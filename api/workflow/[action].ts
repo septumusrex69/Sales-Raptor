@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import advance from '../_lib/workflow/advance.js'
 import release from '../_lib/workflow/release.js'
 import run from '../_lib/workflow/run.js'
 import start from '../_lib/workflow/start.js'
@@ -6,14 +7,14 @@ import start from '../_lib/workflow/start.js'
 /**
  * One serverless function for every /api/workflow/* route.
  *
- * Three routes and the same one function, which is the point: Vercel's Hobby plan counts FILES,
- * not routes. `run` is the morning cron and answers to a cron secret; `release` and `start` are a
- * person pressing a button and answer to their session. Adding `start` -- the collector issuing a
- * section 129 -- cost nothing here, where as its own file it would have cost a twelfth of the
- * deployment.
+ * Four routes and the same one function, which is the point: Vercel's Hobby plan counts FILES,
+ * not routes. `run` is the morning cron and answers to a cron secret; `release`, `start` and
+ * `advance` are a person pressing a button and answer to their session. Adding `start` -- the
+ * collector issuing a section 129 -- cost nothing here, where as its own file it would have cost a
+ * twelfth of the deployment, and `advance` (the test clock) cost nothing for the same reason.
  */
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void>> = {
-  run, release, start,
+  run, release, start, advance,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

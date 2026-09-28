@@ -79,6 +79,7 @@ import { accountMergeValues } from '../../lib/accountMergeValues.ts'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
 import { WorkflowRunPanel } from '../../components/collections/WorkflowRunPanel'
 import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
+import { TestClockPanel } from '../../components/collections/TestClockPanel'
 import {
   fetchAccountRuns, fetchStartableWorkflows, type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
@@ -775,6 +776,12 @@ export function AccountDetail() {
   /* Four lines saying which sequence is running, for the rail the track was too big for. See
      WorkflowNowPanel: the tab keeps the work, the rail keeps the fact. */
   const workflowNowPanel = <WorkflowNowPanel key="workflow-now" accountId={account.id} runs={runs} />
+  /* ONLY EVER ON A TEST ACCOUNT -- the panel draws nothing otherwise, the server refuses, and the
+     database refuses again. See TestClockPanel. */
+  const testClockPanel = (
+    <TestClockPanel key="test-clock" accountId={account.id} accountNumber={account.accountNumber}
+      onTick={reload} />
+  )
 
   const clientLinePanel = (
     <ClientLinePanel
@@ -1317,7 +1324,7 @@ export function AccountDetail() {
            * already gone out by itself, which is worth seeing and never the first thing to act on.
            */
           side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
-            disputesPanel, workflowNowPanel, positionPanel]}
+            disputesPanel, workflowNowPanel, testClockPanel, positionPanel]}
         />
       )}
 

@@ -10875,3 +10875,98 @@ comment on function public.workflow_resume_account(uuid, text, text) is
 
 revoke all on function public.workflow_resume_account(uuid, text, text) from public;
 grant execute on function public.workflow_resume_account(uuid, text, text) to authenticated;
+
+
+-- ============================================================================
+-- A TEST CLOCK: MOVING A TEST ACCOUNT BACKWARDS UNDER THE CALENDAR.
+--
+-- THE FIRM: "Can we start testing the workflows in real time, kind of... everything go out one
+-- minute after the other... two minutes where everything happens. So it could switch between
+-- workflows... and I will tick received or not received."
+--
+-- THE ENGINE HAS NO CLOCK, ONLY A CALENDAR. A step's due_on is a DATE and the runner sends
+-- everything where due_on <= today. Making steps fire minutes apart would mean giving every step a
+-- timestamp and rewriting the planner, the re-dating after a pause and the runner's comparison --
+-- rebuilding the code that issues section 129s so that a test can run quickly. So nothing about the
+-- calendar changes and the ACCOUNT is moved under it instead.
+--
+-- THIS IS THE LOCK THAT MATTERS. The server refuses unless the database is staging and unless the
+-- account is a test one, but both of those are checks a client could one day be talked past. This
+-- one is in the database, the same way the ledgers are protected by having no update policy: an
+-- account whose number does not begin BF-TEST cannot be moved by anybody, through any route, ever.
+-- It is not granted to `authenticated` either -- only the service_role client behind /api/workflow
+-- can reach it at all.
+--
+-- A PREFIX RATHER THAN A FLAG COLUMN, deliberately: a column is something somebody can tick on a
+-- real account by accident. A debtor whose account number begins BF-TEST does not exist.
+--
+-- WHAT MOVES, AND WHY EACH ONE. The run's started_on, because redateResumedRuns recomputes a step's
+-- date from started_on + its day number -- move only the steps and the first hold-and-resume in the
+-- test would undo the whole compression. Its open holds, so heldDays keeps measuring a period that
+-- still sits inside the run. And every step NOT yet sent.
+--
+-- A SENT STEP DOES NOT MOVE, here as everywhere: its date is the record of a notice that reached a
+-- debtor, and this file is the last place that rule should be relaxed for convenience.
+-- ============================================================================
+create or replace function public.workflow_test_advance(
+  p_account_id uuid, p_days integer
+) returns integer
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_number text;
+  v_moved integer := 0;
+begin
+  if p_days is null or p_days < 1 or p_days > 400 then
+    raise exception 'A test clock moves between 1 and 400 days at a time, not %.', p_days
+      using errcode = '22023';
+  end if;
+
+  select account_number into v_number from public.debtor_accounts where id = p_account_id;
+  if v_number is null then
+    raise exception 'No such account.' using errcode = '22023';
+  end if;
+  /* THE LOCK. Not a warning, not a log line -- a refusal, in the database. */
+  if v_number not like 'BF-TEST%' then
+    raise exception 'The test clock only moves test accounts. % is a real account.', v_number
+      using errcode = '42501';
+  end if;
+
+  /* The run itself, or the first pause-and-resume re-dates every step from the original start and
+     the compression is silently undone. Only RUNNING runs: a held run is paused, and pulling its
+     steps forward while it is paused fights the re-dating that happens when it is let go. */
+  update public.workflow_runs
+     set started_on = started_on - p_days
+   where account_id = p_account_id and state = 'running';
+
+  update public.workflow_run_holds h
+     set started_on = h.started_on - p_days,
+         ended_on = case when h.ended_on is null then null else h.ended_on - p_days end
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account_id and r.state = 'running';
+
+  with moved as (
+    update public.workflow_run_steps s
+       set due_on = s.due_on - p_days
+      from public.workflow_runs r
+     where s.run_id = r.id
+       and r.account_id = p_account_id
+       and r.state = 'running'
+       and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_moved from moved;
+
+  return v_moved;
+end $$;
+
+comment on function public.workflow_test_advance(uuid, integer) is
+  'Move a TEST account backwards under the calendar so its next workflow step falls due today. '
+  'Refuses any account whose number does not begin BF-TEST, and is granted to no role but '
+  'service_role. Sent steps never move: their dates are the record of notices that reached a '
+  'debtor.';
+
+revoke all on function public.workflow_test_advance(uuid, integer) from public;
+revoke all on function public.workflow_test_advance(uuid, integer) from authenticated;

@@ -324,6 +324,49 @@ export async function fetchStartableWorkflows(accountId: string): Promise<Starta
 }
 
 /**
+ * ONE TICK OF THE TEST CLOCK.
+ *
+ * Pulls this account's next workflow step onto today and runs the ordinary daily pass over it, so
+ * a sequence whose steps are a week apart can be watched happening in an afternoon. See
+ * testClock.ts for why the account moves and the calendar does not, and api advance.ts for the
+ * three locks.
+ *
+ * IT REPORTS RATHER THAN THROWS ON A REFUSAL, because the two things it is refused for -- a real
+ * account, a production database -- are facts about where you are, not failures to retry. The
+ * panel prints the sentence and stops its own beat.
+ */
+export async function advanceTestClock(accessToken: string, accountId: string): Promise<{
+  ok: boolean
+  /** How many days the account moved. Nought means something was already due, or nothing is left. */
+  jumpedDays: number
+  sent: number
+  held: number
+  notes: string[]
+  problem: string | null
+}> {
+  const res = await fetch('/api/workflow/advance', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ accountId }),
+  })
+  const body = await res.json().catch(() => ({})) as {
+    ok?: boolean; sent?: number; held?: number; notes?: string[]; error?: string
+  }
+  const jumped = Number(res.headers.get('x-test-clock-jumped-days') ?? 0)
+  if (!res.ok || !body.ok) {
+    return { ok: false, jumpedDays: jumped, sent: 0, held: 0, notes: [], problem: body.error ?? 'The test clock could not run.' }
+  }
+  return {
+    ok: true,
+    jumpedDays: jumped,
+    sent: body.sent ?? 0,
+    held: body.held ?? 0,
+    notes: body.notes ?? [],
+    problem: null,
+  }
+}
+
+/**
  * START ONE, WHICH SENDS ITS FIRST STEP.
  *
  * THE FIRM: "the moment the section 129 is sent out via email, that is when the workflow is
