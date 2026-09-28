@@ -55,6 +55,14 @@ export interface AccountEmail {
   sentByName: string | null
   /** Excluding VAT. Null where nothing was charged at all — every inbound message. */
   chargedExclVat: number | null
+  /**
+   * THE TICKET THIS EMAIL RAISED, where somebody pressed the button on it.
+   *
+   * What makes the press once-only on the screen as well as in the endpoint: a second press would
+   * raise a second ticket for one objection, and on a dispute the second is refused by
+   * one_open_dispute_per_account -- after the first has already charged item 3.
+   */
+  queryId: string | null
   /** Null means nobody has opened it yet. Only ever set on an inbound message. */
   readAt: string | null
   /** Whose inbox it arrived in. Only they can mark it read — see markRepliesRead. */
@@ -72,6 +80,7 @@ interface EmailRow {
   message_id: string | null
   in_reply_to: string | null
   attachment_names: string[] | null
+  query_id: string | null
   to_recipients: Recipient[] | null
   cc_recipients: Recipient[] | null
   sent_by_name: string | null
@@ -92,6 +101,7 @@ function toEmail(r: EmailRow): AccountEmail {
     messageId: r.message_id,
     inReplyTo: r.in_reply_to,
     attachmentNames: r.attachment_names ?? [],
+    queryId: r.query_id ?? null,
     /* Named by hand like every other field here -- see the warning in CLAUDE.md. A column that
        is in the table, in the type and in the select but missing from this mapper reads as
        undefined for ever and nothing fails. */
@@ -111,7 +121,7 @@ function toEmail(r: EmailRow): AccountEmail {
 export async function fetchAccountEmails(accountId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, received_by, occurred_at')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, received_by, occurred_at, query_id')
     .eq('account_id', accountId)
     .order('occurred_at', { ascending: false })
   if (error) throw new Error(error.message)

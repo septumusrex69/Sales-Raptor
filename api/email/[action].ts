@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import attachment from '../_lib/email/attachment.js'
+import ticket from '../_lib/email/ticket.js'
 import connect from '../_lib/email/connect.js'
 import disconnect from '../_lib/email/disconnect.js'
 import send from '../_lib/email/send.js'
@@ -25,6 +26,7 @@ import syncAll from '../_lib/email/sync-all.js'
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void>> = {
   attachment,
   connect,
+  ticket,
   disconnect,
   send,
   status,

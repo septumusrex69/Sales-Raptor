@@ -1255,6 +1255,10 @@ export function AccountDetail() {
           emails={emails}
           userId={currentUser?.id ?? null}
           canSend={!!mailbox}
+          /* A dispute raised off an email stops every collection sequence and files its
+             attachments as documents, so three panels are stale the moment it returns. See
+             EmailsPanel's onRaised. */
+          onRaised={reload}
           onCompose={() => { startCompose(); setComposeTo(emailContact?.value ?? '') }}
           onReply={(e) => { startCompose(); setReplyTo(e); setComposeTo(e.debtorAddress) }}
           /*

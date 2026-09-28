@@ -11027,3 +11027,158 @@ alter table public.account_queries add constraint account_queries_from_only_on_r
 alter table public.account_queries add constraint account_queries_request_says_who_from
   check (kind <> 'request'
          or (request_from is not null and request_from = any (array['client','debtor','file'])));
+
+
+-- ============================================================================
+-- A TICKET OWNS ITS PAPERWORK AND ITS THREAD.
+--
+-- THE FIRM: "if we've received a dispute, for example, possibly it would be an email. I think
+-- maybe there what we could do is we could create the ticket like it already exists for the
+-- dispute and like somehow attach the email and the attachments from there to that ticket and
+-- then have a note there."
+--
+-- WHAT IT REPLACES IS SIX STEPS AND A RETYPE. Read the email, raise a dispute, type out what the
+-- debtor said, mark it received in writing, download the attachments, upload them again. THE
+-- RETYPING IS WHERE DISPUTES GET MIS-RECORDED -- it is the step most likely to be shortened at
+-- half past four, and what a debtor actually wrote is the thing a finding has to answer.
+--
+-- TWO LINKS, AND THEY POINT THE SAME WAY. A document knows which ticket it belongs to; a filed
+-- email knows which ticket it started. So a dispute becomes the objection, its attachments and the
+-- correspondence in one place, instead of three places that only a person remembers connecting.
+--
+-- `on delete set null` ON BOTH: closing or deleting a ticket must never take a debtor's paperwork
+-- or their email with it. The document is the record; the ticket is how we worked it.
+--
+-- AND A TICKET FROM ANOTHER ACCOUNT IS REFUSED. Without this, a mistyped id files one debtor's
+-- bank statements against another debtor's dispute -- which is a leak between two people's
+-- records, and the sort that is found by the person it was leaked to. A CHECK constraint cannot
+-- see another table, so it is a trigger; one function serves both because the rule is one rule.
+--
+-- IT IS NOT ADDED TO protect_filed_mail_target, deliberately. That trigger stops mail being MOVED
+-- between accounts by anybody but an Administrator. A ticket link does not move anything -- the
+-- email is already filed to that account and this rule keeps it there -- and making a collector
+-- fetch an Administrator to correct a mis-pressed button would mean the button goes unused.
+-- ============================================================================
+alter table public.account_documents
+  add column if not exists query_id uuid references public.account_queries(id) on delete set null;
+
+comment on column public.account_documents.query_id is
+  'The ticket this document came in on, where it came in on one. Null for everything filed '
+  'directly against the account, which is most of it.';
+
+alter table public.user_emails
+  add column if not exists linked_query_id uuid references public.account_queries(id) on delete set null;
+
+comment on column public.user_emails.linked_query_id is
+  'The ticket this email raised, where somebody pressed the button on it. The thread stays in the '
+  'mailbox; this is the thread a dispute is about.';
+
+create or replace function public.ticket_belongs_to_the_same_account() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_ticket_account uuid;
+  v_row_account uuid;
+begin
+  /* ONE FUNCTION, TWO TABLES, because it is one rule: a ticket link may only point at a ticket on
+     the row's own account. Written twice they drift, and the half that drifts is the one nobody is
+     looking at the day somebody mistypes an id. */
+  if tg_table_name = 'account_documents' then
+    if new.query_id is null then return new; end if;
+    v_row_account := new.account_id;
+    select account_id into v_ticket_account from public.account_queries where id = new.query_id;
+  else
+    if new.linked_query_id is null then return new; end if;
+    v_row_account := new.linked_account_id;
+    select account_id into v_ticket_account from public.account_queries where id = new.linked_query_id;
+  end if;
+
+  /* A SHEET-LEVEL TICKET HAS NO ACCOUNT, and neither does unfiled mail. Neither may carry a link:
+     "belongs to the same account" is unanswerable when one side has none, and unanswerable is not
+     the same as yes. */
+  if v_ticket_account is null or v_row_account is null or v_ticket_account <> v_row_account then
+    raise exception 'That ticket belongs to a different account.' using errcode = '23503';
+  end if;
+  return new;
+end $$;
+
+comment on function public.ticket_belongs_to_the_same_account() is
+  'A document or an email may only be linked to a ticket on its OWN account. Without it a mistyped '
+  'id files one debtor''s bank statements against another debtor''s dispute.';
+
+drop trigger if exists documents_ticket_same_account on public.account_documents;
+create trigger documents_ticket_same_account
+  before insert or update of query_id, account_id on public.account_documents
+  for each row execute function public.ticket_belongs_to_the_same_account();
+
+drop trigger if exists mail_ticket_same_account on public.user_emails;
+create trigger mail_ticket_same_account
+  before insert or update of linked_query_id, linked_account_id on public.user_emails
+  for each row execute function public.ticket_belongs_to_the_same_account();
+
+
+-- ============================================================================
+-- THE TICKET LINK BELONGS ON THE ACCOUNT'S CORRESPONDENCE, NOT ON SOMEBODY'S INBOX.
+--
+-- CORRECTING THE MIGRATION BEFORE IT, which put `linked_query_id` on `user_emails`. That table is
+-- a PERSON'S OWN MAILBOX -- their inbox as they see it, with `linked_account_id` recording what a
+-- message was filed against. A DEBTOR'S CORRESPONDENCE is `account_emails`: the account's own
+-- record of what was sent and received, which is what the Emails panel on the account draws and
+-- what a collector is reading when a dispute arrives.
+--
+-- NOTHING HAD WRITTEN TO THE WRONG COLUMN YET, so this removes it rather than leaving a decoy. A
+-- column nothing writes is exactly the thing somebody later reads as meaningful -- CLAUDE.md's own
+-- warning about mappers, wearing a different hat.
+--
+-- AND account_emails STORES THE BODY, which the inbox table does not. So the press does not have
+-- to reach into a mailbox for what the debtor actually wrote: it is already on the account. Only
+-- the attachments are fetched, because those were deliberately never stored (see attachment.ts --
+-- the mailbox stays the archive, given this mailbox's volume).
+-- ============================================================================
+drop trigger if exists mail_ticket_same_account on public.user_emails;
+alter table public.user_emails drop column if exists linked_query_id;
+
+alter table public.account_emails
+  add column if not exists query_id uuid references public.account_queries(id) on delete set null;
+
+comment on column public.account_emails.query_id is
+  'The ticket this email raised, where somebody pressed the button on it. The attachments come '
+  'across as documents against the same ticket, so a dispute is the objection, its paperwork and '
+  'the correspondence in one place.';
+
+create or replace function public.ticket_belongs_to_the_same_account() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_ticket uuid;
+  v_ticket_account uuid;
+begin
+  /* ONE FUNCTION, TWO TABLES, because it is one rule: a ticket link may only point at a ticket on
+     the row's own account. Both tables call their account column `account_id` and both call the
+     link `query_id`, so there is nothing left to branch on -- which is the shape to keep. */
+  v_ticket := new.query_id;
+  if v_ticket is null then return new; end if;
+
+  select account_id into v_ticket_account from public.account_queries where id = v_ticket;
+
+  /* A SHEET-LEVEL TICKET HAS NO ACCOUNT. It may not be linked to either: "belongs to the same
+     account" is unanswerable when one side has none, and unanswerable is not the same as yes. */
+  if v_ticket_account is null or new.account_id is null or v_ticket_account <> new.account_id then
+    raise exception 'That ticket belongs to a different account.' using errcode = '23503';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists documents_ticket_same_account on public.account_documents;
+create trigger documents_ticket_same_account
+  before insert or update of query_id, account_id on public.account_documents
+  for each row execute function public.ticket_belongs_to_the_same_account();
+
+drop trigger if exists mail_ticket_same_account on public.account_emails;
+create trigger mail_ticket_same_account
+  before insert or update of query_id, account_id on public.account_emails
+  for each row execute function public.ticket_belongs_to_the_same_account();

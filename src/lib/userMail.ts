@@ -708,6 +708,73 @@ export async function fetchMailBody(
  * A blob rather than a plain link, because the request needs an Authorization header and a link
  * cannot carry one.
  */
+/**
+ * RAISE A TICKET OFF A DEBTOR'S EMAIL.
+ *
+ * THE FIRM: "if we've received a dispute... we could create the ticket like it already exists and
+ * somehow attach the email and the attachments from there to that ticket and then have a note
+ * there."
+ *
+ * THE SERVER DOES ALL OF IT, for the same reason startWorkflow does: the attachments have to be
+ * fetched out of a mailbox with credentials the browser has never held, and a dispute raised this
+ * way stops every collection sequence on the account. Half of that happening because a laptop lid
+ * closed is not a state anybody could read afterwards.
+ *
+ * IT REPORTS WHAT IT COULD NOT DO rather than throwing on it. The ticket IS raised by the time
+ * anything can fail below it -- a file the mailbox no longer has is a line the collector reads and
+ * acts on, not a reason to pretend the dispute was not recorded.
+ */
+export async function raiseTicketFromEmail(input: {
+  accessToken: string
+  accountEmailId: string
+  kind: 'dispute' | 'request'
+  requestFrom?: 'client' | 'debtor' | 'file'
+  category?: string | null
+  ownerId?: string | null
+  chaseOn?: string | null
+}): Promise<{
+  ok: boolean
+  ticketId: string | null
+  /** Filenames that came across onto the account, against this ticket. */
+  attached: string[]
+  /** And the ones that did not, each saying why. */
+  failed: string[]
+  /** What item 3 took, where it took anything. Null on a request, which charges nothing. */
+  charged: number | null
+  problem: string | null
+}> {
+  const res = await fetch('/api/email/ticket', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.accessToken}` },
+    body: JSON.stringify({
+      accountEmailId: input.accountEmailId,
+      kind: input.kind,
+      requestFrom: input.requestFrom,
+      category: input.category ?? null,
+      ownerId: input.ownerId ?? null,
+      chaseOn: input.chaseOn ?? null,
+    }),
+  })
+  const body = await res.json().catch(() => ({})) as {
+    ok?: boolean; ticketId?: string; attached?: string[]; failed?: string[]
+    charged?: number | null; error?: string
+  }
+  if (!res.ok || !body.ok) {
+    return {
+      ok: false, ticketId: null, attached: [], failed: [], charged: null,
+      problem: body.error ?? 'The ticket could not be raised.',
+    }
+  }
+  return {
+    ok: true,
+    ticketId: body.ticketId ?? null,
+    attached: body.attached ?? [],
+    failed: body.failed ?? [],
+    charged: body.charged ?? null,
+    problem: null,
+  }
+}
+
 export async function downloadAttachment(input: {
   mailId?: string
   accountEmailId?: string
