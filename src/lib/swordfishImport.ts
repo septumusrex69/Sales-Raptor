@@ -635,6 +635,12 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       commission_rate_source: schedule?.source ?? null,
 
       interest_rate_annual: num(r['Current Interest Rate']) ?? 24,
+      // WHAT THE CLIENT TOLD US, and the fallback is the HANDOVER rather than today -- loadDate is
+      // what handover_date below is set to, so an export with no Initial Interest Date lands on the
+      // firm's own rule ("normally, interest starts occurring from the date of handover") instead of
+      // on the day the file happened to be loaded. It is a record, not an instruction: on 63 of
+      // these rows the client's date is up to 95 days BEFORE the handover, so nothing accrues from
+      // it. See rule 2 in interestAccrual.ts.
       interest_from: isoDate(r['Initial Interest Date']) ?? loadDate,
 
       prescribed: r['Is Prescribed'] === 'Yes',

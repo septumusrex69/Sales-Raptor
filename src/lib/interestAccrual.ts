@@ -18,6 +18,28 @@
  * spanning September and October accrues September on the opening balance and October on the
  * balance September left behind.
  *
+ * WHERE THE CLOCK STARTS, IN THE FIRM'S OWN WORDS. Asked how interest behaves across an import:
+ * "normally, interest starts occurring from the date of handover. Sometimes the client does put
+ * their interest in. Sometimes not, but the handover is the capital. Whether or not they charge the
+ * interest is up to them. So we will not ask Raptor to calculate this."
+ *
+ * Three rules come out of that and they are the whole of it:
+ *
+ *   1. THE HANDOVER FIGURE IS THE CAPITAL. Whatever interest the client rolled in before they gave
+ *      the firm the file is inside that number. It is not separable and nobody is asked to separate
+ *      it -- which is also why in duplum's ceiling is that figure and never twice it.
+ *   2. RAPTOR'S CLOCK STARTS AT THE HANDOVER, never earlier. A date before the handover belongs to
+ *      the client's own book: accruing from it would be Raptor recomputing interest the client has
+ *      already charged and already folded into the capital, on a file the firm did not have yet.
+ *      `debtor_accounts.interest_from` is a RECORD OF WHAT THE CLIENT TOLD US and on 63 of the 738
+ *      imported accounts it is 1 to 95 days BEFORE the handover -- so it is not the column to
+ *      accrue from, and nothing in accountBalance.ts reads it.
+ *   3. AN IMPORT CONTINUES, IT DOES NOT RECOMPUTE. The firm: "the interest ... has already run. So
+ *      it's exported from Swordfish. And then we will import it on the same day. So then it should
+ *      just continue running." The posted accruals come across as they were posted and `coveredTo`
+ *      picks up the day after the last of them. This is the frozen-history rule in CLAUDE.md
+ *      applied to interest, and it is why this file computes only the OPEN period.
+ *
  * The convention lives in ONE place — `MONTHS_PER_YEAR` and `proRata` below — because it is the
  * one number in this system that turns time into money. If the business ever moves to true daily
  * interest (365ths of the annual rate rather than 12ths of it, which is a different and slightly

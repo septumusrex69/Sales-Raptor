@@ -209,6 +209,22 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
  * off (accrual stopped when it did), a caller reprinting a historical statement, or a book that
  * is already current. Each of those has to produce a real zero rather than an accidental one, so
  * they are all decided here in one place.
+ *
+ * AND ONE OF THEM IS NOT A RULE, IT IS AN UNBUILT HALF: `!covered` -- an account with no posted
+ * accrual at all. Interest then never starts, because there is no last posting to run on from.
+ * Every account the firm has actually imported or captured has a posted accrual or a zero rate, so
+ * nothing in the real book is standing still; what sits in this state on staging is generated test
+ * data. The firm's rule for it is settled (interestAccrual.ts: the clock starts at the HANDOVER
+ * DATE, not at `interest_from`, which on 63 imported accounts predates the handover by up to 95
+ * days), and what is NOT settled is the one arithmetic question the fix turns on: this function is
+ * handed a single opening balance with every fee and payment already in it, so accruing a long
+ * period from the handover would earn interest from day one on a fee raised in month eight. Whether
+ * fees bear interest at all, and from when, is the firm's to answer -- it moves money and it pushes
+ * non-capital against the in duplum ceiling -- so it is asked at import rather than assumed here.
+ *
+ * `interest_from` IS DELIBERATELY NOT READ. See rule 2 in interestAccrual.ts: it records what the
+ * client told us about their own book, and using it as a start date would have Raptor recompute
+ * interest the client already charged and already folded into the capital.
  */
 function openAccrual(
   input: BalanceInput,
