@@ -65,6 +65,7 @@ const commission = lastFn('finance_commission')
 const allocate = lastFn('allocate_payment')
 const replay = lastFn('reallocate_account')
 const reverse = lastFn('reverse_payment_allocation')
+const balances = lastFn('engine_balances')
 
 /* PRESENCE BEFORE ANYTHING ELSE. An empty string satisfies most negative assertions, so a deleted
    function would otherwise read as a clean pass -- CLAUDE.md's `indexOf` trap in another shape. */
@@ -73,6 +74,7 @@ ok('finance_commission is in the schema', commission.length > 500)
 ok('allocate_payment is in the schema', allocate.length > 1000)
 ok('reallocate_account is in the schema', replay.length > 500)
 ok('reverse_payment_allocation is in the schema', reverse.length > 200)
+ok('engine_balances is in the schema', balances.length > 400)
 
 /* ---------------- the split touches nothing, which is what makes it the only copy ---------------- */
 
@@ -140,8 +142,16 @@ ok('invented data and reversed money are skipped',
  * may actually be recovered, and half A takes the second. The two columns differ only on the
  * accounts where it matters, so the wrong one passes every test that does not have one.
  */
-ok('half A takes recoverable interest', /sum\(amount_recoverable\), 0\) into v_interest/.test(allocate))
-check('...and never the accrued figure', (allocate.match(/amount_accrued/g) ?? []), [])
+/*
+ * GATHERED IN ONE PLACE, because the account page's dry run asks the same question. A preview with
+ * balances of its own is a second opinion about what a payment would do, and it is the preview
+ * that would drift -- so both go through engine_balances and hand the answer to finance_split.
+ */
+ok('the engine asks for its balances rather than gathering them',
+  /from public\.engine_balances\(v_acct\.id, p_payment_id\)/.test(allocate))
+ok('...and so does the dry run', /from public\.engine_balances\(p_account, null\)/.test(lastFn('preview_allocation')))
+ok('half A takes recoverable interest', /sum\(amount_recoverable\), 0\) into interest/.test(balances))
+check('...and never the accrued figure', (balances.match(/amount_accrued/g) ?? []), [])
 
 /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's -- CLAUDE.md's rule that a fee is
    priced on the schedule in force on the day of the ACTION. */

@@ -13052,3 +13052,845 @@ begin
 end $$;
 
 revoke all on function public.reallocate_account(uuid) from public;
+
+-- ============================================================================
+-- FINANCE, PROMPT 7 (a): 'draft' SPLITS INTO 'needs_review' AND 'ready'.
+--
+-- The firm's own ladder, and prompt 7 says it wins over prompt 3: needs_review -> ready ->
+-- approved -> sent -> paid, forward only, plus void. A run is needs_review while it has any open
+-- exception and becomes ready the moment the last one is resolved.
+--
+-- WHY THE TWO ARE STORED RATHER THAN DERIVED, against this codebase's usual instinct. A derived
+-- status would be honest but it cannot be indexed, sorted or filtered, and the work queue's whole
+-- job is "needs_review first, then ready, then approved, then sent". What keeps it from going
+-- stale is that it is recomputed by the ONE function that already runs on every change that could
+-- move it -- recompute_payover_run, which the line-delete trigger and every build already call --
+-- plus a trigger on the client's code, which is the only blocker that does not live on a line.
+--
+-- EVERYWHERE 'draft' MEANT "not yet an invoice" NOW MEANS EITHER OF TWO VALUES, so that test is
+-- written once, in payover_run_is_open, rather than as `in (...)` in nine places that would drift.
+-- ============================================================================
+
+create or replace function public.payover_run_is_open(p_status text)
+returns boolean
+language sql
+immutable
+as $$ select p_status in ('needs_review', 'ready') $$;
+
+comment on function public.payover_run_is_open(text) is
+  'True while a run is still a working document -- needs_review or ready -- and false once it is '
+  'an issued invoice. The successor to "status = draft", written once so nine callers cannot drift.';
+
+alter table public.payover_runs drop constraint if exists payover_runs_status_check;
+update public.payover_runs set status = 'needs_review' where status = 'draft';
+alter table public.payover_runs add constraint payover_runs_status_check
+  check (status in ('needs_review', 'ready', 'approved', 'sent', 'paid', 'void'));
+alter table public.payover_runs alter column status set default 'needs_review';
+
+comment on column public.payover_runs.status is
+  'needs_review (an exception is open) -> ready -> approved -> sent -> paid, forward only, plus '
+  'void. The first two are recomputed from the blockers; the rest are pressed by a person.';
+
+create or replace function public.recompute_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare t record;
+begin
+  select
+    coalesce(sum(l.to_capital)              filter (where l.line_kind <> 'carried' and not l.paid_to_client), 0) as trust_capital,
+    coalesce(sum(l.commission)              filter (where l.line_kind <> 'carried' and not l.paid_to_client), 0) as trust_commission,
+    coalesce(sum(l.payment_amount)          filter (where l.line_kind <> 'carried' and l.paid_to_client), 0)     as ptc_received,
+    coalesce(sum(l.to_interest + l.to_costs) filter (where l.line_kind <> 'carried' and l.paid_to_client), 0)    as ptc_fees,
+    coalesce(sum(l.to_capital)              filter (where l.line_kind <> 'carried' and l.paid_to_client), 0)     as ptc_capital,
+    coalesce(sum(l.commission)              filter (where l.line_kind <> 'carried' and l.paid_to_client), 0)     as ptc_commission,
+    /* PER LINE, AND ALREADY ROUNDED ON THE ALLOCATION -- the firm's decision 5, so the lines add
+       up to the invoice total. VAT on the SUM differs from the sum of the VATs by cents, and the
+       firm's own Dr Roux figures are the sum of the VATs: 3 013.30 against 3 013.18. */
+    coalesce(sum(l.commission_vat)          filter (where l.line_kind <> 'carried'), 0) as commission_vat,
+    coalesce(sum(l.carried_amount)          filter (where l.line_kind = 'carried'), 0)  as carried_in
+  into t
+  from public.payover_run_lines l where l.run_id = p_run;
+
+  update public.payover_runs r
+     set trust_capital = t.trust_capital,
+         trust_commission = t.trust_commission,
+         due_to_client = t.trust_capital - t.trust_commission,
+         ptc_received = t.ptc_received,
+         ptc_fees_taken = t.ptc_fees,
+         ptc_capital = t.ptc_capital,
+         ptc_commission = t.ptc_commission,
+         due_to_bf = t.ptc_fees + t.ptc_commission,
+         commission_vat = t.commission_vat,
+         carried_in = t.carried_in,
+         net_payover = (t.trust_capital - t.trust_commission)
+                     - (t.ptc_fees + t.ptc_commission)
+                     - t.commission_vat
+                     + t.carried_in,
+         /* AND THE LADDER'S FIRST TWO RUNGS, from the blockers as they stand right now. The firm:
+            a run "becomes ready automatically when the last one is resolved" -- so nobody presses
+            anything to make it ready, and nothing has to remember to. */
+         status = case when exists (select 1 from public.payover_run_blockers(p_run))
+                       then 'needs_review' else 'ready' end
+   where r.id = p_run and public.payover_run_is_open(r.status);
+end $$;
+
+revoke all on function public.recompute_payover_run(uuid) from public;
+
+-- ---------- THE ONE BLOCKER THAT DOES NOT LIVE ON A LINE ----------
+--
+-- `no_client_code` is a fact about the CLIENT, so nothing about the run changes when somebody
+-- fills it in -- and the run would sit on needs_review for ever with its reason already fixed. A
+-- warning that fires when nothing is wrong is worse than no warning: people stop reading it.
+--
+-- AND THE TRIGGER RENUMBERS WHAT IT UNBLOCKS. The blocker's own sentence says the invoice number
+-- is provisional; clearing the blocker without replacing PO-NOCODE-2609 would ship exactly the
+-- thing the exception existed to prevent, looking resolved. OPEN runs only -- an approved run's
+-- number has been quoted to a client on a tax invoice, and a number that moves after it was
+-- issued is worse than an ugly one.
+create or replace function public.refresh_runs_on_client_code() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare r record;
+begin
+  if new.code is not distinct from old.code then return new; end if;
+  for r in select id, period_end from public.payover_runs
+            where company_id = new.id and public.payover_run_is_open(status) loop
+    update public.payover_runs
+       set invoice_number = public.payover_invoice_number(new.id, r.period_end)
+     where id = r.id;
+    perform public.recompute_payover_run(r.id);
+  end loop;
+  return new;
+end $$;
+
+drop trigger if exists refresh_runs_on_client_code on public.companies;
+create trigger refresh_runs_on_client_code
+  after update of code on public.companies
+  for each row execute function public.refresh_runs_on_client_code();
+
+-- ============================================================================
+-- FINANCE, PROMPT 7 (b): THE SIX PLACES THAT TESTED FOR 'draft'.
+--
+-- Each one meant "this is still a working document", which is now two values. Every one goes
+-- through payover_run_is_open, so the next value the firm adds to the ladder is one edit. The
+-- reasoning inside each function is unchanged and is recorded above, at prompt 3; only the status
+-- test moved.
+-- ============================================================================
+
+create or replace function public.build_payover_run(p_company uuid, p_period_start date)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_end date := public.payover_cycle_end(p_period_start);
+  v_from timestamptz := (p_period_start::timestamp) at time zone 'Africa/Johannesburg';
+  v_to timestamptz := ((v_end + 1)::timestamp) at time zone 'Africa/Johannesburg';
+  v_run uuid;
+  v_status text;
+  v_prev record;
+begin
+  select id, status into v_run, v_status
+    from public.payover_runs where company_id = p_company and period_start = p_period_start;
+
+  if v_run is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'The % run for this client is already %; a correction belongs in the next run.',
+      to_char(p_period_start, 'DD Mon YYYY'), v_status;
+  end if;
+
+  if v_run is null then
+    insert into public.payover_runs (company_id, period_start, period_end, invoice_number)
+    values (p_company, p_period_start, v_end, public.payover_invoice_number(p_company, v_end))
+    returning id into v_run;
+  else
+    /* Let go of everything it was holding before it claims again, so a rebuild is not an append. */
+    update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
+    update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
+    update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    delete from public.payover_run_lines where run_id = v_run;
+  end if;
+
+  with claimed as (
+    update public.payment_allocations a
+       set payover_run_id = v_run
+      from public.account_payments p, public.debtor_accounts d
+     where p.id = a.payment_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       and p.created_at >= v_from
+       and p.created_at < v_to
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat,
+    excess_credit, needs_rate
+  )
+  select v_run, c.id, c.account_id,
+         case when c.paid_to_client then 'ptc' else 'trust' end,
+         c.paid_to_client,
+         coalesce(c.payment_amount, 0), c.to_interest, coalesce(c.to_costs, 0), c.to_capital,
+         c.commission, c.commission_vat, c.excess_credit, c.status = 'needs_rate'
+    from claimed c;
+
+  with carried as (
+    update public.payment_allocations a
+       set reversal_carried_run_id = v_run
+      from public.payover_runs r, public.debtor_accounts d
+     where r.id = a.payover_run_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat, excess_credit
+  )
+  select v_run, c.id, c.account_id, 'reversal', c.paid_to_client,
+         -coalesce(c.payment_amount, 0), -c.to_interest, -coalesce(c.to_costs, 0), -c.to_capital,
+         -c.commission, -c.commission_vat, -c.excess_credit
+    from carried c;
+
+  select r.id, r.net_payover, r.invoice_number into v_prev
+    from public.payover_runs r
+   where r.company_id = p_company
+     and r.period_start < p_period_start
+     and r.status in ('approved', 'sent', 'paid')
+     and r.net_payover < 0
+     and r.carried_out_run_id is null
+   order by r.period_start desc limit 1;
+
+  if v_prev.id is not null then
+    insert into public.payover_run_lines (run_id, line_kind, carried_amount)
+    values (v_run, 'carried', v_prev.net_payover);
+    update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
+  end if;
+
+  perform public.recompute_payover_run(v_run);
+  return v_run;
+end $$;
+
+revoke all on function public.build_payover_run(uuid, date) from public;
+
+create or replace function public.close_payover_cycle(p_period_start date default null)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_start date := coalesce(p_period_start, public.payover_cycle_start(now() - interval '1 day'));
+  v_end date := public.payover_cycle_end(v_start);
+  v_from timestamptz := (v_start::timestamp) at time zone 'Africa/Johannesburg';
+  v_to timestamptz := ((v_end + 1)::timestamp) at time zone 'Africa/Johannesburg';
+  v_company uuid;
+  v_count integer := 0;
+begin
+  for v_company in
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.account_payments p on p.id = a.payment_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       and p.created_at >= v_from
+       and p.created_at < v_to
+    union
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.payover_runs r on r.id = a.payover_run_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    union
+    select r.company_id
+      from public.payover_runs r
+     where r.status in ('approved', 'sent', 'paid')
+       and r.net_payover < 0
+       and r.carried_out_run_id is null
+       and r.period_start < v_start
+  loop
+    if exists (select 1 from public.payover_runs
+                where company_id = v_company and period_start = v_start
+                  and not public.payover_run_is_open(status)) then
+      continue;
+    end if;
+    perform public.build_payover_run(v_company, v_start);
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end $$;
+
+revoke all on function public.close_payover_cycle(date) from public;
+
+-- APPROVE FROM AN OPEN RUN ONLY, and the sentence names the blocker rather than saying "wrong
+-- status" -- the person pressing the button is the person who has to fix it.
+create or replace function public.approve_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+  v_why text;
+begin
+  select status into v_status from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if not public.payover_run_is_open(v_status) then
+    raise exception 'That run is already %.', v_status;
+  end if;
+
+  select string_agg(b.detail, '; ') into v_why from public.payover_run_blockers(p_run) b;
+  if v_why is not null then
+    raise exception 'This run cannot be approved yet: %', v_why;
+  end if;
+
+  update public.payover_runs
+     set status = 'approved', approved_by = auth.uid(), approved_at = now()
+   where id = p_run;
+end $$;
+
+revoke all on function public.approve_payover_run(uuid) from public;
+
+create or replace function public.void_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  update public.payment_allocations set payover_run_id = null where payover_run_id = p_run;
+  update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = p_run;
+  update public.payover_runs set carried_out_run_id = null where carried_out_run_id = p_run;
+  delete from public.payover_run_lines where run_id = p_run;
+  update public.payover_runs set status = 'void'
+   where id = p_run and public.payover_run_is_open(status);
+  if not found then raise exception 'Only a run that has not been approved can be voided.'; end if;
+end $$;
+
+revoke all on function public.void_payover_run(uuid) from public;
+
+create or replace function public.protect_payover_run() returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if not public.payover_run_is_open(old.status) then
+      raise exception 'Payover run % is %; an invoice is not deleted.', old.invoice_number, old.status;
+    end if;
+    return old;
+  end if;
+
+  if public.payover_run_is_open(old.status) then return new; end if;
+
+  if public.payover_run_is_open(new.status) then
+    raise exception 'Payover run % has been %; it cannot go back to being a working document.',
+      old.invoice_number, old.status;
+  end if;
+
+  if (new.company_id, new.period_start, new.period_end, new.invoice_number,
+      new.trust_capital, new.trust_commission, new.due_to_client,
+      new.ptc_received, new.ptc_fees_taken, new.ptc_capital, new.ptc_commission, new.due_to_bf,
+      new.commission_vat, new.carried_in, new.net_payover)
+     is distinct from
+     (old.company_id, old.period_start, old.period_end, old.invoice_number,
+      old.trust_capital, old.trust_commission, old.due_to_client,
+      old.ptc_received, old.ptc_fees_taken, old.ptc_capital, old.ptc_commission, old.due_to_bf,
+      old.commission_vat, old.carried_in, old.net_payover) then
+    raise exception 'Payover run % is %; its figures are an issued invoice. A correction is a negative line in the next run.',
+      old.invoice_number, old.status;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.protect_payover_run_lines() returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_run uuid := coalesce(new.run_id, old.run_id);
+  v_status text;
+  v_number text;
+begin
+  select status, invoice_number into v_status, v_number from public.payover_runs where id = v_run;
+  if v_status is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'Payover run % is %; its lines are an issued invoice.', v_number, v_status;
+  end if;
+  return coalesce(new, old);
+end $$;
+
+-- ============================================================================
+-- FINANCE, PROMPT 6 (a): THE BALANCES THE ENGINE SPLITS AGAINST, GATHERED IN ONE PLACE.
+--
+-- The firm wants a "what if the debtor pays R X today" preview on an account, before agreeing a
+-- settlement or an arrangement. A preview that gathers its own balances is a second opinion about
+-- what a payment would do, and it is the preview that would drift -- CLAUDE.md's rule about one
+-- clause builder, applied to money. So allocate_payment and preview_allocation now ask the same
+-- function for interest, costs and capital, and both hand the answer to finance_split.
+--
+-- `p_exclude_payment` IS THE PAYMENT BEING ALLOCATED, and it has to be excluded from both sides:
+-- its own receipt fee is not yet a debt finance_split can be told about (finance_split adds it
+-- itself, because it must exist before it can be paid), and its own allocation must not net
+-- against the balance it is being computed from. NULL means "nothing to exclude", which is the
+-- preview -- and is why every test is written `p_exclude is null or ...` rather than with a
+-- coalesce to a sentinel, which would have excluded every hand-raised fee from the preview.
+-- ============================================================================
+create or replace function public.engine_balances(p_account uuid, p_exclude_payment uuid)
+returns table (interest numeric, costs numeric, capital numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then
+    interest := 0; costs := 0; capital := 0; return next; return;
+  end if;
+
+  /* Interest is `amount_recoverable`, not `amount_accrued`: interest the in duplum ceiling put out
+     of reach was never ours to take, and half A must not pretend otherwise. */
+  select coalesce(sum(amount_recoverable), 0) into interest
+    from public.account_interest_accruals where account_id = p_account;
+  select interest - coalesce(sum(a.to_interest), 0) into interest
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment)
+     and a.status <> 'reversed';
+
+  /* Costs INCLUDING VAT -- the firm's decision 1 -- with cancelled fees and fees raised above the
+     items 1-7 ceiling (billed = false) left out, because neither may be recovered. */
+  select coalesce(sum(f.amount_excl_vat + coalesce(f.vat_amount, 0)), 0) into costs
+    from public.account_fees f
+   where f.account_id = p_account
+     and f.cancelled_at is null
+     and f.billed is not false
+     and (p_exclude_payment is null or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid) <> p_exclude_payment);
+  select costs - coalesce(sum(a.to_costs), 0) into costs
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment)
+     and a.status <> 'reversed';
+
+  capital := greatest(coalesce(v_acct.capital_outstanding, v_acct.capital_handed_over, 0), 0);
+  return next;
+end $$;
+
+comment on function public.engine_balances(uuid, uuid) is
+  'What an account still owes in interest, costs (incl VAT) and capital, net of what earlier '
+  'payments took. Shared by allocate_payment and preview_allocation so a collector''s dry run '
+  'cannot promise something the engine would not do.';
+
+revoke all on function public.engine_balances(uuid, uuid) from public;
+
+-- ---------- THE ENGINE, NOW ASKING RATHER THAN GATHERING ----------
+create or replace function public.allocate_payment(p_payment_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_acct public.debtor_accounts%rowtype;
+  v_cutover timestamptz;
+  v_vat numeric;
+  v_fee_rate numeric;
+  v_fee_cap numeric;
+  v_tariff_from date;
+  b record;
+  v_rate numeric;
+  v_bands jsonb;
+  v_cumulative numeric;
+  v_mandate timestamptz;
+  s record;
+  v_commission numeric;
+  v_commission_vat numeric;
+  v_status text := 'allocated';
+  v_to_client numeric;
+  v_due_to_bf numeric;
+  v_id uuid;
+begin
+  select * into v_pay from public.account_payments where id = p_payment_id;
+  if not found then return null; end if;
+
+  /* THREE REASONS NOT TO TOUCH IT, and none of them is an error: invented data, money already
+     given back, and history that Swordfish settled and a client has been paid on. */
+  if v_pay.is_demo or v_pay.reversed_at is not null then return null; end if;
+
+  select vat_rate, finance_cutover_at into v_vat, v_cutover from public.firm_settings limit 1;
+  if v_cutover is null or v_pay.created_at < v_cutover then return null; end if;
+
+  select * into v_acct from public.debtor_accounts where id = v_pay.account_id;
+  if not found then return null; end if;
+
+  /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. */
+  select rate, cap_excl_vat, effective_from into v_fee_rate, v_fee_cap, v_tariff_from
+    from public.annexure_b_tariffs
+   where item = '9'
+     and v_pay.received_at::date >= effective_from
+     and (effective_to is null or v_pay.received_at::date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then
+    raise exception 'No Annexure B item 9 tariff covers %', v_pay.received_at::date;
+  end if;
+
+  select * into b from public.engine_balances(v_acct.id, p_payment_id);
+
+  select * into s from public.finance_split(
+    v_pay.amount, b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description,
+    amount_excl_vat, vat_rate, vat_amount, counts_toward_fee_cap,
+    incurred_at, source, payment_id, billed, action_code
+  ) values (
+    v_acct.id, '9', v_tariff_from, 'Receipt of instalment',
+    s.fee_excl, v_vat * 100, s.fee_vat, false,
+    v_pay.received_at - interval '1 second', 'raptor', p_payment_id, true, 'receipt'
+  ) on conflict do nothing;
+
+  select c.commission_rate, c.commission_bands, c.mandate_signed_at
+    into v_rate, v_bands, v_mandate
+    from public.companies c where c.id = v_acct.company_id;
+  v_rate := coalesce(v_acct.commission_rate, v_rate);
+
+  v_cumulative := 0;
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_acct.company_id
+       and a.status <> 'reversed'
+       and a.payment_id <> p_payment_id
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  v_commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+
+  if v_commission is null then
+    v_status := 'needs_rate';
+    v_commission := 0;
+  end if;
+  v_commission_vat := round(v_commission * v_vat, 2);
+
+  if v_pay.paid_to_client then
+    v_to_client := 0;
+    v_due_to_bf := s.to_interest + s.to_costs + v_commission;
+  else
+    v_to_client := s.to_capital - v_commission - v_commission_vat;
+    v_due_to_bf := 0;
+  end if;
+
+  insert into public.payment_allocations (
+    payment_id, account_id, payment_amount, half_a,
+    receipt_fee_excl, receipt_fee_vat,
+    to_interest, to_costs, to_capital, excess_credit,
+    to_receipt_fee, to_fees,
+    commission, commission_vat, to_client, due_to_bf,
+    capital_before, capital_after, commission_rate, vat_rate,
+    paid_to_client, status, engine_version, computed_at
+  ) values (
+    p_payment_id, v_acct.id, v_pay.amount, s.half_a,
+    s.fee_excl, s.fee_vat,
+    s.to_interest, s.to_costs, s.to_capital, s.excess,
+    0, 0,
+    v_commission, v_commission_vat, v_to_client, v_due_to_bf,
+    b.capital, b.capital - s.to_capital, v_rate, v_vat,
+    v_pay.paid_to_client, v_status, 'v1-5050', now()
+  ) returning id into v_id;
+
+  update public.debtor_accounts
+     set capital_outstanding = greatest(b.capital - s.to_capital, 0),
+         last_payment_at = greatest(coalesce(last_payment_at, v_pay.received_at), v_pay.received_at)
+   where id = v_acct.id;
+
+  return v_id;
+end $$;
+
+revoke all on function public.allocate_payment(uuid) from public;
+
+-- ---------- AND THE SAME THING, WITHOUT WRITING ANYTHING ----------
+--
+-- WHAT THE FIRM ASKED FOR: "what if the debtor pays R X today", before agreeing a settlement. The
+-- tariff is read on TODAY'S date rather than a payment's, because the payment being previewed
+-- would be taken today -- which is still the rule that a fee is priced on the day of the action.
+create or replace function public.preview_allocation(
+  p_account uuid, p_amount numeric, p_paid_to_client boolean default false)
+returns table (
+  receipt_fee_excl numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric,
+  commission numeric, commission_vat numeric,
+  to_client numeric, due_to_bf numeric, bf_takes numeric,
+  interest_before numeric, costs_before numeric, capital_before numeric,
+  interest_after numeric, costs_after numeric, capital_after numeric,
+  has_rate boolean
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  b record; s record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric := 0;
+  v_company uuid;
+begin
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and current_date >= effective_from
+     and (effective_to is null or current_date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  select * into b from public.engine_balances(p_account, null);
+  select * into s from public.finance_split(
+    greatest(coalesce(p_amount, 0), 0), b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  select d.company_id, coalesce(d.commission_rate, c.commission_rate), c.commission_bands, c.mandate_signed_at
+    into v_company, v_rate, v_bands, v_mandate
+    from public.debtor_accounts d join public.companies c on c.id = d.company_id
+   where d.id = p_account;
+
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_company and a.status <> 'reversed'
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+  has_rate := commission is not null;
+  if commission is null then commission := 0; end if;
+  commission_vat := round(commission * v_vat, 2);
+
+  receipt_fee_excl := s.fee_excl;
+  receipt_fee_vat := s.fee_vat;
+  to_interest := s.to_interest;
+  to_costs := s.to_costs;
+  to_capital := s.to_capital;
+  excess_credit := s.excess;
+
+  if p_paid_to_client then
+    to_client := 0;
+    due_to_bf := s.to_interest + s.to_costs + commission;
+  else
+    to_client := s.to_capital - commission - commission_vat;
+    due_to_bf := 0;
+  end if;
+  /* WHAT BF ACTUALLY EARNS, which is not due_to_bf: interest and costs recovered plus commission,
+     however the money arrived. The VAT is SARS's and is deliberately not in this figure. */
+  bf_takes := s.to_interest + s.to_costs + commission;
+
+  interest_before := b.interest; costs_before := b.costs; capital_before := b.capital;
+  /* The receipt fee this payment would raise joins costs before it is paid, so what is left after
+     is the old costs plus that fee less what the payment took. */
+  interest_after := b.interest - s.to_interest;
+  costs_after := b.costs + s.fee_excl + s.fee_vat - s.to_costs;
+  capital_after := b.capital - s.to_capital;
+  return next;
+end $$;
+
+comment on function public.preview_allocation(uuid, numeric, boolean) is
+  'A payment that has not happened, split by the same arithmetic as one that has: same balances, '
+  'same finance_split, same commission. Writes nothing. Administrator only -- it shows what BF '
+  'earns, which is the one thing the company dashboard may never disclose.';
+
+revoke all on function public.preview_allocation(uuid, numeric, boolean) from public;
+
+-- ============================================================================
+-- FINANCE, PROMPT 6 (b): FOUR BUCKETS PER ACCOUNT, AND WHAT IS STILL IN EACH.
+--
+-- BF's own view, which never appears on anything a client receives. Every figure is VAT-INCLUSIVE,
+-- because that is what the debtor owes -- the firm's decision 1.
+--
+-- WHICH FEE A PAYMENT PAID IS NOT RECORDED ANYWHERE, AND IS DERIVED HERE. `to_costs` is one pool
+-- covering items 1-7 and the item 9 receipt fee together, because finance_split pays "costs" as
+-- one number -- which is right, and leaves the four buckets with no stored answer to "how much of
+-- what was taken was receipt fees". Recording it would need a fee-by-fee settlement ledger; it is
+-- derived instead, OLDEST FEE FIRST, which is deterministic, recomputes from the ledger every
+-- time, and cannot go stale. Oldest-first is a CHOICE -- the gazette does not order them -- and it
+-- is the defensible one: it is the order the fees were incurred and the order a statement reads.
+--
+-- WHAT "CAN'T TAKE" MEANS, per bucket, and it is not one thing:
+--   interest  -- accrued but not recoverable: the in duplum ceiling, prescription, a write-off.
+--   costs     -- cancelled, or raised above the items 1-7 ceiling and marked `billed = false`.
+--                Read off what is RECORDED rather than by recomputing the cap, because the cap was
+--                applied at the time on the capital as it then stood; recomputing it today against
+--                a capital that has since been paid down would move fees in and out of reach.
+--   item 9    -- outside the cap entirely, so only a cancellation puts it out of reach.
+-- ============================================================================
+create or replace view public.account_money_position as
+with fee_rows as (
+  select f.account_id,
+         f.id,
+         f.incurred_at,
+         f.counts_toward_fee_cap,
+         f.annexure_item,
+         f.amount_excl_vat,
+         f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+         (f.cancelled_at is not null or f.billed is false) as unrecoverable
+    from public.account_fees f
+),
+/* What was already settled by the time this fee's turn came, oldest first. */
+ordered as (
+  select r.*,
+         coalesce(sum(case when r.unrecoverable then 0 else r.incl end)
+           over (partition by r.account_id order by r.incurred_at, r.id
+                 rows between unbounded preceding and 1 preceding), 0) as settled_before
+    from fee_rows r
+),
+pool as (
+  select a.account_id, coalesce(sum(a.to_costs), 0) as taken
+    from public.payment_allocations a where a.status <> 'reversed' group by a.account_id
+),
+fees as (
+  select o.account_id,
+         o.counts_toward_fee_cap,
+         o.annexure_item,
+         o.unrecoverable,
+         o.incl,
+         o.amount_excl_vat,
+         case when o.unrecoverable then 0
+              else least(greatest(coalesce(p.taken, 0) - o.settled_before, 0), o.incl) end as taken
+    from ordered o left join pool p on p.account_id = o.account_id
+),
+cost_buckets as (
+  select account_id,
+         sum(incl) filter (where counts_toward_fee_cap)                   as c17_charged,
+         sum(incl) filter (where counts_toward_fee_cap and unrecoverable) as c17_cant,
+         sum(taken) filter (where counts_toward_fee_cap)                  as c17_taken,
+         sum(amount_excl_vat) filter (where counts_toward_fee_cap and not unrecoverable) as c17_excl_recoverable,
+         sum(incl) filter (where not counts_toward_fee_cap)                   as i9_charged,
+         sum(incl) filter (where not counts_toward_fee_cap and unrecoverable) as i9_cant,
+         sum(taken) filter (where not counts_toward_fee_cap)                  as i9_taken
+    from fees group by account_id
+),
+interest as (
+  select account_id,
+         coalesce(sum(amount_accrued), 0) as accrued,
+         coalesce(sum(amount_recoverable), 0) as recoverable
+    from public.account_interest_accruals group by account_id
+),
+allocated as (
+  select account_id,
+         coalesce(sum(to_interest), 0) as interest_taken,
+         coalesce(sum(to_capital), 0) as capital_taken,
+         coalesce(sum(commission), 0) as commission_earned,
+         coalesce(sum(commission_vat), 0) as commission_vat_earned,
+         coalesce(sum(payment_amount), 0) as payments_allocated,
+         coalesce(sum(excess_credit), 0) as excess_credit
+    from public.payment_allocations where status <> 'reversed' group by account_id
+)
+select d.id as account_id,
+       d.company_id,
+       d.case_number,
+       d.account_number,
+       d.assigned_to,
+       d.status,
+       d.capital_handed_over,
+       coalesce(d.capital_outstanding, 0) as capital_outstanding,
+       coalesce(al.capital_taken, 0) as capital_taken,
+
+       coalesce(i.accrued, 0) as interest_charged,
+       coalesce(al.interest_taken, 0) as interest_taken,
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0) as interest_left,
+       greatest(coalesce(i.accrued, 0) - coalesce(i.recoverable, 0), 0) as interest_cant_take,
+
+       coalesce(cb.c17_charged, 0) as costs_charged,
+       coalesce(cb.c17_taken, 0) as costs_taken,
+       greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0) as costs_left,
+       coalesce(cb.c17_cant, 0) as costs_cant_take,
+
+       coalesce(cb.i9_charged, 0) as receipt_fees_charged,
+       coalesce(cb.i9_taken, 0) as receipt_fees_taken,
+       greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0) as receipt_fees_left,
+       coalesce(cb.i9_cant, 0) as receipt_fees_cant_take,
+
+       /* COMMISSION: earned when capital comes in, so it has no "left" -- only a potential. */
+       coalesce(al.commission_earned, 0) + coalesce(al.commission_vat_earned, 0) as commission_earned,
+       round(coalesce(d.capital_outstanding, 0)
+             * coalesce(d.commission_rate, c.commission_rate, 0)
+             * (1 + coalesce(fs.vat_rate, 0.15)), 2) as commission_potential,
+       coalesce(d.commission_rate, c.commission_rate) as commission_rate,
+
+       /* THE ITEMS 1-7 CEILING: the capital handed over or R1 225, whichever is the lesser, and
+          measured EXCLUDING VAT -- which is the unit annexureB.ts's feeCeiling already works in
+          and the unit the gazette sets the figure in. */
+       least(coalesce(d.capital_handed_over, 0), 1225.00) as cost_cap,
+       coalesce(cb.c17_excl_recoverable, 0) as cost_cap_used,
+       greatest(least(coalesce(d.capital_handed_over, 0), 1225.00) - coalesce(cb.c17_excl_recoverable, 0), 0) as cost_cap_headroom,
+
+       /* IN DUPLUM (NCA s103(5)): interest + costs still to take may not pass the ceiling. */
+       coalesce(d.in_duplum, false) as in_duplum,
+       coalesce(d.in_duplum_ceiling, 0) as in_duplum_ceiling,
+
+       coalesce(al.excess_credit, 0) as excess_credit,
+       coalesce(al.payments_allocated, 0) as payments_allocated,
+
+       /* WHAT BF STILL HAS TO COME. Commission is not in it: it is not a debt the debtor owes. */
+       greatest(coalesce(i.recoverable, 0) - coalesce(al.interest_taken, 0), 0)
+         + greatest(coalesce(cb.c17_charged, 0) - coalesce(cb.c17_cant, 0) - coalesce(cb.c17_taken, 0), 0)
+         + greatest(coalesce(cb.i9_charged, 0) - coalesce(cb.i9_cant, 0) - coalesce(cb.i9_taken, 0), 0)
+         as bf_left_to_take
+  from public.debtor_accounts d
+  join public.companies c on c.id = d.company_id
+  cross join (select vat_rate from public.firm_settings limit 1) fs
+  left join cost_buckets cb on cb.account_id = d.id
+  left join interest i on i.account_id = d.id
+  left join allocated al on al.account_id = d.id;
+
+comment on view public.account_money_position is
+  'One row per account: what has been charged, taken, is left to take and can never be taken, in '
+  'four buckets -- interest, Annexure B items 1-7, item 9 receipt fees, commission -- plus the '
+  'cost cap and the in duplum ceiling. BF''s own view; it never appears on a client document.';
+
+revoke all on public.account_money_position from anon, authenticated;
+
+/*
+ * READ THROUGH A FUNCTION, NOT A GRANT. A view does not carry row level security of its own, and
+ * the tables under this one are readable by every collector -- so granting select here would hand
+ * the whole floor the commission figures the firm has said are not even for an administrator to
+ * see on a dashboard. The Finance screens read it through this, which checks the role.
+ */
+create or replace function public.money_position(p_account uuid default null)
+returns setof public.account_money_position
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select * from public.account_money_position
+   where public.current_user_role() = 'Administrator'
+     and (p_account is null or account_id = p_account)
+$$;
+
+comment on function public.money_position(uuid) is
+  'account_money_position, gated to the Administrator role. The view itself is not granted: a view '
+  'carries no RLS of its own, and the tables under it are readable by the whole floor.';
+
+revoke all on function public.money_position(uuid) from public;
+grant execute on function public.money_position(uuid) to authenticated;

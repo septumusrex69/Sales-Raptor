@@ -161,8 +161,13 @@ ok('...and the column is on the line to be read',
 ok('a carried shortfall has a column of its own',
   /carried_amount/.test(totals) && /add column if not exists carried_amount numeric/.test(sql))
 /* AND THE TOTALS ONLY EVER MOVE ON A DRAFT. */
-ok('the totals are only recomputed while the run is a draft',
-  /where r\.id = p_run and r\.status = 'draft'/.test(totals))
+/*
+ * AND ONLY WHILE THE RUN IS STILL A WORKING DOCUMENT. 'draft' became two values -- needs_review
+ * and ready -- and every test for it now goes through payover_run_is_open, so the next rung the
+ * firm adds to the ladder is one edit rather than nine.
+ */
+ok('the totals are only recomputed while the run is open',
+  /where r\.id = p_run and public\.payover_run_is_open\(r\.status\)/.test(totals))
 
 /* ---------------- what stops approval ---------------- */
 
@@ -179,7 +184,7 @@ for (const kind of ['needs_rate', 'excess_credit', 'no_client_code']) {
 ok('approving asks the blockers', /from public\.payover_run_blockers\(p_run\) b/.test(approve))
 ok('...and refuses with the reason in the sentence',
   /raise exception 'This run cannot be approved yet: %', v_why/.test(approve))
-ok('...and only from a draft', /if v_status <> 'draft' then/.test(approve))
+ok('...and only from an open run', /if not public\.payover_run_is_open\(v_status\) then/.test(approve))
 /* THE EFT REFERENCE IS WHAT RECONCILES THE INVOICE TO THE BANK, so it is required. */
 ok('marking a run paid requires the EFT reference',
   /if nullif\(btrim\(coalesce\(p_reference, ''\)\), ''\) is null then\s*\n\s*raise exception/.test(paid))
@@ -192,7 +197,8 @@ ok('marking a run paid requires the EFT reference',
  */
 ok('an approved run refuses an edit to its figures',
   /raise exception 'Payover run % is %; its figures are an issued invoice/.test(guardRun))
-ok('...refuses to go back to a draft', /new\.status = 'draft' then\s*\n\s*raise exception/.test(guardRun))
+ok('...refuses to go back to a working document',
+  /if public\.payover_run_is_open\(new\.status\) then\s*\n\s*raise exception/.test(guardRun))
 ok('...and refuses to be deleted', /an invoice is not deleted/.test(guardRun))
 ok('...before the row is written', /before update or delete on public\.payover_runs/.test(sql))
 /* THE LINES WITH IT: a frozen total over editable lines is a total that no longer describes them. */
@@ -201,7 +207,7 @@ ok('...on insert as well as update and delete',
   /before insert or update or delete on public\.payover_run_lines/.test(sql))
 /* REBUILDING ONE IS REFUSED AT THE SOURCE, not merely by the trigger underneath. */
 ok('an approved run cannot be rebuilt',
-  /if v_run is not null and v_status <> 'draft' then\s*\n\s*raise exception/.test(build))
+  /if v_run is not null and not public\.payover_run_is_open\(v_status\) then\s*\n\s*raise exception/.test(build))
 /*
  * A REBUILD RELEASES BEFORE IT CLAIMS, or a second build appends to the first.
  *
