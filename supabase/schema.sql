@@ -10623,3 +10623,255 @@ drop trigger if exists one_open_dispute_per_account on public.account_queries;
 create trigger one_open_dispute_per_account
   before insert or update of status, kind, account_id on public.account_queries
   for each row execute function public.one_open_dispute_per_account();
+
+
+-- ============================================================================
+-- THE INVITATION ENDS HOWEVER THE WRITING ARRIVES, AND IT DOES NOT COME BACK.
+--
+-- FOUND WHILE CLEARING ONE DISPUTE OFF A TEST ACCOUNT so the firm could raise another. The account
+-- was holding a `dispute_alleged` run -- the sequence that asks the debtor to put the dispute in
+-- writing by a date and, if nothing comes, sends the DEEMED UNDISPUTED notice. Closing the dispute
+-- would have set it running again. workflow_start_on_dispute's own comment calls that notice
+-- reaching a debtor whose written dispute is on the firm's desk "the single worst thing in the
+-- sequence", and there were two ways to get there.
+--
+-- ONE: THE ENDING WAS INSIDE `if tg_op = 'UPDATE'`. It fired when a VERBAL dispute was later marked
+-- received in writing, and not when a dispute ARRIVED in writing -- which is a first-class answer
+-- in the Escalate box ("We have it in writing") and the one the firm uses when a debtor emails
+-- before anybody telephones. The UPDATE branch is there to stop a sequence restarting on every
+-- edit of a dispute, which is what the two guards inside it do; ending the invitation was never
+-- part of that job and is now outside it.
+--
+-- TWO: ANSWERING A DISPUTE RESUMED THE INVITATION. workflow_on_dispute_answered calls
+-- workflow_resume_account, which let go of everything the dispute had held -- including the
+-- alleged run, whose subject was that same dispute. Rehearsed on a clean account: raise it
+-- verbally, close it not upheld, and the invitation is RUNNING against a dispute that has been
+-- answered and filed.
+--
+-- SO THE RULE IS STATED POSITIVELY: an invitation is alive only while there is an open dispute on
+-- the account that we are still waiting for in writing. Anything else ends it. This is the same
+-- guard as the promise sequence beside it and it is written in the same place for the same reason
+-- -- it runs on EVERY resume, so an order nobody has thought of heals rather than sends.
+-- ============================================================================
+create or replace function public.workflow_start_on_dispute() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_kind text;
+begin
+  if new.kind <> 'dispute' or new.account_id is null then
+    return new;
+  end if;
+
+  /*
+   * WHICH SEQUENCE ANSWERS THIS DISPUTE, decided by the one fact that separates them: have we got
+   * it in writing? `in_writing` and `received_on` are the same answer from two directions -- the
+   * box sets both -- and either one on its own is enough here, because a row carrying only one of
+   * them is a row somebody wrote by hand and it still means the dispute arrived.
+   */
+  v_kind := case when new.in_writing or new.received_on is not null
+    then 'dispute_logged' else 'dispute_alleged' end;
+
+  /*
+   * ON AN UPDATE, ONLY WHEN THE ANSWER HAS CHANGED. A dispute is edited for a dozen reasons -- an
+   * owner, a chase date, a category -- and a sequence started on every one of them would be a
+   * second acknowledgement to the debtor for a field nobody changed.
+   *
+   * THIS BRANCH IS ABOUT EDIT NOISE AND NOTHING ELSE. Ending the invitation used to live inside it
+   * and so never ran on an INSERT -- see the header: a dispute that arrives already in writing left
+   * the deemed-undisputed sequence running.
+   */
+  if tg_op = 'UPDATE' then
+    if v_kind <> 'dispute_logged' then return new; end if;
+    if coalesce(old.in_writing, false) or old.received_on is not null then return new; end if;
+  end if;
+
+  /*
+   * AND THE INVITATION IS OVER, HOWEVER THE WRITING GOT HERE. The alleged sequence exists to ask
+   * for the dispute in writing and, if nothing comes, to send the deemed-undisputed notice. It has
+   * come. A SENT STEP STAYS SENT, as everywhere: it is the record of a notice that reached a
+   * debtor. Its holds are closed with it, or the run is left carrying one nothing will ever lift.
+   */
+  if v_kind = 'dispute_logged' then
+    with live as (
+      select r.id from public.workflow_runs r
+        join public.workflow_versions v on v.id = r.version_id
+       where r.account_id = new.account_id
+         and r.state in ('running', 'held')
+         and v.trigger_kind = 'dispute_alleged'
+    ), killed as (
+      update public.workflow_run_steps s
+         set state = 'cancelled', note = 'The dispute was received in writing'
+        from live
+       where s.run_id = live.id and s.state in ('pending', 'held')
+       returning s.id
+    ), closed as (
+      update public.workflow_run_holds h
+         set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+             ended_reason = 'The dispute was received in writing'
+        from live
+       where h.run_id = live.id and h.ended_on is null
+       returning h.id
+    )
+    update public.workflow_runs r
+       set state = 'left', left_reason = 'The dispute was received in writing', left_at = now()
+      from live
+     where r.id = live.id;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.raised_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = v_kind
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+
+  return new;
+end $$;
+
+comment on function public.workflow_start_on_dispute() is
+  'A dispute the debtor only SAID starts the sequence that asks for it in writing; one we have in '
+  'writing starts the real one and ends the invitation -- however the writing arrived, on an '
+  'insert as well as an update. The firm: "creating a dispute from what a debtor said doesn''t do '
+  'anything... but receiving an email with a written dispute, that."';
+
+revoke all on function public.workflow_start_on_dispute() from public;
+
+drop trigger if exists workflow_start_on_dispute on public.account_queries;
+create trigger workflow_start_on_dispute
+  after insert or update of in_writing, received_on on public.account_queries
+  for each row execute function public.workflow_start_on_dispute();
+
+
+-- ---------- AND NEITHER SEQUENCE COMES BACK WITH NOTHING LEFT TO BE ABOUT ----------
+create or replace function public.workflow_resume_account(
+  p_account_id uuid, p_reason text default null, p_cause text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_resumed integer := 0;
+begin
+  /*
+   * TWO SEQUENCES WHOSE WHOLE SUBJECT CAN STOP EXISTING, ENDED HERE BEFORE ANYTHING IS LET GO.
+   *
+   * A PROMISE SEQUENCE WITH NO LIVE ARRANGEMENT. The firm: "there's no active PTP on here, but the
+   * workflow is running a PTP." Its confirmation, its reminder two days before and its message on
+   * the day are all about an undertaking that no longer exists.
+   *
+   * AN INVITATION NOBODY IS WAITING ON. The alleged sequence asks the debtor to put the dispute in
+   * writing and ends by deeming it undisputed. Once the dispute is answered, or once the writing
+   * has arrived, there is nothing left to wait for -- and that notice reaching a debtor whose
+   * dispute is on the firm's desk is the worst thing either sequence can do.
+   *
+   * ENDED, NOT LEFT HELD: a held run is one somebody is expected to release later, and these must
+   * never go again. And it runs on EVERY resume rather than only the event that caused it, so an
+   * order of events nobody has thought of heals instead of sending.
+   */
+  with dead as (
+    select r.id, 'The arrangement is no longer live'::text as why
+      from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'promise_due'
+       /* LIVE MEANS open OR defaulted, the rule ptpSchedule applies to every notice merged on this
+          account. Cancelled, kept and broken are one answer: no undertaking is left. */
+       and not exists (
+         select 1 from public.promises_to_pay p
+          where p.account_id = p_account_id and p.status in ('open', 'defaulted')
+       )
+    union all
+    select r.id, 'Nobody is waiting for this dispute in writing'::text
+      from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'dispute_alleged'
+       /* ALIVE ONLY WHILE AN OPEN DISPUTE IS STILL BEING WAITED FOR IN WRITING. Closed, or already
+          in writing, and the invitation has been answered one way or the other. */
+       and not exists (
+         select 1 from public.account_queries q
+          where q.account_id = p_account_id
+            and q.kind = 'dispute'
+            and q.status <> 'closed'
+            and not coalesce(q.in_writing, false)
+            and q.received_on is null
+       )
+  ), killed as (
+    /* A SENT STEP STAYS SENT: it is the record of a message that reached a debtor. */
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = dead.why
+      from dead
+     where s.run_id = dead.id and s.state in ('pending', 'held')
+     returning s.id
+  ), closed as (
+    update public.workflow_run_holds h
+       set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+           ended_reason = dead.why
+      from dead
+     where h.run_id = dead.id and h.ended_on is null
+     returning h.id
+  )
+  update public.workflow_runs r
+     set state = 'left', left_reason = dead.why, left_at = now()
+    from dead
+   where r.id = dead.id;
+
+  /*
+   * ONLY THE HOLDS THIS EVENT IS ABOUT.
+   *
+   * This closed every open hold on the account whatever had caused it, so a dispute being answered
+   * released a run that a PROMISE had stopped -- and the section 129 went on demanding payment
+   * from a debtor who had an arrangement the firm had accepted.
+   *
+   * NULL MEANS EVERY CAUSE, and it is not a loophole: that is a person pressing Resume, who is
+   * looking at the account and deciding it may go on. The triggers all name their cause.
+   */
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(p_reason, 'Resumed')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state = 'held'
+     and h.ended_on is null
+     and (p_cause is null or h.cause = p_cause);
+
+  /*
+   * AND A RUN GOES ONLY WHERE NOTHING ELSE IS STILL HOLDING IT.
+   *
+   * CLOSE THE HOLD FIRST, THEN LET THE RUN GO -- in this order because the hold's ended_on is what
+   * the app adds up to move the remaining steps: a run set running with its hold still open would
+   * be a sequence whose clock never restarted, and the next morning's sweep would send the step it
+   * was paused on.
+   */
+  update public.workflow_runs r
+     set state = 'running'
+   where r.account_id = p_account_id
+     and r.state = 'held'
+     and not exists (
+       select 1 from public.workflow_run_holds h
+        where h.run_id = r.id and h.ended_on is null
+     );
+
+  get diagnostics v_resumed = row_count;
+  return v_resumed;
+end $$;
+
+comment on function public.workflow_resume_account(uuid, text, text) is
+  'Let a held sequence go again. It lifts only holds of the cause given, a run with another hold '
+  'still open stays held, and a sequence with nothing left to be about is ended rather than '
+  'resumed: a promise sequence whose arrangement is gone, and an invitation to put a dispute in '
+  'writing that nobody is waiting on any more.';
+
+revoke all on function public.workflow_resume_account(uuid, text, text) from public;
+grant execute on function public.workflow_resume_account(uuid, text, text) to authenticated;

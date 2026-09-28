@@ -244,9 +244,25 @@ ok('...and the sequence is asked for after the dispute is saved', atUpdate > 0 &
 const resumeAt = sql.lastIndexOf('create or replace function public.workflow_resume_account(')
 ok('workflow_resume_account is in the schema', resumeAt > 0)
 const resume = resumeAt > 0 ? sql.slice(resumeAt, sql.indexOf('$$;', resumeAt)) : ''
-/* ENDED, NOT LEFT HELD: a held run is one somebody is expected to let go later, and this one must
+/* ENDED, NOT LEFT HELD: a held run is one somebody is expected to let go later, and these must
    never go again. */
-ok('a promise sequence with no live arrangement is ended', /left_reason = 'The arrangement is no longer live'/.test(resume))
+ok('a sequence with nothing left to be about is ended',
+  /set state = 'left', left_reason = dead\.why/.test(resume))
+ok('...one of them the promise sequence with no live arrangement',
+  /'The arrangement is no longer live'::text as why/.test(resume))
+/*
+ * AND THE OTHER IS THE INVITATION TO PUT A DISPUTE IN WRITING. It asks the debtor for the dispute
+ * in writing by a date and ends by DEEMING IT UNDISPUTED. Answering the dispute used to resume it,
+ * so a debtor whose written dispute was on the firm's desk was queued to be told they never sent
+ * one -- which workflow_start_on_dispute itself calls the worst thing in the sequence.
+ */
+ok('...the other the invitation nobody is waiting on',
+  /'Nobody is waiting for this dispute in writing'::text/.test(resume)
+  && /v\.trigger_kind = 'dispute_alleged'/.test(resume))
+/* ALIVE ONLY WHILE AN OPEN DISPUTE IS STILL BEING WAITED FOR IN WRITING -- stated positively, so
+   "closed" and "already in writing" are one answer rather than two conditions to remember. */
+ok('...and only while one is still being waited for',
+  /not coalesce\(q\.in_writing, false\)[\s\S]{0,80}?q\.received_on is null/.test(resume))
 /* MATCHED ON THE VERSION'S TRIGGER, the same way the cancel and the hold decide which run they mean
    -- "this version exists to answer exactly this event" is a fact, where "started recently" is a
    guess about clocks. */
@@ -298,6 +314,36 @@ ok('...telling the collector what to do instead',
 const trigAt = sql.lastIndexOf('create trigger one_open_dispute_per_account')
 ok('...on a trigger that runs before the write', trigAt > 0
   && /before insert or update of status, kind, account_id/.test(sql.slice(trigAt, trigAt + 300)))
+
+/*
+ * THE INVITATION ENDS HOWEVER THE WRITING ARRIVES. The ending used to sit inside
+ * `if tg_op = 'UPDATE'`, so it fired when a VERBAL dispute was later marked received in writing and
+ * not when one ARRIVED in writing -- which is a first-class answer in the Escalate box ("We have it
+ * in writing") and what the firm uses when a debtor emails before anybody telephones.
+ *
+ * ASSERTED BY POSITION, because the bug was position and nothing else: the same statement, two
+ * lines further in, was correct on one path and absent on the other.
+ */
+const startAt = sql.lastIndexOf('create or replace function public.workflow_start_on_dispute(')
+ok('the dispute trigger is in the schema', startAt > 0)
+const start = startAt > 0 ? sql.slice(startAt, sql.indexOf('$$;', startAt)) : ''
+const atUpdateBranch = start.indexOf("\n  if tg_op = 'UPDATE' then")
+const atEndBranch = start.indexOf("\n  if v_kind = 'dispute_logged' then")
+/*
+ * BY INDENTATION, which is the only thing that actually distinguishes the two versions. An
+ * order-only assertion passed on the broken code here: deleting the `end if;` that closes the
+ * UPDATE branch nests the ending inside it WITHOUT moving it, so "after the branch opens" is still
+ * true and the two `return new; end if;` guards inside satisfy any search for a closing line.
+ * CLAUDE.md's first trap, met head on. A top-level statement in this function is indented two
+ * spaces; one nested inside the UPDATE branch is indented four, so the leading "\n  " is the test.
+ */
+ok('...and it ends the invitation', atEndBranch > 0)
+ok('...at the top level of the function, not inside the edit-noise branch',
+  atUpdateBranch > 0 && atEndBranch > atUpdateBranch
+  && /\n  end if;\n/.test(start.slice(atUpdateBranch, atEndBranch)))
+/* A SENT STEP STAYS SENT -- the record of a notice that reached a debtor. */
+ok('...cancelling only what had not gone',
+  /set state = 'cancelled', note = 'The dispute was received in writing'/.test(start))
 
 /*
  * AND THE SCREENS NEVER OFFER ONE. The refusal is good and it arrives too late: a collector has
