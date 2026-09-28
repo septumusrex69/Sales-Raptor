@@ -10,6 +10,8 @@ import { LoginPage } from './pages/auth/LoginPage'
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
+import { RequireFinance } from './components/auth/RequireFinance'
+
 import { CollectorDashboard } from './pages/CollectorDashboard'
 /*
  * LOADED ON DEMAND -- EVERY SCREEN EXCEPT THE TWO YOU LAND ON.
@@ -31,6 +33,16 @@ import { CollectorDashboard } from './pages/CollectorDashboard'
 const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })))
 const CommunicationsDashboard = lazy(() => import('./pages/CommunicationsDashboard').then((m) => ({ default: m.CommunicationsDashboard })))
 const AdminOverview = lazy(() => import('./pages/AdminOverview').then((m) => ({ default: m.AdminOverview })))
+/*
+ * THE FINANCE SECTION, LAZILY. Nobody but an Administrator can open any of it, and most of them
+ * will not open it most days -- so none of it belongs in the download everybody waits for.
+ * check-app-boot holds that rule for every screen past the ones you land on.
+ */
+const FinanceWorkQueue = lazy(() => import('./pages/finance/FinanceWorkQueue').then((m) => ({ default: m.FinanceWorkQueue })))
+const RunDetail = lazy(() => import('./pages/finance/RunDetail').then((m) => ({ default: m.RunDetail })))
+const FinanceExceptions = lazy(() => import('./pages/finance/FinanceExceptions').then((m) => ({ default: m.FinanceExceptions })))
+const BackOffice = lazy(() => import('./pages/finance/BackOffice').then((m) => ({ default: m.BackOffice })))
+const FinancePayments = lazy(() => import('./pages/finance/FinancePayments').then((m) => ({ default: m.FinancePayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -102,6 +114,16 @@ function App() {
               <Route path="/companies" element={<RequireClientAccess><CompaniesList /></RequireClientAccess>} handle={{ title: 'Clients' }} />
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
               <Route path="/mail" element={<MailPage />} handle={{ title: 'Mail' }} />
+              {/*
+                * THE FINANCE SECTION. Its landing page is the payover WORK QUEUE, not an overview:
+                * prompt 7 replaced prompt 5's overview because this is the screen the team opens
+                * to find out what to do, not a set of figures to read.
+                */}
+              <Route path="/finance" element={<RequireFinance><FinanceWorkQueue /></RequireFinance>} handle={{ title: 'Finance' }} />
+              <Route path="/finance/runs/:id" element={<RequireFinance><RunDetail /></RequireFinance>} handle={{ title: 'Payover run' }} />
+              <Route path="/finance/payments" element={<RequireFinance><FinancePayments /></RequireFinance>} handle={{ title: 'Payments' }} />
+              <Route path="/finance/exceptions" element={<RequireFinance><FinanceExceptions /></RequireFinance>} handle={{ title: 'Finance exceptions' }} />
+              <Route path="/finance/back-office" element={<RequireFinance><BackOffice /></RequireFinance>} handle={{ title: 'Back office' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               {/*
                 THE OLD WAY IN, KEPT AS A REDIRECT. The read-only page that lived here showed the

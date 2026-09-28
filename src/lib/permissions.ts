@@ -238,3 +238,21 @@ export function canViewLibrary(role: Pick<User, 'role'>['role'] | undefined): bo
 export function canEditLibrary(role: Pick<User, 'role'>['role'] | undefined): boolean {
   return role === 'Administrator'
 }
+
+/**
+ * WHO SEES THE FINANCE SECTION, AND IT IS ONE ROLE.
+ *
+ * The firm, setting the condition for the whole module: "The Finance section is Administrator
+ * only. Sales representatives never see the payment split." It is the same instinct as the
+ * company dashboard's rule -- "we're not going to be disclosing commission and income from the
+ * Annexure B fees" -- one screen further in: a payover run IS the commission earned on a client's
+ * whole book, and the back office is what the firm still intends to take off every debtor.
+ *
+ * THIS IS THE COURTESY, NOT THE BOUNDARY. Every function behind these screens checks the role
+ * itself, in the database, because they run as security definer and there is no policy to fall
+ * back on inside one. A menu item that always refuses is worse than no menu item; a menu item
+ * that is the ONLY thing refusing is worse still.
+ */
+export function canViewFinance(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator'
+}

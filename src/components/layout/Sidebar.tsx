@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
-import { canViewClients, canViewLibrary } from '../../lib/permissions'
+import { canViewClients, canViewLibrary , canViewFinance } from '../../lib/permissions'
 import { useSidebarCollapsed } from '../../lib/sidebarCollapsed'
 
 /**
@@ -56,6 +56,12 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   // Its own item rather than a Settings tab, where the workflow builder currently hides: a
   // library is content a person maintains and comes back to, not a switch they set once. It sits
   // by Reports because both are reference rather than a queue somebody works down.
+  /*
+   * FINANCE: remittances, payovers and the back office. ADMINISTRATOR ONLY, on the firm's own
+   * condition for the module. It sits above Library rather than under Settings because it is a
+   * queue somebody works down every month, not a switch they set once.
+   */
+  { to: '/finance', label: 'Finance', icon: Landmark },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings },
@@ -106,6 +112,7 @@ export function Sidebar() {
              nobody may enter and teaches people that the sidebar lies. The page keeps its own
              guard for anyone who types the address. */
           .filter((n) => n.to !== '/library' || canViewLibrary(currentUser?.role))
+          .filter((n) => n.to !== '/finance' || canViewFinance(currentUser?.role))
           .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0
           return (
