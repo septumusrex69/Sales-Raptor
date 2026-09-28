@@ -10,9 +10,9 @@ import {
   RUN_STATUS_LABEL, approveRun, fetchPaymentAudit, fetchRunPayments, markRunPaid,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
-import { buildRemittanceAdvice } from '../../lib/remittanceAdvice'
+import { adviceBody, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
 import { remittancePdf } from '../../lib/remittancePdf'
-import { adviceBody, adviceSubject, sendRemittanceAdvice } from '../../lib/remittanceEmail'
+import { sendRemittanceAdvice } from '../../lib/remittanceEmail'
 
 /**
  * ONE PAYOVER RUN, AND THE PAYMENTS UNDER IT.
@@ -530,8 +530,8 @@ function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
           </pre>
         </div>
         <p className="text-xs text-slate-400">
-          {advice.run.invoiceNumber}.pdf is attached — {advice.collections.length} collection
-          {advice.collections.length === 1 ? '' : 's'}
+          {advice.run.invoiceNumber}.pdf and the same detail as a spreadsheet are attached —
+          {' '}{advice.collections.length} collection{advice.collections.length === 1 ? '' : 's'}
           {advice.direct.length > 0 ? ` and ${advice.direct.length} paid to you directly` : ''}.
           The run is marked sent only once the message has actually gone.
         </p>

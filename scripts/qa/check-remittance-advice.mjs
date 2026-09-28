@@ -21,7 +21,10 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-remittance-advice.mjs
  */
 import { readFileSync } from 'node:fs'
-import { buildRemittanceAdvice, advStatus, ANNEXURE_B_FOOTNOTE } from '../../src/lib/remittanceAdvice.ts'
+import {
+  ANNEXURE_B_FOOTNOTE, adviceBody, adviceSchedule, adviceSubject, advStatus, buildRemittanceAdvice,
+} from '../../src/lib/remittanceAdvice.ts'
+
 import { rand, amount, randOrDash, ratePercent, NBSP } from '../../src/lib/money.ts'
 
 let pass = 0
@@ -199,6 +202,51 @@ ok('the run is marked sent after the send, not before',
 ok('it reuses the existing send endpoint', /fetch\('\/api\/email\/send'/.test(emailSrc))
 /* BLANK LINES ARE PARAGRAPHS, which is the firm's rule after a final notice went out as one block. */
 ok('the covering message is rendered by emailBodyHtml', /emailBodyHtml\(adviceBody\(adv\)\)/.test(emailSrc))
+
+/* ---------------- the spreadsheet that travels with it ---------------- */
+
+/*
+ * THE SAME DETAIL, FOR WORKING RATHER THAN READING. The firm asked for both: the PDF is the tax
+ * invoice, the .xlsx is what a bookkeeper sorts and totals against their own ledger.
+ *
+ * AMOUNTS GO IN AS NUMBERS AND REFERENCES AS TEXT, which is the same argument pointing two ways.
+ * xlsxWrite's default is text because the rejected-rows sheet goes BACK to a client and Excel
+ * reformatting it would eat their corrections -- 40 of 42 phone numbers on one client's own sheet
+ * had already lost a leading zero that way. Here text would stop a column being summed. So the
+ * caller says which, and the choice that can corrupt data is the one needing no thought.
+ */
+/* A RUN WITH BOTH KINDS ON IT, because the schedule's job is to carry both tables and a fixture
+   with only one would let a missing heading through. */
+const both = build([line(), line({
+  lineId: 'p2', lineKind: 'ptc', paidToClient: true, paymentAmount: 4900, toInterest: 0,
+  toCosts: 1975.11, toCapital: 2924.89, commission: 877.47, commissionVat: 131.62,
+  dueToBf: 2852.58, toClient: 0,
+})])
+const schedule = adviceSchedule(both)
+ok('the schedule is a readable zip', schedule.length > 1000
+  && schedule[0] === 0x50 && schedule[1] === 0x4B && schedule[2] === 0x03 && schedule[3] === 0x04)
+const sheetXml = new TextDecoder().decode(schedule)
+/* A DEFLATED entry would not be greppable; stored is what makes this assertion possible at all,
+   and stored is what xlsxWrite already chose so that no caller has to be async. */
+ok('...with the sheet inside it', sheetXml.includes('xl/worksheets/sheet1.xml'))
+/*
+ * BOTH TABLES, NOT JUST ONE. The first version of this looked for a single numeric cell and a
+ * break test that turned every COLLECTIONS amount into text walked straight through it, because
+ * the client-direct table still had one. An assertion that one amount somewhere is a number
+ * proves nothing about the column a bookkeeper wants to sum.
+ */
+ok('a collections amount is a number Excel can total', /<v>500<\/v>/.test(sheetXml))
+ok('...and a client-direct one', /<v>4900<\/v>/.test(sheetXml))
+ok('...and the workings, so the reconciliation totals too', /<v>38958\.32<\/v>/.test(sheetXml))
+ok('...and a reference keeps its leading zeros as text',
+  /<t xml:space="preserve">5956<\/t>/.test(sheetXml))
+ok('both tables are on the one sheet',
+  sheetXml.includes('Collections by us') && sheetXml.includes('Paid to you directly'))
+ok('...and the workings after them', sheetXml.includes('How we got there'))
+/* AND IT GOES WITH THE PDF, not instead of it. */
+ok('the email carries both attachments',
+  /\$\{adv\.run\.invoiceNumber\}\.pdf/.test(emailSrc)
+  && /\$\{adv\.run\.invoiceNumber\} schedule\.xlsx/.test(emailSrc))
 
 console.log(`\ncheck-remittance-advice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

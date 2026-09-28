@@ -19,6 +19,7 @@ const TABS = [
   { to: '/finance/payments', label: 'Payments' },
   { to: '/finance/exceptions', label: 'Exceptions' },
   { to: '/finance/back-office', label: 'Back office' },
+  { to: '/finance/settings', label: 'Settings' },
 ]
 
 export function FinanceTabs() {

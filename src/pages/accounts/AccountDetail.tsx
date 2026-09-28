@@ -33,6 +33,7 @@ import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
+import { LedgerPanel } from './LedgerPanel'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -764,6 +765,7 @@ export function AccountDetail() {
         * shows the firm's own cut, which is the one figure the company dashboard may never carry.
         */}
       <MoneyPanel accountId={account.id} />
+      <LedgerPanel accountId={account.id} />
     </div>
   )
   const timelinePanel = (

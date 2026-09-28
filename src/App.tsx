@@ -42,6 +42,7 @@ const FinanceWorkQueue = lazy(() => import('./pages/finance/FinanceWorkQueue').t
 const RunDetail = lazy(() => import('./pages/finance/RunDetail').then((m) => ({ default: m.RunDetail })))
 const FinanceExceptions = lazy(() => import('./pages/finance/FinanceExceptions').then((m) => ({ default: m.FinanceExceptions })))
 const BackOffice = lazy(() => import('./pages/finance/BackOffice').then((m) => ({ default: m.BackOffice })))
+const FinanceSettings = lazy(() => import('./pages/finance/FinanceSettings').then((m) => ({ default: m.FinanceSettings })))
 const FinancePayments = lazy(() => import('./pages/finance/FinancePayments').then((m) => ({ default: m.FinancePayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
@@ -124,6 +125,7 @@ function App() {
               <Route path="/finance/payments" element={<RequireFinance><FinancePayments /></RequireFinance>} handle={{ title: 'Payments' }} />
               <Route path="/finance/exceptions" element={<RequireFinance><FinanceExceptions /></RequireFinance>} handle={{ title: 'Finance exceptions' }} />
               <Route path="/finance/back-office" element={<RequireFinance><BackOffice /></RequireFinance>} handle={{ title: 'Back office' }} />
+              <Route path="/finance/settings" element={<RequireFinance><FinanceSettings /></RequireFinance>} handle={{ title: 'Finance settings' }} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               {/*
                 THE OLD WAY IN, KEPT AS A REDIRECT. The read-only page that lived here showed the

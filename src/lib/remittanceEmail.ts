@@ -1,6 +1,12 @@
 /**
  * THE REMITTANCE ADVICE, ON ITS WAY TO THE CLIENT.
  *
+ * ONLY THE SENDING LIVES HERE. The subject, the covering message and the spreadsheet are in
+ * remittanceAdvice.ts, which touches no network and no Supabase client -- the same split
+ * emailStyle.ts was carved out of firmSettings.ts for, and for the same reason: a check script
+ * cannot import a module that pulls in the Supabase client, so a pure function stranded in one
+ * can only ever be read back as text.
+ *
  * NO NEW ENDPOINT. `api/email/send` already takes base64 attachments in the same JSON body --
  * built for exactly this, and for the reason letterPdf gives: Vercel's Hobby plan caps a project
  * at twelve serverless functions and api/ is at twelve. The PDF is made in the browser, handed
@@ -18,36 +24,12 @@
  */
 import { supabase } from './supabase'
 import { emailBodyHtml } from './emailStyle'
-import { rand } from './money'
-import { advDate, type RemittanceAdvice } from './remittanceAdvice'
+import {
+  adviceBody, adviceSchedule, adviceSubject, type RemittanceAdvice,
+} from './remittanceAdvice'
 import { remittancePdf } from './remittancePdf'
 import { markRunSent } from './payover'
-
-export function adviceSubject(adv: RemittanceAdvice): string {
-  return `Remittance advice ${adv.run.invoiceNumber} - ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}`
-}
-
-/**
- * The covering message. SHORT, because the document is the thing: the net amount, when it is
- * being paid, and where the detail is. The blank lines are content rather than a guess in a
- * renderer -- emailBodyHtml turns each one into a paragraph, which is the firm's own rule after a
- * final notice went out as a single block.
- */
-export function adviceBody(adv: RemittanceAdvice): string {
-  const when = adv.run.paidAt
-    ? `on ${advDate(adv.run.paidAt)}`
-    : 'within our normal payment run'
-  return [
-    'Good day',
-    `Please find attached our remittance advice and tax invoice ${adv.run.invoiceNumber} for `
-      + `collections from ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}.`,
-    `Net amount payable to you: ${rand(adv.run.netPayover)}`
-      + `\nPayment: by EFT to your nominated account, ${when}`
-      + (adv.run.eftReference ? `\nReference: ${adv.run.eftReference}` : ''),
-    'The attached statement lists every payment behind that figure, account by account.',
-    'Kind regards\nBredell Ferreira',
-  ].join('\n\n')
-}
+import { XLSX_MIME, toBase64 } from './xlsxWrite'
 
 export async function sendRemittanceAdvice(
   adv: RemittanceAdvice,
@@ -68,11 +50,18 @@ export async function sendRemittanceAdvice(
       to,
       subject: adviceSubject(adv),
       bodyHtml: emailBodyHtml(adviceBody(adv)),
-      attachments: [{
-        filename: `${adv.run.invoiceNumber}.pdf`,
-        contentType: 'application/pdf',
-        content: base64(bytes),
-      }],
+      attachments: [
+        {
+          filename: `${adv.run.invoiceNumber}.pdf`,
+          contentType: 'application/pdf',
+          content: base64(bytes),
+        },
+        {
+          filename: `${adv.run.invoiceNumber} schedule.xlsx`,
+          contentType: XLSX_MIME,
+          content: toBase64(adviceSchedule(adv)),
+        },
+      ],
     }),
   })
   const body = await res.json().catch(() => ({})) as { error?: string }

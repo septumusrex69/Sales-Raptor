@@ -57,6 +57,13 @@ const LEDGERS = [
    * lock, and the one that holds even for a draft nobody has approved yet.
    */
   'payover_run_lines',
+  /*
+   * AND THE SIXTH, WHICH IS NOT MONEY BUT DECIDES IT: who changed a commission rate, the VAT
+   * rate, a tariff or the cut-over, from what to what, and why. An audit trail somebody can edit
+   * is not an audit trail -- and this one is the only record of a change that silently alters
+   * what every debtor is charged and every client is paid.
+   */
+  'finance_setting_changes',
 ]
 
 for (const table of LEDGERS) {
@@ -102,7 +109,7 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-The five money ledgers can be read and written to and never changed or deleted -- enforced by
+The six ledgers can be read and written to and never changed or deleted -- enforced by
 policies that are ABSENT rather than by policies that refuse, which is why it is worth a check:
 the next person to add a policy block has nothing to trip over. Searched over the whole of
 schema.sql, because it is append-only and a later migration lands at the end.`)

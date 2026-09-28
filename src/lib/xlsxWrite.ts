@@ -124,7 +124,21 @@ function zip(files: Entry[]): Uint8Array {
  * could not be opened.
  */
 export type CellStyle = 'head' | 'bad'
-export type Cell = string | null | undefined | { v: string; style?: CellStyle }
+/**
+ * A cell is TEXT unless it says otherwise, and `{ n }` is how it says otherwise.
+ *
+ * The default exists for the rejected-rows sheet, where writing a number AS a number is the bug:
+ * 40 of 42 "Cell Phone 2" values on the client's own sheet had already lost their leading zero to
+ * Excel's reformatting, and a client correcting a sheet must not have the correction eaten on the
+ * way back. So text it stays.
+ *
+ * THE REMITTANCE SCHEDULE WANTS THE OPPOSITE, and it is the same argument pointing the other way:
+ * that sheet goes to a bookkeeper to sort and total, and a column of amounts Excel treats as text
+ * cannot be summed without being converted first. Neither default is right for both jobs, so the
+ * caller says which -- and the one that can quietly corrupt a client's data is the one that needs
+ * no thought.
+ */
+export type Cell = string | null | undefined | { v: string; style?: CellStyle } | { n: number; style?: CellStyle }
 
 const STYLE_INDEX: Record<CellStyle, number> = { head: 1, bad: 2 }
 
@@ -166,7 +180,8 @@ export function buildXlsx(sheetName: string, rows: Cell[][]): Uint8Array {
   const body = rows.map((row, r) => {
     const cells = row.map((cell, c) => {
       const isObject = typeof cell === 'object' && cell !== null
-      const text = (isObject ? cell.v : cell ?? '').toString()
+      const isNumber = isObject && 'n' in cell && Number.isFinite(cell.n)
+      const text = isObject ? ('n' in cell ? String(cell.n) : cell.v) : (cell ?? '').toString()
       const style = isObject ? cell.style : undefined
       /*
        * AN EMPTY CELL IS STILL WRITTEN WHEN IT IS COLOURED, and that is the case that matters
@@ -177,6 +192,10 @@ export function buildXlsx(sheetName: string, rows: Cell[][]): Uint8Array {
       if (!text && !style) return ''
       const s = style ? ` s="${STYLE_INDEX[style]}"` : ''
       if (!text) return `<c r="${columnName(c)}${r + 1}"${s}/>`
+      /* A NUMBER HAS NO `t`, which is what makes Excel treat it as one. No number FORMAT either:
+         the reader in xlsx.ts decides a cell is a date by looking up its style's format, so a
+         format here would make an amount come back as a date. General is right. */
+      if (isNumber) return `<c r="${columnName(c)}${r + 1}"${s}><v>${text}</v></c>`
       /* `t="inlineStr"` rather than the shared-strings table: one fewer part in the zip, and
          nothing here repeats itself often enough for the table to pay for itself. */
       return `<c r="${columnName(c)}${r + 1}"${s} t="inlineStr"><is><t xml:space="preserve">`

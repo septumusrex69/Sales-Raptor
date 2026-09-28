@@ -424,3 +424,168 @@ export async function reallocateAccount(accountId: string): Promise<void> {
   const { error } = await supabase.rpc('reallocate_account', { p_account_id: accountId })
   if (error) throw new Error(error.message)
 }
+
+/* ---------------- what the promises are worth ---------------- */
+
+export interface ExpectedPromise {
+  accountId: string
+  companyId: string
+  client: string
+  caseNumber: string | null
+  debtor: string
+  promises: number
+  promised: number
+  bfShare: number
+  clientShare: number
+  vat: number
+  firstDue: string | null
+  lastDue: string | null
+}
+
+/**
+ * EVERY PROMISE DUE BEFORE THE CUT-OFF, RUN THROUGH THE ENGINE AS A DRY RUN.
+ *
+ * It assumes every promise is kept, in full and on time -- which the firm's own broken-promise
+ * rung says is not what happens. It answers "what is this cycle worth if the book behaves", which
+ * is the question somebody asks on the 3rd, and it is an estimate on purpose.
+ */
+export async function fetchExpectedFromPromises(): Promise<ExpectedPromise[]> {
+  const { data, error } = await supabase.rpc('expected_from_promises', {
+    p_from: null, p_to: null,
+  })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    accountId: String(r.account_id),
+    companyId: String(r.company_id),
+    client: String(r.client),
+    caseNumber: s(r.case_number),
+    debtor: String(r.debtor),
+    promises: n(r.promises),
+    promised: n(r.promised),
+    bfShare: n(r.bf_share),
+    clientShare: n(r.client_share),
+    vat: n(r.vat),
+    firstDue: s(r.first_due),
+    lastDue: s(r.last_due),
+  }))
+}
+
+/* ---------------- one account, line by line ---------------- */
+
+export interface LedgerLine {
+  paymentId: string
+  receivedAt: string | null
+  capturedAt: string | null
+  reversed: boolean
+  reversalReason: string | null
+  paidToClient: boolean
+  amount: number
+  receiptFee: number
+  toInterest: number
+  toCosts: number
+  toCapital: number
+  excessCredit: number
+  commission: number
+  commissionVat: number
+  toClient: number
+  dueToBf: number
+  needsRate: boolean
+  capitalAfter: number
+  interestAfter: number
+  costsAfter: number
+  runInvoice: string | null
+  runStatus: RunStatus | null
+  runId: string | null
+}
+
+export async function fetchAccountLedger(accountId: string): Promise<LedgerLine[]> {
+  const { data, error } = await supabase.rpc('account_ledger', { p_account: accountId })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paymentId: String(r.payment_id),
+    receivedAt: s(r.received_at),
+    capturedAt: s(r.captured_at),
+    reversed: Boolean(r.reversed),
+    reversalReason: s(r.reversal_reason),
+    paidToClient: Boolean(r.paid_to_client),
+    amount: n(r.amount),
+    receiptFee: n(r.receipt_fee),
+    toInterest: n(r.to_interest),
+    toCosts: n(r.to_costs),
+    toCapital: n(r.to_capital),
+    excessCredit: n(r.excess_credit),
+    commission: n(r.commission),
+    commissionVat: n(r.commission_vat),
+    toClient: n(r.to_client),
+    dueToBf: n(r.due_to_bf),
+    needsRate: Boolean(r.needs_rate),
+    capitalAfter: n(r.capital_after),
+    interestAfter: n(r.interest_after),
+    costsAfter: n(r.costs_after),
+    runInvoice: s(r.run_invoice),
+    runStatus: s(r.run_status) as RunStatus | null,
+    runId: s(r.run_id),
+  }))
+}
+
+/* ---------------- and a record of who changed a rate ---------------- */
+
+export interface SettingChange {
+  id: string
+  changedAt: string
+  changedBy: string | null
+  setting: string
+  companyId: string | null
+  scope: string | null
+  oldValue: string | null
+  newValue: string | null
+  reason: string | null
+}
+
+/**
+ * WRITTEN IN THE SAME BREATH AS THE CHANGE, and never instead of it.
+ *
+ * If the log fails the change still stands -- the alternative is a screen that refuses to save a
+ * VAT rate because an audit row would not insert, which trades a real problem for a worse one.
+ * What it must not do is succeed silently while the change did not, which is why it is called
+ * after the update rather than before.
+ */
+export async function logSettingChange(entry: {
+  setting: string
+  companyId?: string | null
+  scope?: string | null
+  oldValue?: string | null
+  newValue?: string | null
+  reason?: string | null
+}): Promise<void> {
+  const { data: me } = await supabase.auth.getUser()
+  await supabase.from('finance_setting_changes').insert({
+    setting: entry.setting,
+    company_id: entry.companyId ?? null,
+    scope: entry.scope ?? null,
+    old_value: entry.oldValue ?? null,
+    new_value: entry.newValue ?? null,
+    reason: entry.reason ?? null,
+    changed_by: me.user?.id ?? null,
+  })
+}
+
+export async function fetchSettingChanges(limit = 50): Promise<SettingChange[]> {
+  const { data, error } = await supabase
+    .from('finance_setting_changes')
+    .select('*, profiles(name)')
+    .order('changed_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    changedAt: String(r.changed_at),
+    changedBy: (r.profiles as { name?: string } | null)?.name ?? null,
+    setting: String(r.setting),
+    companyId: s(r.company_id),
+    scope: s(r.scope),
+    oldValue: s(r.old_value),
+    newValue: s(r.new_value),
+    reason: s(r.reason),
+  }))
+}

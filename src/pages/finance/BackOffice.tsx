@@ -6,7 +6,7 @@ import { Card } from '../../components/ui/Card'
 import { FinanceTabs } from './FinanceTabs'
 import { rand } from '../../lib/money'
 import { useAppStore } from '../../store/AppStore'
-import { fetchMoneyPosition, type MoneyPosition } from '../../lib/payover'
+import { fetchExpectedFromPromises, fetchMoneyPosition, type ExpectedPromise, type MoneyPosition } from '../../lib/payover'
 
 /**
  * BF'S BACK OFFICE: WHAT IS LEFT TO TAKE.
@@ -42,10 +42,15 @@ export function BackOffice() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<string>('all')
+  const [promises, setPromises] = useState<ExpectedPromise[]>([])
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    try { setRows(await fetchMoneyPosition()) }
+    try {
+      const [p, q] = await Promise.all([fetchMoneyPosition(), fetchExpectedFromPromises()])
+      setRows(p)
+      setPromises(q)
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not load the back office.') }
     finally { setLoading(false) }
   }, [])
@@ -107,6 +112,7 @@ export function BackOffice() {
   }, [rows, companies])
 
   const cappedCount = scoped.filter((r) => r.costCapHeadroom === 0 && r.costCap > 0).length
+  const scopedPromises = client === 'all' ? promises : promises.filter((p) => p.companyId === client)
 
   return (
     <div className="space-y-4">
@@ -136,8 +142,8 @@ export function BackOffice() {
               note="Interest, costs and receipt fees still owed by debtors" />
             <Kpi label="Taken so far" value={rand(sum((r) => r.interestTaken + r.costsTaken + r.receiptFeesTaken))}
               note="Recovered from payments already split" />
-            <Kpi label="Potential commission" value={rand(sum((r) => r.commissionPotential))}
-              note="If every rand of capital still out were collected" />
+            <Kpi label="Expected from promises" value={rand(scopedPromises.reduce((t, p) => t + p.bfShare, 0))}
+              note={`BF's share of ${scopedPromises.length} ${scopedPromises.length === 1 ? 'account' : 'accounts'} promising before the cut-off`} />
             <Kpi label="Cannot be taken" value={rand(sum((r) => r.interestCantTake + r.costsCantTake + r.receiptFeesCantTake))}
               note={`Over the cap, in duplum or written off · ${cappedCount} accounts at the ceiling`} tone="warn" />
           </div>
@@ -246,6 +252,80 @@ export function BackOffice() {
                 </tbody>
               </table>
             </div>
+          </Card>
+
+          {/*
+            * EXPECTED FROM PROMISES BEFORE THE CUT-OFF.
+            *
+            * Every promise due between today and the 10th, run through the engine as a dry run. It
+            * assumes each one is KEPT, in full and on time, which the firm's own broken-promise
+            * rung says is not what happens -- so it is an estimate, and the heading says so rather
+            * than letting a precise-looking number imply otherwise.
+            *
+            * THE PROMISES ON ONE ACCOUNT ARE WALKED IN ORDER, not measured independently. Two
+            * promises against one debtor each measured against today's balances would take the
+            * same interest twice; on a test account with R200 of interest and two R1 000
+            * promises that is R140 of the firm's share invented out of nothing.
+            */}
+          <Card padded={false}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 px-4 py-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
+                Expected from promises, before the cut-off
+              </span>
+              <span className="text-xs text-slate-400">
+                Assumes every promise is kept, in full and on time
+              </span>
+            </div>
+            {scopedPromises.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-400">
+                Nothing is promised between today and the 10th.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px]">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+                      <th className="px-4 py-2.5">Debtor</th>
+                      <th className="px-4 py-2.5">Due</th>
+                      <th className="px-4 py-2.5 text-right">Promised</th>
+                      <th className="px-4 py-2.5 text-right">BF&rsquo;s share</th>
+                      <th className="px-4 py-2.5 text-right">Client&rsquo;s share</th>
+                      <th className="px-4 py-2.5 text-right">VAT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scopedPromises.slice(0, 100).map((p) => (
+                      <tr key={p.accountId} className="border-b border-slate-50 text-sm">
+                        <td className="px-4 py-2.5">
+                          <Link to={`/accounts/${p.accountId}`} className="font-medium text-slate-800 hover:underline">{p.debtor}</Link>
+                          <div className="text-xs text-slate-400">
+                            {p.caseNumber} · {p.client}
+                            {p.promises > 1 ? ` · ${p.promises} promises` : ''}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-slate-500">
+                          {p.firstDue ? new Date(`${p.firstDue}T00:00:00`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) : '—'}
+                          {p.lastDue && p.lastDue !== p.firstDue ? ` – ${new Date(`${p.lastDue}T00:00:00`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}` : ''}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{rand(p.promised)}</td>
+                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{rand(p.bfShare)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">{rand(p.clientShare)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-slate-400">{rand(p.vat)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-800 text-sm font-semibold">
+                      <td className="px-4 py-2.5" colSpan={2}>Total</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{rand(scopedPromises.reduce((t, p) => t + p.promised, 0))}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{rand(scopedPromises.reduce((t, p) => t + p.bfShare, 0))}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{rand(scopedPromises.reduce((t, p) => t + p.clientShare, 0))}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{rand(scopedPromises.reduce((t, p) => t + p.vat, 0))}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </Card>
         </>
       )}

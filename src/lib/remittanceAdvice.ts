@@ -23,6 +23,8 @@
  *   - A reversal is a negative line and says what it is, rather than silently reducing a total.
  */
 import type { RunPayment } from './payover'
+import { rand } from './money.js'
+import { buildXlsx, type Cell } from './xlsxWrite.js'
 
 export interface RemittanceFirm {
   name: string
@@ -249,4 +251,96 @@ export function buildRemittanceAdvice(input: {
 function fmtRate(fraction: number): string {
   const pct = fraction * 100
   return `${Number.isInteger(pct) ? pct : pct.toFixed(2).replace(/\.?0+$/, '')}%`
+}
+
+export function adviceSubject(adv: RemittanceAdvice): string {
+  return `Remittance advice ${adv.run.invoiceNumber} - ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}`
+}
+
+/**
+ * The covering message. SHORT, because the document is the thing: the net amount, when it is
+ * being paid, and where the detail is. The blank lines are content rather than a guess in a
+ * renderer -- emailBodyHtml turns each one into a paragraph, which is the firm's own rule after a
+ * final notice went out as a single block.
+ */
+export function adviceBody(adv: RemittanceAdvice): string {
+  const when = adv.run.paidAt
+    ? `on ${advDate(adv.run.paidAt)}`
+    : 'within our normal payment run'
+  return [
+    'Good day',
+    `Please find attached our remittance advice and tax invoice ${adv.run.invoiceNumber} for `
+      + `collections from ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}.`,
+    `Net amount payable to you: ${rand(adv.run.netPayover)}`
+      + `\nPayment: by EFT to your nominated account, ${when}`
+      + (adv.run.eftReference ? `\nReference: ${adv.run.eftReference}` : ''),
+    'The attached statement lists every payment behind that figure, account by account.',
+    'Kind regards\nBredell Ferreira',
+  ].join('\n\n')
+}
+
+/**
+ * THE SAME DETAIL AS A SPREADSHEET, because the PDF is for reading and this is for working.
+ *
+ * The firm asked for both. A bookkeeper reconciling a payover does not want a table in a PDF --
+ * they want to sort it by debtor, total a column and tick it off against their own ledger. So the
+ * amounts go in as NUMBERS (`{ n }`), which is the opposite of what the rejected-rows sheet wants
+ * and is the same argument pointing the other way: there, text protects a client's corrections
+ * from Excel; here, text would stop a bookkeeper summing a column.
+ *
+ * THE REFERENCES STAY TEXT for exactly that reason -- a client reference like 07062 is a string
+ * that looks like a number, and 40 of 42 phone numbers on one client's own sheet had already lost
+ * a leading zero to Excel deciding otherwise.
+ *
+ * ONE SHEET, NOT TWO, because buildXlsx writes one and because the two tables have different
+ * columns: they are separated by a heading row instead, which is what somebody scrolling expects.
+ */
+export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
+  const head = (t: string): Cell => ({ v: t, style: 'head' })
+  const rows: Cell[][] = []
+
+  rows.push([head(`${adv.client.name} — remittance advice ${adv.run.invoiceNumber}`)])
+  rows.push([`Collections ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}`])
+  rows.push([])
+
+  if (adv.collections.length) {
+    rows.push([head('Collections by us')])
+    rows.push([
+      head('Your ref'), head('Our ref'), head('Debtor'), head('Status'), head('Handed over'),
+      head('Handover amount'), head('Paid'), head('Capital received'), head('Commission'),
+      head('VAT'), head('Capital outstanding'), head('Note'),
+    ])
+    for (const c of adv.collections) {
+      rows.push([
+        c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver,
+        { n: c.handoverAmount }, c.paid, { n: c.capitalReceived }, { n: c.commission },
+        { n: c.vat }, { n: c.capitalOutstanding },
+        [c.reversal ? 'reversal' : '', c.lateCapture ? 'captured after previous cut-off' : '']
+          .filter(Boolean).join(' · '),
+      ])
+    }
+    rows.push([])
+  }
+
+  if (adv.direct.length) {
+    rows.push([head('Paid to you directly')])
+    rows.push([
+      head('Your ref'), head('Our ref'), head('Debtor'), head('Paid'), head('Received by you'),
+      head('Annexure B fees'), head('Capital portion'), head('Commission'), head('Due to us'),
+      head('Capital outstanding'), head('Note'),
+    ])
+    for (const d of adv.direct) {
+      rows.push([
+        d.yourRef, d.ourRef, d.debtor, d.paid, { n: d.receivedByYou },
+        { n: d.annexureBFees }, { n: d.capitalPortion }, { n: d.commission }, { n: d.dueToUs },
+        { n: d.capitalOutstanding }, d.reversal ? 'reversal' : '',
+      ])
+    }
+    rows.push([])
+  }
+
+  rows.push([head('How we got there')])
+  for (const w of adv.workings) rows.push([w.label, { n: w.amount }])
+
+  return buildXlsx('Remittance', rows)
 }

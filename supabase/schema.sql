@@ -14171,3 +14171,275 @@ comment on column public.email_connections.sync_error is
 comment on column public.email_connections.last_sync_attempt_at is
   'When Raptor last TRIED, whether or not it worked. last_synced_at only moves on success, so on '
   'its own it cannot tell "never connected" from "nobody has run the job".';
+
+-- ============================================================================
+-- FINANCE, PROMPT 6 (4): WHAT IS EXPECTED FROM PROMISES BEFORE THE CUT-OFF.
+--
+-- THE PROMISES ON ONE ACCOUNT ARE WALKED IN ORDER, NOT PREVIEWED INDEPENDENTLY, and that is the
+-- whole reason this is not a loop over preview_allocation. Two promises against one debtor both
+-- measured against today's balances would each take the same interest and the same costs -- the
+-- first payment would have cleared them -- so the firm's share comes out high on every
+-- arrangement in the book. Balances are threaded through the walk: what a promise takes is
+-- deducted, and the receipt fee it raises is added to costs before the next one is split.
+--
+-- MEASURED: an account with R200 of interest and two R1 000 promises gives the firm R901.00
+-- walked and R1 041.00 previewed twice -- R140 invented out of nothing, on one account.
+--
+-- AND THE TWO AGREE WHENEVER HALF A IS SATURATED, which is why the naive version would have
+-- looked right on exactly the accounts anybody spot-checks: with a big interest balance both
+-- promises hand the whole of half A to the firm either way.
+--
+-- IT IS STILL AN ESTIMATE, and of one particular kind: it assumes every promise is KEPT, in full
+-- and on time. The firm's own broken-promise rung says that is not what happens. It answers "what
+-- is this cycle worth if the book behaves", which is the question somebody asks on the 3rd.
+-- ============================================================================
+create or replace function public.expected_from_promises(
+  p_from date default null, p_to date default null)
+returns table (
+  account_id uuid, company_id uuid, client text, case_number text, debtor text,
+  promises integer, promised numeric, bf_share numeric, client_share numeric, vat numeric,
+  first_due date, last_due date
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_from date := coalesce(p_from, (now() at time zone 'Africa/Johannesburg')::date);
+  v_to date := coalesce(p_to, public.payover_cycle_end(public.payover_cycle_start(now())));
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  acc record; pr record; b record; s record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric;
+  v_commission numeric; v_interest numeric; v_costs numeric; v_capital numeric;
+begin
+  if public.current_user_role() <> 'Administrator' then return; end if;
+
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  /* TODAY'S TARIFF, because the promises are due from today onwards. */
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and current_date >= effective_from
+     and (effective_to is null or current_date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  for acc in
+    select d.id, d.company_id, c.name as client, d.case_number,
+           public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname) as debtor,
+           coalesce(d.commission_rate, c.commission_rate) as rate,
+           c.commission_bands, c.mandate_signed_at
+      from public.debtor_accounts d
+      join public.companies c on c.id = d.company_id
+     where exists (
+       select 1 from public.promises_to_pay p
+        where p.account_id = d.id
+          and p.due_on between v_from and v_to
+          /* OPEN ONES ONLY. A promise already kept is money that has arrived and is in the run
+             already; a broken or cancelled one is not expected from anybody. */
+          and p.status not in ('kept', 'broken', 'cancelled')
+          and p.amount > 0)
+  loop
+    select * into b from public.engine_balances(acc.id, null);
+    v_interest := b.interest; v_costs := b.costs; v_capital := b.capital;
+
+    v_rate := acc.rate; v_bands := acc.commission_bands; v_mandate := acc.mandate_signed_at;
+    v_cumulative := 0;
+    if v_bands is not null then
+      select coalesce(sum(a.to_capital), 0) into v_cumulative
+        from public.payment_allocations a
+        join public.debtor_accounts d2 on d2.id = a.account_id
+       where d2.company_id = acc.company_id and a.status <> 'reversed'
+         and (v_mandate is null or a.computed_at >= v_mandate);
+    end if;
+
+    account_id := acc.id; company_id := acc.company_id; client := acc.client;
+    case_number := acc.case_number; debtor := acc.debtor;
+    promises := 0; promised := 0; bf_share := 0; client_share := 0; vat := 0;
+    first_due := null; last_due := null;
+
+    for pr in
+      select p.amount, p.due_on
+        from public.promises_to_pay p
+       where p.account_id = acc.id
+         and p.due_on between v_from and v_to
+         and p.status not in ('kept', 'broken', 'cancelled')
+         and p.amount > 0
+       order by p.due_on, p.id
+    loop
+      select * into s from public.finance_split(
+        pr.amount, v_interest, v_costs, v_capital, v_vat, v_fee_rate, v_fee_cap);
+
+      v_commission := coalesce(
+        public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative), 0);
+      v_cumulative := v_cumulative + s.to_capital;
+
+      promises := promises + 1;
+      promised := promised + pr.amount;
+      /* WHAT BF EARNS: interest and costs recovered plus commission. The VAT is SARS's and is
+         reported beside it rather than inside it, exactly as the account preview does. */
+      bf_share := bf_share + s.to_interest + s.to_costs + v_commission;
+      client_share := client_share + s.to_capital - v_commission - round(v_commission * v_vat, 2);
+      vat := vat + round(v_commission * v_vat, 2);
+      if first_due is null then first_due := pr.due_on; end if;
+      last_due := pr.due_on;
+
+      /* AND THE BALANCES MOVE ON, which is the point of the walk. */
+      v_interest := v_interest - s.to_interest;
+      v_costs := v_costs + s.fee_excl + s.fee_vat - s.to_costs;
+      v_capital := v_capital - s.to_capital;
+    end loop;
+
+    if promises > 0 then return next; end if;
+  end loop;
+end $$;
+
+comment on function public.expected_from_promises(date, date) is
+  'What the promises due before the cut-off would be worth, split by the same arithmetic as a real '
+  'payment. Walks each account''s promises IN ORDER with the balances threaded through, because '
+  'two promises measured against the same opening balances each take the same interest twice. '
+  'Assumes every promise is kept, which is an estimate and is meant to be.';
+
+revoke all on function public.expected_from_promises(date, date) from public;
+grant execute on function public.expected_from_promises(date, date) to authenticated;
+
+-- ============================================================================
+-- FINANCE, PROMPT 5 (5): THE ACCOUNT LEDGER — EVERY PAYMENT, ITS SPLIT, AND THE RUN THAT PAID IT.
+--
+-- RUNNING BALANCES ARE COMPUTED FORWARD FROM THE OPENING POSITION rather than read off each
+-- allocation's `capital_after`. Those are right about the moment they were written and wrong after
+-- a replay reorders anything; a ledger whose lines each remember their own history disagrees with
+-- itself the first time a payment is reversed. Forward from the opening figures, in capture order,
+-- every line is consistent with the one above it by construction.
+--
+-- A REVERSED PAYMENT IS SHOWN AND CONTRIBUTES NOTHING. That the money arrived and went back is the
+-- thing the firm has to be able to explain to a debtor; dropping the line makes the account look
+-- as though it never happened.
+-- ============================================================================
+create or replace function public.account_ledger(p_account uuid)
+returns table (
+  payment_id uuid, received_at timestamptz, captured_at timestamptz,
+  reversed boolean, reversal_reason text, paid_to_client boolean,
+  amount numeric, receipt_fee numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  needs_rate boolean,
+  capital_after numeric, interest_after numeric, costs_after numeric,
+  run_invoice text, run_status text, run_id uuid
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_capital numeric; v_interest numeric; v_costs numeric; rec record;
+begin
+  if public.current_user_role() <> 'Administrator' then return; end if;
+
+  /* THE OPENING POSITION: what the account started the engine's life owing -- capital handed
+     over, every rand of recoverable interest ever accrued, and every fee ever raised that may be
+     recovered, before any of it was paid. The walk below takes payments off it in order. */
+  select coalesce(d.capital_handed_over, 0) into v_capital
+    from public.debtor_accounts d where d.id = p_account;
+  select coalesce(sum(amount_recoverable), 0) into v_interest
+    from public.account_interest_accruals where account_id = p_account;
+  select coalesce(sum(f.amount_excl_vat + coalesce(f.vat_amount, 0)), 0) into v_costs
+    from public.account_fees f
+   where f.account_id = p_account and f.cancelled_at is null and f.billed is not false;
+
+  for rec in
+    select p.id, p.received_at, p.created_at, p.reversed_at, p.reversal_reason, p.paid_to_client,
+           p.amount,
+           a.receipt_fee_excl, a.receipt_fee_vat, a.to_interest, a.to_costs, a.to_capital,
+           a.excess_credit, a.commission, a.commission_vat, a.to_client, a.due_to_bf, a.status,
+           r.invoice_number, r.status as run_status, r.id as run_id
+      from public.account_payments p
+      left join public.payment_allocations a on a.payment_id = p.id
+      left join public.payover_runs r on r.id = a.payover_run_id
+     where p.account_id = p_account and not p.is_demo
+     order by p.created_at, p.id
+  loop
+    payment_id := rec.id; received_at := rec.received_at; captured_at := rec.created_at;
+    reversed := rec.reversed_at is not null or rec.status = 'reversed';
+    reversal_reason := rec.reversal_reason;
+    paid_to_client := coalesce(rec.paid_to_client, false);
+    amount := rec.amount;
+    receipt_fee := coalesce(rec.receipt_fee_excl, 0) + coalesce(rec.receipt_fee_vat, 0);
+    to_interest := coalesce(rec.to_interest, 0);
+    to_costs := coalesce(rec.to_costs, 0);
+    to_capital := coalesce(rec.to_capital, 0);
+    excess_credit := coalesce(rec.excess_credit, 0);
+    commission := coalesce(rec.commission, 0);
+    commission_vat := coalesce(rec.commission_vat, 0);
+    to_client := coalesce(rec.to_client, 0);
+    due_to_bf := coalesce(rec.due_to_bf, 0);
+    needs_rate := rec.status = 'needs_rate';
+    run_invoice := rec.invoice_number; run_status := rec.run_status; run_id := rec.run_id;
+
+    /* A REVERSED LINE MOVES NOTHING. It is shown because it happened, not because it counts. */
+    if not reversed then
+      v_capital := v_capital - to_capital;
+      v_interest := v_interest - to_interest;
+      v_costs := v_costs - to_costs;
+    end if;
+    capital_after := v_capital; interest_after := v_interest; costs_after := v_costs;
+    return next;
+  end loop;
+end $$;
+
+comment on function public.account_ledger(uuid) is
+  'Every payment on an account with its split, the receipt fee it raised and the run that paid it '
+  'over, with capital, interest and costs carried forward line by line. Balances are computed '
+  'forward, not read off each allocation, so a replay cannot leave the ledger disagreeing with '
+  'itself. Administrator only.';
+
+revoke all on function public.account_ledger(uuid) from public;
+grant execute on function public.account_ledger(uuid) to authenticated;
+
+-- ============================================================================
+-- FINANCE, PROMPT 5 (6): AND A RECORD OF WHO CHANGED WHAT.
+--
+-- Four things on the Finance settings screen decide what every debtor is charged and what every
+-- client is paid: the Annexure B tariff rows, the VAT rate, the cut-over, and a client's
+-- commission. None of them is the sort of change anybody remembers making a month later.
+--
+-- A TABLE RATHER THAN A TRIGGER ON EACH, because what matters is not only the old and new value
+-- but WHY -- and only the person pressing the button knows that. It is written by the screen, in
+-- the same breath as the change.
+--
+-- AND IT IS A LEDGER: select and insert, no update or delete policy, denied by omission the way
+-- the five money tables are. An audit trail somebody can edit is not one.
+-- ============================================================================
+create table if not exists public.finance_setting_changes (
+  id uuid primary key default gen_random_uuid(),
+  changed_at timestamptz not null default now(),
+  changed_by uuid references public.profiles(id),
+  /* What was touched: 'vat_rate', 'finance_cutover_at', 'commission_rate', 'commission_bands',
+     'annexure_b_tariff'. Free text on purpose -- a closed list would need a migration every time
+     the firm gains a setting, and the value is descriptive rather than load-bearing. */
+  setting text not null,
+  company_id uuid references public.companies(id) on delete set null,
+  scope text,
+  old_value text,
+  new_value text,
+  reason text
+);
+
+comment on table public.finance_setting_changes is
+  'Who changed a rate, a tariff, the VAT rate or the cut-over, from what to what, and why. A '
+  'ledger: no update or delete policy, so Postgres refuses. An audit trail somebody can edit is '
+  'not an audit trail.';
+
+create index if not exists finance_setting_changes_when_idx
+  on public.finance_setting_changes (changed_at desc);
+
+alter table public.finance_setting_changes enable row level security;
+
+drop policy if exists finance_setting_changes_read on public.finance_setting_changes;
+create policy finance_setting_changes_read on public.finance_setting_changes
+  for select to authenticated using (public.current_user_role() = 'Administrator');
+
+drop policy if exists finance_setting_changes_insert on public.finance_setting_changes;
+create policy finance_setting_changes_insert on public.finance_setting_changes
+  for insert to authenticated with check (public.current_user_role() = 'Administrator');
