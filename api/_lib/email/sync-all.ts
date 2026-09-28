@@ -56,11 +56,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       results.push({ userId: conn.user_id, skipped: true })
       continue
     }
+    /*
+     * THE ATTEMPT IS RECORDED WHETHER IT WORKS OR NOT, and the reason is kept when it does not.
+     *
+     * This used to collect each failure into `results` and return 200, which meant a mailbox that
+     * failed every night said nothing to anybody: one was connected on 24 September and had still
+     * never been read four nightly runs later, and the only sign was a debtor's reply that never
+     * arrived. `last_synced_at` alone cannot tell "never connected" from "nobody ran the job".
+     */
+    await admin.from('email_connections')
+      .update({ last_sync_attempt_at: new Date().toISOString() })
+      .eq('user_id', conn.user_id)
     try {
       const result = await syncConnection(admin, conn)
+      /* Cleared on success, so it never describes a mailbox that has since recovered. */
+      await admin.from('email_connections').update({ sync_error: null }).eq('user_id', conn.user_id)
       results.push({ userId: conn.user_id, logged: result.logged })
     } catch (err) {
-      results.push({ userId: conn.user_id, error: err instanceof Error ? err.message : 'Sync failed.' })
+      const message = err instanceof Error ? err.message : 'Sync failed.'
+      await admin.from('email_connections')
+        .update({ sync_error: message.slice(0, 500) })
+        .eq('user_id', conn.user_id)
+      results.push({ userId: conn.user_id, error: message })
     } finally {
       await releaseSync(admin, conn.user_id)
     }

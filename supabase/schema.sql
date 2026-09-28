@@ -13894,3 +13894,280 @@ comment on function public.money_position(uuid) is
 
 revoke all on function public.money_position(uuid) from public;
 grant execute on function public.money_position(uuid) to authenticated;
+
+-- ============================================================================
+-- FINANCE, PROMPT 5/7: WHAT THE SCREENS READ.
+--
+-- EVERY ONE OF THESE IS AN AGGREGATE OVER THE WHOLE BOOK, which is why they are functions and not
+-- a select in the browser. CLAUDE.md's rule about the two data paths: the collections book is
+-- hundreds of thousands of rows and a screen that loads it to count it stops working the month it
+-- matters. Administrator only, every one, checked inside the function -- these are security
+-- definer, so there is no policy to fall back on.
+-- ============================================================================
+
+create or replace function public.debtor_full_name(p_first text, p_second text, p_surname text)
+returns text
+language sql
+immutable
+as $$
+  select coalesce(nullif(btrim(concat_ws(' ',
+           nullif(btrim(coalesce(p_first, '')), ''),
+           nullif(btrim(coalesce(p_second, '')), ''),
+           nullif(btrim(coalesce(p_surname, '')), ''))), ''), 'Unnamed debtor')
+$$;
+
+create or replace function public.payover_cycle_now()
+returns table (period_start date, period_end date, days_left integer, today date)
+language sql stable security definer set search_path to 'public'
+as $$
+  select s, public.payover_cycle_end(s),
+         (public.payover_cycle_end(s) - (now() at time zone 'Africa/Johannesburg')::date)::integer,
+         (now() at time zone 'Africa/Johannesburg')::date
+    from (select public.payover_cycle_start(now()) as s) c
+$$;
+grant execute on function public.payover_cycle_now() to authenticated;
+
+create or replace function public.payover_work_queue(p_period_start date default null)
+returns table (
+  run_id uuid, company_id uuid, client text, client_code text, invoice_number text,
+  period_start date, period_end date, payments integer,
+  trust_capital numeric, ptc_set_off numeric, net_payover numeric,
+  exceptions integer, status text, next_step text,
+  approved_at timestamptz, sent_at timestamptz, paid_at timestamptz, eft_reference text
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select r.id, r.company_id, c.name, c.code, r.invoice_number, r.period_start, r.period_end,
+         (select count(*)::integer from public.payover_run_lines l
+           where l.run_id = r.id and l.line_kind in ('trust', 'ptc')),
+         r.trust_capital, r.due_to_bf, r.net_payover,
+         (select count(*)::integer from public.payover_run_blockers(r.id)),
+         r.status,
+         /* THE ONE NEXT STEP, decided here rather than on the screen. The firm asked for exactly
+            one button per row; deciding which in the browser puts the ladder in two places. */
+         case r.status
+           when 'needs_review' then 'fix' when 'ready' then 'approve'
+           when 'approved' then 'email' when 'sent' then 'paid' else '' end,
+         r.approved_at, r.sent_at, r.paid_at, r.eft_reference
+    from public.payover_runs r
+    join public.companies c on c.id = r.company_id
+   where public.current_user_role() = 'Administrator'
+     and r.status <> 'void'
+     and (p_period_start is null or r.period_start = p_period_start)
+   order by case r.status
+              when 'needs_review' then 1 when 'ready' then 2
+              when 'approved' then 3 when 'sent' then 4 else 5 end,
+            r.net_payover desc
+$$;
+grant execute on function public.payover_work_queue(date) to authenticated;
+
+-- `unmatched` IS ZERO AND SAYS SO HONESTLY. The board's tile counts trust-account payments no
+-- account matches, which arrive from a bank statement import Raptor does not have yet: every
+-- payment in the database is already keyed to an account, because that is the only way one can be
+-- captured. Reported as zero rather than dropped, so the tile is there the day the import is.
+create or replace function public.payover_cycle_tiles(p_period_start date default null)
+returns table (
+  money_received numeric, due_to_clients numeric,
+  unmatched_count integer, unmatched_amount numeric,
+  waiting_count integer, needs_review_count integer, ready_count integer
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cyc as (select coalesce(p_period_start, public.payover_cycle_start(now())) as s),
+  bounds as (
+    select s, (s::timestamp) at time zone 'Africa/Johannesburg' as f,
+           ((public.payover_cycle_end(s) + 1)::timestamp) at time zone 'Africa/Johannesburg' as t
+      from cyc
+  )
+  select
+    coalesce((select sum(a.payment_amount) from public.payment_allocations a
+               join public.account_payments p on p.id = a.payment_id, bounds b
+              where a.status <> 'reversed' and not a.paid_to_client
+                and p.created_at >= b.f and p.created_at < b.t), 0),
+    coalesce((select sum(r.net_payover) from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status <> 'void'), 0),
+    0, 0,
+    coalesce((select count(*)::integer from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status in ('needs_review', 'ready', 'approved', 'sent')), 0),
+    coalesce((select count(*)::integer from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status = 'needs_review'), 0),
+    coalesce((select count(*)::integer from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status = 'ready'), 0)
+   where public.current_user_role() = 'Administrator'
+$$;
+grant execute on function public.payover_cycle_tiles(date) to authenticated;
+
+-- ---------- ONE RUN'S PAYMENTS, AND WHAT THE CLIENT'S OWN STATEMENT QUOTES ----------
+--
+-- THE POSITION IS DERIVED, NOT `debtor_accounts.status`. The old FileFish report printed "Paid in
+-- Full" beside R5 635.80 still outstanding, which is exactly what a stored status does when the
+-- money moves and nobody re-reads it. Paid in full here means the capital is nought.
+--
+-- DROPPED AND RECREATED rather than replaced: a function's OUT parameters are part of its return
+-- type, and `create or replace` may not change one.
+drop function if exists public.payover_run_payments(uuid);
+create function public.payover_run_payments(p_run uuid)
+returns table (
+  line_id uuid, allocation_id uuid, payment_id uuid, account_id uuid,
+  case_number text, client_reference text, debtor text,
+  line_kind text, paid_to_client boolean,
+  received_at timestamptz, captured_at timestamptz,
+  payment_amount numeric, receipt_fee numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric,
+  commission numeric, commission_vat numeric,
+  to_client numeric, due_to_bf numeric,
+  excess_credit numeric, needs_rate boolean,
+  capital_after numeric, carried_amount numeric,
+  late_capture boolean,
+  account_status text, handover_date date, capital_handed_over numeric, paid_in_full boolean
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.allocation_id, a.payment_id, l.account_id,
+         d.case_number, d.client_reference,
+         public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+         l.line_kind, l.paid_to_client,
+         p.received_at, p.created_at,
+         l.payment_amount,
+         coalesce(a.receipt_fee_excl, 0) + coalesce(a.receipt_fee_vat, 0),
+         l.to_interest, l.to_costs, l.to_capital,
+         l.commission, l.commission_vat,
+         coalesce(a.to_client, 0), coalesce(a.due_to_bf, 0),
+         l.excess_credit, l.needs_rate,
+         coalesce(a.capital_after, 0), l.carried_amount,
+         /* CAPTURED AFTER THE PREVIOUS CUT-OFF: older than the period it is paid over in, which
+            the old report showed with no explanation at all. */
+         p.received_at is not null
+           and p.received_at < (r.period_start::timestamp at time zone 'Africa/Johannesburg'),
+         d.status, d.handover_date, d.capital_handed_over,
+         coalesce(a.capital_after, coalesce(d.capital_outstanding, 0)) <= 0
+    from public.payover_run_lines l
+    join public.payover_runs r on r.id = l.run_id
+    left join public.payment_allocations a on a.id = l.allocation_id
+    left join public.account_payments p on p.id = a.payment_id
+    left join public.debtor_accounts d on d.id = l.account_id
+   where l.run_id = p_run
+     and public.current_user_role() = 'Administrator'
+   order by coalesce(d.debtor_surname, ''), p.received_at, l.id
+$$;
+grant execute on function public.payover_run_payments(uuid) to authenticated;
+
+-- ---------- EVERY EXCEPTION, AS A JOB ----------
+--
+-- ONE ROW IS ONE THING SOMEBODY DOES. The count here must equal the count on the work queue's
+-- tile, which is why both read this rather than each counting their own way.
+create or replace function public.finance_exception_jobs()
+returns table (
+  allocation_id uuid, account_id uuid, company_id uuid, client text,
+  case_number text, debtor text, kind text, problem text, amount numeric,
+  action text, run_id uuid, run_status text, occurred_at timestamptz
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select e.allocation_id, e.account_id, e.company_id, c.name,
+         d.case_number,
+         public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+         e.kind, e.problem, e.amount,
+         case e.kind
+           when 'needs_rate' then 'Set rate'
+           when 'excess_credit' then 'Refund or reallocate'
+           when 'closed_account' then 'Re-open or return'
+           else 'Look at it' end,
+         a.payover_run_id, r.status, e.computed_at
+    from public.finance_exceptions e
+    join public.debtor_accounts d on d.id = e.account_id
+    join public.companies c on c.id = e.company_id
+    left join public.payment_allocations a on a.id = e.allocation_id
+    left join public.payover_runs r on r.id = a.payover_run_id
+   where public.current_user_role() = 'Administrator'
+   order by case e.kind when 'needs_rate' then 1 when 'excess_credit' then 2 else 3 end,
+            e.amount desc nulls last
+$$;
+grant execute on function public.finance_exception_jobs() to authenticated;
+
+-- ---------- WHAT HAPPENED TO ONE PAYMENT ----------
+--
+-- ASSEMBLED FROM WHAT IS ALREADY RECORDED, not from an audit table nobody writes to. Every line is
+-- a timestamp that had to be stored anyway, which is what makes it true. An audit trail with a
+-- table of its own is a second thing to keep in step, and the day it falls behind it is the record
+-- that looks authoritative and is wrong.
+create or replace function public.payment_audit(p_payment uuid)
+returns table (at timestamptz, what text, who text)
+language sql stable security definer set search_path to 'public'
+as $$
+  select * from (
+    select p.created_at as at,
+           (case p.source when 'swordfish' then 'Imported from Swordfish'
+                          when 'demo' then 'Demo data'
+                          else 'Captured' end
+             || coalesce(' · reference ' || nullif(p.reference, ''), '')) as what,
+           coalesce(pr.name, '—') as who
+      from public.account_payments p
+      left join public.profiles pr on pr.id = p.created_by
+     where p.id = p_payment
+    union all
+    select f.created_at,
+           'Receipt fee ' || to_char(f.amount_excl_vat + coalesce(f.vat_amount, 0), 'FM999G999D00')
+             || ' charged (Annexure B item 9)'
+             || coalesce(' · cancelled: ' || f.cancel_reason, ''),
+           '—'
+      from public.account_fees f
+     where f.payment_id = p_payment and f.annexure_item = '9' and f.source = 'raptor'
+    union all
+    select a.computed_at,
+           'Allocated by engine ' || a.engine_version
+             || case when a.status = 'needs_rate' then ' · no commission rate' else '' end
+             || case when a.status = 'reversed' then ' · since reversed' else '' end,
+           '—'
+      from public.payment_allocations a where a.payment_id = p_payment
+    union all
+    select r.created_at, 'Added to run ' || r.invoice_number, '—'
+      from public.payment_allocations a join public.payover_runs r on r.id = a.payover_run_id
+     where a.payment_id = p_payment
+    union all
+    select r.approved_at, 'Run ' || r.invoice_number || ' approved', coalesce(pr.name, '—')
+      from public.payment_allocations a join public.payover_runs r on r.id = a.payover_run_id
+      left join public.profiles pr on pr.id = r.approved_by
+     where a.payment_id = p_payment and r.approved_at is not null
+    union all
+    select r.sent_at, 'Remittance advice ' || r.invoice_number || ' emailed', '—'
+      from public.payment_allocations a join public.payover_runs r on r.id = a.payover_run_id
+     where a.payment_id = p_payment and r.sent_at is not null
+    union all
+    select r.paid_at, 'Paid over · EFT ' || coalesce(r.eft_reference, ''), '—'
+      from public.payment_allocations a join public.payover_runs r on r.id = a.payover_run_id
+     where a.payment_id = p_payment and r.paid_at is not null
+    union all
+    select p.reversed_at, 'Reversed · ' || coalesce(p.reversal_reason, 'no reason given'), '—'
+      from public.account_payments p where p.id = p_payment and p.reversed_at is not null
+  ) t
+  where public.current_user_role() = 'Administrator'
+  order by 1
+$$;
+grant execute on function public.payment_audit(uuid) to authenticated;
+
+-- ============================================================================
+-- A MAILBOX THAT FAILS TO SYNC EVERY NIGHT SAYS SO.
+--
+-- Found the hard way. A section 129 went out from a collector's desk, the debtor replied, and the
+-- reply never reached Raptor -- not because the matching failed, but because that mailbox had
+-- never been read at all. Connected on 24 September, still `last_synced_at is null` four days and
+-- four nightly runs later. The nightly job caught each mailbox's error into a `results` array in
+-- its own HTTP response, which nobody reads, and returned 200.
+--
+-- `last_sync_attempt_at` moves whether the sync worked or not, and `sync_error` holds the last
+-- reason it did not -- cleared on the first success, so it never describes a mailbox that has
+-- since recovered. Together they answer what the old shape could not: is this mailbox being read,
+-- and if not, since when and why.
+-- ============================================================================
+alter table public.email_connections
+  add column if not exists sync_error text,
+  add column if not exists last_sync_attempt_at timestamptz;
+
+comment on column public.email_connections.sync_error is
+  'Why the last sync attempt failed, or null if the last one worked. Cleared on success, so it '
+  'never describes a mailbox that has recovered.';
+
+comment on column public.email_connections.last_sync_attempt_at is
+  'When Raptor last TRIED, whether or not it worked. last_synced_at only moves on success, so on '
+  'its own it cannot tell "never connected" from "nobody has run the job".';

@@ -24,6 +24,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     userId = targetUserId
   }
 
-  const { data: conn } = await admin.from('email_connections').select('email, last_synced_at').eq('user_id', userId).maybeSingle()
-  res.status(200).json({ connected: !!conn, email: conn?.email ?? null, lastSyncedAt: conn?.last_synced_at ?? null })
+  const { data: conn } = await admin.from('email_connections')
+    .select('email, last_synced_at, last_sync_attempt_at, sync_error')
+    .eq('user_id', userId).maybeSingle()
+  /*
+   * THE FAILURE TRAVELS WITH THE STATUS. A mailbox that has never been read looks identical to one
+   * that is quietly failing every night unless the screen can see the reason -- which is how a
+   * debtor's reply to a section 129 went missing for four days with nothing anywhere saying so.
+   */
+  res.status(200).json({
+    connected: !!conn,
+    email: conn?.email ?? null,
+    lastSyncedAt: conn?.last_synced_at ?? null,
+    lastAttemptAt: conn?.last_sync_attempt_at ?? null,
+    syncError: conn?.sync_error ?? null,
+  })
 }

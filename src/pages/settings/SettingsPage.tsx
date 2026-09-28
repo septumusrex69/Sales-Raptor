@@ -722,6 +722,7 @@ function AdminEmailConnectModal({ user, accessToken, onClose }: { user: User; ac
             Connected as <span className="font-medium">{status.email}</span>
           </p>
           {status.lastSyncedAt && <p className="text-xs text-slate-400 mt-1">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>}
+          <SyncTrouble status={status} />
           <div className="flex justify-end mt-4">
             <button onClick={handleDisconnect} className="text-sm font-medium px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
               Disconnect
@@ -2110,7 +2111,42 @@ function ExtensionPicker({ value, options, saving, onChange }: { value?: string;
   )
 }
 
-type EmailStatus = { connected: boolean; email?: string; lastSyncedAt?: string | null }
+type EmailStatus = {
+  connected: boolean; email?: string; lastSyncedAt?: string | null
+  /* WHEN RAPTOR LAST TRIED, AND WHY IT FAILED. `lastSyncedAt` only moves on success, so on its
+     own it cannot tell "never connected" from "the nightly job has not run" -- which is how a
+     mailbox sat unread for four days with a debtor's reply in it and nothing saying so. */
+  lastAttemptAt?: string | null
+  syncError?: string | null
+}
+
+/**
+ * The one line that says a mailbox is not being read.
+ *
+ * SHOWN IN BOTH PLACES a mailbox status appears -- an administrator looking at somebody else's
+ * connection, and a person looking at their own -- because the person most likely to notice is
+ * whichever of them opens the screen first.
+ */
+function SyncTrouble({ status }: { status: EmailStatus }) {
+  if (!status.connected) return null
+  if (status.syncError) {
+    return (
+      <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+        Raptor could not read this mailbox
+        {status.lastAttemptAt ? ` when it last tried, ${new Date(status.lastAttemptAt).toLocaleString()}` : ''}:
+        {' '}{status.syncError}
+      </p>
+    )
+  }
+  if (!status.lastSyncedAt) {
+    return (
+      <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+        This mailbox has never been read. Nothing sent to it will reach an account until it syncs.
+      </p>
+    )
+  }
+  return null
+}
 
 function EmailIntegrationCard() {
   const { session } = useAuth()
@@ -2215,6 +2251,7 @@ function EmailIntegrationCard() {
                 ? `Connected as ${status.email}`
                 : 'Send email and automatically log matching replies as CRM activity'}
             </p>
+            {status?.connected && <SyncTrouble status={status} />}
             {status?.connected && status.lastSyncedAt && (
               <p className="text-xs text-slate-400 mt-0.5">Last synced {new Date(status.lastSyncedAt).toLocaleString()}</p>
             )}

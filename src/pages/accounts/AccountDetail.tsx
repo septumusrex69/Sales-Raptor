@@ -33,6 +33,7 @@ import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
+import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
@@ -757,6 +758,12 @@ export function AccountDetail() {
         onPractitioner={() => setPractitioner({ suggest: null })}
         onAddDirector={() => setDirector({ editing: null })}
         onEditDirector={(d) => setDirector({ editing: d })} />
+      {/*
+        * WHAT BF STILL HAS TO COME OFF THIS DEBTOR, and what a payment would do before anybody
+        * agrees to it. ADMINISTRATOR ONLY -- it draws nothing at all for a collector, because it
+        * shows the firm's own cut, which is the one figure the company dashboard may never carry.
+        */}
+      <MoneyPanel accountId={account.id} />
     </div>
   )
   const timelinePanel = (
