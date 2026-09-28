@@ -10545,3 +10545,81 @@ comment on function public.workflow_resume_account(uuid, text, text) is
 
 revoke all on function public.workflow_resume_account(uuid, text, text) from public;
 grant execute on function public.workflow_resume_account(uuid, text, text) to authenticated;
+
+
+-- ============================================================================
+-- ONE OPEN DISPUTE AT A TIME, AND IT MAY BE ABOUT SEVERAL THINGS.
+--
+-- THE FIRM: "I think there can only be one dispute at a time. A debtor can't have multiple
+-- disputes. He can dispute multiple things in one dispute. But there should only be one dispute
+-- allowed to be open at a specific time."
+--
+-- WHY IT IS A RULE AND NOT A PREFERENCE. A dispute is not a note -- it is a clock and a sequence.
+-- Each one holds the collection sequences the moment it is in writing, each one runs its own
+-- ten-business-day answer, and each one ends with a finding that decides whether a statutory
+-- sequence resumes, ends, or has to be issued again. Two open on one account is two clocks on one
+-- debt and two findings that can contradict each other: the firm's own test account had FOUR, and
+-- answering one of them released sequences the other was still holding.
+--
+-- A TRIGGER RATHER THAN A PARTIAL UNIQUE INDEX, which is what the diary uses for its one open
+-- entry. Two reasons, and the second is the one that decides it. A unique index cannot be created
+-- while any account already breaches it -- two do here, and nobody can say what production holds --
+-- so the migration would fail on the database that matters most. And an index raises a constraint
+-- name; this raises the sentence a collector needs to READ, which is what to do instead. It still
+-- carries unique_violation's own errcode so anything matching on that keeps working.
+--
+-- IT DOES NOT TOUCH WHAT IS ALREADY THERE. Existing accounts with two open disputes stay exactly
+-- as they are until somebody closes one, which is a finding and the firm's to make. The rule binds
+-- from here on.
+--
+-- AND AN ORDINARY EDIT OF THE DISPUTE THAT IS ALREADY OPEN IS NOT A SECOND ONE. Moving it to a
+-- liaison, marking it received in writing, changing its category -- all of those are UPDATEs on a
+-- row that is already open, and refusing them would make the one open dispute unworkable.
+-- ============================================================================
+create or replace function public.one_open_dispute_per_account() returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  /* Only a dispute, only an open one, and only where there is an account to hold it. A query about
+     a client's own sheet has no account, and an agent asking a team leader for help is not a
+     debtor objecting -- neither starts a clock and neither is limited. */
+  if new.kind <> 'dispute' or new.status = 'closed' or new.account_id is null then
+    return new;
+  end if;
+
+  /* ALREADY OPEN ON THIS ACCOUNT BEFORE THIS WRITE: it is the one open dispute, being worked on.
+     Only a row that is BECOMING open here -- an insert, a reopen, or a move onto another account
+     -- is asking for a second clock. */
+  if tg_op = 'UPDATE'
+     and coalesce(old.status, '') <> 'closed'
+     and old.account_id is not distinct from new.account_id then
+    return new;
+  end if;
+
+  if exists (
+    select 1 from public.account_queries q
+     where q.account_id = new.account_id
+       and q.kind = 'dispute'
+       and q.status <> 'closed'
+       and q.id <> new.id
+  ) then
+    /* THE SENTENCE IS THE POINT. It reaches the collector as it stands -- raiseQuery throws the
+       database's own message -- so it says what to do instead rather than naming a constraint. */
+    raise exception 'This account already has an open dispute. Add what the debtor is now saying to that one -- a debtor may dispute several things, but only in one dispute at a time.'
+      using errcode = '23505';
+  end if;
+
+  return new;
+end $$;
+
+comment on function public.one_open_dispute_per_account() is
+  'One open dispute per account. A debtor may dispute several things, but in one dispute: each is '
+  'a clock, a hold on the collection sequences and a finding, and two of those on one debt '
+  'contradict each other. Refuses a second loudly; leaves accounts that already have two alone.';
+
+drop trigger if exists one_open_dispute_per_account on public.account_queries;
+create trigger one_open_dispute_per_account
+  before insert or update of status, kind, account_id on public.account_queries
+  for each row execute function public.one_open_dispute_per_account();

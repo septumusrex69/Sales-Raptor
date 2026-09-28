@@ -5,7 +5,7 @@ import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
 import { chargeMessage } from '../../lib/accountCharges'
 import {
-  closeQuery, isStale, markDisputeReceived, markOutcomeDone, raiseQuery, updateQuery,
+  closeQuery, isStale, markDisputeReceived, markOutcomeDone, openDisputeOn, raiseQuery, updateQuery,
   stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, QUERY_STAGE_LABEL,
   type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
 } from '../../lib/accountQueries'
@@ -67,15 +67,35 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
   const [adding, setAdding] = useState(false)
   const open = queries.filter((q) => q.status !== 'closed')
   const closed = queries.filter((q) => q.status === 'closed')
+  /*
+   * ONE AT A TIME, SO THERE IS NOTHING TO PRESS.
+   *
+   * THE FIRM: "there should only be one dispute allowed to be open at a specific time." The
+   * database refuses a second, and finding that out by pressing Raise one, typing what the debtor
+   * said and being told no -- with the debtor still on the telephone -- is the worst way to learn
+   * a rule. So the control is not there, and the line under the heading says why and what instead.
+   */
+  const alreadyDisputed = openDisputeOn(queries)
 
   return (
     <Card>
       <div className="flex items-center justify-between gap-2 mb-3">
         <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes</h3>
-        <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
-          {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Raise one</>}
-        </button>
+        {!alreadyDisputed && (
+          <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+            {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Raise one</>}
+          </button>
+        )}
       </div>
+
+      {/* THE FIRM'S OWN DISTINCTION: several things, one dispute. Said where the button was, so it
+          reads as an instruction rather than as something missing. */}
+      {alreadyDisputed && (
+        <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+          This account has an open dispute. A debtor may dispute several things, but in one
+          dispute — add what they are now saying to the one below.
+        </p>
+      )}
 
       {adding && (
         <RaiseForm

@@ -265,6 +265,72 @@ ok('...and it happens before the resume', atDead > 0 && atResume > 0 && atDead <
    to come is cancelled. */
 ok('...cancelling only what had not gone', /where s\.run_id = dead\.id and s\.state in \('pending', 'held'\)/.test(resume))
 
+/* ---------------- one open dispute at a time ---------------- */
+
+/*
+ * THE FIRM: "there can only be one dispute at a time. A debtor can't have multiple disputes. He can
+ * dispute multiple things in one dispute. But there should only be one dispute allowed to be open
+ * at a specific time."
+ *
+ * IT IS A CLOCK, NOT A NOTE, which is why this is a rule. Each dispute holds the collection
+ * sequences the moment it is in writing, runs its own ten business days, and ends with a finding
+ * that decides whether a statutory sequence resumes, ends or must be issued again. The firm's own
+ * test account carried four, and answering one released sequences another was still holding.
+ */
+const guardAt = sql.lastIndexOf('create or replace function public.one_open_dispute_per_account(')
+ok('the database refuses a second open dispute', guardAt > 0)
+const guard = guardAt > 0 ? sql.slice(guardAt, sql.indexOf('$$;', guardAt)) : ''
+ok('...only on a dispute', /new\.kind <> 'dispute'/.test(guard))
+ok('...only on an open one', /new\.status = 'closed'/.test(guard))
+/*
+ * AND AN ORDINARY EDIT OF THE ONE ALREADY OPEN IS NOT A SECOND. Moving it to a liaison, marking it
+ * received in writing, changing its category -- every one of those is an UPDATE on a row that is
+ * already open, and refusing them would make the one open dispute unworkable.
+ */
+ok('...and an edit of the open one is not a second',
+  /tg_op = 'UPDATE'[\s\S]{0,200}?coalesce\(old\.status, ''\) <> 'closed'/.test(guard))
+/* THE MESSAGE IS THE POINT: it reaches the collector as it stands, so it says what to do. */
+ok('...telling the collector what to do instead',
+  /a debtor may dispute several things, but only in one dispute at a time/.test(guard))
+/* BEFORE, so nothing is written and then undone. */
+const trigAt = sql.lastIndexOf('create trigger one_open_dispute_per_account')
+ok('...on a trigger that runs before the write', trigAt > 0
+  && /before insert or update of status, kind, account_id/.test(sql.slice(trigAt, trigAt + 300)))
+
+/*
+ * AND THE SCREENS NEVER OFFER ONE. The refusal is good and it arrives too late: a collector has
+ * chosen a classification and typed out what the debtor said, with the debtor on the telephone.
+ * CLAUDE.md's rule about a button that appears to work and does not, on the one screen where the
+ * cost of it is somebody's words.
+ */
+ok('there is one function for what is already open',
+  /export function openDisputeOn\(queries: AccountQuery\[\]\): AccountQuery \| null/.test(lib))
+/* WRITTEN ONCE BECAUSE TWO SCREENS RAISE A DISPUTE, and the half that drifts is the one that
+   offers a second the database then refuses. */
+ok('...used by the panel', /openDisputeOn\(queries\)/.test(panel))
+const detail = read('src/pages/accounts/AccountDetail.tsx')
+ok('...and by the escalate box', /alreadyDisputed=\{openDisputeOn\(queries\) !== null\}/.test(detail))
+/* THE PANEL: no control at all, and a line where it was saying why. */
+ok('the panel does not offer a second', /\{!alreadyDisputed && \(/.test(panel))
+ok('...saying several things go in one dispute',
+  /A debtor may dispute several things, but in one/.test(panel))
+/* THE BOX: shown and unselectable rather than removed -- a missing option reads as a screen that is
+   broken or a permission somebody lacks. */
+ok('the escalate box bars the dispute option', /const barred = k === 'dispute' && alreadyDisputed/.test(modal))
+ok('...visibly rather than by removing it', /disabled=\{barred\}/.test(modal))
+ok('...with the reason in place of the blurb',
+  /barred\s*\?\s*'There is already an open dispute on this account\./.test(modal))
+/* AND IT DOES NOT OPEN ON AN OPTION THAT CANNOT BE CHOSEN. */
+ok('...and opens on one that can be',
+  /useState<EscalationKind>\(alreadyDisputed \? 'help' : 'dispute'\)/.test(modal))
+/*
+ * THE OTHER TWO KINDS ARE UNTOUCHED. Asking a team leader for help and recommending litigation
+ * start no clock and hold nothing; an open dispute is no reason to refuse either, and barring them
+ * would leave a collector with an open dispute unable to ask anybody anything.
+ */
+ok('...while the other escalations still go', /k === 'dispute' && alreadyDisputed/.test(modal)
+  && !/alreadyDisputed \? true/.test(modal))
+
 console.log(`\ncheck-dispute-stage: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

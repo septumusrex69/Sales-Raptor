@@ -60,7 +60,7 @@ import { SmsModal } from './SmsModal'
 import { CallScriptModal } from './CallScriptModal'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
-import { fetchQueries, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
+import { fetchQueries, openDisputeOn, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
 import {
   fetchAccountEmails, markRepliesRead, markRepliesUnread, recordSentEmail, replySubject,
   type AccountEmail,
@@ -1351,6 +1351,8 @@ export function AccountDetail() {
           /* teamId is what makes "your team leader" answerable rather than "every team leader in
              the firm" -- see EscalateModal's own note. */
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
+          /* One dispute at a time -- the box does not offer a second. See openDisputeOn. */
+          alreadyDisputed={openDisputeOn(queries) !== null}
           onClose={() => setDisputing(false)}
           onDone={reload}
         />

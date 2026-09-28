@@ -632,6 +632,29 @@ export async function updateQuery(
 }
 
 /**
+ * THE ONE OPEN DISPUTE ON AN ACCOUNT, OR NOTHING.
+ *
+ * THE FIRM: "there can only be one dispute at a time. A debtor can't have multiple disputes. He
+ * can dispute multiple things in one dispute. But there should only be one dispute allowed to be
+ * open at a specific time."
+ *
+ * `one_open_dispute_per_account` is the rule and it refuses a second loudly. THIS IS WHAT THE
+ * SCREENS ASK so they never offer one: a button that appears to work and does not is worse than
+ * one that is not there, and here the error would arrive after a collector had typed out what the
+ * debtor said with the debtor still on the telephone.
+ *
+ * ONE FUNCTION BECAUSE TWO SCREENS RAISE A DISPUTE -- the Escalate box and the panel on the
+ * account. Written out twice they drift, and the half that drifts is the one that offers a second
+ * dispute the database then refuses.
+ *
+ * THE FIRST OF THEM, NOT A COUNT. An account that already has two (there are two on staging, from
+ * before the rule) has one that is the answer, and any of them is the one to add to.
+ */
+export function openDisputeOn(queries: AccountQuery[]): AccountQuery | null {
+  return queries.find((q) => q.kind === 'dispute' && q.status !== 'closed') ?? null
+}
+
+/**
  * THE WRITTEN DISPUTE HAS ARRIVED.
  *
  * THE FIRM: "we need a way to figure out, to start the dispute workflow from the moment that

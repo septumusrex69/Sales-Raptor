@@ -34,7 +34,15 @@
  *      `debtor_accounts.interest_from` is a RECORD OF WHAT THE CLIENT TOLD US and on 63 of the 738
  *      imported accounts it is 1 to 95 days BEFORE the handover -- so it is not the column to
  *      accrue from, and nothing in accountBalance.ts reads it.
- *   3. AN IMPORT CONTINUES, IT DOES NOT RECOMPUTE. The firm: "the interest ... has already run. So
+ *   3. IT RUNS ON THE OUTSTANDING BALANCE, NOT ON THE CAPITAL. The firm, asked what the base is:
+ *      "interest is calculated on the outstanding balance, which includes the handover plus fees
+ *      plus other interest minus payments." So Annexure B fees bear interest like everything else,
+ *      and interest compounds on interest -- which is what the posted history already does, and
+ *      what `computeBalance` already hands this file (capital + interest + fees + receiptFees -
+ *      payments). It is written down here because it is a decision and not an implementation
+ *      detail: a reading of "interest on the capital" is defensible, several creditors work that
+ *      way, and it would be a smaller number on every account in the book.
+ *   4. AN IMPORT CONTINUES, IT DOES NOT RECOMPUTE. The firm: "the interest ... has already run. So
  *      it's exported from Swordfish. And then we will import it on the same day. So then it should
  *      just continue running." The posted accruals come across as they were posted and `coveredTo`
  *      picks up the day after the last of them. This is the frozen-history rule in CLAUDE.md

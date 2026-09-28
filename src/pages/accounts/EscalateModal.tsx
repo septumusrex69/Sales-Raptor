@@ -39,17 +39,32 @@ const TODAY = new Date().toISOString().slice(0, 10)
  * for either. raiseQuery refuses to charge on anything but a dispute; this screen simply does not
  * offer the box.
  */
-export function EscalateModal({ accountId, users, clientLiaison, actor, onClose, onDone }: {
+export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyDisputed, onClose, onDone }: {
   accountId: string
   users: User[]
   /** The liaison on this debtor's client, which is who a client query goes to by default. */
   clientLiaison: User | undefined
   /** The person escalating. `teamId` is what makes "my team leader" answerable -- see `mine`. */
   actor: { id: string | null; name: string | null; teamId?: string }
+  /**
+   * THE DISPUTE ALREADY OPEN ON THIS ACCOUNT, IF THERE IS ONE.
+   *
+   * THE FIRM: "there should only be one dispute allowed to be open at a specific time... he can
+   * dispute multiple things in one dispute." `one_open_dispute_per_account` refuses a second and
+   * the refusal is a good one, but it arrives AFTER a collector has chosen a classification and
+   * typed out what the debtor said, with the debtor still on the telephone. So the option is not
+   * offered, and it says which dispute to add it to instead.
+   *
+   * THE OTHER TWO KINDS ARE UNTOUCHED. Asking a team leader for help and recommending litigation
+   * start no clock and hold nothing; an open dispute is no reason to refuse either.
+   */
+  alreadyDisputed: boolean
   onClose: () => void
   onDone: () => Promise<void>
 }) {
-  const [kind, setKind] = useState<EscalationKind>('dispute')
+  /* DISPUTE IS THE DEFAULT, EXCEPT WHERE IT IS NOT AVAILABLE -- a box opening on an option that
+     cannot be chosen reads as broken. */
+  const [kind, setKind] = useState<EscalationKind>(alreadyDisputed ? 'help' : 'dispute')
   const [toId, setToId] = useState(clientLiaison?.id ?? '')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
@@ -173,12 +188,19 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
         */}
         <fieldset className="space-y-1.5">
           <legend className="text-sm font-medium text-slate-700 mb-1.5">Why are you escalating it?</legend>
-          {ESCALATION_KIND_ORDER.map((k) => (
+          {ESCALATION_KIND_ORDER.map((k) => {
+            /* SHOWN AND UNSELECTABLE RATHER THAN REMOVED. A missing option reads as a screen that
+               is broken or a permission somebody lacks; a greyed one with the reason under it
+               reads as the rule it is. */
+            const barred = k === 'dispute' && alreadyDisputed
+            return (
             <label key={k}
-              className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                kind === k ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+              className={`flex items-start gap-2.5 p-2.5 rounded-lg border transition-colors ${
+                barred ? 'border-slate-100 bg-slate-50 cursor-not-allowed opacity-60'
+                  : kind === k ? 'border-brand-500 bg-brand-50/50 cursor-pointer'
+                    : 'border-slate-200 hover:bg-slate-50 cursor-pointer'
               }`}>
-              <input type="radio" name="escalation-kind" value={k} checked={kind === k}
+              <input type="radio" name="escalation-kind" value={k} checked={kind === k} disabled={barred}
                 onChange={() => {
                   setKind(k)
                   // A classification only means something on a dispute, so it is dropped rather
@@ -191,10 +213,15 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, onClose,
                 className="mt-0.5" />
               <span className="min-w-0">
                 <span className="block text-sm text-slate-800">{ESCALATION_KINDS[k].label}</span>
-                <span className="block text-[11px] text-slate-500">{ESCALATION_KINDS[k].blurb}</span>
+                <span className="block text-[11px] text-slate-500">
+                  {barred
+                    ? 'There is already an open dispute on this account. A debtor may dispute several things, but in one dispute — add it to that one.'
+                    : ESCALATION_KINDS[k].blurb}
+                </span>
               </span>
             </label>
-          ))}
+            )
+          })}
         </fieldset>
 
         {/*

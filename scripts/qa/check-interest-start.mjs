@@ -127,6 +127,56 @@ near('...with nothing reconstructed as interest', bare.interest, 0)
    the client handed over. */
 near('...and the capital is what the client handed over', bare.capital, 25000)
 
+/* ---------------- and it runs on the outstanding balance ---------------- */
+
+/*
+ * "INTEREST IS CALCULATED ON THE OUTSTANDING BALANCE, WHICH INCLUDES THE HANDOVER PLUS FEES PLUS
+ * OTHER INTEREST MINUS PAYMENTS." The firm's answer when asked what the base is, and it is a
+ * DECISION rather than an implementation detail: "interest on the capital" is a defensible reading,
+ * several creditors work that way, and it would be a smaller number on every account in the book.
+ *
+ * ASSERTED AS ARITHMETIC, not as the shape of the expression -- the point is which number comes
+ * out. A fee on the account has to make the interest bigger, and a payment has to make it smaller.
+ */
+const month = { handoverDate: '2026-08-01', interestRateAnnual: 24, accrueTo: '2026-09-30' }
+const posted = [{ from: '2026-08-01', days: 30, amount: 0 }]
+/* A posted accrual of nought closes August, so the open period is the whole of September and lands
+   on the flat monthly 2% -- which makes each figure below readable by hand. */
+const bare2 = computeBalance({ capitalHandedOver: 10000, ledgers: { payments: [], fees: [], interest: posted }, ...month })
+near('a bare account accrues 2% of the capital', bare2.interest, 200)
+
+const withFee = computeBalance({
+  capitalHandedOver: 10000,
+  ledgers: { payments: [], fees: [{ date: '2026-08-15', exclVat: 1000, vat: 150 }], interest: posted },
+  ...month,
+})
+/* R11 150 at 2% is R223. The fee and ITS VAT are both in the base: a fee is what the debtor owes. */
+near('...and a fee on the account is in the base', withFee.interest, 223)
+
+const withPayment = computeBalance({
+  capitalHandedOver: 10000,
+  ledgers: { payments: [{ date: '2026-08-15', amount: 5000 }], fees: [], interest: posted },
+  ...month,
+})
+/* R5 000 left, less the receipt fee item 9 raises on the payment, so this is "smaller" rather than
+   an exact hand figure -- the direction is the assertion, and it is the one that would flip if the
+   base ever became the capital. */
+ok(`...and a payment takes it out again (${withPayment.interest.toFixed(2)} < 200.00)`,
+  withPayment.interest < 200)
+/* AND IT IS NOT THE CAPITAL. The one assertion that fails the moment somebody "simplifies" the base
+   to capitalHandedOver, which is the change this rule exists to refuse. */
+ok('...so the base is not the capital alone', withFee.interest > bare2.interest)
+/*
+ * INTEREST COMPOUNDS ON INTEREST, which is the "plus other interest" half. A posted accrual of
+ * R1 000 is in the base the next period runs on: R11 000 at 2% is R220.
+ */
+const onInterest = computeBalance({
+  capitalHandedOver: 10000,
+  ledgers: { payments: [], fees: [], interest: [{ from: '2026-08-01', days: 30, amount: 1000 }] },
+  ...month,
+})
+near('...and interest already posted is in the base too', onInterest.interest - 1000, 220)
+
 console.log(`\ncheck-interest-start: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)
