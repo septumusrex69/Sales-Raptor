@@ -33,7 +33,7 @@ export const COLUMNS = 'firm_name, registration_number, vat_number, council_numb
   + 'trust_account_type, payment_instruction, '
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
-  + 'email_font, email_size_pt, updated_at'
+  + 'email_font, email_size_pt, vat_rate, updated_at'
 
 export interface Row {
   firm_name: string
@@ -61,6 +61,8 @@ export interface Row {
   signatory_title: string | null
   email_font: string
   email_size_pt: number | string
+  /* numeric comes back as a string over the wire, like every other numeric here. */
+  vat_rate: number | string
   updated_at: string
 }
 
@@ -107,6 +109,13 @@ export interface FirmSettings {
   /** A full CSS stack, not a face. See EMAIL_FONTS. */
   emailFont: string
   emailSizePt: number
+  /**
+   * VAT AS A FRACTION: 0.15 is fifteen percent, the same unit as a commission rate.
+   *
+   * On the firm's settings rather than in code because it is a rate the firm changes when SARS
+   * does -- and because the allocation engine, which runs in SQL, reads it from the same row.
+   */
+  vatRate: number
   updatedAt: string
 }
 
@@ -143,6 +152,8 @@ export const FIRM_UNSET: FirmSettings = {
   signatoryTitle: null,
   emailFont: CHARTER_EMAIL_STACK,
   emailSizePt: 10.5,
+  /* The rate today, and the one every figure in the codebase already assumes. */
+  vatRate: 0.15,
   updatedAt: '',
 }
 
@@ -180,6 +191,7 @@ export function toSettings(r: Row): FirmSettings {
     signatoryTitle: some(r.signatory_title),
     emailFont: r.email_font,
     emailSizePt: Number(r.email_size_pt),
+    vatRate: Number(r.vat_rate),
     updatedAt: r.updated_at,
   }
 }

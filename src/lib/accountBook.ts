@@ -438,8 +438,14 @@ export interface LedgerPayment {
    * Null on anything Raptor took in itself, and on payments migrated from the older export, which
    * did not carry it. Where it is present it is preferred over the computed figure: it is what
    * the debtor was billed and what the client's own records show.
+   *
+   * NAMED FOR WHAT IT IS, AS OF THE FINANCE MODULE. The column and this field were both called
+   * "collection commission", which is what Swordfish's export calls it -- and it is not commission
+   * at all. It is Annexure B item 9, the receipt fee, 10 per cent of the payment capped. Read as
+   * commission by an allocation engine, it would pay a client a tenth of every payment they were
+   * never owed. The doc comment here always said the right thing; the name did not.
    */
-  collectionCommission: number | null
+  receiptFeeLegacy: number | null
 }
 
 export interface LedgerFee {
@@ -493,7 +499,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
    */
   const [payments, fees, accruals] = await Promise.all([
     supabase.from('account_payments')
-      .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,collection_commission')
+      .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,receipt_fee_legacy')
       .eq('account_id', accountId).order('received_at', { ascending: false }),
     supabase.from('account_fees')
       .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by')
@@ -516,8 +522,8 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       details: r.details,
       paidToClient: !!r.paid_to_client,
       reversedAt: r.reversed_at,
-      collectionCommission: r.collection_commission === null || r.collection_commission === undefined
-        ? null : Number(r.collection_commission),
+      receiptFeeLegacy: r.receipt_fee_legacy === null || r.receipt_fee_legacy === undefined
+        ? null : Number(r.receipt_fee_legacy),
     })),
     fees: (fees.data ?? []).map((r: any) => ({
       id: r.id,

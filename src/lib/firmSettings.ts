@@ -82,6 +82,7 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     signatory_title: some(next.signatoryTitle),
     email_font: next.emailFont,
     email_size_pt: next.emailSizePt,
+    vat_rate: next.vatRate,
     updated_at: new Date().toISOString(),
     updated_by: me.user?.id ?? null,
   }).eq('id', true)
