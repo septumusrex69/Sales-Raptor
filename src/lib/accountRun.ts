@@ -196,6 +196,32 @@ export function nudgeWorkflows(accessToken: string, accountId: string): void {
 }
 
 /**
+ * THE SAME NUDGE, FOR A RUN THAT NOBODY HANDED A TOKEN TO.
+ *
+ * `nudgeWorkflows` takes one because both its callers already have a session open in front of
+ * them: the promise modal and the allocation screen. THE DISPUTE PATHS DO NOT. They are called
+ * from a panel several components down that has never needed a session, and a rule that depends on
+ * every future call site remembering to thread a token through is the rule that gets forgotten.
+ *
+ * IT ALREADY WAS. `workflow_start_on_dispute` creates the run in the database and nothing dated
+ * it, so the firm marked a dispute received in writing and got a sequence with no steps in it:
+ * "it also doesn't show me the steps for the dispute". Five nodes, nought steps, and the day-1
+ * acknowledgement that should have gone to the debtor waiting for the six o'clock sweep the next
+ * morning -- on a clock the firm gives the client ten business days on.
+ *
+ * SO THIS ONE ASKS FOR THE SESSION ITSELF. Same endpoint, same single account, same fire and
+ * forget: the sweep is still the backstop, and a debtor's dispute must not fail to save because
+ * the browser could not reach the API a moment later.
+ */
+export async function nudgeWorkflowsForAccount(accountId: string): Promise<void> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  /* No session is not an error here. Signed out, there is nothing to nudge WITH and nothing the
+     caller could do about it; the sweep picks the run up either way. */
+  if (token) nudgeWorkflows(token, accountId)
+}
+
+/**
  * THE WORKFLOWS A PERSON MAY START ON THIS ACCOUNT.
  *
  * Only the published ones that wait for a person -- `by_hand`. Everything else starts itself in

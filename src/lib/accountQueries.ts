@@ -18,6 +18,7 @@ const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Afric
 import { refreshNavCounts } from './navCounts'
 import { addNote, type AccountNote } from './accountWorkspace'
 import { chargeItem, type ChargeResult } from './accountCharges'
+import { nudgeWorkflowsForAccount } from './accountRun.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -519,6 +520,25 @@ export async function raiseQuery(input: {
       kind: 'query',
     })
   }
+
+  /*
+   * AND THE SEQUENCE THIS JUST STARTED GETS ITS DATES NOW.
+   *
+   * `workflow_start_on_dispute` creates the run in the database off the three columns above, and a
+   * run arrives from a trigger with NO STEPS -- the dating needs the working-day calendar, which
+   * lives in the app. Nothing called the planner here, so the firm raised a dispute and found a
+   * workflow that had started and could never do anything: "it also doesn't show me the steps for
+   * the dispute."
+   *
+   * DISPUTES ONLY. An agent asking a team leader for help and a query about a client's own sheet
+   * start no sequence at all, and nudging on those would fire the account's due steps early for
+   * nothing.
+   *
+   * LAST, AND IT CANNOT FAIL THE DISPUTE. Everything above is the firm's record of what the debtor
+   * said; this is the part that reaches out. Fire and forget, with the six o'clock sweep behind it.
+   */
+  if (isDispute && input.accountId) void nudgeWorkflowsForAccount(input.accountId)
+
   return { query: q, charge }
 }
 
@@ -656,6 +676,13 @@ export async function markDisputeReceived(
       kind: 'query',
     })
   }
+
+  /* AND THE REAL SEQUENCE GETS ITS DATES NOW -- see raiseEscalation for why the trigger cannot do
+     this itself. This is the one the firm watched start with nothing in it: day 1 of the dispute
+     workflow is the acknowledgement to the debtor, and waiting for the sweep sends it a day late
+     against a period the firm has ten business days to answer in. */
+  if (context.accountId) void nudgeWorkflowsForAccount(context.accountId)
+
   await refreshNavCounts()
   return toQuery(data)
 }

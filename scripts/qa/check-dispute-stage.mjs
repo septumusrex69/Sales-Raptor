@@ -182,6 +182,89 @@ ok('...saying so, so a missing name is not read as a fault',
 ok('the follow-up date says what it is', /Follow it up on/.test(modal))
 ok('...and no longer reads as chasing somebody', !/>Chase on</.test(modal))
 
+/* ---------------- and the sequence it starts is dated the moment it starts ---------------- */
+
+/*
+ * THE RUN IS CREATED IN SQL AND DATED IN THE APP, so somebody has to ASK.
+ *
+ * THE FIRM, HAVING MARKED A DISPUTE RECEIVED IN WRITING: "it also doesn't show me the steps for the
+ * dispute." The trigger had created the run; nothing called the planner; the run sat at five nodes
+ * and nought steps, and the day-1 acknowledgement to the debtor waited for the six o'clock sweep
+ * the following morning -- a day of a period the firm answers in ten business days.
+ *
+ * THIS IS THE SAME FAULT THE HANDOVER HAD AND THE PROMISE HAD. Each was fixed where it happened and
+ * the next path to create a run in SQL forgot again, which is why the nudge these call does not
+ * take a token: see nudgeWorkflowsForAccount.
+ */
+const run = read('src/lib/accountRun.ts')
+ok('there is a nudge that does not need a token passed to it',
+  /export async function nudgeWorkflowsForAccount\(accountId: string\)/.test(run))
+/* IT ASKS FOR THE SESSION ITSELF, which is the whole point of it existing beside the other one. */
+ok('...which asks for the session itself', /supabase\.auth\.getSession\(\)/.test(run))
+/* AND IT GOES THROUGH THE ONE NUDGE, so the fire-and-forget and the one-account rule are stated
+   once. Written twice they drift, and the second copy is the one that sweeps the book. */
+ok('...and through the one nudge', /if \(token\) nudgeWorkflows\(token, accountId\)/.test(run))
+
+/* RAISING ONE. A verbal dispute starts the sequence asking for it in writing; a written one starts
+   the real answer. Both arrive from the trigger with no steps. */
+ok('raising a dispute dates the sequence it starts',
+  /if \(isDispute && input\.accountId\) void nudgeWorkflowsForAccount\(input\.accountId\)/.test(lib))
+/*
+ * DISPUTES ONLY. An agent asking a team leader for help and a query about a client's own sheet
+ * start no sequence at all; nudging there would fire the account's due steps early for nothing.
+ */
+ok('...and only a dispute does', /isDispute && input\.accountId/.test(lib))
+/* RECEIVING ONE IN WRITING -- the moment the firm named, and the one they watched do nothing. */
+ok('the dispute arriving in writing dates the real sequence',
+  /if \(context\.accountId\) void nudgeWorkflowsForAccount\(context\.accountId\)/.test(lib))
+/*
+ * AND BOTH AFTER THE WRITE, never before it: everything above each of them is the firm's own record
+ * of what the debtor said, and a sequence started against a dispute whose row then failed to save
+ * is a notice the account cannot account for.
+ */
+const received = lib.slice(lib.indexOf('export async function markDisputeReceived('))
+const atUpdate = received.indexOf(".update({ received_on:")
+const atNudge = received.indexOf('nudgeWorkflowsForAccount')
+ok('...and the sequence is asked for after the dispute is saved', atUpdate > 0 && atNudge > atUpdate)
+
+/* ---------------- a resume does not revive what has nothing left to be about ---------------- */
+
+/*
+ * THE FIRM: "there's no active PTP on here, but the workflow is running a PTP." The arrangement had
+ * been cancelled, a written dispute held every sequence on the account, and answering the dispute
+ * let them all go -- including the one whose every step is about an arrangement that no longer
+ * exists. Its next step read "Reminder before the payment".
+ *
+ * READ AS THE LAST DEFINITION, because schema.sql is append-only and this function is replaced
+ * three times in it. The bare name also appears in its own grant, revoke and comment, so the
+ * anchor is the whole `create or replace function public.<name>(` -- CLAUDE.md's own trap.
+ */
+const resumeAt = sql.lastIndexOf('create or replace function public.workflow_resume_account(')
+ok('workflow_resume_account is in the schema', resumeAt > 0)
+const resume = resumeAt > 0 ? sql.slice(resumeAt, sql.indexOf('$$;', resumeAt)) : ''
+/* ENDED, NOT LEFT HELD: a held run is one somebody is expected to let go later, and this one must
+   never go again. */
+ok('a promise sequence with no live arrangement is ended', /left_reason = 'The arrangement is no longer live'/.test(resume))
+/* MATCHED ON THE VERSION'S TRIGGER, the same way the cancel and the hold decide which run they mean
+   -- "this version exists to answer exactly this event" is a fact, where "started recently" is a
+   guess about clocks. */
+ok('...matched on what the sequence is for', /v\.trigger_kind = 'promise_due'/.test(resume))
+/* LIVE IS open OR defaulted, which is the rule ptpSchedule applies to every notice merged on this
+   account. Cancelled, kept and broken are one answer: there is no undertaking left. */
+ok('...where no arrangement is open or defaulted',
+  /p\.status in \('open', 'defaulted'\)/.test(resume))
+/*
+ * AND BEFORE ANYTHING IS LET GO. Written after the resume it would end a run this same call had
+ * just set running -- the account would show the sequence starting and stopping, and whatever the
+ * app did in between it would have done against a dead arrangement.
+ */
+const atDead = resume.indexOf("v.trigger_kind = 'promise_due'")
+const atResume = resume.indexOf("set state = 'running'")
+ok('...and it happens before the resume', atDead > 0 && atResume > 0 && atDead < atResume)
+/* A SENT STEP STAYS SENT. It is the record of a message that reached a debtor; only what was still
+   to come is cancelled. */
+ok('...cancelling only what had not gone', /where s\.run_id = dead\.id and s\.state in \('pending', 'held'\)/.test(resume))
+
 console.log(`\ncheck-dispute-stage: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

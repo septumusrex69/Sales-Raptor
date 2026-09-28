@@ -10420,3 +10420,128 @@ set body = replace(
   'is confirmed: {{ptp_amount}} {{ptp_frequency}}, due {{ptp_date}}.'
 )
 where seed_key in ('sms-ptp-confirmed-individual', 'sms-ptp-confirmed-company');
+
+
+-- ============================================================================
+-- A RESUME NEVER REVIVES A SEQUENCE WITH NOTHING LEFT TO BE ABOUT.
+--
+-- THE FIRM, LOOKING AT AN ACCOUNT WHOSE ARRANGEMENT THEY HAD CANCELLED: "there's no active PTP on
+-- here, but the workflow is running a PTP." They had cancelled the arrangement; a written dispute
+-- then held every sequence on the account; answering the dispute let them all go again -- including
+-- the one whose entire subject was an arrangement that no longer existed. Its next step, drawn on
+-- the account, was "Reminder before the payment".
+--
+-- EVERY STEP OF THAT SEQUENCE IS ABOUT A LIVE ARRANGEMENT: the confirmation, the reminder two days
+-- before, the message on the day. There is no half of it that still makes sense, so it is ENDED
+-- rather than left held -- a held run is one somebody is expected to let go later, and this one
+-- must never go again.
+--
+-- LIVE MEANS open OR defaulted, which is the rule ptpSchedule already applies to every notice
+-- merged on this account. Cancelled, kept and broken are the same answer here: there is no
+-- undertaking left to remind anybody about.
+--
+-- AND IT RUNS ON EVERY RESUME, not only the one that caused this. workflow_on_promise_cancelled
+-- ends the run at the moment of cancelling, which is the fix for everything from here on; this is
+-- what catches an account cancelled before that trigger existed -- the firm's own test account was
+-- one -- and any order of events nobody has thought of yet. It ends nothing on the book today,
+-- which is what a guard should do.
+-- ============================================================================
+create or replace function public.workflow_resume_account(
+  p_account_id uuid, p_reason text default null, p_cause text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_resumed integer := 0;
+begin
+  /* See the header above: a promise sequence whose arrangement is gone is ended here, BEFORE
+     anything is let go, so that it cannot be one of the runs this resume starts again. */
+  with dead as (
+    select r.id from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'promise_due'
+       and not exists (
+         select 1 from public.promises_to_pay p
+          where p.account_id = p_account_id and p.status in ('open', 'defaulted')
+       )
+  ), killed as (
+    /* A SENT STEP STAYS SENT, as everywhere else: it is the record of a message that reached a
+       debtor. Only what was still to come is cancelled. */
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = 'The arrangement is no longer live'
+      from dead
+     where s.run_id = dead.id and s.state in ('pending', 'held')
+     returning s.id
+  ), closed as (
+    /* Its own holds are closed with it, or the run is left carrying an open hold nothing will ever
+       lift -- which is what the app adds up to re-date steps that no longer exist. */
+    update public.workflow_run_holds h
+       set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+           ended_reason = 'The arrangement is no longer live'
+      from dead
+     where h.run_id = dead.id and h.ended_on is null
+     returning h.id
+  )
+  update public.workflow_runs r
+     set state = 'left', left_reason = 'The arrangement is no longer live', left_at = now()
+    from dead
+   where r.id = dead.id;
+
+  /*
+   * ONLY THE HOLDS THIS EVENT IS ABOUT.
+   *
+   * This closed every open hold on the account whatever had caused it, so a dispute being answered
+   * released a run that a PROMISE had stopped -- and the section 129 went on demanding payment
+   * from a debtor who had an arrangement the firm had accepted. On the firm's own test account the
+   * evidence is a hold whose cause is 'promise' and whose ended_reason reads 'dispute_closed'.
+   *
+   * NULL MEANS EVERY CAUSE, and it is not a loophole: that is a person pressing Resume, who is
+   * looking at the account and deciding it may go on. The triggers all name their cause.
+   */
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(p_reason, 'Resumed')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state = 'held'
+     and h.ended_on is null
+     and (p_cause is null or h.cause = p_cause);
+
+  /*
+   * AND A RUN GOES ONLY WHERE NOTHING ELSE IS STILL HOLDING IT.
+   *
+   * CLOSE THE HOLD FIRST, THEN LET THE RUN GO -- in this order because the hold's ended_on is what
+   * the app adds up to move the remaining steps: a run set running with its hold still open would
+   * be a sequence whose clock never restarted, and the next morning's sweep would send the step it
+   * was paused on.
+   *
+   * A run stopped by a promise AND by a written dispute has two open holds. Answering the dispute
+   * closes one of them and must not start the sequence again, because the promise is still live --
+   * which the old unconditional update did, and which is the same fault as the one above wearing a
+   * different hat.
+   */
+  update public.workflow_runs r
+     set state = 'running'
+   where r.account_id = p_account_id
+     and r.state = 'held'
+     and not exists (
+       select 1 from public.workflow_run_holds h
+        where h.run_id = r.id and h.ended_on is null
+     );
+
+  get diagnostics v_resumed = row_count;
+  return v_resumed;
+end $$;
+
+comment on function public.workflow_resume_account(uuid, text, text) is
+  'Let a held sequence go again. Nothing was cancelled, so it carries on where it stopped -- and '
+  'the remaining steps are re-dated by the app, forward by the working days the hold lasted. It '
+  'lifts only holds of the cause given, a run with another hold still open stays held, and a '
+  'promise sequence whose arrangement is no longer live is ended rather than resumed.';
+
+revoke all on function public.workflow_resume_account(uuid, text, text) from public;
+grant execute on function public.workflow_resume_account(uuid, text, text) to authenticated;
