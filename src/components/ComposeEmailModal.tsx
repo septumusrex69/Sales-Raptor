@@ -4,6 +4,7 @@ import { Modal, FormField, inputClass } from './ui/Modal'
 import { AttachLetter } from './letters/AttachLetter'
 import { UseTemplate } from './library/UseTemplate'
 import { buildLetterAttachment } from '../lib/letterAttachment.ts'
+import { fileSize } from '../lib/fileSize.ts'
 import { fetchLibrary } from '../lib/templateLibrary.ts'
 import { missingFieldsNote } from '../lib/messageTemplates'
 import { RecipientField } from './RecipientField'
@@ -24,13 +25,6 @@ import { emailBodyHtml } from '../lib/emailStyle.ts'
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
 
 interface Attached { filename: string; contentType: string; size: number; content: string }
-
-/** Bytes as somebody reads them. en-ZA groups with a non-breaking space; sizes do not need it. */
-function fileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 /**
  * Sends via the current user's connected mailbox (Settings → Integrations) and, on success,

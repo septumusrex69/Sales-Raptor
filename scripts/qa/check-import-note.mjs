@@ -131,9 +131,19 @@ ok('...and a business names itself rather than having a surname',
 /* THE FIRM: "at the add a debtor, there should be a note as well, option for make a note." */
 ok('the form takes a note', /const \[note, setNote\] = useState\(''\)/.test(modal))
 ok('...which can be spoken', /<DictateButton size="small" value=\{note\} onChange=\{setNote\}/.test(modal))
-/* SEPARATE FROM THE ACCOUNT. It is not a field on the ledger; it goes onto the timeline. */
+/*
+ * SEPARATE FROM THE ACCOUNT. It is not a field on the ledger; it goes onto the timeline.
+ *
+ * MATCHED UP TO THE COMMA RATHER THAN TO THE BRACKET. This pinned the whole call and failed the
+ * day the case files became a third argument -- which was the check working, but the thing it is
+ * about is that the note is handed over BESIDE the form rather than inside it, and that is true
+ * whatever else travels with it.
+ */
 ok('...and is handed over separately from the account',
-  /onSave\(form, note\.trim\(\) \|\| null\)/.test(modal))
+  /onSave\(form, note\.trim\(\) \|\| null[,)]/.test(modal))
+/* AND IT IS NOT ON THE LEDGER, which is the half a signature cannot show: a note that had become a
+   column would still be passed here and would still read correctly above. */
+ok('...and is not a field on the account itself', !/note:/.test(modal.slice(modal.indexOf('useState<NewDebtorInput>'), modal.indexOf('const [note'))))
 
 const detail = readFileSync(new URL('../../src/pages/companies/CompanyDetail.tsx', import.meta.url), 'utf8')
 ok('the note is written onto the account', /from\('account_notes'\)\.insert\(\{/.test(detail))

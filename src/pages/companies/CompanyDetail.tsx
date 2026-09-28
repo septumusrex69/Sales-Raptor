@@ -42,6 +42,7 @@ import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
 import { ClientPicker } from '../../components/ui/ClientPicker'
 import { CommissionCard } from '../../components/companies/CommissionCard'
 import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
+import { uploadDocument } from '../../lib/accountWorkspace'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
 import { HandOutModal } from '../accounts/HandOutModal'
@@ -926,7 +927,7 @@ export function CompanyDetail() {
           busy={debtorBusy}
           error={debtorError}
           onClose={() => setDebtorOpen(false)}
-          onSave={async (input: NewDebtorInput, note: string | null) => {
+          onSave={async (input: NewDebtorInput, note: string | null, files: File[]) => {
             setDebtorBusy(true); setDebtorError(null)
             try {
               // Commission is the client's, not the account's, so it is inherited rather than
@@ -961,6 +962,54 @@ export function CompanyDetail() {
                   return
                 }
               }
+              /*
+               * THE CASE FILES, AFTER THE ACCOUNT AND FOR THE SAME REASON AS THE NOTE: they are
+               * filed against its id, which did not exist until the row above was written.
+               *
+               * THE FIRM: "attach the case files. PDFs, Excel, images or whatever. When you upload
+               * a debtor." The batch import has always taken the client's PDFs; a debtor captured
+               * by hand was the one way in with no way to bring the paperwork with it.
+               *
+               * THROUGH uploadDocument, NOT A SECOND UPLOAD PATH. That is where the storage path,
+               * the row, the orphan cleanup when the row fails, and the perusal fee all live -- so
+               * a file arriving this way is the same kind of thing as one uploaded on the account
+               * page, and the fee rule is not written twice. Item 3 is raised once for the lot,
+               * because the firm's limit is one perusal a day per account however many files it
+               * was.
+               *
+               * ONE AT A TIME, DELIBERATELY. In parallel the first failure would leave the rest
+               * mid-flight with nothing able to say which landed, and the report below would be a
+               * guess.
+               *
+               * AND A FAILURE IS SAID, NOT SWALLOWED, exactly as the note's is. The account IS
+               * open -- this cannot undo that and must not pretend otherwise -- so it names what
+               * did not arrive, and the collector attaches those few on the account page rather
+               * than finding out months later that the mandate was never there.
+               */
+              const failed: string[] = []
+              for (const file of files) {
+                try {
+                  await uploadDocument({
+                    accountId: account.id,
+                    file,
+                    /* "Other" rather than a guess. A mandate, a contract and an age analysis all
+                       arrive in one choosing and nothing here can tell them apart; the collector
+                       re-files them on the account page, where the list of kinds is. */
+                    kind: 'Other',
+                    uploadedBy: currentUser?.id ?? null,
+                    uploadedByName: currentUser?.name ?? null,
+                  })
+                } catch (e) {
+                  failed.push(`${file.name} (${e instanceof Error ? e.message : String(e)})`)
+                }
+              }
+              if (failed.length > 0) {
+                setDebtorError(`The account was opened, but ${failed.length} of ${files.length} `
+                  + `file${files.length === 1 ? '' : 's'} did not save: ${failed.join('; ')}`)
+                setDebtorBusy(false)
+                return
+              }
+
               /*
                * STRAIGHT ON TO ASSIGN AND REFER, rather than to the account.
                *

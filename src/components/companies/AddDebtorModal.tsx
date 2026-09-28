@@ -1,6 +1,8 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { Paperclip, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { DictateButton } from '../ui/Dictate'
+import { fileSize } from '../../lib/fileSize.ts'
 import { suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
 
 /**
@@ -20,8 +22,13 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
   busy: boolean
   error: string | null
   onClose: () => void
-  /** The note is separate: it is not part of the account, it goes onto its timeline. */
-  onSave: (input: NewDebtorInput, note: string | null) => void
+  /**
+   * The note is separate: it is not part of the account, it goes onto its timeline.
+   *
+   * SO ARE THE CASE FILES, and for the same reason: they hang off the account's id, which does not
+   * exist until the row is written. See `files` below.
+   */
+  onSave: (input: NewDebtorInput, note: string | null, files: File[]) => void
 }) {
   const today = new Date().toISOString().slice(0, 10)
   const suggested = useMemo(
@@ -50,6 +57,25 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
    * onto the account's own timeline afterwards, the same place the import writes its notes.
    */
   const [note, setNote] = useState('')
+  /*
+   * THE CASE FILES, AT THE FIRM'S ASKING: "attach the case files. PDFs, Excel, images or whatever.
+   * When you upload a debtor."
+   *
+   * THE BATCH IMPORT ALREADY TAKES THEM -- "their PDFs, if there are any", matched to accounts by
+   * filename -- and the account page takes them afterwards. A debtor captured BY HAND was the one
+   * way in with no way to bring the paperwork with it, so the mandate, the contract and the
+   * invoices stayed in somebody's inbox until they remembered to open the account and upload them.
+   *
+   * ANY TYPE, WHICH IS THE FIRM'S OWN WORD FOR IT. The documents panel has never restricted this
+   * either: a client sends a scanned mandate as a JPEG and an age analysis as a spreadsheet, and a
+   * picker that accepted only PDFs would send them away to convert their own paperwork.
+   *
+   * HELD HERE UNTIL THE ACCOUNT EXISTS. They are filed against its id, which is written by the
+   * save -- so they are handed back with the form rather than uploaded as they are chosen, and
+   * choosing them commits nobody to anything until Add debtor is pressed.
+   */
+  const [files, setFiles] = useState<File[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
   // Problems appear once, on submit. Marking a field wrong while somebody is still typing in it
   // is just shouting at them for not having finished.
   const [shown, setShown] = useState<Problem[]>([])
@@ -63,7 +89,7 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
     e.preventDefault()
     const problems = validateNewDebtor(form, today)
     setShown(problems)
-    if (problems.length === 0) onSave(form, note.trim() || null)
+    if (problems.length === 0) onSave(form, note.trim() || null, files)
   }
 
   return (
@@ -240,6 +266,62 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
         <div className="mt-1.5">
           <DictateButton size="small" value={note} onChange={setNote} />
         </div>
+
+        {/*
+          THE CASE FILES. Beside the note rather than up with capital and the handover date,
+          because the two of them are the same kind of thing: what came with the account and did
+          not fit in a box.
+        */}
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mt-5 mb-2">
+          The case files
+        </p>
+        <input ref={fileRef} type="file" multiple className="hidden"
+          onChange={(e) => {
+            /* ADDED TO WHAT IS THERE, not replacing it: the mandate and the invoices are usually
+               in two different folders, and a picker that forgot the first choice on the second
+               would make somebody gather them up somewhere else first. */
+            setFiles((f) => [...f, ...Array.from(e.target.files ?? [])])
+            /* Cleared, or choosing the same file twice in a row fires no change event. */
+            e.target.value = ''
+          }} />
+        <button type="button" onClick={() => fileRef.current?.click()}
+          className="w-full flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 text-left">
+          <span className={`shrink-0 w-8 h-8 rounded-lg grid place-items-center ${
+            files.length ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+            <Paperclip size={16} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-slate-700">
+              The mandate, the contract, the invoices — anything the client sent
+            </span>
+            <span className="block text-xs text-slate-400">
+              {files.length
+                ? `${files.length} file${files.length === 1 ? '' : 's'} · ${fileSize(files.reduce((n, f) => n + f.size, 0))}`
+                : 'PDFs, spreadsheets, photographs — optional'}
+            </span>
+          </span>
+          <span className="text-xs font-medium text-brand-600 shrink-0">
+            {files.length ? 'Add more' : 'Choose'}
+          </span>
+        </button>
+
+        {/* NAMED AND REMOVABLE. A count alone cannot tell somebody they attached the wrong
+            client's mandate, which is the mistake worth catching before the account opens. */}
+        {files.length > 0 && (
+          <ul className="mt-1.5 space-y-1">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${i}`} className="flex items-center gap-2 text-[11px] text-slate-500">
+                <span className="truncate flex-1">{f.name}</span>
+                <span className="shrink-0 text-slate-400">{fileSize(f.size)}</span>
+                <button type="button" aria-label={`Remove ${f.name}`}
+                  onClick={() => setFiles((all) => all.filter((_, n) => n !== i))}
+                  className="shrink-0 text-slate-400 hover:text-negative-700">
+                  <X size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {error && (
           <p className="mt-4 text-sm text-negative-700 bg-negative-50 border border-negative-100 rounded-lg px-3 py-2">{error}</p>
