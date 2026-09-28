@@ -30,6 +30,8 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-dispute-stage.mjs
  */
 import { readFileSync } from 'node:fs'
+import { DAILY_LIMIT } from '../../src/lib/actionTariff.ts'
+import { ENFORCE_ITEM_TOTALS } from '../../src/lib/annexureB.ts'
 
 let pass = 0
 const failures = []
@@ -330,6 +332,52 @@ ok('...and opens on one that can be',
  */
 ok('...while the other escalations still go', /k === 'dispute' && alreadyDisputed/.test(modal)
   && !/alreadyDisputed \? true/.test(modal))
+
+/* ---------------- one box raises a dispute, and it is this one ---------------- */
+
+/*
+ * THE FIRM: "I really like the way that the dispute is captured in the escalate. But if you raise a
+ * dispute in that little box down there, it doesn't do the same."
+ *
+ * IT DID NOT, AND NONE OF IT WAS COSMETIC. The panel's own form never asked how the dispute reached
+ * us, so every dispute raised from the account page was verbal and the written sequence was
+ * unreachable from that screen; it could not be dictated; it offered every user in the firm as the
+ * assignee instead of the three people the firm named; it still said "Chase the client on", which
+ * the firm asked about by name; and its fee sentence was a year out of date.
+ *
+ * SO THE SECOND BOX IS GONE, not brought up to date. Two screens raising the same thing is
+ * CLAUDE.md's one-clause-builder rule in different clothes -- written twice they drift, and what
+ * drifts here is which statutory sequence a dispute starts.
+ */
+ok('the account panel has no form of its own', !/function RaiseForm\(/.test(panel))
+/* AND NOTHING THERE RAISES ONE DIRECTLY, which is the assertion that survives somebody rebuilding
+   the form under another name. */
+ok('...and nothing in it raises a dispute directly', !/raiseQuery\(/.test(panel))
+ok('the panel asks for the escalate box instead', /onRaise: \(\) => void/.test(panel)
+  && /<button onClick=\{onRaise\}/.test(panel))
+/* THE SAME BOX THE ESCALATE BUTTON OPENS -- one modal, one state, so the two entrances cannot get
+   different props. */
+ok('...and it is the one the Escalate button opens', /onRaise=\{\(\) => setDisputing\(true\)\}/.test(detail))
+
+/* ---------------- and it says what the fee actually costs ---------------- */
+
+/*
+ * THE SENTENCE WAS THE GAZETTE'S, NOT THE FIRM'S. It read "it is a total for the account, so it
+ * charges nothing if this account has already had it" -- which is how item 3 is worded and not what
+ * the firm does. They instructed on 9 September that it is charged PER OCCURRENCE, and a collector
+ * reading the old sentence would have expected a free second escalation and charged the debtor R25.
+ */
+check('item 3 is charged per occurrence, not as a total', ENFORCE_ITEM_TOTALS, false)
+ok('...so the box no longer calls it a total for the account',
+  !/total for the account/.test(modal))
+ok('...and says it is charged each time', /each time the work is done/.test(modal))
+/*
+ * WHAT STOPS A SECOND ONE IS THE FIRM'S DAILY LIMIT, a different rule with a different answer.
+ * HELD AGAINST THE NUMBER ITSELF: raising the limit without rewriting this sentence fails here
+ * rather than leaving the screen quietly wrong for another year.
+ */
+check('a perusal may be charged once a day', DAILY_LIMIT.perusal, 1)
+ok('...which is what the box tells the collector', /only once a day on an account/.test(modal))
 
 console.log(`\ncheck-dispute-stage: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

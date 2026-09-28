@@ -868,6 +868,10 @@ export function AccountDetail() {
       users={users}
       actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, role: currentUser?.role }}
       onChange={reload}
+      /* ONE BOX FOR RAISING A DISPUTE, and it is the Escalate one. The panel used to carry a form
+         of its own that asked less and said the wrong thing about the fee -- see QueryPanel's
+         onRaise. */
+      onRaise={() => setDisputing(true)}
       busy={queryBusy}
       run={runQuery}
       clientId={client?.id}

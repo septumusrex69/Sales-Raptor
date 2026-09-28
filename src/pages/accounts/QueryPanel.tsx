@@ -1,17 +1,15 @@
 import { useState } from 'react'
-import { Check, Mail, MessageCircleQuestion, Plus, X } from 'lucide-react'
+import { Check, Mail, MessageCircleQuestion, Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
-import { chargeMessage } from '../../lib/accountCharges'
 import {
-  closeQuery, isStale, markDisputeReceived, markOutcomeDone, openDisputeOn, raiseQuery, updateQuery,
+  closeQuery, isStale, markDisputeReceived, markOutcomeDone, openDisputeOn, updateQuery,
   stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, QUERY_STAGE_LABEL,
   type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
-import { QUERY_CATEGORIES } from '../../lib/disputeCategories'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -49,7 +47,7 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
  * the business's decision, and a system that quietly halted work on an account would be taking
  * that decision away.
  */
-export function QueryPanel({ accountId, accountLabel, queries, users, actor, onChange, busy, run, clientId, clientLiaisonId }: {
+export function QueryPanel({ accountId, accountLabel, queries, users, actor, onChange, onRaise, busy, run, clientId, clientLiaisonId }: {
   accountId: string
   /** The account number, used to find this debtor again on the dispute board. */
   accountLabel: string | null
@@ -61,10 +59,27 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   clientId: string | undefined
+  /**
+   * OPEN THE ESCALATE BOX -- the same one the Escalate button opens, and now the only way in.
+   *
+   * THE FIRM: "I really like the way that the dispute is captured in the escalate. But if you raise
+   * a dispute in that little box down there, it doesn't do the same."
+   *
+   * IT DID NOT, AND THE DIFFERENCES WERE NOT COSMETIC. This panel had a form of its own that never
+   * asked how the dispute reached us, so every dispute raised from here was verbal and the written
+   * sequence was unreachable from this screen; it could not be dictated, with the debtor on the
+   * telephone; it offered every user in the firm as the assignee rather than this person's own team
+   * leader, the liaison on the client and the liaison manager; it still said "Chase the client on",
+   * which the firm asked about by name; and its fee sentence was a year out of date.
+   *
+   * SO IT IS GONE RATHER THAN BROUGHT UP TO DATE. Two boxes raising the same thing is CLAUDE.md's
+   * one-clause-builder rule wearing different clothes: written twice they drift, and what drifts
+   * here is which sequence a statutory dispute starts.
+   */
+  onRaise: () => void
   /** Who looks after this debtor's client — giving a dispute to them is what "with the liaison" means. */
   clientLiaisonId: string | undefined
 }) {
-  const [adding, setAdding] = useState(false)
   const open = queries.filter((q) => q.status !== 'closed')
   const closed = queries.filter((q) => q.status === 'closed')
   /*
@@ -82,8 +97,8 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
       <div className="flex items-center justify-between gap-2 mb-3">
         <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes</h3>
         {!alreadyDisputed && (
-          <button onClick={() => setAdding((v) => !v)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
-            {adding ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Raise one</>}
+          <button onClick={onRaise} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+            <Plus size={12} /> Raise one
           </button>
         )}
       </div>
@@ -97,18 +112,7 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
         </p>
       )}
 
-      {adding && (
-        <RaiseForm
-          accountId={accountId}
-          users={users}
-          actor={actor}
-          busy={busy}
-          run={run}
-          onDone={() => setAdding(false)}
-        />
-      )}
-
-      {open.length === 0 && closed.length === 0 && !adding && (
+      {open.length === 0 && closed.length === 0 && (
         <p className="text-[11px] text-slate-400 leading-relaxed">
           Nothing disputed. Raise one when the debtor says something only the client can answer.
         </p>
@@ -432,73 +436,6 @@ function ChaseDate({ value, stale, busy, onChange }: {
     >
       {value ? formatDate(value) : 'no date'}
     </button>
-  )
-}
-
-function RaiseForm({ accountId, users, actor, busy, run, onDone }: {
-  accountId: string
-  users: User[]
-  actor: { id: string | null; name: string | null }
-  busy: boolean
-  run: (fn: () => Promise<unknown>) => Promise<boolean>
-  onDone: () => void
-}) {
-  const [description, setDescription] = useState('')
-  const [category, setCategory] = useState('')
-  const [ownerId, setOwnerId] = useState('')
-  const [chaseOn, setChaseOn] = useState('')
-  const [charged, setCharged] = useState<string | null>(null)
-
-  return (
-    <form
-      className="space-y-2 p-3 rounded-lg bg-slate-50 border border-slate-100 mb-3"
-      onSubmit={async (e) => {
-        e.preventDefault()
-        if (!description.trim()) return
-        let message: string | null = null
-        const ok = await run(async () => {
-          const { charge } = await raiseQuery({
-            accountId, description, category, ownerId: ownerId || null, chaseOn: chaseOn || null,
-            raisedBy: actor.id, raisedByName: actor.name,
-          })
-          message = charge ? chargeMessage(charge, '3') : 'Not charged to the debtor.'
-        })
-        // Said after the fact rather than promised beforehand: whether item 3 has anything left
-        // on this account depends on the ledger, and the ledger is read when the charge is made.
-        if (ok) { setCharged(message); onDone() }
-      }}
-    >
-      <textarea value={description} onChange={(e) => setDescription(e.target.value)} autoFocus rows={3}
-        placeholder="What did the debtor say? In their words if you can."
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 resize-none" />
-      {/* Optional. The kinds are too various to make anyone pick one before they can save. */}
-      <select value={category} onChange={(e) => setCategory(e.target.value)}
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
-        <option value="">No category</option>
-        {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
-      </select>
-      <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
-        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
-        <option value="">Nobody yet</option>
-        {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-      </select>
-      <label className="block text-[11px] text-slate-500">
-        Chase the client on
-        <input type="date" value={chaseOn} onChange={(e) => setChaseOn(e.target.value)} min={TODAY}
-          className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
-      </label>
-      <p className="text-[10px] text-slate-500 leading-snug">
-        Raising a query charges item 3, &ldquo;other necessary expenses not specifically provided
-        for&rdquo; &mdash; R25 excluding VAT, and a total for the account, so a second query
-        charges nothing under it. Sending it to the client then charges item 1a (R25) and the
-        client&rsquo;s reply charges item 6 (R13), both per occurrence.
-      </p>
-      {charged && <p className="text-[11px] text-gold-600">{charged}</p>}
-      <button type="submit" disabled={busy || !description.trim()}
-        className="w-full text-sm font-medium py-1.5 rounded-lg bg-brand-600 text-white disabled:opacity-50">
-        {busy ? 'Saving...' : 'Raise query'}
-      </button>
-    </form>
   )
 }
 

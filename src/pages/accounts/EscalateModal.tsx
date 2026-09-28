@@ -372,9 +372,21 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           />
           <span className="text-sm text-slate-700">
             Charge the debtor R25 plus VAT
+            {/*
+              WHAT IT ACTUALLY COSTS, WHICH THIS SAID WRONGLY FOR A YEAR. It read "it is a total for
+              the account, so it charges nothing if this account has already had it" -- the gazette's
+              own words for item 3, and not what the firm does: they instructed on 9 September that
+              it is charged PER OCCURRENCE (ENFORCE_ITEM_TOTALS is off for exactly that reason).
+              What stops a second one is the firm's own limit of one a day per account, which is a
+              different rule with a different answer, and a collector reading the old sentence would
+              have expected a free second escalation and charged the debtor R25.
+              check-dispute-stage holds this sentence against DAILY_LIMIT, so raising the limit
+              fails there rather than leaving the screen quietly wrong again.
+            */}
             <span className="block text-[11px] text-slate-500 mt-0.5">
-              Annexure B item 3, &ldquo;other necessary expenses not specifically provided for&rdquo;. It is a
-              total for the account, so it charges nothing if this account has already had it.
+              Annexure B item 3, &ldquo;other necessary expenses not specifically provided for&rdquo;.
+              R25 excluding VAT each time the work is done, but only once a day on an account &mdash;
+              so if something has already been perused here today, this charges nothing.
               {assigned
                 ? ' Ticked because somebody is being put to work on this dispute.'
                 : ' Unticked because it is unassigned — nobody is spending time on it yet.'}
