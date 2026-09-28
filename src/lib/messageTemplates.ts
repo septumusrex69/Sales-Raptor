@@ -912,7 +912,18 @@ export interface TemplateAccount {
   caseNumber: string | null
   /** The day the debt fell due and the account came to the firm. First station on the timeline. */
   handoverDate: string | null
-  /** Paid SINCE the handover, which is what the notices show against what is still outstanding. */
+  /**
+   * Paid SINCE the handover, which is what the notices show against what is still outstanding.
+   *
+   * SUMMED FROM THE PAYMENTS LEDGER BY THE CALLER, never read off `debtor_accounts.payments_to_date`.
+   * That column is null on 20 473 of the 23 782 accounts -- including 1 243 that have received
+   * money, up to R90 530 of it -- and where it is set it disagrees with the ledger beneath it on
+   * 2 644 rows out of 3 309. Both callers take it from the computed balance for that reason; see
+   * the note at the call site in AccountDetail.
+   *
+   * NULL ONLY WHERE NO BALANCE COULD BE COMPUTED AT ALL, which leaves the placeholder standing and
+   * the notice unsendable -- as it should, because then nobody knows.
+   */
   paymentsToDate: number | null
   /** The three the listing notice is a record of. Null until the submission has actually gone. */
   listingDate: string | null

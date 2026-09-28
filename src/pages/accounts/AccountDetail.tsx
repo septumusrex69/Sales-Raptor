@@ -511,7 +511,26 @@ export function AccountDetail() {
           /* What the client gave us, which is neither the capital still outstanding nor the
              balance owed today -- the one figure on a summary of account that never moves. */
           capitalHandedOver: account.capitalHandedOver,
-          paymentsToDate: account.paymentsToDate,
+          /*
+           * OFF THE LEDGER, NOT OFF THE ACCOUNT ROW -- the same place {{balance}} three lines
+           * below comes from, and the same thing the runner has always done (step.ts passes
+           * `balance.payments`).
+           *
+           * THE FIRM, LOOKING AT A COMPOSE BOX THAT WOULD NOT FILL IT: "so if there's no pay to
+           * date thing, then zero has been paid to date." Right, and the reason it would not fill
+           * was that `debtor_accounts.payments_to_date` is null on 20 473 of the 23 782 accounts.
+           *
+           * DEFAULTING THAT NULL TO ZERO WOULD HAVE BEEN A LIE ON 1 243 OF THEM. They have payment
+           * rows totalling R23,7 million -- up to R90 530 on one account -- with the column still
+           * null; and of the 3 309 rows where the column IS set, 2 644 disagree with the ledger
+           * beneath them. So the column cannot answer "what has this debtor paid" in either
+           * direction, and a notice telling somebody who has paid R90 000 that they have paid
+           * nothing is the worst version of this bug rather than the fix for it.
+           *
+           * THE LEDGER ALWAYS CAN, and zero falls out of it by itself: no payment rows sum to
+           * R 0,00, which is exactly what the firm asked to see.
+           */
+          paymentsToDate: statement?.breakdown?.payments ?? null,
           listingDate: account.listingDate,
           listingReference: account.listingReference,
           bureausListed: account.bureausListed,

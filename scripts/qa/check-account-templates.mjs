@@ -25,7 +25,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-account-templates.mjs
  */
 import { readFileSync } from 'node:fs'
-import { missingFieldsNote, renderTemplate } from '../../src/lib/messageTemplates.ts'
+import { missingFieldsNote, renderTemplate, mergeValuesFor } from '../../src/lib/messageTemplates.ts'
 import { smsCost } from '../../src/lib/smsSegments.ts'
 
 let pass = 0
@@ -118,6 +118,68 @@ ok('the account resolves its merge values once', /const letterContext = useMemo\
 check('...and assembles them exactly once on the page',
   (account.match(/accountMergeValues\(\{/g) ?? []).length, 1)
 ok('...and no longer assembles its own beside it', !/mergeValuesFor\(\{/.test(account))
+
+/* ------------------------------------------------------------------ what has been paid */
+
+/*
+ * ZERO IS AN ANSWER, AND IT COMES OFF THE LEDGER.
+ *
+ * THE FIRM, LOOKING AT A COMPOSE BOX THAT WOULD NOT FILL {{paid_to_date}}: "so if there's no pay
+ * to date thing, then zero has been paid to date." Right -- and the reason it would not fill was
+ * that the page read `debtor_accounts.payments_to_date`, which is NULL on 20 473 of the 23 782
+ * accounts on the book.
+ *
+ * DEFAULTING THAT NULL TO ZERO WOULD HAVE BEEN THE WORSE BUG. 1 243 of those null rows have
+ * payments against them -- R23,7 million between them, up to R90 530 on one account -- so the
+ * literal fix would have told a debtor who has paid R90 000 that they have paid nothing, in a
+ * statutory demand. And of the 3 309 rows where the column IS set, 2 644 disagree with the ledger
+ * beneath them, so it cannot answer the question in either direction.
+ *
+ * SUMMED FROM THE PAYMENTS LEDGER, zero falls out by itself.
+ */
+const templateAccount = {
+  caseNumber: 'RAP-100735', handoverDate: '2026-01-05', paymentsToDate: 0,
+  listingDate: null, listingReference: null, bureausListed: null,
+  debtorKind: 'individual', debtorTitle: 'Mr', debtorFirstName: 'Ryno', debtorSurname: 'Buitendag',
+  accountNumber: 'Abc1111', clientReference: null,
+  capitalOutstanding: 4000, capitalHandedOver: 4000, preferredLanguage: null,
+}
+/* Enough of a firm for the merge to run. Only {{paid_to_date}} is being asserted, and the firm's
+   own fields are held against schema.sql by check-firm-settings in both directions. */
+const someFirm = {
+  firmName: 'Bredell Ferreira', email: 'info@bredellferreira.co.za', phone: '012 348 2156',
+  website: null, officeHours: null, physicalAddress: null, postalAddress: null,
+  signatoryName: 'Itumeleng', signatoryTitle: 'Collections', paymentInstruction: null,
+  trustBank: 'Nedbank', trustAccountName: 'BF Trust', trustAccountNumber: '1', trustBranchCode: '198765',
+  trustAccountType: 'Cheque',
+  businessBank: null, businessAccountName: null, businessAccountNumber: null, businessBranchCode: null,
+}
+const merged = (paymentsToDate) => mergeValuesFor({
+  account: { ...templateAccount, paymentsToDate },
+  balance: 5408.78, clientName: 'Tjobecom', agentName: 'Itumeleng', agentPhone: '012 348 2156',
+  firm: someFirm, today: '2026-09-28', money: (n) => `R ${n.toFixed(2)}`,
+}).paid_to_date
+
+check('a debtor who has paid nothing has paid R 0.00', merged(0), 'R 0.00')
+/* AND ONE WHO HAS PAID READS WHAT THEY PAID -- the half that the literal fix would have broken. */
+check('...and one who has paid reads it', merged(90529.84), 'R 90529.84')
+/*
+ * NULL STILL MEANS NOBODY KNOWS, which leaves the placeholder standing and the notice unsendable.
+ * That is the right answer for an account whose balance could not be computed at all, and it is
+ * why this is not simply `?? 0` inside the merge.
+ */
+check('...and null is still unanswerable', merged(null), null)
+
+/*
+ * BOTH SENDERS TAKE IT FROM THE SAME PLACE. The runner has always summed the ledger
+ * (`balance.payments`); the page read the stored column, which is how the two disagreed. Written
+ * twice they drift, and the half that drifts is whichever one nobody is looking at.
+ */
+ok('the page takes what was paid off the computed balance',
+  /paymentsToDate: statement\?\.breakdown\?\.payments \?\? null/.test(account))
+ok('...and never off the account row', !/paymentsToDate: account\.paymentsToDate/.test(account))
+const step = read('../api/_lib/workflow/step.ts')
+ok('the runner takes it off the same balance', /paymentsToDate: balance\.payments/.test(step))
 
 /* ------------------------------------------------------------------ the covering email */
 
