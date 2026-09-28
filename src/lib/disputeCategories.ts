@@ -175,20 +175,30 @@ export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
 export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import'
 
 /**
- * WHO A REQUEST IS BEING ASKED OF, which is not the same as who is doing it.
+ * WHAT A REQUEST IS ASKING FOR.
  *
- * A collector asks a COLLEAGUE (the owner) to get a statement out of the CLIENT (the source). The
- * source is also what decides whether the debtor caused the work at all -- see `chargeable` below.
+ * THE FIRM: "instead of asking who are we asking, ask what are we asking, and then give it to."
+ *
+ * AND ASKING **WHO** WAS THE MISTAKE, not merely the wrong order. They asked, of the version this
+ * replaces: "from the debtor -- how would we request something from the debtor other than a
+ * written dispute, which already has that workflow in place?" The answer is that the source should
+ * never have been a field. WHO IS BEING ASKED IS ALREADY ON THE TICKET -- it is whoever it was
+ * GIVEN TO. Hand a statement request to the liaison and the client is who gets asked; hand a proof
+ * of payment to the collector and the debtor is. Storing it twice meant two fields that could
+ * disagree, with nothing able to say which was true.
+ *
+ * SHAPED LIKE QUERY_CATEGORIES because it does the same job: a closed list so the board sorts by
+ * something other than the free text, with the words a collector would use rather than a code.
  */
-export type RequestSource = 'client' | 'debtor' | 'file'
-
-export const REQUEST_SOURCES: { value: RequestSource; label: string; blurb: string }[] = [
-  { value: 'client', label: 'From the client',
-    blurb: 'A statement, the signed contract, proof of delivery — something they hold.' },
-  { value: 'debtor', label: 'From the debtor',
-    blurb: 'Proof of payment, an updated address, a document they said they would send.' },
-  { value: 'file', label: 'From our own file',
-    blurb: 'Something Raptor or the handover should already have — a note, a scanned page.' },
+export const REQUEST_KINDS: QueryCategory[] = [
+  { value: 'Statement of account', examples: 'The full statement, or one for a period' },
+  { value: 'Contract or agreement', examples: 'The signed agreement, a surety, the terms' },
+  { value: 'Invoices', examples: 'The invoices the debt is made up of' },
+  { value: 'Proof of delivery', examples: 'Delivery notes, signed receipts, waybills' },
+  { value: 'Proof of payment', examples: 'A payment somebody says was made' },
+  { value: 'Debtor details', examples: 'An address, a number, an employer, an identity number' },
+  { value: 'Something on our own file', examples: 'A note, a scanned page, something from the handover' },
+  { value: 'Other', examples: 'Anything the list above does not cover — say what it is' },
 ]
 
 export interface EscalationMeta {
@@ -200,8 +210,27 @@ export interface EscalationMeta {
   chargeable: boolean
   /** A dispute is classified from QUERY_CATEGORIES; the other two have nothing to classify. */
   needsCategory: boolean
-  /** What the description box should prompt for. */
+  /**
+   * WHAT THE DESCRIPTION BOX IS HEADED, and what it prompts for inside.
+   *
+   * `prompt` is here for the same reason `submitLabel` is below: it was the third copy of the same
+   * if-else chain with a fallback, so a request asked "why has collecting run out of road?" until
+   * the check that guards the other two found it.
+   */
+  prompt: string
   placeholder: string
+  /**
+   * WHAT THE BUTTON SAYS, AND WHAT THE FEE LINE SAYS WHEN NOTHING IS CHARGED.
+   *
+   * ON THE KIND RATHER THAN IN A CHAIN ON THE SCREEN, because the screen had
+   * `kind === 'dispute' ? … : kind === 'help' ? … : <litigation>` -- and a chain with a fallback
+   * gives a NEW kind somebody else's words. The firm found it the day a request was added: "it
+   * says like recommend for litigation. Why is that?" A record cannot fall through; a missing
+   * entry is a type error before it is a screen.
+   */
+  submitLabel: string
+  /** Only read where `chargeable` is false. Says why the debtor pays nothing for THIS one. */
+  freeNote: string
   /**
    * Who this normally goes to, used to preselect the assignee.
    *
@@ -219,8 +248,11 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     blurb: 'They say something is wrong — the amount, the debt, the paperwork.',
     chargeable: true,
     needsCategory: true,
+    prompt: 'What is the issue?',
     placeholder: 'Says she settled it directly with the client in March and has the proof.',
     goesTo: 'liaison',
+    submitLabel: 'Raise dispute',
+    freeNote: '',
   },
   /*
    * NOT A DISPUTE, AND THE DIFFERENCE IS PHYSICS RATHER THAN SEVERITY. A dispute is a state of the
@@ -240,24 +272,36 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     blurb: 'A statement, the contract, proof of delivery — something needed to carry on.',
     chargeable: false,
     needsCategory: false,
+    prompt: 'What do you need?',
     placeholder: 'Need the statement for March to June — it was not attached to the handover.',
     goesTo: 'anyone',
+    submitLabel: 'Raise request',
+    freeNote: 'Asking for a document is not something the debtor caused. Where they asked for it '
+      + 'themselves, what earns a fee is sending it — item 1(a) on the email, charged when it goes.',
   },
   help: {
     label: 'Ask a team leader for help',
     blurb: 'You are not sure how to take this one forward and want a decision.',
     chargeable: false,
     needsCategory: false,
+    prompt: 'What do you need decided?',
     placeholder: 'Debtor keeps agreeing to pay and never does. Worth a letter of demand?',
     goesTo: 'team_leader',
+    submitLabel: 'Ask for help',
+    freeNote: 'Asking a team leader what to do is the firm supervising its own staff, not an '
+      + 'expense of collecting from this debtor.',
   },
   litigation: {
     label: 'Recommend it for litigation',
     blurb: 'The debtor will not pay and collections has nothing left to try.',
     chargeable: false,
     needsCategory: false,
+    prompt: 'Why has collecting run out of road?',
     placeholder: 'Refuses to pay, has the means, ignored three letters. Recommend we sue.',
     goesTo: 'liaison',
+    submitLabel: 'Recommend litigation',
+    freeNote: 'Deciding whether to sue is the firm\u2019s own business. The attorneys\u2019 costs '
+      + 'are a separate matter if it goes ahead.',
   },
   /*
    * RAISED BY THE IMPORT, NOT BY A PERSON, which is why it is not in ESCALATION_KIND_ORDER: the
@@ -273,8 +317,11 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     blurb: 'Raised by the import when a handover is accepted with something wrong on it.',
     chargeable: false,
     needsCategory: false,
+    prompt: 'What is wrong with the handover?',
     placeholder: 'The ID number on the handover sheet is a telephone number.',
     goesTo: 'liaison',
+    submitLabel: 'Raise it',
+    freeNote: 'A client\u2019s data being wrong is not something a debtor pays for.',
   },
 }
 

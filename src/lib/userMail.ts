@@ -728,7 +728,8 @@ export async function raiseTicketFromEmail(input: {
   accessToken: string
   accountEmailId: string
   kind: 'dispute' | 'request'
-  requestFrom?: 'client' | 'debtor' | 'file'
+  /** On a request: what is being asked for, from REQUEST_KINDS. Defaults to Other on the server. */
+  requestFor?: string
   category?: string | null
   ownerId?: string | null
   chaseOn?: string | null
@@ -749,7 +750,7 @@ export async function raiseTicketFromEmail(input: {
     body: JSON.stringify({
       accountEmailId: input.accountEmailId,
       kind: input.kind,
-      requestFrom: input.requestFrom,
+      requestFor: input.requestFor,
       category: input.category ?? null,
       ownerId: input.ownerId ?? null,
       chaseOn: input.chaseOn ?? null,

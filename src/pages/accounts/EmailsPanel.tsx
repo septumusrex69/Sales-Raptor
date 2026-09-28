@@ -306,10 +306,9 @@ function EmailBody({ email, canSend, userId, onReply, onReplyAll, onForward, onU
       accessToken: token,
       accountEmailId: email.id,
       kind,
-      /* The ordinary case by a distance, and the only one this button can know: what arrived
-         attached to a debtor's email came FROM the debtor. Re-pointed on the ticket if it turns
-         out the client is the one being chased. */
-      requestFrom: kind === 'request' ? 'debtor' : undefined,
+      /* WHAT it is asking for is left to the server's honest default of Other: the email itself
+         becomes the description, which says what is wanted better than anything this button could
+         infer from a subject line. Re-picked on the ticket in one press. */
     })
     setRaising(null)
     if (!result.ok) { setError(result.problem); return }

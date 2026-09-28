@@ -11182,3 +11182,60 @@ drop trigger if exists mail_ticket_same_account on public.account_emails;
 create trigger mail_ticket_same_account
   before insert or update of query_id, account_id on public.account_emails
   for each row execute function public.ticket_belongs_to_the_same_account();
+
+
+-- ============================================================================
+-- A REQUEST SAYS **WHAT** IS BEING ASKED FOR, NOT WHO IT IS BEING ASKED OF.
+--
+-- THE FIRM, LOOKING AT THE BOX: "instead of asking who are we asking, ask what are we asking, and
+-- then give it to. And then as well, what do you need? A further description. And then you can
+-- follow it up."
+--
+-- AND THE QUESTION THEY ASKED ALONGSIDE IT ANSWERS ITSELF UNDER THE NEW SHAPE. They asked: "from
+-- the debtor -- how would we request something from the debtor other than a written dispute, which
+-- already has that workflow in place?" It was a fair question about `request_from`, and the answer
+-- is that the column should not have existed. WHO IS BEING ASKED IS ALREADY ON THE TICKET: it is
+-- whoever it was GIVEN TO. Hand a statement request to the liaison and the client is who gets
+-- asked; hand a proof of payment to the collector and the debtor is. Naming the source as well
+-- meant two fields that could disagree -- "from the client", given to the collections agent -- and
+-- nothing in the system could say which of them was the truth.
+--
+-- SO IT IS THE SAME FIELD THE DISPUTE HAS. A dispute carries a `category` saying what kind of
+-- objection it is; a request carries `request_for` saying what kind of thing is wanted. Both make
+-- the board sortable by something other than the free text, which is the whole reason either is a
+-- closed list rather than a sentence.
+--
+-- AND THE DESCRIPTION IS NOW THE SECOND HALF OF IT rather than the whole of it: "What do you need?"
+-- is where "the March to June statement, the one that was not attached to the handover" goes.
+--
+-- THE THREE ROWS ALREADY ON THE BOOK are the firm's own from this afternoon, on test accounts.
+-- They are mapped rather than emptied -- two of them say "statement" in their own words, so they
+-- become a statement request; the third becomes Other, which is what it is.
+-- ============================================================================
+alter table public.account_queries add column if not exists request_for text;
+
+comment on column public.account_queries.request_for is
+  'On a request only: WHAT is being asked for -- a statement, the contract, proof of delivery. Who '
+  'it is being asked OF is not stored, because it is already on the ticket: whoever it was given '
+  'to. A closed list for the same reason a dispute has a category, so the board sorts by something '
+  'other than the free text.';
+
+update public.account_queries
+   set request_for = case
+     when description ilike '%statement%' then 'Statement of account'
+     else 'Other' end
+ where kind = 'request' and request_for is null;
+
+alter table public.account_queries drop constraint if exists account_queries_from_only_on_request;
+alter table public.account_queries drop constraint if exists account_queries_request_says_who_from;
+alter table public.account_queries drop column if exists request_from;
+
+-- Nothing but a request says what it wants: a dispute's subject is the objection itself, and an
+-- agent asking a team leader for a ruling is not asking anybody for a document.
+alter table public.account_queries add constraint account_queries_for_only_on_request
+  check (kind = 'request' or request_for is null);
+
+-- And a request always says. `is not null` leads for the reason the migration before last records:
+-- a comparison against NULL is NULL, `false OR NULL` is NULL, and a CHECK passes on NULL.
+alter table public.account_queries add constraint account_queries_request_says_what
+  check (kind <> 'request' or (request_for is not null and length(btrim(request_for)) > 0));

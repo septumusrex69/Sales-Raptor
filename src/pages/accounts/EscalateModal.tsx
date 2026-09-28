@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
-import { raiseQuery, stageForAssignee, REQUEST_SOURCES, type RequestSource } from '../../lib/accountQueries'
+import { raiseQuery, stageForAssignee, REQUEST_KINDS } from '../../lib/accountQueries'
 import {
   categoryExamples, explanationMissing,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
@@ -82,11 +82,10 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
    */
   const [reached, setReached] = useState<'verbal' | 'written'>('verbal')
   /*
-   * WHO A REQUEST IS BEING ASKED OF, which is not who is doing it -- that is the box below. The
-   * client is the ordinary case by a distance: nearly every request is a document the client holds
-   * and did not attach.
+   * WHAT A REQUEST IS ASKING FOR. The statement is the ordinary case by a distance -- it is the
+   * document a handover most often arrives without.
    */
-  const [requestFrom, setRequestFrom] = useState<RequestSource>('client')
+  const [requestFor, setRequestFor] = useState<string>(REQUEST_KINDS[0].value)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -192,7 +191,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
         reached: kind === 'dispute' ? reached : undefined,
         /* Only a request carries one; raiseQuery drops it on the others and the database refuses
            it there anyway. */
-        requestFrom: kind === 'request' ? requestFrom : undefined,
+        requestFor: kind === 'request' ? requestFor : undefined,
       })
       await onDone()
       onClose()
@@ -294,24 +293,27 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           same as who is doing it -- a colleague chases the client -- and it is the answer that
           says whether the debtor caused the work at all.
         */}
+        {/*
+          WHAT IS BEING ASKED FOR, which is the request's equivalent of the dispute's category --
+          the one closed answer that lets the board be sorted by something other than free text.
+          
+          IT REPLACED "WHO ARE WE ASKING", at the firm's asking and for a better reason than order:
+          who is being asked is already on the ticket, because it is whoever it is given to. See
+          REQUEST_KINDS.
+        */}
         {kind === 'request' && (
-          <fieldset className="space-y-1.5">
-            <legend className="text-sm font-medium text-slate-700 mb-1.5">Who are we asking?</legend>
-            {REQUEST_SOURCES.map((sourceOption) => (
-              <label key={sourceOption.value}
-                className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                  requestFrom === sourceOption.value ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
-                }`}>
-                <input type="radio" name="request-from" value={sourceOption.value}
-                  checked={requestFrom === sourceOption.value}
-                  onChange={() => setRequestFrom(sourceOption.value)} className="mt-0.5" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-slate-800">{sourceOption.label}</span>
-                  <span className="block text-[11px] text-slate-500">{sourceOption.blurb}</span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">What are we asking for?</span>
+            <select value={requestFor} onChange={(e) => setRequestFor(e.target.value)}
+              className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 bg-white">
+              {REQUEST_KINDS.map((r) => <option key={r.value} value={r.value}>{r.value}</option>)}
+            </select>
+            {/* The examples under it rather than in the option text: a select that reads
+                "Invoices — the invoices the debt is made up of" is unreadable at this width. */}
+            <span className="block text-[11px] text-slate-500 mt-1">
+              {REQUEST_KINDS.find((r) => r.value === requestFor)?.examples}
+            </span>
+          </label>
         )}
 
         <label className="block">
@@ -372,10 +374,9 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
         <label className="block">
           <span className="flex items-baseline justify-between gap-3">
             <span className="text-sm font-medium text-slate-700">
-              {kind === 'dispute' ? 'What is the issue?'
-                : kind === 'request' ? 'What do you need?'
-                : kind === 'help' ? 'What do you need decided?'
-                : 'Why has collecting run out of road?'}
+              {/* The third copy of the fallback chain, found by the check that guards the other
+                  two -- a request was asking "why has collecting run out of road?". */}
+              {ESCALATION_KINDS[kind].prompt}
             </span>
             {/*
               DICTATED, AT THE FIRM'S REQUEST: "if we raise a dispute, first of all, there should
@@ -468,9 +469,11 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
         ) : (
           <p className="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2.5">
             <span className="font-medium text-slate-700">Nothing is charged.</span>{' '}
-            {kind === 'help'
-              ? 'Asking a team leader what to do is the firm supervising its own staff, not an expense of collecting from this debtor.'
-              : 'Deciding whether to sue is the firm\u2019s own business. The attorneys\u2019 costs are a separate matter if it goes ahead.'}
+            {/* OFF THE KIND, NOT OUT OF A CHAIN. This was
+                `kind === 'help' ? … : <litigation>`, so a request -- being neither -- was told the
+                attorneys' costs were a separate matter. The firm read it back: "it says like
+                recommend for litigation. Why is that?" */}
+            {ESCALATION_KINDS[kind].freeNote}
           </p>
         )}
 
@@ -489,10 +492,8 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
           >
             <ShieldAlert size={15} />
-            {busy ? 'Escalating…'
-              : kind === 'dispute' ? 'Raise dispute'
-              : kind === 'help' ? 'Ask for help'
-              : 'Recommend litigation'}
+            {/* The same fault as the fee line above, on the button a person actually presses. */}
+            {busy ? 'Escalating…' : ESCALATION_KINDS[kind].submitLabel}
           </button>
           <button onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
         </div>

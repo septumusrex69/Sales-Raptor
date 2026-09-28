@@ -19,8 +19,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  ESCALATION_KINDS, ESCALATION_KIND_ORDER, REQUEST_SOURCES,
-  escalationChargeable, escalationNote,
+  ESCALATION_KINDS, ESCALATION_KIND_ORDER, REQUEST_KINDS, QUERY_CATEGORIES,
+  escalationChargeable, escalationNote, explanationMissing,
 } from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
@@ -92,33 +92,104 @@ ok('...without offering anybody twice',
 /* AND THE SHORT LIST IS STILL SHORT ON A DISPUTE. */
 ok('...and a dispute is still held to the three', /kind === 'request'\s*\?\s*'Anybody in the firm/.test(modal))
 
-/* ---------------- who is being asked, which is not who is doing it ---------------- */
+/* ---------------- what is being asked for, which is not who it is asked of ---------------- */
 
-check('there are three sources', REQUEST_SOURCES.map((r) => r.value), ['client', 'debtor', 'file'])
-ok('the box asks which', /Who are we asking\?/.test(modal))
-ok('...and passes it only on a request',
-  /requestFrom: kind === 'request' \? requestFrom : undefined/.test(modal))
+/*
+ * THE FIRM: "instead of asking who are we asking, ask what are we asking, and then give it to."
+ *
+ * AND ASKING **WHO** WAS THE MISTAKE, not merely the wrong order. They asked of the version this
+ * replaces: "from the debtor -- how would we request something from the debtor other than a
+ * written dispute, which already has that workflow in place?" WHO IS BEING ASKED IS ALREADY ON THE
+ * TICKET -- it is whoever it was given to. Storing it as well meant two fields that could
+ * disagree ("from the client", given to the collections agent) with nothing able to say which was
+ * true.
+ */
+ok('the box asks what is wanted', /What are we asking for\?/.test(modal))
+ok('...and no longer asks who of', !/Who are we asking/.test(modal))
+ok('...and nothing carries a source any more', !/requestFrom|request_from/.test(lib))
+/* SHAPED LIKE THE DISPUTE'S CATEGORY, because it does the same job: a closed list so a board of
+   requests sorts by something other than free text. */
+ok('the list is the same shape as the dispute’s categories',
+  REQUEST_KINDS.every((r) => typeof r.value === 'string' && typeof r.examples === 'string'))
+ok('...and every entry says what it covers', REQUEST_KINDS.every((r) => r.examples.length > 10))
+/* THE STATEMENT LEADS, because it is the document a handover most often arrives without -- and the
+   box opens on the first entry, so the order is a default rather than a list. */
+check('the statement is what the box opens on', REQUEST_KINDS[0].value, 'Statement of account')
+/* AND "OTHER" IS LAST AND PRESENT, or a request that is none of the named kinds has nowhere to go
+   and gets logged as the nearest wrong one. */
+check('...and Other is the last resort', REQUEST_KINDS[REQUEST_KINDS.length - 1].value, 'Other')
+/*
+ * WHICH MEANS "OTHER" HAS TO CARRY ITS OWN EXPLANATION, exactly as the dispute's does -- the same
+ * function, so the two cannot drift into different ideas of how much is enough.
+ */
+ok('Other needs saying what it was', explanationMissing('Other', 'stuff'))
+ok('...and a named kind does not', !explanationMissing(REQUEST_KINDS[0].value, ''))
+ok('...by the same rule the dispute uses',
+  QUERY_CATEGORIES.some((c) => c.value === 'Other'))
 /* DECIDED IN THE WRITE, not trusted to the caller -- the same lock `category` has, so a future
-   screen that forgets cannot put a source on a dispute. */
-ok('the write puts a source only on a request',
-  /request_from: \(input\.kind \?\? 'dispute'\) === 'request' \? \(input\.requestFrom \?\? null\) : null/.test(lib))
+   screen that forgets cannot put one on a dispute. */
+ok('the write puts it only on a request',
+  /request_for: \(input\.kind \?\? 'dispute'\) === 'request' \? \(input\.requestFor\?\.trim\(\) \|\| null\) : null/.test(lib))
 /* AND THE MAPPER CARRIES IT BACK. CLAUDE.md's own warning: a column in the table, the type and the
    select but missing from the hand-written mapper reads as undefined for ever and nothing fails. */
-ok('...and the mapper reads it back', /requestFrom: \(r\.request_from \?\? null\)/.test(lib))
+ok('...and the mapper reads it back', /requestFor: \(r\.request_for \?\? null\)/.test(lib))
+
+/* ---------------- and no kind wears another kind's words ---------------- */
+
+/*
+ * THE FIRM, READING A REQUEST BOX BACK: "it says like recommend for litigation. Why is that?"
+ *
+ * THE BUTTON AND THE FEE LINE WERE AN IF-ELSE CHAIN WITH A FALLBACK --
+ * `kind === 'dispute' ? … : kind === 'help' ? … : <litigation>` -- so a kind that was neither
+ * inherited the last branch. Adding `request` was all it took, and nothing failed: the box simply
+ * offered to recommend litigation for a statement.
+ *
+ * SO THE WORDS LIVE ON THE KIND. A record cannot fall through, and a missing entry is a type error
+ * before it is a screen. This is the assertion that keeps it there.
+ */
+ok('every kind carries its own button',
+  ESCALATION_KIND_ORDER.every((k) => (ESCALATION_KINDS[k].submitLabel ?? '').length > 0))
+check('...and no two press the same',
+  new Set(ESCALATION_KIND_ORDER.map((k) => ESCALATION_KINDS[k].submitLabel)).size,
+  ESCALATION_KIND_ORDER.length)
+/* A REQUEST DOES NOT OFFER TO SUE. The specific wrong word the firm read, named so this cannot
+   come back wearing a different chain. */
+ok('a request does not offer to recommend litigation',
+  !/litigation/i.test(ESCALATION_KINDS.request.submitLabel))
+/* AND THE FREE-OF-CHARGE LINE THE SAME WAY, on every kind that charges nothing. */
+ok('every free kind says why it is free',
+  ESCALATION_KIND_ORDER.filter((k) => !ESCALATION_KINDS[k].chargeable)
+    .every((k) => (ESCALATION_KINDS[k].freeNote ?? '').length > 20))
+ok('...and a request’s reason is its own',
+  !/attorneys/i.test(ESCALATION_KINDS.request.freeNote)
+  && !/supervising/i.test(ESCALATION_KINDS.request.freeNote))
+/* READ OFF THE KIND ON THE SCREEN, or the record above is decoration. */
+ok('the box reads the button off the kind',
+  /ESCALATION_KINDS\[kind\]\.submitLabel/.test(modal))
+ok('...and the fee line too', /ESCALATION_KINDS\[kind\]\.freeNote/.test(modal))
+/* AND THE QUESTION ABOVE THE DESCRIPTION, which was the third copy of the same chain. */
+ok('...and the question it asks', /ESCALATION_KINDS\[kind\]\.prompt/.test(modal))
+ok('every kind asks its own question',
+  ESCALATION_KIND_ORDER.every((k) => (ESCALATION_KINDS[k].prompt ?? '').endsWith('?')))
+check('...and no two ask the same',
+  new Set(ESCALATION_KIND_ORDER.map((k) => ESCALATION_KINDS[k].prompt)).size,
+  ESCALATION_KIND_ORDER.length)
+ok('...with no chain left to fall through',
+  !/kind === 'help'\s*\n?\s*\?/.test(modal) && !/'Recommend litigation'/.test(modal))
 
 /* ---------------- the database holds all of it ---------------- */
 
 ok('the database knows the kind', /'dispute','request','help','litigation','import'/.test(sql))
-ok('...and lets nothing else carry a source',
-  /account_queries_from_only_on_request[\s\S]{0,140}?kind = 'request' or request_from is null/.test(sql))
+ok('...and lets nothing else say what it wants',
+  /account_queries_for_only_on_request[\s\S]{0,140}?kind = 'request' or request_for is null/.test(sql))
 /*
  * A REQUEST ALWAYS SAYS WHO IT IS FROM -- and the spelling matters. `request_from = any(array[…])`
  * is NULL when the column is NULL, `false OR NULL` is NULL, and a CHECK constraint PASSES on NULL:
  * the obvious version accepted a request that named nobody. Rehearsing the migration in a
  * transaction is what caught it, and this assertion is what keeps the fix.
  */
-ok('...and a request always names one',
-  /request_from is not null and request_from = any \(array\['client','debtor','file'\]\)/.test(sql))
+ok('...and a request always says',
+  /request_for is not null and length\(btrim\(request_for\)\) > 0/.test(sql))
 
 /* ---------------- and the screen says which is which ---------------- */
 
@@ -128,7 +199,7 @@ ok('the panel is no longer named for one of the four', !/>Disputes</.test(panel)
 ok('...and says what it holds', /Disputes &amp; requests/.test(panel))
 /* ON EVERYTHING BUT A DISPUTE. Labelling the default adds a word to every card to say nothing. */
 ok('a card says what kind it is', /q\.kind !== 'dispute' && \(/.test(panel))
-ok('...and a request says who is being asked', /from the client/.test(panel))
+ok('...and a request says what it wants', /q\.requestFor && <span/.test(panel))
 
 console.log(`\ncheck-request-kind: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

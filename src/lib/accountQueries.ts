@@ -47,7 +47,7 @@ import {
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
   type DisputeStage as QueryStage, type QueryOutcome, type QueryEffect, type EscalationKind,
-  type ClientSection, type RequestSource, REQUEST_SOURCES,
+  type ClientSection, REQUEST_KINDS,
 } from './disputeCategories'
 
 export {
@@ -55,8 +55,8 @@ export {
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
 }
-export type { EscalationKind, ClientSection, RequestSource }
-export { REQUEST_SOURCES }
+export type { EscalationKind, ClientSection }
+export { REQUEST_KINDS }
 export type { QueryStage, QueryOutcome, QueryEffect }
 
 /**
@@ -136,11 +136,11 @@ export interface AccountQuery {
   receivedOn: string | null
   inWriting: boolean
   /**
-   * ON A REQUEST ONLY: who the thing is being asked OF. Not who is doing it, which is `ownerId`.
-   * Null on everything else, and the database refuses it there -- see
-   * account_queries_from_only_on_request.
+   * ON A REQUEST ONLY: WHAT is being asked for. Who it is being asked of is not stored, because it
+   * is already on the ticket -- whoever it was given to. Null on everything else, and the database
+   * refuses it there (account_queries_for_only_on_request).
    */
-  requestFrom: RequestSource | null
+  requestFor: string | null
 }
 
 const toQuery = (r: any): AccountQuery => ({
@@ -150,7 +150,7 @@ const toQuery = (r: any): AccountQuery => ({
   allegedOn: r.alleged_on ?? null,
   receivedOn: r.received_on ?? null,
   inWriting: !!r.in_writing,
-  requestFrom: (r.request_from ?? null) as RequestSource | null,
+  requestFor: (r.request_for ?? null) as string | null,
   accountId: r.account_id ?? null,
   handoverId: r.handover_id ?? null,
   description: r.description,
@@ -441,12 +441,12 @@ export async function raiseQuery(input: {
    */
   reached?: 'verbal' | 'written'
   /**
-   * ON A REQUEST: who it is being asked of. Required there by the database and by the box, because
-   * "get me the statement" with nobody named is a task nobody can start -- and because the source
-   * is what says whether the debtor caused the work at all. Ignored on every other kind, which the
-   * database refuses outright (account_queries_from_only_on_request).
+   * ON A REQUEST: WHAT is being asked for, from REQUEST_KINDS. Required there by the database and
+   * by the box, because a board of requests that all read "see the description" cannot be sorted
+   * or counted. Ignored on every other kind, which the database refuses outright
+   * (account_queries_for_only_on_request).
    */
-  requestFrom?: RequestSource | null
+  requestFor?: string | null
   /** The day the debtor said it, where that is not today -- a call taken at half past four and
       logged the next morning. Defaults to today. */
   allegedOn?: string | null
@@ -483,7 +483,7 @@ export async function raiseQuery(input: {
       in_writing: written,
       /* Only a request carries one, and only a request is allowed to -- decided here rather than
          trusted to the caller, the same way `category` is above. */
-      request_from: (input.kind ?? 'dispute') === 'request' ? (input.requestFrom ?? null) : null,
+      request_for: (input.kind ?? 'dispute') === 'request' ? (input.requestFor?.trim() || null) : null,
     })
     .select('*')
     .single()

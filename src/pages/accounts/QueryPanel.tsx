@@ -242,12 +242,11 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
               {q.kind === 'request' ? 'Request' : q.kind === 'help' ? 'For decision'
                 : q.kind === 'litigation' ? 'For litigation' : 'Handover data'}
             </span>
-            {q.requestFrom && (
-              <span className="text-slate-400">
-                {q.requestFrom === 'client' ? 'from the client'
-                  : q.requestFrom === 'debtor' ? 'from the debtor' : 'from our file'}
-              </span>
-            )}
+            {/* WHAT IS WANTED, straight through: it is already the firm's own words from a
+                closed list, so there is nothing here to translate. It replaced "from the client",
+                which said who was being asked -- a thing the ticket already answers with whose
+                desk it is on. */}
+            {q.requestFor && <span className="text-slate-400">{q.requestFor}</span>}
           </span>
         )}
       </p>

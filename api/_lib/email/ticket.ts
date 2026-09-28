@@ -84,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body ?? {}) as {
     accountEmailId?: string
     kind?: 'dispute' | 'request'
-    requestFrom?: 'client' | 'debtor' | 'file'
+    requestFor?: string
     category?: string | null
     ownerId?: string | null
     chaseOn?: string | null
@@ -97,10 +97,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Say which email.' })
     return
   }
-  if (kind === 'request' && !['client', 'debtor', 'file'].includes(body.requestFrom ?? '')) {
-    res.status(400).json({ error: 'Say who the request is being asked of.' })
-    return
-  }
+  /*
+   * WHAT IS BEING ASKED FOR, and the email's own default is Other -- honestly. A message a debtor
+   * sent is not a form with a box ticked on it: whoever presses this has read what it says, and
+   * the description below IS that message, which explains the request better than a guess from a
+   * subject line would. It is re-picked on the ticket in one press if it turns out to be one of
+   * the named kinds.
+   */
+  const requestFor = kind === 'request'
+    ? ((typeof body.requestFor === 'string' && body.requestFor.trim()) || 'Other')
+    : null
 
   const { data: mailRow, error: mailError } = await admin
     .from('account_emails')
@@ -160,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       kind,
       description,
       category: kind === 'dispute' ? (body.category?.trim() || null) : null,
-      request_from: kind === 'request' ? body.requestFrom : null,
+      request_for: requestFor,
       owner_id: body.ownerId || null,
       /* Where it lands follows who it was given to; unassigned, it sits with the desk it came to. */
       stage: body.ownerId ? 'liaison' : 'agent',
