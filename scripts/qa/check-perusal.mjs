@@ -86,14 +86,20 @@ check('the firm has always charged a perusal at its schedule’s rate',
  */
 const db = (billedToday) => {
   const inserted = []
-  const filters = []
-  const chain = (result) => {
+  /* ONE RECORD PER QUERY, NOT ONE FLAT LIST OF FILTERS. The engine reads account_fees TWICE -- once
+     for the item's monthly allowance and once for the day -- and both narrow by account, so a flat
+     list cannot say which of them carried what and every assertion below would pass on the wrong
+     one. */
+  const queries = []
+  const chain = (result, table) => {
+    const q = { table, eq: [] }
+    queries.push(q)
     const self = {
       select: () => self,
       insert: async (row) => { inserted.push(row); return { error: null } },
       update: () => self,
       or: () => self,
-      eq: (col, val) => { filters.push([col, val]); return self },
+      eq: (col, val) => { q.eq.push([col, val]); return self },
       gte: () => self,
       lt: () => self,
       maybeSingle: async () => result,
@@ -104,12 +110,12 @@ const db = (billedToday) => {
   }
   return {
     inserted,
-    filters,
-    rpc: () => chain({ data: { capital: 50000, spent_on_item: 0, towards_ceiling: 0 }, error: null }),
+    queries,
+    rpc: () => chain({ data: { capital: 50000, spent_on_item: 0, towards_ceiling: 0 }, error: null }, 'rpc'),
     from: (table) => {
-      if (table === 'debtor_accounts') return chain({ data: { status: 'Active' }, error: null })
-      if (table === 'account_fees') return chain({ count: billedToday, error: null })
-      return chain({ error: null })
+      if (table === 'debtor_accounts') return chain({ data: { status: 'Active' }, error: null }, table)
+      if (table === 'account_fees') return chain({ count: billedToday, error: null }, table)
+      return chain({ error: null }, table)
     },
   }
 }
@@ -117,7 +123,7 @@ const perusal = (billedToday) => {
   const d = db(billedToday)
   return chargeItemWith(d, {
     accountId: 'a', itemId: '3', actionCode: 'perusal', description: 'Perusal of documents',
-  }).then((r) => ({ result: r, rows: d.inserted, filters: d.filters }))
+  }).then((r) => ({ result: r, rows: d.inserted, queries: d.queries }))
 }
 
 const first = await perusal(0)
@@ -144,7 +150,13 @@ ok('the refusal says it can be charged again tomorrow',
  * everything else". Asserted as source, because the fake above cannot tell which column was
  * filtered on.
  */
-const asked = second.filters.map(([c, v]) => `${c}=${v}`)
+/* THE QUERY THAT COUNTS THE DAY, picked out by the column that makes it the day's rather than the
+   item's -- and its existence asserted before anything is read off it, or removing the count
+   entirely would leave every assertion below reading an empty list and passing. */
+const dayQueries = second.queries.filter((q) => q.table === 'account_fees'
+  && q.eq.some(([c]) => c === 'action_code'))
+check('one query counts the day', dayQueries.length, 1)
+const asked = (dayQueries[0]?.eq ?? []).map(([c, v]) => `${c}=${v}`)
 ok(`the day is counted on the action (${asked.join(', ')})`,
   asked.includes('action_code=perusal'))
 /* AND NOT ON THE ITEM. Counted there, a dispute handed to a liaison and a document opened would
@@ -154,6 +166,19 @@ ok('...rather than on the Annexure B item', !asked.includes('annexure_item=3'))
 /* ONLY CHARGES THAT EARNED SOMETHING, as the monthly allowance works: a perusal recorded at nought
    took nothing from the debtor and cannot be the reason the next one goes unrecovered. */
 ok('...and only the ones that earned something', asked.includes('billed=true'))
+/*
+ * PER ACCOUNT PER DAY, which is the firm's answer when asked which it was: "one charge per account
+ * per day". The debtor pays it, so the day belongs to the FILE.
+ */
+ok('...on this account', asked.includes('account_id=a'))
+/*
+ * AND NOT PER PERSON. `created_by` is written on every fee row, so counting the day there was one
+ * filter away -- and a collector, their team leader and the client liaison all reading the same
+ * trace report on the same afternoon would then be three charges for one set of documents, which is
+ * the firm billing a debtor for its own internal handover.
+ */
+ok('...and not once for each person who reads it',
+  !asked.some((f) => f.startsWith('created_by=') || f.startsWith('raised_by=') || f.startsWith('user_id=')))
 const dayBlock = engine.slice(engine.indexOf('const perDay = DAILY_LIMIT'))
 /* THE DAY IS THE PERSON'S OWN, built from the same clock the rest of the app calls today rather
    than from a timezone written out here. */

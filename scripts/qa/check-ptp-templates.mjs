@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import { parseLetter, letterProblems, canUseLetter, lettersText, PRINTER_FIELDS } from '../../src/lib/letterDocument.ts'
 import { unknownFields, MERGE_FIELDS } from '../../src/lib/messageTemplates.ts'
 import { smsCost } from '../../src/lib/smsSegments.ts'
+import { PTP_FREQUENCY } from '../../src/lib/arrangements.ts'
 
 let pass = 0
 const failures = []
@@ -288,17 +289,36 @@ for (const key of EXPECTED.sms) {
    * are shorter than what replaces them, which is how a one-segment template becomes a
    * two-segment message. The name is the long one from the firm's own examples.
    */
-  const merged = body
+  const merge = (freq) => body
     .replace(/\{\{debtor_name\}\}/g, 'Mr Van Der Westhuizen')
     .replace(/\{\{case_number\}\}/g, 'RAP-100001')
     .replace(/\{\{ptp_amount\}\}/g, 'R 2 500.00')
     .replace(/\{\{ptp_paid\}\}/g, 'R 2 500.00')
     .replace(/\{\{ptp_date\}\}/g, '5 October 2026')
+    .replace(/\{\{ptp_frequency\}\}/g, freq)
     .replace(/\{\{firm_phone\}\}/g, '012 348 2156')
     .replace(/\{\{firm_name\}\}/g, 'Bredell Ferreira')
-  const cost = smsCost(merged)
-  check(`...and GSM-7 once merged`, cost.offending, [])
-  check(`...and one segment with a long name in it (${cost.units} units)`, cost.segments, 1)
+  /*
+   * THE MERGE LIST COVERS THE TEMPLATE, asserted before anything is measured. A field added to one
+   * of these bodies and forgotten in the list above is measured at its PLACEHOLDER width for ever,
+   * and a placeholder is usually longer than the word that replaces it -- so the check goes on
+   * passing while measuring a message nobody sends. That is exactly what happened when
+   * {{ptp_frequency}} was added: 17 characters of literal stood in for 'once-off'.
+   */
+  check(`...and every field in ${key} is one this check knows the width of`,
+    merge('every month').match(/\{\{[a-z_]+\}\}/g), null)
+  /*
+   * ONCE PER ARRANGEMENT SHAPE. {{ptp_frequency}} is the one field on these whose width is decided
+   * by the arrangement rather than by the debtor, and the three words are three different lengths,
+   * so one shape fitting says nothing about the other two. A longer word put into PTP_FREQUENCY is
+   * a price rise on every confirmation SMS, paid by the debtor under item 1(c).
+   */
+  for (const [shape, freq] of Object.entries(PTP_FREQUENCY)) {
+    const cost = smsCost(merge(freq))
+    check(`...and GSM-7 once merged (${shape})`, cost.offending, [])
+    check(`...and one segment on a ${shape} arrangement with a long name in it (${cost.units} units)`,
+      cost.segments, 1)
+  }
 }
 
 /* ---------- what the confirmation has to say, in the firm's own words ---------- */

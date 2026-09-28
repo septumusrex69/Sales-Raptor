@@ -41,11 +41,17 @@ export const ARRANGEMENT_LABEL: Record<Arrangement, string> = {
  * instalment" is a category on a screen beside other categories. This one completes a sentence a
  * debtor reads -- "Amount: R 500,00 every week" -- and "Weekly instalment" does not.
  *
- * A ONCE-OFF SAYS WHAT IT IS rather than leaving the line bare. "R 13 347,31 as a single payment"
- * is the whole arrangement in four words; an empty frequency there reads as a field that failed.
+ * A ONCE-OFF SAYS WHAT IT IS rather than leaving the line bare. An empty frequency there reads as
+ * a field that failed.
+ *
+ * AND IT IS "ONCE-OFF", WHICH IS THE FIRM'S OWN WORD -- ARRANGEMENT_LABEL has said "Once-off
+ * settlement" since the screen was built. It was "as a single payment", which is eleven characters
+ * longer and means the same thing; on an SMS those eleven characters are priced, and at the
+ * firm's own worst-case name the confirmation was three characters off a second segment at the
+ * debtor's expense under item 1(c).
  */
 export const PTP_FREQUENCY: Record<Arrangement, string> = {
-  once_off: 'as a single payment',
+  once_off: 'once-off',
   weekly: 'every week',
   monthly: 'every month',
 }

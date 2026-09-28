@@ -137,6 +137,13 @@ export interface TariffSchedule {
  * to a liaison are one kind of work to the gazette and one kind of work to the firm, so they share
  * the day's allowance rather than each having their own.
  *
+ * PER ACCOUNT, NOT PER PERSON -- the firm, asked directly which it was: "one charge per account per
+ * day". It is the DEBTOR who pays it, so the day belongs to the file rather than to whoever opened
+ * it. A collector, their team leader and the client liaison all reading the same trace report on
+ * the same afternoon read ONE set of documents; three charges for it would be the firm billing a
+ * debtor for its own internal handover. `created_by` sits on every fee row, so counting the day
+ * there was one filter away, and it would have read "one each".
+ *
  * PER CALENDAR DAY IN THE FIRM'S OWN TIMEZONE. An action at one in the morning in Johannesburg is
  * eleven the previous night in UTC, and a day boundary read in the wrong zone is a second charge
  * on a debtor who was only ever perused once.

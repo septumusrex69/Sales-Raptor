@@ -10388,3 +10388,35 @@ drop trigger if exists workflow_start_on_dispute on public.account_queries;
 create trigger workflow_start_on_dispute
   after insert or update of in_writing, received_on on public.account_queries
   for each row execute function public.workflow_start_on_dispute();
+
+
+-- ============================================================================
+-- THE CONFIRMATION SMS SAYS HOW OFTEN THE PAYMENT FALLS.
+--
+-- THE SAME DEFECT THE EMAIL HAD, LEFT BEHIND WHEN THAT WAS FIXED because an SMS costs the debtor
+-- money and the firm had not asked for it. Shown what it would cost, they did: "yes do the SMS."
+--
+-- "R 2 500.00 by 5 October 2026" IS ONE PAYMENT. The debtor who got that message had agreed to
+-- R2 500 a month, and the only fact that makes it an arrangement was the one the message left out.
+--
+-- "DUE", NOT "FROM", AND THE ONCE-OFF IS WHY. "R 2 500.00 every month from 5 October" reads
+-- correctly and "R 2 500.00 once-off from 5 October" does not -- there is nothing for it to run
+-- from. "...once-off, due 5 October" is right on all three shapes, which is what one template has
+-- to be: the same row goes out on a weekly, a monthly and a settlement arrangement.
+--
+-- AND IT STAYS ONE SEGMENT. Measured on the firm's own worst-case name against every shape: 149,
+-- 148 and 146 of the 160 characters a GSM-7 segment holds. The margin is the same the notice of
+-- default already ships on (150), which is what makes it the house norm rather than a gamble. A
+-- second segment is R3.50 more, charged to the debtor under item 1(c).
+--
+-- PART OF WHAT BOUGHT THAT ROOM IS THE WORD ITSELF: PTP_FREQUENCY's once-off value was "as a
+-- single payment" and is now "once-off", which is the firm's own word for it (ARRANGEMENT_LABEL
+-- has read "Once-off settlement" since the screen was built) and eleven characters shorter.
+-- ============================================================================
+update public.message_templates
+set body = replace(
+  body,
+  'is confirmed: {{ptp_amount}} by {{ptp_date}}.',
+  'is confirmed: {{ptp_amount}} {{ptp_frequency}}, due {{ptp_date}}.'
+)
+where seed_key in ('sms-ptp-confirmed-individual', 'sms-ptp-confirmed-company');
