@@ -7,9 +7,12 @@ import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand, ratePercent } from '../../lib/money'
 import { supabase } from '../../lib/supabase'
 import {
-  RUN_STATUS_LABEL, approveRun, fetchPaymentAudit, fetchRunPayments, markRunPaid, markRunSent,
+  RUN_STATUS_LABEL, approveRun, fetchPaymentAudit, fetchRunPayments, markRunPaid,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
+import { buildRemittanceAdvice } from '../../lib/remittanceAdvice'
+import { remittancePdf } from '../../lib/remittancePdf'
+import { adviceBody, adviceSubject, sendRemittanceAdvice } from '../../lib/remittanceEmail'
 
 /**
  * ONE PAYOVER RUN, AND THE PAYMENTS UNDER IT.
@@ -61,7 +64,7 @@ const STATUS_TONE: Record<RunStatus, string> = {
 export function RunDetail() {
   const { id = '' } = useParams()
   const [run, setRun] = useState<RunRow | null>(null)
-  const [client, setClient] = useState<{ name: string; code: string | null; rate: number | null } | null>(null)
+  const [client, setClient] = useState<{ name: string; code: string | null; rate: number | null; vatNumber: string | null; email: string | null } | null>(null)
   const [blockers, setBlockers] = useState<{ kind: string; detail: string; amount: number | null }[]>([])
   const [rows, setRows] = useState<RunPayment[]>([])
   const [open, setOpen] = useState<RunPayment | null>(null)
@@ -72,6 +75,8 @@ export function RunDetail() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [payModal, setPayModal] = useState(false)
+  const [emailModal, setEmailModal] = useState(false)
+  const [firm, setFirm] = useState<{ name: string; address: string | null; phone: string | null; email: string | null; vatNumber: string | null } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -79,19 +84,30 @@ export function RunDetail() {
     try {
       const { data, error: e } = await supabase
         .from('payover_runs')
-        .select('*, companies(name, code, commission_rate)')
+        .select('*, companies(name, code, commission_rate, vat_number, email)')
         .eq('id', id)
         .maybeSingle()
       if (e) throw new Error(e.message)
       if (!data) throw new Error('That payover run is no longer here.')
-      const d = data as unknown as RunRow & { companies: { name: string; code: string | null; commission_rate: number | null } }
+      const d = data as unknown as RunRow & { companies: { name: string; code: string | null; commission_rate: number | null; vat_number: string | null; email: string | null } }
       setRun(d)
-      setClient({ name: d.companies?.name ?? '', code: d.companies?.code ?? null, rate: d.companies?.commission_rate ?? null })
+      setClient({
+        name: d.companies?.name ?? '', code: d.companies?.code ?? null,
+        rate: d.companies?.commission_rate ?? null,
+        vatNumber: d.companies?.vat_number ?? null, email: d.companies?.email ?? null,
+      })
       const { data: b } = await supabase.rpc('payover_run_blockers', { p_run: id })
       setBlockers(((b ?? []) as Record<string, unknown>[]).map((x) => ({
         kind: String(x.kind), detail: String(x.detail),
         amount: x.amount === null || x.amount === undefined ? null : Number(x.amount),
       })))
+      const { data: fs } = await supabase.from('firm_settings')
+        .select('firm_name, physical_address, phone, email, vat_number').limit(1).maybeSingle()
+      const f = fs as { firm_name: string; physical_address: string | null; phone: string | null; email: string | null; vat_number: string | null } | null
+      setFirm(f ? {
+        name: f.firm_name, address: f.physical_address, phone: f.phone,
+        email: f.email, vatNumber: f.vat_number,
+      } : null)
       setRows(await fetchRunPayments(id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load that run.')
@@ -119,6 +135,46 @@ export function RunDetail() {
         || (r.clientReference ?? '').toLowerCase().includes(q)
     })
   }, [rows, filter, onlyExceptions])
+
+  /*
+   * THE SAME MODEL THE PDF AND THE EMAIL ARE BUILT FROM, assembled here from the run and its
+   * lines. Built once rather than twice: a preview that disagreed with the attachment would be
+   * found by a client, not by us.
+   */
+  const advice = useMemo(() => {
+    if (!run || !client || !firm) return null
+    return buildRemittanceAdvice({
+      firm,
+      client: { name: client.name, code: client.code, vatNumber: client.vatNumber },
+      run: {
+        invoiceNumber: run.invoice_number,
+        periodStart: run.period_start, periodEnd: run.period_end,
+        issuedOn: (run.approved_at ?? new Date().toISOString()).slice(0, 10),
+        trustCapital: run.trust_capital, trustCommission: run.trust_commission,
+        dueToClient: run.due_to_client, ptcReceived: run.ptc_received,
+        ptcFeesTaken: run.ptc_fees_taken, ptcCapital: run.ptc_capital,
+        ptcCommission: run.ptc_commission, dueToBf: run.due_to_bf,
+        commissionVat: run.commission_vat, carriedIn: run.carried_in,
+        netPayover: run.net_payover, commissionRate: client.rate,
+        paidAt: run.paid_at, eftReference: run.eft_reference,
+      },
+      lines: rows,
+    })
+  }, [run, client, firm, rows])
+
+  async function openPdf() {
+    if (!advice) return
+    setBusy(true); setError(null)
+    try {
+      const { bytes, problem } = await remittancePdf(advice)
+      if (problem) { setError(problem); return }
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
+      window.open(url, '_blank', 'noopener')
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not draw the statement.')
+    } finally { setBusy(false) }
+  }
 
   async function act(fn: () => Promise<void>) {
     setBusy(true); setError(null)
@@ -161,10 +217,14 @@ export function RunDetail() {
                 Approve
               </button>
             )}
+            <button type="button" disabled={busy || !advice} onClick={() => void openPdf()}
+              className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+              Preview statement
+            </button>
             {run.status === 'approved' && (
-              <button type="button" disabled={busy} onClick={() => void act(() => markRunSent(run.id))}
+              <button type="button" disabled={busy || !advice} onClick={() => setEmailModal(true)}
                 className="rounded-lg bg-navy-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
-                Mark advice sent
+                Email advice
               </button>
             )}
             {(run.status === 'approved' || run.status === 'sent') && (
@@ -280,6 +340,15 @@ export function RunDetail() {
       </Card>
 
       {open && <PaymentPanel row={open} audit={audit} onClose={() => setOpen(null)} />}
+      {emailModal && advice && run && (
+        <EmailAdviceModal
+          advice={advice}
+          runId={run.id}
+          defaultTo={client?.email ?? ''}
+          onClose={() => setEmailModal(false)}
+          onSent={async () => { setEmailModal(false); await load() }}
+        />
+      )}
       {payModal && run && (
         <MarkPaidModal
           onClose={() => setPayModal(false)}
@@ -413,6 +482,77 @@ function MarkPaidModal({ onClose, onSave }: { onClose: () => void; onSave: (ref:
             className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50"
           >
             Mark paid
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * EMAILING THE ADVICE, with the message shown before it goes.
+ *
+ * The recipient defaults to the client's own address and is editable, because the person who
+ * receives statements is often not the person on the client record. The body is the one the
+ * client will actually get -- blank lines and all -- rather than a summary of it.
+ */
+function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
+  advice: ReturnType<typeof buildRemittanceAdvice>
+  runId: string
+  defaultTo: string
+  onClose: () => void
+  onSent: () => Promise<void>
+}) {
+  const [to, setTo] = useState(defaultTo)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <Modal title="Email the remittance advice" onClose={onClose} width={520}>
+      <div className="space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">To</label>
+          <input value={to} onChange={(e) => setTo(e.target.value)} className={inputClass}
+            placeholder="statements@client.co.za" />
+          {!defaultTo && (
+            <p className="mt-1 text-xs text-amber-700">
+              This client has no email address on file, so there is nothing to fall back on.
+            </p>
+          )}
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-slate-600">Subject</div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-700">{adviceSubject(advice)}</div>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-slate-600">Message</div>
+          <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-[13px] font-sans text-slate-700">
+            {adviceBody(advice)}
+          </pre>
+        </div>
+        <p className="text-xs text-slate-400">
+          {advice.run.invoiceNumber}.pdf is attached — {advice.collections.length} collection
+          {advice.collections.length === 1 ? '' : 's'}
+          {advice.direct.length > 0 ? ` and ${advice.direct.length} paid to you directly` : ''}.
+          The run is marked sent only once the message has actually gone.
+        </p>
+        {advice.problems.length > 0 && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+            {advice.problems.map((p) => <div key={p}>{p}</div>)}
+          </div>
+        )}
+        {error && <p className="rounded-lg bg-rust-50 px-3 py-2 text-[13px] text-rust-700">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" disabled={busy || !to.trim()}
+            onClick={() => {
+              setBusy(true); setError(null)
+              void sendRemittanceAdvice(advice, to.trim(), runId)
+                .then(onSent)
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : 'It would not send.'))
+                .finally(() => setBusy(false))
+            }}
+            className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
+            {busy ? 'Sending…' : 'Send it'}
           </button>
         </div>
       </div>

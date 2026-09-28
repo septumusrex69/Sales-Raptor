@@ -109,6 +109,12 @@ export interface RunPayment {
   capitalAfter: number
   carriedAmount: number
   lateCapture: boolean
+  accountStatus: string | null
+  handoverDate: string | null
+  capitalHandedOver: number
+  /* DERIVED, NEVER THE STATUS COLUMN. The old FileFish report printed "Paid in Full" beside
+     R5 635.80 still outstanding; paid in full here means the capital is nought and nothing else. */
+  paidInFull: boolean
 }
 
 export interface ExceptionJob {
@@ -270,6 +276,10 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     capitalAfter: n(r.capital_after),
     carriedAmount: n(r.carried_amount),
     lateCapture: Boolean(r.late_capture),
+    accountStatus: s(r.account_status),
+    handoverDate: s(r.handover_date),
+    capitalHandedOver: n(r.capital_handed_over),
+    paidInFull: Boolean(r.paid_in_full),
   }))
 }
 
