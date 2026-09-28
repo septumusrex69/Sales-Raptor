@@ -103,7 +103,18 @@ check('chargeable and classifiable agree',
 
 // The dispute stays first: it is the common case and the box opens on it.
 check('the dispute is offered first', ESCALATION_KIND_ORDER[0], 'dispute')
-check('there are three kinds', ESCALATION_KIND_ORDER.length, 3)
+/*
+ * THE SET, NOT THE COUNT. This read `length === 3` and failed the day a request was added --
+ * which was the check working, but a bare count cannot tell a kind that was added on purpose from
+ * one that appeared by accident, and the number says nothing about which. Naming them means a
+ * deliberate addition updates one line and states what it added.
+ */
+check('the kinds offered are exactly these', ESCALATION_KIND_ORDER,
+  ['dispute', 'request', 'help', 'litigation'])
+/* AND THE IMPORT'S KIND IS NOT AMONG THEM. It is raised by the import, which knows which cell was
+   wrong; an agent looking at an account cannot decide a client's handover sheet was mistyped. */
+check('...and the import is not one a person may raise',
+  ESCALATION_KIND_ORDER.includes('import'), false)
 check('every kind has a label, a blurb and a placeholder', ESCALATION_KIND_ORDER.every(
   (k) => ESCALATION_KINDS[k].label && ESCALATION_KINDS[k].blurb && ESCALATION_KINDS[k].placeholder), true)
 
@@ -112,8 +123,16 @@ check('a dispute reads as one', escalationNote('dispute', 'says she paid'), 'Dis
 check('help reads as help', escalationNote('help', 'what now?'), 'Escalated for help: what now?')
 check('litigation reads as litigation', escalationNote('litigation', 'will not pay'),
   'Recommended for litigation: will not pay')
+check('a request reads as a request', escalationNote('request', 'the March statement'),
+  'Information requested: the March statement')
+/*
+ * AND NO TWO READ ALIKE, counted against the LIST rather than against a number -- a hard 3 here
+ * would have passed a fourth kind that duplicated an existing sentence, which is the one thing
+ * this assertion exists to catch.
+ */
 const notes = ESCALATION_KIND_ORDER.map((k) => escalationNote(k, 'x'))
-check('no two kinds read the same on the timeline', new Set(notes).size, 3)
+check('no two kinds read the same on the timeline',
+  new Set(notes).size, ESCALATION_KIND_ORDER.length)
 
 /*
  * THE FEE GUARD IS STRUCTURAL, and this proves it is still wired.

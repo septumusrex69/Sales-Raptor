@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
-import { raiseQuery, stageForAssignee } from '../../lib/accountQueries'
+import { raiseQuery, stageForAssignee, REQUEST_SOURCES, type RequestSource } from '../../lib/accountQueries'
 import {
   categoryExamples, explanationMissing,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
@@ -81,6 +81,12 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
    * not stops a statutory sequence on a document nobody has.
    */
   const [reached, setReached] = useState<'verbal' | 'written'>('verbal')
+  /*
+   * WHO A REQUEST IS BEING ASKED OF, which is not who is doing it -- that is the box below. The
+   * client is the ordinary case by a distance: nearly every request is a document the client holds
+   * and did not attach.
+   */
+  const [requestFrom, setRequestFrom] = useState<RequestSource>('client')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -114,6 +120,23 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
   )
   /* What `Ask a team leader` suggests, and what the charge rule reads. */
   const teamLeaders = myLeaders
+
+  /*
+   * EVERYBODY THE THREE GROUPS ABOVE DO NOT ALREADY OFFER, for a request only.
+   *
+   * Filtered rather than concatenated so nobody appears twice: a liaison manager who is also this
+   * client's liaison is one person, and a select with their name in it twice reads as two people
+   * with the same name.
+   */
+  const alreadyOffered = useMemo(
+    () => new Set([clientLiaison?.id, ...myLeaders.map((u) => u.id), ...liaisonManagers.map((u) => u.id)]
+      .filter((id): id is string => !!id)),
+    [clientLiaison?.id, myLeaders, liaisonManagers],
+  )
+  const everybodyElse = useMemo(
+    () => users.filter((u) => !alreadyOffered.has(u.id)),
+    [users, alreadyOffered],
+  )
 
   /*
    * Whether the debtor pays for this follows one question: did the dispute go to somebody else?
@@ -167,6 +190,9 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
         /* Only a dispute has a stage. raiseQuery ignores it on the other two and the database
            refuses the dates there anyway -- nobody alleges an agent asking for help. */
         reached: kind === 'dispute' ? reached : undefined,
+        /* Only a request carries one; raiseQuery drops it on the others and the database refuses
+           it there anyway. */
+        requestFrom: kind === 'request' ? requestFrom : undefined,
       })
       await onDone()
       onClose()
@@ -262,6 +288,32 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           </fieldset>
         )}
 
+        {/*
+          WHO THE THING IS BEING ASKED OF, which is the request's equivalent of the dispute's "how
+          did it reach us": one closed question that decides what the ticket means. It is NOT the
+          same as who is doing it -- a colleague chases the client -- and it is the answer that
+          says whether the debtor caused the work at all.
+        */}
+        {kind === 'request' && (
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium text-slate-700 mb-1.5">Who are we asking?</legend>
+            {REQUEST_SOURCES.map((sourceOption) => (
+              <label key={sourceOption.value}
+                className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                  requestFrom === sourceOption.value ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+                }`}>
+                <input type="radio" name="request-from" value={sourceOption.value}
+                  checked={requestFrom === sourceOption.value}
+                  onChange={() => setRequestFrom(sourceOption.value)} className="mt-0.5" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-slate-800">{sourceOption.label}</span>
+                  <span className="block text-[11px] text-slate-500">{sourceOption.blurb}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Give it to</span>
           <select
@@ -285,11 +337,30 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
                 {liaisonManagers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </optgroup>
             )}
+            {/*
+              A REQUEST MAY GO TO ANYBODY, at the firm's choosing, and a dispute may not.
+              The short list exists because a FINDING needs somebody with standing over the person
+              who raised it. Nothing about "please send me the March statement" needs standing, and
+              the person who can answer it is often neither a team leader nor a liaison -- whoever
+              did the import, whoever took the call. Narrowing it there would send somebody hunting
+              for a name and then logging it as a dispute to reach them, which is the whole fault
+              this kind exists to remove.
+
+              THE THREE ABOVE STAY AT THE TOP even on a request: they are still the likeliest
+              answer, and a list that reorders itself by kind is a list nobody learns.
+            */}
+            {kind === 'request' && everybodyElse.length > 0 && (
+              <optgroup label="Anybody else">
+                {everybodyElse.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </optgroup>
+            )}
           </select>
           {/* THE LIST IS SHORT ON PURPOSE and says so, or somebody hunts for a name that is not
               there and concludes the screen is broken. */}
           <span className="block text-[11px] text-slate-500 mt-1">
-            Your team leader, the liaison who looks after this client, or the liaison manager.
+            {kind === 'request'
+              ? 'Anybody in the firm — a request needs somebody who can answer it, not somebody senior.'
+              : 'Your team leader, the liaison who looks after this client, or the liaison manager.'}
           </span>
           {!clientLiaison && (
             <span className="block text-[11px] text-gold-600 mt-1">
@@ -302,6 +373,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           <span className="flex items-baseline justify-between gap-3">
             <span className="text-sm font-medium text-slate-700">
               {kind === 'dispute' ? 'What is the issue?'
+                : kind === 'request' ? 'What do you need?'
                 : kind === 'help' ? 'What do you need decided?'
                 : 'Why has collecting run out of road?'}
             </span>

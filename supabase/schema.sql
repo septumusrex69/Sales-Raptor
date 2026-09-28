@@ -10970,3 +10970,60 @@ comment on function public.workflow_test_advance(uuid, integer) is
 
 revoke all on function public.workflow_test_advance(uuid, integer) from public;
 revoke all on function public.workflow_test_advance(uuid, integer) from authenticated;
+
+
+-- ============================================================================
+-- A REQUEST IS NOT A DISPUTE, AND THEY HAVE DIFFERENT PHYSICS.
+--
+-- THE FIRM: "sometimes we get like disputes, not a dispute, it's like the clerk that might request
+-- some information... it might be something small like a statement or additional information...
+-- requesting additional information doesn't justify something as serious as a dispute... the whole
+-- dispute situation for me currently just feels very disorganised."
+--
+-- IT WAS ONE TABLE DOING TWO JOBS, and because the dispute machinery hangs off the row, everything
+-- filed there inherited a dispute's gravity:
+--
+--   A DISPUTE IS A STATE OF THE ACCOUNT. The debtor asserts the debt is wrong; in writing it HOLDS
+--   every collection sequence; it runs a clock the firm answers in ten business days; it ends in a
+--   FINDING that decides whether a statutory sequence resumes, ends or must be issued again; it is
+--   charged to the debtor under item 3; and there may be only one at a time.
+--
+--   A REQUEST IS A PIECE OF WORK. Somebody needs a thing to carry on -- a statement the client did
+--   not attach, the signed contract, proof of delivery. It holds nothing, changes nothing about the
+--   account's legal position, ends when THE THING ARRIVES, and several are open at once.
+--
+-- A clerk needing a statement had nowhere to put it, so it went in as a dispute -- which held the
+-- collection sequences on an account nobody was objecting to, and put a second clock on the book.
+-- It also made the one-open-dispute rule riskier than it should have been, because the pressure to
+-- log a small query as a dispute was the only door.
+--
+-- `request_from` SAYS WHO IT IS BEING ASKED OF, which is not the same as who is doing it. A
+-- collector asks a colleague (the owner) to get a statement out of the client (the source). Both
+-- matter, and the source is what decides whether the debtor caused the work at all.
+--
+-- THE SECOND CHECK IS WRITTEN WITH `is not null` FIRST ON PURPOSE. `request_from = any(array[...])`
+-- is NULL when the column is NULL, `false OR NULL` is NULL, and a CHECK constraint PASSES on NULL
+-- -- so the obvious spelling accepted a request that said nothing about who it was from. Caught by
+-- rehearsing it in a transaction before applying it, which is the only reason this note exists.
+-- ============================================================================
+alter table public.account_queries drop constraint account_queries_kind_check;
+alter table public.account_queries add constraint account_queries_kind_check
+  check (kind = any (array['dispute','request','help','litigation','import']));
+
+alter table public.account_queries add column if not exists request_from text;
+
+comment on column public.account_queries.request_from is
+  'On a request only: who the thing is being asked OF -- client, debtor, or our own file. Not who '
+  'is doing it, which is owner_id. The source is what decides whether the debtor caused the work: '
+  'a clerk chasing a client for a statement the client should have attached is the client''s '
+  'failing, and billing a debtor for their creditor''s admin would not survive being asked about.';
+
+-- Nothing but a request has a source: an agent asking a team leader for a ruling is not asking
+-- anybody for a document, and a dispute's source is the debtor by definition.
+alter table public.account_queries add constraint account_queries_from_only_on_request
+  check (kind = 'request' or request_from is null);
+
+-- And a request always has one. See the header for why `is not null` leads.
+alter table public.account_queries add constraint account_queries_request_says_who_from
+  check (kind <> 'request'
+         or (request_from is not null and request_from = any (array['client','debtor','file'])));

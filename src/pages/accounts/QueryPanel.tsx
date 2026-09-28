@@ -95,7 +95,14 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
   return (
     <Card>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes</h3>
+        {/*
+          NOT "DISPUTES" ANY MORE, because it never only held them -- help and litigation have
+          always been on this list, and a request joins them. The firm: "the whole dispute
+          situation for me currently just feels very disorganised." A panel of four kinds of thing
+          under one of their names is part of that: it made a request for a statement look like a
+          debtor objecting, which is exactly the confusion the kinds are there to end.
+        */}
+        <h3 className="text-[11px] uppercase tracking-wide text-slate-400">Disputes &amp; requests</h3>
         {!alreadyDisputed && (
           <button onClick={onRaise} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
             <Plus size={12} /> Raise one
@@ -217,6 +224,30 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
         {q.category && (
           <span className="inline-flex items-center gap-1.5">
             <span className="text-slate-300">&middot;</span>{q.category}
+          </span>
+        )}
+        {/*
+          WHAT KIND OF THING THIS IS, ON EVERYTHING BUT A DISPUTE.
+          
+          NOT ON A DISPUTE, deliberately: it is the heaviest of them and the one the panel is
+          named for, so labelling it adds a word to every card to say the default. The others
+          look identical to it without this -- which is how "please send the March statement"
+          read as a debtor objecting to the debt -- and a request also says who is being asked,
+          because "awaiting liaison · from the client" is the whole status in five words.
+        */}
+        {q.kind !== 'dispute' && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-slate-300">&middot;</span>
+            <span className="text-slate-600">
+              {q.kind === 'request' ? 'Request' : q.kind === 'help' ? 'For decision'
+                : q.kind === 'litigation' ? 'For litigation' : 'Handover data'}
+            </span>
+            {q.requestFrom && (
+              <span className="text-slate-400">
+                {q.requestFrom === 'client' ? 'from the client'
+                  : q.requestFrom === 'debtor' ? 'from the debtor' : 'from our file'}
+              </span>
+            )}
           </span>
         )}
       </p>

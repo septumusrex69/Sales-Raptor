@@ -47,7 +47,7 @@ import {
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
   type DisputeStage as QueryStage, type QueryOutcome, type QueryEffect, type EscalationKind,
-  type ClientSection,
+  type ClientSection, type RequestSource, REQUEST_SOURCES,
 } from './disputeCategories'
 
 export {
@@ -55,7 +55,8 @@ export {
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
 }
-export type { EscalationKind, ClientSection }
+export type { EscalationKind, ClientSection, RequestSource }
+export { REQUEST_SOURCES }
 export type { QueryStage, QueryOutcome, QueryEffect }
 
 /**
@@ -134,6 +135,12 @@ export interface AccountQuery {
   allegedOn: string | null
   receivedOn: string | null
   inWriting: boolean
+  /**
+   * ON A REQUEST ONLY: who the thing is being asked OF. Not who is doing it, which is `ownerId`.
+   * Null on everything else, and the database refuses it there -- see
+   * account_queries_from_only_on_request.
+   */
+  requestFrom: RequestSource | null
 }
 
 const toQuery = (r: any): AccountQuery => ({
@@ -143,6 +150,7 @@ const toQuery = (r: any): AccountQuery => ({
   allegedOn: r.alleged_on ?? null,
   receivedOn: r.received_on ?? null,
   inWriting: !!r.in_writing,
+  requestFrom: (r.request_from ?? null) as RequestSource | null,
   accountId: r.account_id ?? null,
   handoverId: r.handover_id ?? null,
   description: r.description,
@@ -432,6 +440,13 @@ export async function raiseQuery(input: {
    * account_queries_dates_only_on_dispute. Nobody alleges an agent asking for help.
    */
   reached?: 'verbal' | 'written'
+  /**
+   * ON A REQUEST: who it is being asked of. Required there by the database and by the box, because
+   * "get me the statement" with nobody named is a task nobody can start -- and because the source
+   * is what says whether the debtor caused the work at all. Ignored on every other kind, which the
+   * database refuses outright (account_queries_from_only_on_request).
+   */
+  requestFrom?: RequestSource | null
   /** The day the debtor said it, where that is not today -- a call taken at half past four and
       logged the next morning. Defaults to today. */
   allegedOn?: string | null
@@ -466,6 +481,9 @@ export async function raiseQuery(input: {
          them is a row that says the dispute both has and has not arrived. */
       received_on: written ? todayIso() : null,
       in_writing: written,
+      /* Only a request carries one, and only a request is allowed to -- decided here rather than
+         trusted to the caller, the same way `category` is above. */
+      request_from: (input.kind ?? 'dispute') === 'request' ? (input.requestFrom ?? null) : null,
     })
     .select('*')
     .single()

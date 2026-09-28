@@ -172,7 +172,24 @@ export const QUERY_EFFECT_HINT: Record<QueryEffect, string> = {
  * the firm supervising its own staff. A recommendation to sue is the firm deciding how to run
  * its business. A debtor pays for the first and must never pay for the other two.
  */
-export type EscalationKind = 'dispute' | 'help' | 'litigation' | 'import'
+export type EscalationKind = 'dispute' | 'request' | 'help' | 'litigation' | 'import'
+
+/**
+ * WHO A REQUEST IS BEING ASKED OF, which is not the same as who is doing it.
+ *
+ * A collector asks a COLLEAGUE (the owner) to get a statement out of the CLIENT (the source). The
+ * source is also what decides whether the debtor caused the work at all -- see `chargeable` below.
+ */
+export type RequestSource = 'client' | 'debtor' | 'file'
+
+export const REQUEST_SOURCES: { value: RequestSource; label: string; blurb: string }[] = [
+  { value: 'client', label: 'From the client',
+    blurb: 'A statement, the signed contract, proof of delivery — something they hold.' },
+  { value: 'debtor', label: 'From the debtor',
+    blurb: 'Proof of payment, an updated address, a document they said they would send.' },
+  { value: 'file', label: 'From our own file',
+    blurb: 'Something Raptor or the handover should already have — a note, a scanned page.' },
+]
 
 export interface EscalationMeta {
   /** What the option is called. */
@@ -185,8 +202,15 @@ export interface EscalationMeta {
   needsCategory: boolean
   /** What the description box should prompt for. */
   placeholder: string
-  /** Who this normally goes to, used to preselect the assignee. */
-  goesTo: 'liaison' | 'team_leader'
+  /**
+   * Who this normally goes to, used to preselect the assignee.
+   *
+   * `anyone` is the request's, at the firm's choosing: a request is low-stakes admin and the
+   * person who can answer it is often neither a team leader nor a liaison -- whoever did the
+   * import, whoever took the call. A dispute is the opposite and stays on the short list, because
+   * a FINDING needs somebody with standing to make it.
+   */
+  goesTo: 'liaison' | 'team_leader' | 'anyone'
 }
 
 export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
@@ -197,6 +221,27 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     needsCategory: true,
     placeholder: 'Says she settled it directly with the client in March and has the proof.',
     goesTo: 'liaison',
+  },
+  /*
+   * NOT A DISPUTE, AND THE DIFFERENCE IS PHYSICS RATHER THAN SEVERITY. A dispute is a state of the
+   * account -- it holds every collection sequence, runs a ten-business-day clock and ends in a
+   * finding. A request is a piece of work: it holds nothing, ends when THE THING ARRIVES, and
+   * several are open at once. The firm: "requesting additional information doesn't justify
+   * something as serious as a dispute."
+   *
+   * NEVER CHARGEABLE. Item 3 recovers time the DEBTOR caused somebody to spend. A clerk chasing a
+   * client for a statement the client should have attached is the client's failing, and billing a
+   * debtor for their creditor's admin would not survive being asked about. Where a request really
+   * was debtor-caused, the thing that earns a fee is the SENDING of what they asked for -- item
+   * 1(a) on the email -- not the asking.
+   */
+  request: {
+    label: 'Ask somebody for information or a document',
+    blurb: 'A statement, the contract, proof of delivery — something needed to carry on.',
+    chargeable: false,
+    needsCategory: false,
+    placeholder: 'Need the statement for March to June — it was not attached to the handover.',
+    goesTo: 'anyone',
   },
   help: {
     label: 'Ask a team leader for help',
@@ -268,7 +313,12 @@ export function clientSection(kind: EscalationKind | null | undefined): ClientSe
 }
 
 /** In the order the options should be offered: the common one first. */
-export const ESCALATION_KIND_ORDER: EscalationKind[] = ['dispute', 'help', 'litigation']
+/*
+ * THE ORDER IS THE LADDER, HEAVIEST FIRST, and `request` sits second rather than last on purpose:
+ * it is the one that gets picked most and the one whose absence used to push small things into a
+ * dispute.
+ */
+export const ESCALATION_KIND_ORDER: EscalationKind[] = ['dispute', 'request', 'help', 'litigation']
 
 /**
  * May this escalation raise Annexure B item 3?
@@ -283,6 +333,7 @@ export function escalationChargeable(kind: EscalationKind | null | undefined): b
 /** How the timeline records it. */
 export function escalationNote(kind: EscalationKind, description: string): string {
   switch (kind) {
+    case 'request': return `Information requested: ${description}`
     case 'help': return `Escalated for help: ${description}`
     case 'litigation': return `Recommended for litigation: ${description}`
     default: return `Dispute raised: ${description}`
