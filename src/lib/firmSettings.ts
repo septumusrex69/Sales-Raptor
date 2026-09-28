@@ -82,6 +82,19 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     signatory_title: some(next.signatoryTitle),
     email_font: next.emailFont,
     email_size_pt: next.emailSizePt,
+    vat_rate: next.vatRate,
+    /*
+     * WRITTEN BACK LIKE EVERY OTHER FIELD, AND THE DATABASE IS WHAT KEEPS IT SAFE.
+     *
+     * Leaving it out of this list is the failure CLAUDE.md describes: five hand-written lists that
+     * have to stay in step, and a column missing from one of them reads as undefined for ever. But
+     * a settings tab opened before the engine was switched on would, on save, write back the null
+     * it loaded and quietly turn the engine off -- payments still captured, none of them split,
+     * and the first sign a payover run short by a month. So the switch is frozen in the database
+     * once the engine has split anything (`protect_finance_cutover`), which reverts rather than
+     * raises: somebody saving the firm's phone number was not asking about the allocation engine.
+     */
+    finance_cutover_at: next.financeCutoverAt,
     updated_at: new Date().toISOString(),
     updated_by: me.user?.id ?? null,
   }).eq('id', true)

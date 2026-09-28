@@ -152,7 +152,7 @@ export interface PaymentRow {
   /** Swordfish's own key for the payment. Unique, so a re-import updates instead of duplicating. */
   swordfish_payment_id: string | null
   /** The receipt fee Swordfish actually charged, excluding VAT. Null on the older export. */
-  collection_commission: number | null
+  receipt_fee_legacy: number | null
 }
 
 export interface FeeRow {
@@ -737,7 +737,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       // Only the newer export carries these two. The id makes a re-import idempotent; the
       // commission is the receipt fee as actually charged, which appears in no other report.
       swordfish_payment_id: text(p['Payment Unique ID']),
-      collection_commission: num(p['Payment Collection Commission']) ?? null,
+      receipt_fee_legacy: num(p['Payment Collection Commission']) ?? null,
       // The client took the money directly and owes us our share. Still a full payment on the
       // account; it settles in the month-end reconciliation rather than arriving in our trust
       // account. Read off Payment Type, which states it, rather than matched out of the free-text

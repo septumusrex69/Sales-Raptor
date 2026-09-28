@@ -34,10 +34,10 @@ export interface LedgerLines {
   /**
    * Every payment received, oldest first. Reversed payments are excluded by the caller.
    *
-   * `commissionExclVat` is the receipt fee as Swordfish actually charged it. Where it is given it
+   * `receiptFeeExclVat` is the receipt fee as Swordfish actually charged it. Where it is given it
    * wins over the computed figure — see receiptFeeOn below for why that is the honest choice.
    */
-  payments: { date: string; amount: number; paidToClient?: boolean; commissionExclVat?: number | null }[]
+  payments: { date: string; amount: number; paidToClient?: boolean; receiptFeeExclVat?: number | null }[]
   /** Every fee raised. `inclVat` is what was actually charged. */
   fees: {
     date: string
@@ -258,7 +258,7 @@ function openAccrual(
  * on, and for the older export, which did not carry a commission at all.
  */
 function receiptFeeOn(
-  p: { date: string; amount: number; commissionExclVat?: number | null },
+  p: { date: string; amount: number; receiptFeeExclVat?: number | null },
   vatRate: number,
   schedule?: AnnexureBSchedule,
 ): number {
@@ -266,7 +266,7 @@ function receiptFeeOn(
   // once. The computed branch goes through receiptFeeInclVat for the same reason: rounding the
   // exclusive figure first and charging VAT on the rounded number costs a cent on any payment
   // whose ten percent lands on a fraction.
-  if (p.commissionExclVat != null) return roundToCents(p.commissionExclVat * (1 + vatRate))
+  if (p.receiptFeeExclVat != null) return roundToCents(p.receiptFeeExclVat * (1 + vatRate))
   return receiptFeeInclVat(p.amount, vatRate, schedule ?? scheduleFor(p.date))
 }
 

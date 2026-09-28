@@ -435,7 +435,7 @@ export function AccountDetail() {
             date: p.receivedAt.slice(0, 10),
             amount: p.amount,
             paidToClient: p.paidToClient,
-            commissionExclVat: p.collectionCommission,
+            receiptFeeExclVat: p.receiptFeeLegacy,
           })),
         fees: ledgers.fees.map((f) => ({
           date: f.incurredAt.slice(0, 10),

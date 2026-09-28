@@ -11239,3 +11239,204 @@ alter table public.account_queries add constraint account_queries_for_only_on_re
 -- a comparison against NULL is NULL, `false OR NULL` is NULL, and a CHECK passes on NULL.
 alter table public.account_queries add constraint account_queries_request_says_what
   check (kind <> 'request' or (request_for is not null and length(btrim(request_for)) > 0));
+
+
+-- ============================================================================
+-- FINANCE, PROMPT 1: CLEAN THE DATA THE ALLOCATION ENGINE DEPENDS ON.
+--
+-- No engine yet. This is the five things that would make the engine wrong on day one.
+-- ============================================================================
+
+-- ---------- 1. COMMISSION RATES, IN ONE UNIT ----------
+--
+-- 18 000 accounts stored 25 meaning 25%, and 5 758 stored 0.25 meaning the same thing. The code
+-- has always meant the fraction -- CLAUDE.md records what the other reading cost: "passing a
+-- percentage through here is what made one account read as 2300% on the accounts list". Run
+-- against the percent rows, the engine would have taken 2 500% commission.
+--
+-- REHEARSED FIRST, AND IT ANSWERED THE QUESTION THAT MATTERED: not one row holds the two columns
+-- in DIFFERENT units. So dividing both moves them together, and `commission_drift` -- a stored
+-- generated column comparing them at four decimals -- flags exactly the same 417 accounts before
+-- and after. The flag still means what the firm thinks it means.
+update public.debtor_accounts set commission_rate = commission_rate / 100 where commission_rate > 1;
+update public.debtor_accounts set commission_rate_expected = commission_rate_expected / 100
+ where commission_rate_expected > 1;
+update public.companies set commission_rate = commission_rate / 100 where commission_rate > 1;
+
+-- A RATE IS A FRACTION, ENFORCED. Null stays legal: "no rate resolved" and "we charge nothing"
+-- are different facts, which is why the column is nullable in the first place -- and the engine
+-- refuses to allocate without a rate rather than quietly using nought.
+alter table public.debtor_accounts add constraint debtor_accounts_commission_rate_is_a_fraction
+  check (commission_rate is null or (commission_rate >= 0 and commission_rate <= 1));
+alter table public.debtor_accounts add constraint debtor_accounts_commission_expected_is_a_fraction
+  check (commission_rate_expected is null or (commission_rate_expected >= 0 and commission_rate_expected <= 1));
+alter table public.companies add constraint companies_commission_rate_is_a_fraction
+  check (commission_rate is null or (commission_rate >= 0 and commission_rate <= 1));
+
+-- THROUGH A FUNCTION, because a CHECK constraint may not contain a subquery and reading a jsonb
+-- array needs one. Immutable, so the constraint may call it at all.
+create or replace function public.commission_bands_are_fractions(bands jsonb)
+returns boolean
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select bands is null or not exists (
+    select 1 from jsonb_array_elements(bands) b
+     where (b->>'rate') is null
+        or (b->>'rate')::numeric < 0
+        or (b->>'rate')::numeric > 1
+  )
+$$;
+
+comment on function public.commission_bands_are_fractions(jsonb) is
+  'Every rate inside a client''s sliding commission bands is a fraction, like every other rate in '
+  'the system. The three clients with bands already held fractions; this is what keeps it so.';
+
+alter table public.companies add constraint companies_commission_bands_are_fractions
+  check (public.commission_bands_are_fractions(commission_bands));
+
+-- ---------- 2. THE RECEIPT FEE COLUMN, CALLED WHAT IT IS ----------
+--
+-- Swordfish's "Payment Collection Commission" is the ANNEXURE B ITEM 9 RECEIPT FEE -- 10% of the
+-- payment, capped -- and not client commission at all. Under the old name, an engine reading it as
+-- commission would pay a client 10% of every payment they were never owed.
+alter table public.account_payments rename column collection_commission to receipt_fee_legacy;
+
+comment on column public.account_payments.receipt_fee_legacy is
+  'Swordfish''s "Payment Collection Commission": the Annexure B ITEM 9 RECEIPT FEE charged on that '
+  'payment (10 per cent, capped), NOT client commission. Named collection_commission on import, '
+  'which is what the export calls it and is wrong in the way that matters. Historic only -- the '
+  'engine charges its own receipt fee from the cut-over onwards.';
+
+-- ---------- 3. DEMO DATA, MARKED ----------
+--
+-- 3 090 payments carrying R23,6m of invented money sit beside 1 070 real Swordfish ones and 163
+-- captured by hand. A payover run that swept them would tell a client they were owed money nobody
+-- ever paid.
+alter table public.account_payments add column if not exists is_demo boolean not null default false;
+update public.account_payments set is_demo = true where source = 'demo';
+
+comment on column public.account_payments.is_demo is
+  'Invented data, kept for screen testing. EVERY finance query, view and function must exclude it: '
+  'it is R23,6m of money nobody paid, sitting in the same table as money somebody did.';
+
+create index if not exists account_payments_real_money_idx
+  on public.account_payments (account_id, received_at) where is_demo = false;
+
+-- ---------- 4. THE TARIFF, WHERE SQL CAN READ IT ----------
+--
+-- The gazette already lives in src/lib/annexureB.ts, priced by the date of the ACTION. This table
+-- exists because the allocation engine runs in SQL and cannot call TypeScript. It is therefore a
+-- SECOND place the tariff is written down, which is a thing to be uncomfortable about.
+create table if not exists public.annexure_b_tariffs (
+  id uuid primary key default gen_random_uuid(),
+  item text not null,
+  description text not null,
+  rate numeric,
+  fixed_amount numeric,
+  cap_excl_vat numeric,
+  vat_applies boolean not null default true,
+  effective_from date not null,
+  effective_to date,
+  created_at timestamptz not null default now(),
+  constraint annexure_b_tariffs_period check (effective_to is null or effective_to >= effective_from)
+);
+
+comment on table public.annexure_b_tariffs is
+  'The Annexure B tariff as the SQL engine reads it. src/lib/annexureB.ts is the other copy and the '
+  'one the app prices from; this exists because allocate_payment runs in the database. Rows here '
+  'record the caps AS CHARGED -- see the item 9 rows, where the firm''s signed-off dates differ '
+  'from the gazette''s.';
+
+-- ITEM 9, ON THE FIRM'S SIGNED-OFF DECISION 7: R502 to 6 April 2026, R610 from 7 April 2026.
+--
+-- THESE ARE THE CAPS AS SWORDFISH CHARGED THEM, NOT AS THE GAZETTE SET THEM, and the difference is
+-- recorded here rather than argued with. The gazette (GN R.7207, GG 54273) commenced 6 MARCH 2026
+-- and the schedule before it capped item 9 at R509 -- src/lib/annexureB.ts holds both. Swordfish
+-- charged R502 (seven rand under, entered wrong, per swordfishImport.ts) until 31 March and R610
+-- from 7 April, three and a half weeks late.
+--
+-- IT IS INERT FOR ANYTHING THE ENGINE WILL PRICE. Decision 3 is a cut-over with no replay of
+-- history, and every payment from here on falls after 7 April 2026, where both readings say R610.
+-- The difference would only bite if history were ever recalculated, which decision 3 forbids.
+insert into public.annexure_b_tariffs (item, description, rate, cap_excl_vat, vat_applies, effective_from, effective_to)
+select '9', 'On receipt of an instalment in redemption of the debt, including instalments made directly to the client',
+       0.10, 502.00, true, date '2000-01-01', date '2026-04-06'
+ where not exists (select 1 from public.annexure_b_tariffs where item = '9' and effective_from = date '2000-01-01');
+
+insert into public.annexure_b_tariffs (item, description, rate, cap_excl_vat, vat_applies, effective_from, effective_to)
+select '9', 'On receipt of an instalment in redemption of the debt, including instalments made directly to the client',
+       0.10, 610.00, true, date '2026-04-07', null
+ where not exists (select 1 from public.annexure_b_tariffs where item = '9' and effective_from = date '2026-04-07');
+
+alter table public.annexure_b_tariffs enable row level security;
+
+drop policy if exists annexure_b_tariffs_read on public.annexure_b_tariffs;
+create policy annexure_b_tariffs_read on public.annexure_b_tariffs
+  for select to authenticated using (true);
+
+-- WRITTEN BY AN ADMINISTRATOR ONLY. A tariff row decides what every debtor is charged; it is not
+-- something a collector edits between calls.
+drop policy if exists annexure_b_tariffs_write on public.annexure_b_tariffs;
+create policy annexure_b_tariffs_write on public.annexure_b_tariffs
+  for all to authenticated
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
+
+-- ---------- 4b. VAT, ON THE FIRM'S OWN SETTINGS ----------
+alter table public.firm_settings add column if not exists vat_rate numeric not null default 0.15;
+alter table public.firm_settings add constraint firm_settings_vat_rate_is_a_fraction
+  check (vat_rate >= 0 and vat_rate < 1);
+
+comment on column public.firm_settings.vat_rate is
+  'VAT as a FRACTION: 0.15 is fifteen percent, the same unit as a commission rate. On the firm''s '
+  'settings rather than in code because it is a rate the firm changes when SARS does.';
+
+-- ---------- 5. THE CLIENT'S OWN REFERENCE, WITHOUT THE SPREADSHEET'S DIRT ----------
+--
+-- FileFish printed ''07062 and ,987 on remittance advices: a leading apostrophe is how a
+-- spreadsheet keeps a number as text, and it travelled into the export. LEADING ZEROS STAY --
+-- btrim takes named characters off the ends and never touches a digit, which is why this is not a
+-- cast to a number.
+update public.debtor_accounts
+   set client_reference = nullif(btrim(client_reference, ' ''",' || chr(9)), '')
+ where client_reference is not null
+   and client_reference <> btrim(client_reference, ' ''",' || chr(9));
+
+-- ---------- 4c. THE ALLOCATION ENGINE'S CUT-OVER, ON THE SAME ROW ----------
+--
+-- THE COLUMN ONLY, NOT THE ENGINE. The engine itself is being built on its own branch; this is
+-- here because there is ONE staging database and the column is already live in it, so the five
+-- hand-written lists on firm_settings have to carry it or check-firm-settings fails on correct
+-- code. Null means the engine is off, which is what it is.
+alter table public.firm_settings add column if not exists finance_cutover_at timestamptz;
+
+comment on column public.firm_settings.finance_cutover_at is
+  'Go-live for the allocation engine. Payments CAPTURED (created_at) on or after this are split by '
+  'Raptor; everything earlier keeps the outcome Swordfish gave it, because remittances have '
+  'already been passed on it. NULL means the engine is off, which is the safe default.';
+
+-- AND THE GUARD THAT KEEPS A SETTINGS SAVE OFF IT. `finance_cutover_at` travels with the rest of
+-- the row -- selected, mapped and written back -- which puts it on a form people save for
+-- unrelated reasons. A settings tab opened before go-live would write back the null it loaded and
+-- turn the engine off; payments would keep being captured, none of them split, and the first sign
+-- would be a payover run short by a month. Frozen once anything has been split, and it REVERTS
+-- rather than raises: somebody saving the firm's phone number was not asking about the engine.
+create or replace function public.protect_finance_cutover() returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  if new.finance_cutover_at is distinct from old.finance_cutover_at
+     and exists (select 1 from public.payment_allocations limit 1) then
+    new.finance_cutover_at := old.finance_cutover_at;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists protect_finance_cutover on public.firm_settings;
+create trigger protect_finance_cutover
+  before update on public.firm_settings
+  for each row execute function public.protect_finance_cutover();

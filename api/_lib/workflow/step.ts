@@ -852,7 +852,7 @@ async function lettersFor(admin: SupabaseClient, rows: TemplateRow[]) {
 async function ledgersFor(admin: SupabaseClient, accountId: string) {
   const [payments, fees, accruals] = await Promise.all([
     admin.from('account_payments')
-      .select('received_at, amount, paid_to_client, reversed_at, collection_commission')
+      .select('received_at, amount, paid_to_client, reversed_at, receipt_fee_legacy')
       .eq('account_id', accountId).order('received_at'),
     admin.from('account_fees')
       .select('incurred_at, description, amount_excl_vat, vat_amount, billed, segments, cancelled_at')
@@ -868,7 +868,7 @@ async function ledgersFor(admin: SupabaseClient, accountId: string) {
         date: (p.received_at as string).slice(0, 10),
         amount: Number(p.amount ?? 0),
         paidToClient: Boolean(p.paid_to_client),
-        commissionExclVat: p.collection_commission === null ? null : Number(p.collection_commission),
+        receiptFeeExclVat: p.receipt_fee_legacy === null ? null : Number(p.receipt_fee_legacy),
       })),
     fees: (fees.data ?? [])
       /* A cancelled fee is one somebody took off the account. Left in, the notice quotes a

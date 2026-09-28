@@ -45,8 +45,11 @@ const fks = []
 /**
  * Table -> set of column names, read out of `create table` blocks.
  *
- * Also honours `alter table ... add column`, because a migration mirrored into schema.sql
- * sometimes lands as an alter rather than being folded into the original block.
+ * Also honours `alter table ... add column` and `... rename column`, because a migration mirrored
+ * into schema.sql sometimes lands as an alter rather than being folded into the original block --
+ * and schema.sql is APPEND-ONLY, so a rename can never be folded in at all. The `create table`
+ * block goes on saying the old name for ever, and the alter at the end of the file is the only
+ * record that it moved.
  */
 function readSchema(rawSql) {
   const tables = new Map()
@@ -94,6 +97,20 @@ function readSchema(rawSql) {
     if (!tables.has(table)) continue
     for (const [, col] of body.matchAll(/add column (?:if not exists )?"?(\w+)"?/gi)) {
       tables.get(table).add(col)
+    }
+    /*
+     * AND A COLUMN THAT MOVED. schema.sql is append-only, so a rename can NEVER be folded back
+     * into the `create table` block -- that block says `collection_commission` for ever, and this
+     * line at the end of the file is the only record that it is now `receipt_fee_legacy`.
+     *
+     * IN ORDER, AND THE OLD NAME GOES. Read in file order, so a column renamed twice ends on the
+     * last name; and deleting the old one is the half that matters, because a select still asking
+     * for the name the database no longer has is exactly what this check exists to catch --
+     * PostgREST rejects the whole request and empties the page.
+     */
+    for (const [, from, to] of body.matchAll(/rename column "?(\w+)"? to "?(\w+)"?/gi)) {
+      tables.get(table).delete(from)
+      tables.get(table).add(to)
     }
     // A column added by ALTER can carry a foreign key too — which is exactly how the second key
     // to debtor_accounts arrived and broke the mailbox.
