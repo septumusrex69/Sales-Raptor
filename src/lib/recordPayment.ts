@@ -58,6 +58,15 @@ export interface ManualPayment {
 export class DuplicatePayment extends Error {}
 /** Thrown when a PTC arrives without the client's confirmation. */
 export class ProofRequired extends Error {}
+/**
+ * Thrown when a payment is captured with no reference on it.
+ *
+ * THE FIRM, LOOKING AT THE BOX: "this reference here should be compulsory." Money on a bank
+ * statement carries the debtor's own reference and is matched on it; a payment typed in by hand
+ * has nothing unless somebody writes it down -- and a reversal three months later has to be
+ * findable in the bank's records, which "R 5 000, 29 September" is not.
+ */
+export class ReferenceRequired extends Error {}
 
 export async function recordManualPayment(input: ManualPayment): Promise<string> {
   const { data, error } = await supabase.rpc('record_manual_payment', {
@@ -78,6 +87,7 @@ export async function recordManualPayment(input: ManualPayment): Promise<string>
        so they are shown as they are. */
     if (error.code === '23505') throw new DuplicatePayment(error.message)
     if (error.code === '23514') throw new ProofRequired(error.message)
+    if (error.code === '23502') throw new ReferenceRequired(error.message)
     throw new Error(error.message)
   }
   return String(data)

@@ -273,6 +273,54 @@ const splitUi = read('src/pages/finance/SplitReceiptModal.tsx')
 ok('the screen requires it to balance too', /const balanced = leftCents === 0 && parts\.length >= 2/.test(splitUi))
 ok('...counting in cents, not rands', /Math\.round\(receipt\.amount \* 100\)/.test(splitUi))
 
+/* ---------------- and nothing is captured without a reference ---------------- */
+
+/*
+ * THE FIRM, LOOKING AT THE BOX: "this reference here should be compulsory."
+ *
+ * IT IS THE ONLY THING TYING A CAPTURED PAYMENT TO ANYTHING OUTSIDE RAPTOR. Money that arrives on
+ * a statement carries the debtor's own reference and is matched on it; a payment typed in by hand
+ * carries whatever somebody writes here, or nothing at all. The firm said why when the import was
+ * built: "all the reference numbers used on the bank should be saved as well per payment, so that
+ * if we, for example, in the future have to reverse a payment" -- a reversal three months later
+ * has to be findable in the bank's own records, and "R 5 000, 29 September" is not a way to find
+ * it. On a PTC it is the CLIENT's reference, which is what their query about the commission gets
+ * checked against.
+ */
+ok('a payment cannot be captured without a reference',
+  /if v_reference is null then[\s\S]{0,200}?raise exception 'Put the reference on it/.test(fn ?? ''))
+/* WHITESPACE IS NOT A REFERENCE. A space bar satisfies a `not null` and satisfies nobody looking
+   for the payment afterwards, which is the entire purpose of the field. */
+ok('...and a space bar is not one',
+  /v_reference text := nullif\(btrim\(coalesce\(p_reference, ''\)\), ''\)/.test(fn ?? ''))
+/* STORED AS THE TRIMMED VALUE, computed once -- two spellings of the same trim is how the guard
+   and the insert come to disagree about what was checked. */
+ok('...and what was checked is what is stored', /\n    v_reference,\n/.test(fn ?? ''))
+/*
+ * REFUSED BEFORE ANYTHING IS WRITTEN, like the proof, and for the same reason: account_payments
+ * has no delete, so a payment recorded without one could only ever be reversed.
+ */
+const refAt = (fn ?? '').indexOf('if v_reference is null then')
+ok('the reference is demanded before the payment is written', refAt > 0 && insertAt > refAt)
+/* RAISED AS ITS OWN CODE so the screen says what is missing rather than "could not be recorded",
+   which reads as something going wrong rather than something left out. */
+ok('...raised so the screen can name it', /using errcode = '23502'/.test(fn ?? ''))
+ok('...and the browser tells it apart from a real failure', /error\.code === '23502'/.test(lib))
+ok('...under a name of its own', /export class ReferenceRequired extends Error/.test(lib))
+ok('...which the screen catches', /e instanceof ReferenceRequired/.test(modal))
+
+/* AND THE BUTTON DOES NOT OFFER WHAT THE DATABASE WILL REFUSE -- the same courtesy the PTC proof
+   gets, so nobody fills in a form and meets a refusal at the end of it. */
+ok('the screen will not offer to record one without it', /&& !!reference\.trim\(\)/.test(modal))
+ok('...and says the field is required', /Reference<span className="text-negative-600 ml-0\.5">\*/.test(modal))
+/*
+ * INCLUDING THE DUPLICATE OVERRIDE. It is a second way to press Record, shown only after the
+ * database has asked whether this is a second payment -- and the reference can be cleared between
+ * the two presses.
+ */
+ok('...including the "this is a second payment" way in',
+  /onClick=\{\(\) => void save\(true\)\} disabled=\{busy \|\| !ready\}/.test(modal))
+
 console.log(`\ncheck-record-payment: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

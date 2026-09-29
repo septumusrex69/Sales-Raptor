@@ -4,7 +4,9 @@ import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { uploadDocument } from '../../lib/accountWorkspace'
-import { recordManualPayment, DuplicatePayment, ProofRequired } from '../../lib/recordPayment'
+import {
+  recordManualPayment, DuplicatePayment, ProofRequired, ReferenceRequired,
+} from '../../lib/recordPayment'
 import { chargePtcConfirmation } from '../../lib/accountCharges'
 import { chargeMessage } from '../../lib/accountCharges'
 import { useAuth } from '../../store/AuthContext'
@@ -81,10 +83,18 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
   }, [term])
 
   const value = Number(amount.replace(/[^\d.]/g, ''))
-  /* A PTC is not ready until its confirmation is attached. The database refuses one without --
-     this only stops the button offering to do something that will be refused. */
+  /*
+   * A PTC is not ready until its confirmation is attached, and NOTHING is ready without a
+   * reference. The database refuses both -- this only stops the button offering to do something
+   * that will be refused.
+   *
+   * THE FIRM ASKED FOR THE REFERENCE LOOKING AT THIS BOX: "this reference here should be
+   * compulsory." It is the only thing tying a payment typed in by hand to anything outside
+   * Raptor -- a receipt on a statement carries the debtor's own, and a capture carries whatever
+   * somebody writes here or nothing at all.
+   */
   const ready = !!accountId && Number.isFinite(value) && value > 0 && !!receivedOn
-    && (!paidToClient || !!proof)
+    && !!reference.trim() && (!paidToClient || !!proof)
 
   async function attach(file: File) {
     if (!accountId) return
@@ -148,6 +158,10 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
     } catch (e) {
       if (e instanceof DuplicatePayment) { setDuplicate(e.message); setBusy(false); return }
       if (e instanceof ProofRequired) { setError(e.message); setBusy(false); return }
+      /* The database's own sentence, which is written to be read and says what to put in the box.
+         Named rather than folded into the generic failure so it never wears "could not be
+         recorded", which reads as something going wrong rather than something missing. */
+      if (e instanceof ReferenceRequired) { setError(e.message); setBusy(false); return }
       setError(e instanceof Error ? e.message : 'That payment could not be recorded.')
       setBusy(false)
     }
@@ -306,9 +320,17 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
             </select>
           </label>
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Reference</span>
+            <span className="text-sm font-medium text-slate-700">
+              Reference<span className="text-negative-600 ml-0.5">*</span>
+            </span>
+            {/*
+              WHAT TO PUT IN IT, rather than a blank box with a star on it. The answer differs by
+              direction and the placeholder says which: our statement's reference when the money
+              came to us, the client's own when the debtor paid them.
+            */}
             <input value={reference} onChange={(e) => setReference(e.target.value)}
-              placeholder="Optional" className={inputClass} />
+              placeholder={paidToClient ? 'The client’s reference' : 'As it appears on the statement'}
+              className={inputClass} />
           </label>
         </div>
 
@@ -321,7 +343,7 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
             </p>
             {/* A DEBTOR GENUINELY CAN PAY THE SAME AMOUNT TWICE IN A DAY, so this is a question
                 rather than a refusal -- but it is asked, because a payment cannot be deleted. */}
-            <button type="button" onClick={() => void save(true)} disabled={busy}
+            <button type="button" onClick={() => void save(true)} disabled={busy || !ready}
               className="mt-2 text-xs font-medium px-2.5 py-1 rounded-md border border-amber-300
                 bg-white text-amber-900 hover:bg-amber-100 disabled:opacity-40">
               Yes, this is a second payment — record it
