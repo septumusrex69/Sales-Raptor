@@ -248,6 +248,17 @@ function ReverseModal({ row, onClose, onDone }: { row: Row; onClose: () => void;
           capital goes back on the account, and every later payment is re-split against the balances
           this one moved.
         </p>
+        {/*
+          WHERE THE MONEY GOES, which the firm asked about directly: "not really the suspense
+          account -- it goes back into a state ready for approval." Said here because it is the
+          difference between a reversal that loses the receipt and one that hands it back to be
+          redone, and nobody should have to find that out by looking afterwards.
+        */}
+        <p className="rounded-lg bg-brand-50 px-3 py-2 text-[13px] text-slate-700">
+          This receipt then comes back to <strong className="font-medium">Awaiting approval</strong>{' '}
+          as {rand(row.amount)} still to be placed, so it can go on the right debtor and be approved
+          again. This reversal stays on the ledger with your reason on it.
+        </p>
         {invoiced && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
             This payment has already been paid over. The invoice that carried it is not touched —

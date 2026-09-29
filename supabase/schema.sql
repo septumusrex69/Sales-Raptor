@@ -16513,3 +16513,215 @@ begin
     execute format('revoke execute on function public.%s from public, anon', fn);
   end loop;
 end $$;
+
+-- ============================================================================
+-- A REVERSAL PUTS THE RECEIPT BACK IN THE DAY'S QUEUE.
+--
+-- THE FIRM, ASKED WHERE A REVERSED PAYMENT GOES: "not really the suspense account -- it goes back
+-- into a state ready for approval." Suspense was the wrong answer and they were right to say so.
+-- Suspense is money in the trust account nobody has been able to PLACE; a reversed receipt is
+-- money whose place was DECIDED and decided wrongly, and the screen where that decision is taken
+-- is the morning's approval queue. One queue for a payment that needs somebody, not two.
+--
+-- THE REVERSED ROW STAYS AND A FRESH COPY COMES BACK, which is the firm's own choice between the
+-- two ways of doing it. account_payments is one of the ledgers that is never edited: taking an
+-- approval back would be an edit, and the row would then carry no trace that it had ever been
+-- reversed. So the reversal is permanent and carries its reason for ever, and the SAME MONEY is
+-- raised again as a new, unapproved receipt pointing back at it. The account's history reads
+-- "received, reversed -- wrong allocation, received again, approved", which is what happened.
+--
+-- ONLY AN APPROVED PAYMENT COMES BACK, and that is what stops the loop. Reversing something still
+-- sitting in the queue -- the copy of a cheque that turned out to have bounced -- simply takes it
+-- out. Without that, every reversal would breed another copy and a bounced cheque could never be
+-- got rid of.
+--
+-- AND AN IMPORTED PAYMENT IS REFUSED. A Swordfish receipt reversed and raised again would be
+-- re-split under TODAY's schedule against figures a client was invoiced on years ago, which is
+-- the one thing swordfishImport rule 1 exists to prevent. Corrections to imported history are the
+-- firm's decision, case by case -- so it says to ask.
+-- ============================================================================
+alter table public.account_payments
+  add column if not exists replaces_payment_id uuid references public.account_payments (id) on delete set null;
+
+create index if not exists account_payments_replaces_idx
+  on public.account_payments (replaces_payment_id) where replaces_payment_id is not null;
+
+comment on column public.account_payments.replaces_payment_id is
+  'The reversed receipt this one was raised to redo. The firm: a reversal goes back into a state ready for approval.';
+
+-- Dropped rather than replaced: it returns the copy's id now, and Postgres counts the return type
+-- as part of the signature.
+drop function if exists public.reverse_payment(uuid, text);
+
+create function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator may reverse a payment.' using errcode = '42501';
+  end if;
+  -- The reason is not decoration: it becomes the cancellation reason on the receipt fee, and it
+  -- is what the queue shows beside the copy so the next person knows why it is back.
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  -- ONCE. The trigger on reversed_at gives the capital back; fired twice it gives it back twice.
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+  if v_pay.swordfish_payment_id is not null then
+    raise exception 'That payment came across from Swordfish. Imported history is not corrected here — ask first.'
+      using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  -- swordfish_payment_id is NOT carried -- it is unique, and the guard above means there is never
+  -- one to carry. receipt_fee_legacy is not carried either: it is what the old system charged,
+  -- and this is a new receipt that will be priced by the engine.
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id
+    ) values (
+      -- received_at is the BANK's date and does not move. The money arrived when it arrived; what
+      -- was wrong was where it was put.
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo, v_pay.bank_line_id, auth.uid(), v_pay.id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+comment on function public.reverse_payment(uuid, text) is
+  'Reverses one receipt, Administrator only, with the reason kept. An APPROVED one comes back as a fresh unapproved copy in the day''s queue; an unapproved one simply leaves it. Returns the copy''s id, or null.';
+
+-- ----------------------------------------------------------------------------
+-- MOVING AN UNAPPROVED RECEIPT ONTO THE RIGHT DEBTOR.
+--
+-- The firm's answer to what the queue may change: the account only. Which debtor it goes on is the
+-- thing that was wrong; the amount and the date are what the bank said and nobody may quietly turn
+-- R 5 000 into R 500.
+--
+-- THIS IS NOT AN EDIT TO A FINANCIAL RECORD, and the guards are what make that true. An unapproved
+-- payment has not been processed -- nothing split, no fee raised, no remittance run -- which is the
+-- whole reason the approval gate exists. The moment it is approved this refuses and says to
+-- reverse it instead.
+-- ----------------------------------------------------------------------------
+create or replace function public.set_payment_account(p_payment uuid, p_account uuid)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to change a payment.' using errcode = '42501';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.approved_at is not null then
+    raise exception 'That payment has been approved and split. Reverse it instead.' using errcode = '22023';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed.' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.' using errcode = 'P0002';
+  end if;
+
+  update public.account_payments set account_id = p_account where id = p_payment;
+end $$;
+
+comment on function public.set_payment_account(uuid, uuid) is
+  'Moves an UNAPPROVED receipt onto the right debtor before it is approved. Nothing has been split, no fee raised and no remittance run, so it is not yet a processed record.';
+
+-- ----------------------------------------------------------------------------
+-- AND THE QUEUE SAYS WHICH ONES CAME BACK, AND WHY.
+--
+-- A receipt that reappears on tomorrow's list with no explanation is one somebody approves again
+-- exactly as it was -- straight back onto the wrong debtor. The reason travels with it.
+--
+-- Dropped and created rather than replaced: three new OUT columns are part of the return type.
+-- ----------------------------------------------------------------------------
+drop function if exists public.payments_awaiting_approval();
+
+create function public.payments_awaiting_approval()
+returns table (
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric,
+  paid_to_client boolean, method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  left join lateral public.preview_allocation(p.account_id, p.amount, p.paid_to_client) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+-- The list again, with set_payment_account on it.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()', 'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)', 'money_position(uuid)', 'payover_work_queue(date)',
+    'payover_cycle_tiles(date)', 'payover_run_payments(uuid)', 'finance_exception_jobs()',
+    'payment_audit(uuid)', 'account_ledger(uuid)', 'expected_from_promises(date, date)',
+    'import_bank_lines(text, text, jsonb)', 'place_bank_line(uuid, uuid)',
+    'reconcile_bank_debit(uuid, uuid)', 'unallocated_receipts()', 'unreconciled_payouts()',
+    'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'split_bank_line(uuid, jsonb)',
+    'reverse_payment(uuid, text)', 'set_payment_account(uuid, uuid)'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;

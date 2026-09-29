@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, Loader2 } from 'lucide-react'
+import { AlertTriangle, Check, Loader2, RotateCcw, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
-import { fetchAwaitingApproval, approvePayments, type AwaitingPayment } from '../../lib/payover'
+import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import {
+  fetchAwaitingApproval, approvePayments, setPaymentAccount, type AwaitingPayment,
+} from '../../lib/payover'
 
 /**
  * THE DAY'S PAYMENTS, WAITING TO BE APPROVED.
@@ -30,6 +34,8 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  /* The receipt whose debtor is being corrected, if one is. */
+  const [moving, setMoving] = useState<AwaitingPayment | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -156,13 +162,34 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
           <tbody>
             {rows.map((r) => (
               <tr key={r.paymentId}
-                className={`border-b border-slate-50 ${picked.has(r.paymentId) ? 'bg-gold-50/40' : ''}`}>
+                /*
+                  A RETURNED RECEIPT IS TINTED, and that is not decoration. The firm: a reversal
+                  "goes back into a state ready for approval" -- so it arrives on this list looking
+                  exactly like the morning's new money, and approving it unread puts it straight
+                  back onto the debtor it should never have been on.
+                */
+                className={`border-b border-slate-50 ${
+                  picked.has(r.paymentId) ? 'bg-gold-50/40'
+                    : r.cameBackFrom ? 'bg-amber-50/50' : ''}`}>
                 <td className="px-3 py-1.5">
                   <input type="checkbox" checked={picked.has(r.paymentId)}
                     onChange={() => toggle(r.paymentId)} />
                 </td>
                 <td className="px-2 py-1.5 text-slate-600">{formatDate(r.receivedOn)}</td>
-                <td className="px-2 py-1.5 text-slate-600">{r.caseNumber ?? r.accountNumber}</td>
+                <td className="px-2 py-1.5 text-slate-600">
+                  {r.caseNumber ?? r.accountNumber}
+                  {/*
+                    THE ONE THING THIS SCREEN MAY CHANGE, and the firm chose it: which debtor the
+                    money goes on. The amount and the date are what the bank said. Offered on every
+                    row rather than only the returned ones -- a receipt placed on the wrong debtor
+                    by a mistyped reference is the same mistake found one step earlier.
+                  */}
+                  <button type="button" onClick={() => setMoving(r)}
+                    className="ml-1.5 text-[11px] font-medium text-slate-400 underline underline-offset-2
+                      hover:text-slate-700">
+                    Move
+                  </button>
+                </td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.receiptFee)}</td>
@@ -186,6 +213,18 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                       : 'bg-slate-100 text-slate-600'}`}>
                     {r.paidToClient ? 'Client direct' : 'Direct'}
                   </span>
+                  {/*
+                    WHY IT IS BACK, carried from the reversal it replaces. Without it the row is
+                    indistinguishable from new money and gets approved again exactly as it was.
+                  */}
+                  {r.cameBackFrom && (
+                    <span className="ml-1 inline-flex items-center gap-1 text-[10.5px] px-1.5 py-0.5
+                      rounded bg-amber-100 text-amber-900"
+                      title={`Reversed ${r.cameBackOn ? formatDate(r.cameBackOn) : ''} — ${
+                        r.cameBackReason ?? 'no reason given'}`}>
+                      <RotateCcw size={10} /> Came back
+                    </span>
+                  )}
                 </td>
                 <td className="px-2 py-1.5 text-slate-500 max-w-[14rem] truncate"
                   title={r.bankDescription ?? r.details ?? ''}>
@@ -196,6 +235,154 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
           </tbody>
         </table>
       </div>
+
+      {moving && (
+        <MoveAccountModal
+          payment={moving}
+          onClose={() => setMoving(null)}
+          onDone={async () => { setMoving(null); await load() }}
+        />
+      )}
     </Card>
+  )
+}
+
+/**
+ * PUTTING AN UNAPPROVED RECEIPT ON THE RIGHT DEBTOR.
+ *
+ * THE FIRM, ASKED WHAT THIS SCREEN MAY CHANGE: the account only. Which debtor the money goes on is
+ * what was wrong; the amount and the date are the bank's own facts and nobody may quietly turn
+ * R 5 000 into R 500.
+ *
+ * IT IS NOT AN EDIT TO A FINANCIAL RECORD, and `set_payment_account` is what makes that true
+ * rather than this screen: nothing has been split, no receipt fee raised and no remittance run
+ * against an unapproved payment, which is the whole reason the approval gate exists. Approved, the
+ * function refuses and says to reverse it instead.
+ *
+ * THE SEARCH IS THE ACCOUNTS LIST'S OWN -- the same one Suspense uses to place a receipt. A second,
+ * subtly different way to find a debtor is how somebody puts money on a similar-looking account.
+ */
+function MoveAccountModal({ payment, onClose, onDone }: {
+  payment: AwaitingPayment
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<DebtorAccount[]>([])
+  const [looking, setLooking] = useState(false)
+  const [chosen, setChosen] = useState<DebtorAccount | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const q = term.trim()
+    if (q.length < 2) { setHits([]); return }
+    let cancelled = false
+    setLooking(true)
+    /* Debounced, and no count: 100 000 rows per keystroke otherwise -- see fetchAccounts. */
+    const t = setTimeout(() => {
+      void fetchAccounts({ search: q, pageSize: 10, countRows: false })
+        .then((r) => { if (!cancelled) setHits(r.accounts) })
+        .catch(() => { if (!cancelled) setHits([]) })
+        .finally(() => { if (!cancelled) setLooking(false) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [term])
+
+  async function move() {
+    if (!chosen || busy) return
+    setBusy(true); setError(null)
+    try {
+      await setPaymentAccount(payment.paymentId, chosen.id)
+      await onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That payment could not be moved.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Which debtor is this?" onClose={onClose} width={520}>
+      <div className="space-y-3">
+        <div className="rounded-lg bg-slate-50 px-3 py-2.5">
+          <p className="text-[15px] font-semibold tabular-nums text-navy-950">{rand(payment.amount)}</p>
+          <p className="text-[12px] text-slate-600 mt-0.5 wrap-anywhere">
+            {payment.reference ?? payment.bankDescription ?? 'No reference'}
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Received {formatDate(payment.receivedOn)} · on {payment.debtor} at the moment
+          </p>
+          {payment.cameBackFrom && (
+            <p className="text-[11px] text-amber-800 mt-1">
+              Reversed {payment.cameBackOn ? formatDate(payment.cameBackOn) : ''} —{' '}
+              {payment.cameBackReason ?? 'no reason given'}
+            </p>
+          )}
+        </div>
+
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Move it to</span>
+          <span className="relative block mt-1">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={term} onChange={(e) => { setTerm(e.target.value); setChosen(null) }}
+              autoFocus placeholder="Case number, account number, reference or surname"
+              className={`${inputClass} pl-8`} />
+          </span>
+        </label>
+
+        {looking && <p className="text-[12px] text-slate-400">Looking…</p>}
+
+        {hits.length > 0 && !chosen && (
+          <ul className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+            {hits.map((a) => (
+              <li key={a.id}>
+                <button type="button" onClick={() => setChosen(a)}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-50">
+                  <span className="block text-[13px] text-slate-800">
+                    {[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || 'No name'}
+                  </span>
+                  <span className="block text-[11px] text-slate-500">
+                    {a.caseNumber} · {a.accountNumber} · {rand(a.capitalOutstanding)} outstanding
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {chosen && (
+          <div className="rounded-lg border border-brand-500 bg-brand-50/50 px-3 py-2">
+            <p className="text-[13px] text-slate-800">
+              {[chosen.debtorFirstName, chosen.debtorSurname].filter(Boolean).join(' ') || 'No name'}
+            </p>
+            <p className="text-[11px] text-slate-500">{chosen.caseNumber} · {chosen.accountNumber}</p>
+            <button type="button" onClick={() => setChosen(null)}
+              className="text-[11px] text-slate-500 underline mt-1">Pick a different one</button>
+          </div>
+        )}
+
+        {/* NOTHING IS SPLIT YET, said so nobody thinks moving it also books it. */}
+        {chosen && (
+          <p className="text-[12px] text-slate-500">
+            Nothing is split until you approve it. The figures on the list are redrawn against this
+            debtor&rsquo;s balances.
+          </p>
+        )}
+
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
+
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose}
+            className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="button" onClick={() => void move()} disabled={!chosen || busy}
+            className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white
+              hover:bg-brand-700 disabled:opacity-50">
+            {busy ? 'Moving…' : 'Move it'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }

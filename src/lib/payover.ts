@@ -812,6 +812,16 @@ export interface AwaitingPayment {
   /** The bank line it came from, so a wrong reference can be traced to what the debtor typed. */
   bankLineId: string | null
   bankDescription: string | null
+  /*
+   * WHY THIS ONE IS BACK.
+   *
+   * Null on an ordinary new receipt. Set where it is the fresh copy of something reversed, and
+   * without it the row is indistinguishable from any other -- which means it gets approved again
+   * exactly as it was, straight back onto the debtor it should never have been on.
+   */
+  cameBackFrom: string | null
+  cameBackReason: string | null
+  cameBackOn: string | null
 }
 
 export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
@@ -846,6 +856,11 @@ export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
     capitalAfter: Number(r.capital_after ?? 0),
     bankLineId: s(r.bank_line_id),
     bankDescription: s(r.bank_description),
+    /* CLAUDE.md's own warning: a column in the function, the type and the select but missing from
+       the hand-written mapper reads as undefined for ever and nothing fails. */
+    cameBackFrom: s(r.came_back_from),
+    cameBackReason: s(r.came_back_reason),
+    cameBackOn: s(r.came_back_on),
   }))
 }
 
@@ -895,10 +910,36 @@ export async function approvePayments(paymentIds: string[]): Promise<ApprovalOut
  * back, the later payments re-split -- is `reverse_payment_allocation`, the trigger on
  * `reversed_at`, and is unchanged.
  */
-export async function reversePayment(paymentId: string, reason: string): Promise<void> {
-  const { error } = await supabase.rpc('reverse_payment', {
+export async function reversePayment(paymentId: string, reason: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('reverse_payment', {
     p_payment: paymentId,
     p_reason: reason,
+  })
+  if (error) throw new Error(error.message)
+  /*
+   * THE COPY'S ID, OR NULL. An APPROVED receipt comes back as a fresh unapproved one in the day's
+   * queue -- the firm: a reversal "goes back into a state ready for approval". One that was still
+   * waiting simply leaves the queue, which is also how a cheque that turned out to have bounced
+   * is got rid of, and there is nothing to return.
+   */
+  return typeof data === 'string' ? data : null
+}
+
+/**
+ * PUTTING AN UNAPPROVED RECEIPT ON THE RIGHT DEBTOR.
+ *
+ * The firm, asked what the approval queue may change: the account only. Which debtor it goes on is
+ * what was wrong; the amount and the date are what the bank said, and nobody may quietly turn
+ * R 5 000 into R 500.
+ *
+ * It is not an edit to a financial record, and the function's guards are what make that true: an
+ * unapproved payment has nothing split, no fee raised and no remittance run against it, which is
+ * the whole reason the approval gate exists. Approved, it refuses and says to reverse instead.
+ */
+export async function setPaymentAccount(paymentId: string, accountId: string): Promise<void> {
+  const { error } = await supabase.rpc('set_payment_account', {
+    p_payment: paymentId,
+    p_account: accountId,
   })
   if (error) throw new Error(error.message)
 }
