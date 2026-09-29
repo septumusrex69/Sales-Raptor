@@ -13,9 +13,17 @@
  * about text appearing in the wrong order.
  *
  * SO THE CONTENT IS PUSHED INSTEAD. The sheet stays one box; each block that would straddle a
- * boundary is given enough padding above it to start at the top of the next page. The padding is
- * PRESENTATION and never reaches the document -- see the note on the unit below, and on why
- * padding rather than margin.
+ * boundary is given enough MARGIN above it to start at the top of the next page. The push is
+ * PRESENTATION and never reaches the document -- see the note on the unit below.
+ *
+ * MARGIN, NOT PADDING, AND THIS HEADER SAID PADDING FOR MONTHS. It was wrong in a way that only
+ * shows on paper: padding moves the text and LEAVES THE BOX WHERE IT WAS, so a bordered table
+ * pushed with padding prints its rule across the letterhead's footer while the words sit
+ * correctly on the next page. The consumer has always set `marginTop` (LetterPageEditor) and
+ * check-page-editor asserts both the margin and the ABSENCE of paddingTop, so the code and the
+ * check were right and only the explanation was wrong. Left uncorrected it is the more dangerous
+ * half: somebody reads the header, believes padding is deliberate, and "fixes" the consumer to
+ * match. Flagged by audit -- CLAUDE.md calls this rule load-bearing and gives the same failure.
  *
  * PURE, AND IN ONE UNIT. The caller measures in pixels and passes pixels; the checks beside this
  * folder work in millimetres because they are easier to read that way. Nothing here knows which,

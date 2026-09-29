@@ -14623,3 +14623,626 @@ create index if not exists sms_messages_sent_idx
   on public.sms_messages (created_at) where direction = 'outbound' and account_id is not null;
 create index if not exists promises_to_pay_made_idx
   on public.promises_to_pay (created_at) where created_by is not null;
+
+-- ---------- The Finance section is Administrator only, and nine functions were not ----------
+--
+-- FOUND BY AUDIT, IN CODE WRITTEN THIS WEEK. payover.ts states the guarantee in its own header --
+-- "ADMINISTRATOR ONLY, ENFORCED IN THE DATABASE... each function checks the role itself" -- and
+-- the firm's words behind it are "The Finance section is Administrator only. Sales
+-- representatives never see the payment split." Six of the fifteen finance RPCs checked. Nine did
+-- not, and every one of them is security definer.
+--
+-- SECURITY DEFINER RUNS AS THE OWNER, SO ROW-LEVEL SECURITY DOES NOT APPLY. The policies on
+-- payover_runs restrict reads to an Administrator and are correct -- and a definer function walks
+-- straight past them. check-payover-runs asserts exactly those policies, which is why the section
+-- READ as locked down: the check was true about one layer and silent about the one carrying the
+-- weight. A check on one enforcement layer is not a guarantee about the feature.
+--
+-- AND THE GRANT WAS WORSE THAN THE FILE COULD SHOW. Read off the live catalogue, all fifteen
+-- carried `anon=X/postgres` -- EXECUTE granted to the UNAUTHENTICATED PostgREST role, which is
+-- Supabase's default on the public schema. `preview_allocation` returns commission,
+-- commission_vat, to_client, due_to_bf and bf_takes: the payment split. The three state
+-- transitions authorise and record paying a client. `reallocate_account` DELETES
+-- payment_allocations rows.
+--
+-- `account_ledger` WAS THE SHARPEST OF THE NINE and the audit did not list it, because it is not
+-- a Finance screen at all: it is mounted on the ACCOUNT page, which every collector opens all
+-- day, and it returns the same split. LedgerPanel does check canViewFinance and draws nothing for
+-- a collector -- but payover.ts's own header says what that is worth: "a route guard in the
+-- browser is a courtesy, not a boundary."
+--
+-- `approve_payover_run` DID contain auth.uid(), which is what made it look guarded in a grep: it
+-- is `approved_by = auth.uid()`, a record of who acted. Called by anon it would have written NULL
+-- into it and approved the run.
+--
+-- TWO LAYERS, AND BOTH ARE NEEDED. The revoke at the foot closes the unauthenticated hole and
+-- does nothing about a signed-in collector, who is the person the firm's rule is actually about.
+-- The in-body guard closes that one. Neither alone is the rule.
+--
+-- VERIFIED IN BOTH DIRECTIONS against staging: as an Administrator every function still returns
+-- its rows (account_ledger two lines on an allocated account, payover_work_queue twelve); as a
+-- collector, `ERROR: 42501: The Finance section is Administrator only.`
+create or replace function public.approve_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+  v_why text;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select status into v_status from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if not public.payover_run_is_open(v_status) then
+    raise exception 'That run is already %.', v_status;
+  end if;
+
+  select string_agg(b.detail, '; ') into v_why from public.payover_run_blockers(p_run) b;
+  if v_why is not null then
+    raise exception 'This run cannot be approved yet: %', v_why;
+  end if;
+
+  update public.payover_runs
+     set status = 'approved', approved_by = auth.uid(), approved_at = now()
+   where id = p_run;
+end $$;
+
+create or replace function public.build_payover_run(p_company uuid, p_period_start date)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_end date := public.payover_cycle_end(p_period_start);
+  v_from timestamptz := (p_period_start::timestamp) at time zone 'Africa/Johannesburg';
+  v_to timestamptz := ((v_end + 1)::timestamp) at time zone 'Africa/Johannesburg';
+  v_run uuid;
+  v_status text;
+  v_prev record;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select id, status into v_run, v_status
+    from public.payover_runs where company_id = p_company and period_start = p_period_start;
+
+  if v_run is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'The % run for this client is already %; a correction belongs in the next run.',
+      to_char(p_period_start, 'DD Mon YYYY'), v_status;
+  end if;
+
+  if v_run is null then
+    insert into public.payover_runs (company_id, period_start, period_end, invoice_number)
+    values (p_company, p_period_start, v_end, public.payover_invoice_number(p_company, v_end))
+    returning id into v_run;
+  else
+    /* Let go of everything it was holding before it claims again, so a rebuild is not an append. */
+    update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
+    update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
+    update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    delete from public.payover_run_lines where run_id = v_run;
+  end if;
+
+  with claimed as (
+    update public.payment_allocations a
+       set payover_run_id = v_run
+      from public.account_payments p, public.debtor_accounts d
+     where p.id = a.payment_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       and p.created_at >= v_from
+       and p.created_at < v_to
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat,
+    excess_credit, needs_rate
+  )
+  select v_run, c.id, c.account_id,
+         case when c.paid_to_client then 'ptc' else 'trust' end,
+         c.paid_to_client,
+         coalesce(c.payment_amount, 0), c.to_interest, coalesce(c.to_costs, 0), c.to_capital,
+         c.commission, c.commission_vat, c.excess_credit, c.status = 'needs_rate'
+    from claimed c;
+
+  with carried as (
+    update public.payment_allocations a
+       set reversal_carried_run_id = v_run
+      from public.payover_runs r, public.debtor_accounts d
+     where r.id = a.payover_run_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat, excess_credit
+  )
+  select v_run, c.id, c.account_id, 'reversal', c.paid_to_client,
+         -coalesce(c.payment_amount, 0), -c.to_interest, -coalesce(c.to_costs, 0), -c.to_capital,
+         -c.commission, -c.commission_vat, -c.excess_credit
+    from carried c;
+
+  select r.id, r.net_payover, r.invoice_number into v_prev
+    from public.payover_runs r
+   where r.company_id = p_company
+     and r.period_start < p_period_start
+     and r.status in ('approved', 'sent', 'paid')
+     and r.net_payover < 0
+     and r.carried_out_run_id is null
+   order by r.period_start desc limit 1;
+
+  if v_prev.id is not null then
+    insert into public.payover_run_lines (run_id, line_kind, carried_amount)
+    values (v_run, 'carried', v_prev.net_payover);
+    update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
+  end if;
+
+  perform public.recompute_payover_run(v_run);
+  return v_run;
+end $$;
+
+create or replace function public.mark_payover_run_paid(
+  p_run uuid, p_reference text, p_paid_at timestamptz default now())
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(p_reference, '')), '') is null then
+    raise exception 'Say which EFT paid it -- the reference is what reconciles this invoice to the bank.';
+  end if;
+  update public.payover_runs
+     set status = 'paid', paid_at = p_paid_at, eft_reference = btrim(p_reference)
+   where id = p_run and status in ('approved', 'sent');
+  if not found then raise exception 'Only an approved or sent run can be marked paid.'; end if;
+end $$;
+
+create or replace function public.mark_payover_run_sent(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  update public.payover_runs set status = 'sent', sent_at = now()
+   where id = p_run and status = 'approved';
+  if not found then raise exception 'Only an approved run can be sent.'; end if;
+end $$;
+
+create or replace function public.preview_allocation(
+  p_account uuid, p_amount numeric, p_paid_to_client boolean default false)
+returns table (
+  receipt_fee_excl numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric,
+  commission numeric, commission_vat numeric,
+  to_client numeric, due_to_bf numeric, bf_takes numeric,
+  interest_before numeric, costs_before numeric, capital_before numeric,
+  interest_after numeric, costs_after numeric, capital_after numeric,
+  has_rate boolean
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  b record; s record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric := 0;
+  v_company uuid;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and current_date >= effective_from
+     and (effective_to is null or current_date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  select * into b from public.engine_balances(p_account, null);
+  select * into s from public.finance_split(
+    greatest(coalesce(p_amount, 0), 0), b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  select d.company_id, coalesce(d.commission_rate, c.commission_rate), c.commission_bands, c.mandate_signed_at
+    into v_company, v_rate, v_bands, v_mandate
+    from public.debtor_accounts d join public.companies c on c.id = d.company_id
+   where d.id = p_account;
+
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_company and a.status <> 'reversed'
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+  has_rate := commission is not null;
+  if commission is null then commission := 0; end if;
+  commission_vat := round(commission * v_vat, 2);
+
+  receipt_fee_excl := s.fee_excl;
+  receipt_fee_vat := s.fee_vat;
+  to_interest := s.to_interest;
+  to_costs := s.to_costs;
+  to_capital := s.to_capital;
+  excess_credit := s.excess;
+
+  if p_paid_to_client then
+    to_client := 0;
+    due_to_bf := s.to_interest + s.to_costs + commission;
+  else
+    to_client := s.to_capital - commission - commission_vat;
+    due_to_bf := 0;
+  end if;
+  /* WHAT BF ACTUALLY EARNS, which is not due_to_bf: interest and costs recovered plus commission,
+     however the money arrived. The VAT is SARS's and is deliberately not in this figure. */
+  bf_takes := s.to_interest + s.to_costs + commission;
+
+  interest_before := b.interest; costs_before := b.costs; capital_before := b.capital;
+  /* The receipt fee this payment would raise joins costs before it is paid, so what is left after
+     is the old costs plus that fee less what the payment took. */
+  interest_after := b.interest - s.to_interest;
+  costs_after := b.costs + s.fee_excl + s.fee_vat - s.to_costs;
+  capital_after := b.capital - s.to_capital;
+  return next;
+end $$;
+
+create or replace function public.reallocate_account(p_account_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_cutover timestamptz;
+  v_restored numeric := 0;
+  v_count integer := 0;
+  v_payment record;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select finance_cutover_at into v_cutover from public.firm_settings limit 1;
+  if v_cutover is null then return 0; end if;
+
+  select coalesce(sum(a.to_capital), 0) into v_restored
+    from public.payment_allocations a
+    join public.account_payments p on p.id = a.payment_id
+   where a.account_id = p_account_id
+     and p.created_at >= v_cutover
+     and not public.allocation_is_invoiced(a.payover_run_id);
+
+  delete from public.payment_allocations a
+   using public.account_payments p
+   where a.payment_id = p.id
+     and a.account_id = p_account_id
+     and p.created_at >= v_cutover
+     and not public.allocation_is_invoiced(a.payover_run_id);
+
+  /* THE ENGINE'S OWN RECEIPT FEES GO WITH THEM, so the replay charges them again rather than
+     charging them twice -- and only for the payments the loop below actually replays. A reversed
+     payment is not replayed, so its fee stays on the ledger as the cancelled line the reversal
+     wrote; an invoiced one is not replayed either, so its fee stays as the charge the client was
+     already paid over on. */
+  delete from public.account_fees f
+   using public.account_payments p
+   where f.payment_id = p.id
+     and f.account_id = p_account_id
+     and f.annexure_item = '9'
+     and f.source = 'raptor'
+     and p.created_at >= v_cutover
+     and p.reversed_at is null
+     and not public.payment_is_invoiced(p.id);
+
+  update public.debtor_accounts
+     set capital_outstanding = coalesce(capital_outstanding, 0) + v_restored
+   where id = p_account_id;
+
+  for v_payment in
+    select p.id from public.account_payments p
+     where p.account_id = p_account_id
+       and p.created_at >= v_cutover
+       and not p.is_demo
+       and p.reversed_at is null
+       and not public.payment_is_invoiced(p.id)
+     order by p.created_at, p.id
+  loop
+    perform public.allocate_payment(v_payment.id);
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end $$;
+
+create or replace function public.account_ledger(p_account uuid)
+returns table (
+  payment_id uuid, received_at timestamptz, captured_at timestamptz,
+  reversed boolean, reversal_reason text, paid_to_client boolean,
+  amount numeric, receipt_fee numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  needs_rate boolean,
+  capital_after numeric, interest_after numeric, costs_after numeric,
+  run_invoice text, run_status text, run_id uuid
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_capital numeric; v_interest numeric; v_costs numeric; rec record;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  /* THE OPENING POSITION: what the account started the engine's life owing -- capital handed
+     over, every rand of recoverable interest ever accrued, and every fee ever raised that may be
+     recovered, before any of it was paid. The walk below takes payments off it in order. */
+  select coalesce(d.capital_handed_over, 0) into v_capital
+    from public.debtor_accounts d where d.id = p_account;
+  select coalesce(sum(amount_recoverable), 0) into v_interest
+    from public.account_interest_accruals where account_id = p_account;
+  select coalesce(sum(f.amount_excl_vat + coalesce(f.vat_amount, 0)), 0) into v_costs
+    from public.account_fees f
+   where f.account_id = p_account and f.cancelled_at is null and f.billed is not false;
+
+  for rec in
+    select p.id, p.received_at, p.created_at, p.reversed_at, p.reversal_reason, p.paid_to_client,
+           p.amount,
+           a.receipt_fee_excl, a.receipt_fee_vat, a.to_interest, a.to_costs, a.to_capital,
+           a.excess_credit, a.commission, a.commission_vat, a.to_client, a.due_to_bf, a.status,
+           r.invoice_number, r.status as run_status, r.id as run_id
+      from public.account_payments p
+      left join public.payment_allocations a on a.payment_id = p.id
+      left join public.payover_runs r on r.id = a.payover_run_id
+     where p.account_id = p_account and not p.is_demo
+     order by p.created_at, p.id
+  loop
+    payment_id := rec.id; received_at := rec.received_at; captured_at := rec.created_at;
+    reversed := rec.reversed_at is not null or rec.status = 'reversed';
+    reversal_reason := rec.reversal_reason;
+    paid_to_client := coalesce(rec.paid_to_client, false);
+    amount := rec.amount;
+    receipt_fee := coalesce(rec.receipt_fee_excl, 0) + coalesce(rec.receipt_fee_vat, 0);
+    to_interest := coalesce(rec.to_interest, 0);
+    to_costs := coalesce(rec.to_costs, 0);
+    to_capital := coalesce(rec.to_capital, 0);
+    excess_credit := coalesce(rec.excess_credit, 0);
+    commission := coalesce(rec.commission, 0);
+    commission_vat := coalesce(rec.commission_vat, 0);
+    to_client := coalesce(rec.to_client, 0);
+    due_to_bf := coalesce(rec.due_to_bf, 0);
+    needs_rate := rec.status = 'needs_rate';
+    run_invoice := rec.invoice_number; run_status := rec.run_status; run_id := rec.run_id;
+
+    /* A REVERSED LINE MOVES NOTHING. It is shown because it happened, not because it counts. */
+    if not reversed then
+      v_capital := v_capital - to_capital;
+      v_interest := v_interest - to_interest;
+      v_costs := v_costs - to_costs;
+    end if;
+    capital_after := v_capital; interest_after := v_interest; costs_after := v_costs;
+    return next;
+  end loop;
+end $$;
+
+create or replace function public.expected_from_promises(
+  p_from date default null, p_to date default null)
+returns table (
+  account_id uuid, company_id uuid, client text, case_number text, debtor text,
+  promises integer, promised numeric, bf_share numeric, client_share numeric, vat numeric,
+  first_due date, last_due date
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_from date := coalesce(p_from, (now() at time zone 'Africa/Johannesburg')::date);
+  v_to date := coalesce(p_to, public.payover_cycle_end(public.payover_cycle_start(now())));
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  acc record; pr record; b record; s record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric;
+  v_commission numeric; v_interest numeric; v_costs numeric; v_capital numeric;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  /* TODAY'S TARIFF, because the promises are due from today onwards. */
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and current_date >= effective_from
+     and (effective_to is null or current_date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  for acc in
+    select d.id, d.company_id, c.name as client, d.case_number,
+           public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname) as debtor,
+           coalesce(d.commission_rate, c.commission_rate) as rate,
+           c.commission_bands, c.mandate_signed_at
+      from public.debtor_accounts d
+      join public.companies c on c.id = d.company_id
+     where exists (
+       select 1 from public.promises_to_pay p
+        where p.account_id = d.id
+          and p.due_on between v_from and v_to
+          /* OPEN ONES ONLY. A promise already kept is money that has arrived and is in the run
+             already; a broken or cancelled one is not expected from anybody. */
+          and p.status not in ('kept', 'broken', 'cancelled')
+          and p.amount > 0)
+  loop
+    select * into b from public.engine_balances(acc.id, null);
+    v_interest := b.interest; v_costs := b.costs; v_capital := b.capital;
+
+    v_rate := acc.rate; v_bands := acc.commission_bands; v_mandate := acc.mandate_signed_at;
+    v_cumulative := 0;
+    if v_bands is not null then
+      select coalesce(sum(a.to_capital), 0) into v_cumulative
+        from public.payment_allocations a
+        join public.debtor_accounts d2 on d2.id = a.account_id
+       where d2.company_id = acc.company_id and a.status <> 'reversed'
+         and (v_mandate is null or a.computed_at >= v_mandate);
+    end if;
+
+    account_id := acc.id; company_id := acc.company_id; client := acc.client;
+    case_number := acc.case_number; debtor := acc.debtor;
+    promises := 0; promised := 0; bf_share := 0; client_share := 0; vat := 0;
+    first_due := null; last_due := null;
+
+    for pr in
+      select p.amount, p.due_on
+        from public.promises_to_pay p
+       where p.account_id = acc.id
+         and p.due_on between v_from and v_to
+         and p.status not in ('kept', 'broken', 'cancelled')
+         and p.amount > 0
+       order by p.due_on, p.id
+    loop
+      select * into s from public.finance_split(
+        pr.amount, v_interest, v_costs, v_capital, v_vat, v_fee_rate, v_fee_cap);
+
+      v_commission := coalesce(
+        public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative), 0);
+      v_cumulative := v_cumulative + s.to_capital;
+
+      promises := promises + 1;
+      promised := promised + pr.amount;
+      /* WHAT BF EARNS: interest and costs recovered plus commission. The VAT is SARS's and is
+         reported beside it rather than inside it, exactly as the account preview does. */
+      bf_share := bf_share + s.to_interest + s.to_costs + v_commission;
+      client_share := client_share + s.to_capital - v_commission - round(v_commission * v_vat, 2);
+      vat := vat + round(v_commission * v_vat, 2);
+      if first_due is null then first_due := pr.due_on; end if;
+      last_due := pr.due_on;
+
+      /* AND THE BALANCES MOVE ON, which is the point of the walk. */
+      v_interest := v_interest - s.to_interest;
+      v_costs := v_costs + s.fee_excl + s.fee_vat - s.to_costs;
+      v_capital := v_capital - s.to_capital;
+    end loop;
+
+    if promises > 0 then return next; end if;
+  end loop;
+end $$;
+-- The one `sql` function of the nine. Converted to plpgsql rather than given a where-clause
+-- guard: returning NO ROWS to a caller who may not ask is a different answer from refusing, and
+-- the browser would draw an empty cycle rather than an error. Every finance RPC refusing the same
+-- way is also what makes the rule one sentence instead of fourteen.
+create or replace function public.payover_cycle_now()
+returns table (period_start date, period_end date, days_left integer, today date)
+language plpgsql stable security definer set search_path to 'public'
+as $$
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  return query
+  select s, public.payover_cycle_end(s),
+         (public.payover_cycle_end(s) - (now() at time zone 'Africa/Johannesburg')::date)::integer,
+         (now() at time zone 'Africa/Johannesburg')::date
+    from (select public.payover_cycle_start(now()) as s) c;
+end $$;
+
+-- AND NOBODY UNAUTHENTICATED REACHES ANY OF THEM.
+--
+-- `anon` is the role PostgREST uses before anybody signs in. It has no business calling a finance
+-- function at all, guarded or not: a refusal it can trigger is still a function it can reach.
+-- `authenticated` keeps EXECUTE because that is who the Finance screens run as, and the guard
+-- inside each function decides which of them may proceed.
+--
+-- LISTED BY HAND, because a loop over "everything that looks like a finance function" would take
+-- its meaning from a naming convention rather than from what the firm said, and would quietly
+-- stop covering a function somebody named differently.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)',
+    'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)',
+    'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)',
+    'money_position(uuid)',
+    'payover_work_queue(date)',
+    'payover_cycle_tiles(date)',
+    'payover_run_payments(uuid)',
+    'finance_exception_jobs()',
+    'payment_audit(uuid)',
+    'account_ledger(uuid)',
+    'expected_from_promises(date, date)'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;
