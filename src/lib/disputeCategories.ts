@@ -196,6 +196,19 @@ export const REQUEST_KINDS: QueryCategory[] = [
   { value: 'Invoices', examples: 'The invoices the debt is made up of' },
   { value: 'Proof of delivery', examples: 'Delivery notes, signed receipts, waybills' },
   { value: 'Proof of payment', examples: 'A payment somebody says was made' },
+  /*
+   * WHAT WAS ALREADY SAID TO THE DEBTOR, and the firm asked for it by name.
+   *
+   * It sits with the other two PROOFS rather than at the end, because a reader scanning this list
+   * looks for "Proof of ..." as one group -- and it is asked for the same way they are: something
+   * the client has and the firm needs before it can answer.
+   *
+   * THE COMMONEST REASON FOR IT IS A DEBTOR SAYING NOBODY EVER CONTACTED THEM. A section 129
+   * turns on delivery rather than quantum, so what was sent and when is the answer to that
+   * objection -- and it is usually on the client's system rather than ours, which is exactly what
+   * makes it a request.
+   */
+  { value: 'Proof of communication', examples: 'Letters, emails or texts already sent to the debtor' },
   { value: 'Debtor details', examples: 'An address, a number, an employer, an identity number' },
   { value: 'Something on our own file', examples: 'A note, a scanned page, something from the handover' },
   { value: 'Other', examples: 'Anything the list above does not cover — say what it is' },

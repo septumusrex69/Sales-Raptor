@@ -115,6 +115,25 @@ ok('...and every entry says what it covers', REQUEST_KINDS.every((r) => r.exampl
 /* THE STATEMENT LEADS, because it is the document a handover most often arrives without -- and the
    box opens on the first entry, so the order is a default rather than a list. */
 check('the statement is what the box opens on', REQUEST_KINDS[0].value, 'Statement of account')
+/*
+ * PROOF OF COMMUNICATION, ASKED FOR BY NAME -- and the assertion is that it is IN THE PROOFS,
+ * not merely in the list. The commonest reason a liaison asks for it is a debtor saying nobody
+ * ever contacted them, and a section 129 turns on delivery rather than quantum, so what was sent
+ * and when is the whole answer to that objection. It lives on the CLIENT's system far more often
+ * than on ours, which is what makes it a request rather than something to go and look up.
+ *
+ * THE CONTIGUITY IS THE POINT. A reader scanning a nine-item select looks for "Proof of ..." as
+ * one group; a fourth proof appended at the bottom, above Other, is present and still not found.
+ */
+const proofs = REQUEST_KINDS.map((r, i) => [r.value, i]).filter(([v]) => v.startsWith('Proof of'))
+ok('the firm can ask for what was already said to the debtor',
+  REQUEST_KINDS.some((r) => r.value === 'Proof of communication'))
+check('...and it is one of the proofs', proofs.map(([v]) => v), [
+  'Proof of delivery', 'Proof of payment', 'Proof of communication',
+])
+ok('...which are offered together rather than scattered',
+  proofs.every(([, i], n) => n === 0 || i === proofs[n - 1][1] + 1))
+
 /* AND "OTHER" IS LAST AND PRESENT, or a request that is none of the named kinds has nowhere to go
    and gets logged as the nearest wrong one. */
 check('...and Other is the last resort', REQUEST_KINDS[REQUEST_KINDS.length - 1].value, 'Other')
