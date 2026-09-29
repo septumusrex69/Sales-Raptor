@@ -94,6 +94,51 @@ check('neither debtor lookup counts the book',
 ok('...and none of them counts by accident',
   !/fetchAccounts\(\{ search: q, pageSize: 8 \}\)/.test(mail))
 
+/* ---------------- what happened this month ---------------- */
+
+/*
+ * THE DASHBOARD ASKS BY DATE AND EVERY DATE INDEX LED WITH account_id.
+ *
+ * `collector_performance` is the arithmetic behind the company dashboard -- which everybody lands
+ * on, so it runs constantly -- and Postgres' own statement statistics had it as the largest
+ * single consumer of time on the instance: 696 calls at 1 696 ms, nineteen and a half minutes.
+ * (account_id, placed_at) answers "what happened on this account" and cannot answer "what
+ * happened between these two dates", because the leading column is not in the predicate.
+ *
+ * HELD PER TABLE RATHER THAN AS ONE ASSERTION, because the failure this guards against is one of
+ * them being dropped or renamed while the others stay -- which reads as a working dashboard right
+ * up until somebody looks at the month.
+ */
+const dashboardIndexes = [
+  ['account_payments', 'account_payments_received_idx', /\(received_at\) where reversed_at is null/],
+  ['account_calls', 'account_calls_placed_idx', /\(placed_at\) where placed_by is not null/],
+  ['account_notes', 'account_notes_written_idx', /\(created_at\) where source = 'manual'/],
+  ['account_emails', 'account_emails_sent_idx', /\(occurred_at\) where direction = 'out'/],
+  ['sms_messages', 'sms_messages_sent_idx', /\(created_at\) where direction = 'outbound'/],
+  ['promises_to_pay', 'promises_to_pay_made_idx', /\(created_at\) where created_by is not null/],
+]
+for (const [table, name, shape] of dashboardIndexes) {
+  ok(`${table} can be asked what happened this month`,
+    new RegExp(`create index if not exists ${name}\\s*\\n\\s*on public\\.${table} `).test(sql))
+  /* PARTIAL ON THE CONDITION THE FUNCTION ALREADY FILTERS BY, so the index stays small and
+     carries only rows an answer could contain. A plain index on the date column would work and
+     would be several times the size for the same result. */
+  ok(`...only over the rows that can answer it`, shape.test(sql))
+}
+
+/*
+ * AND THE FUNCTION STILL FILTERS THE WAY THOSE INDEXES ARE SHAPED. A partial index is only used
+ * when the query's predicate implies the index's -- so if the function stopped excluding reversed
+ * payments, or started counting Raptor's own system notes, the index would silently go unused and
+ * the dashboard would quietly return to two and a half seconds.
+ */
+const perfAt = sql.lastIndexOf('create or replace function public.collector_performance(')
+ok('the dashboard function is there', perfAt > 0)
+const perf = perfAt > 0 ? sql.slice(perfAt, sql.indexOf('$$;', perfAt)) : ''
+ok('...still excluding reversed payments', /p\.reversed_at is null/.test(perf))
+ok('...still counting only a person’s own notes', /source = 'manual'/.test(perf))
+ok('...still counting only mail that went out', /direction = 'out'/.test(perf))
+
 console.log(`\ncheck-book-speed: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

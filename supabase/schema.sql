@@ -14584,3 +14584,42 @@ create policy debtor_accounts_update on public.debtor_accounts
 create policy debtor_accounts_delete on public.debtor_accounts
   for delete to authenticated
   using ((select auth.uid()) is not null);
+
+-- ---------- What happened this month, and not one index could answer it ----------
+--
+-- `collector_performance` is the arithmetic behind the company dashboard and the collections
+-- floor -- and EVERYBODY LANDS ON THE COMPANY DASHBOARD, so it runs constantly. Postgres' own
+-- statement statistics had it at 696 calls at 1 696 ms each: NINETEEN AND A HALF MINUTES of
+-- database time, the largest single consumer on the instance.
+--
+-- EVERY DATE INDEX ON EVERY TABLE IT READS WAS PREFIXED BY account_id -- (account_id, placed_at),
+-- (account_id, occurred_at), (account_id, received_at). Those answer "what happened on this
+-- account", which is the account page's question and a good index for it. They cannot answer
+-- "what happened between these two dates", which is every question a dashboard asks, because the
+-- leading column is not in the predicate.
+--
+-- AND THE FUNCTION HID IT. Inlined with literal dates the same SQL ran in 124 ms; called as a
+-- function with p_from and p_to as parameters it took 2 513 ms. A parameter is opaque to the
+-- planner, so the estimate that made it reach for an index at all disappeared and the payments
+-- lateral ran over every payment in the book instead of the four hundred in the month. That is
+-- why measuring the CTEs one at a time found nothing: each was already fast with a literal, and
+-- the thing being measured was not the thing that ran.
+--
+--   collector_performance   2 513 ms  ->  199 ms   (132 ms warm)
+--
+-- EACH INDEX IS PARTIAL ON A CONDITION THE DASHBOARD ALREADY FILTERS BY, so it stays small and
+-- carries only rows an answer could contain. `reversed_at is null` is the firm's own rule -- a
+-- debit order that bounced was never money -- and `source = 'manual'` keeps Raptor's own system
+-- notes out of somebody's note count, which is the same reason the function filters on it.
+create index if not exists account_payments_received_idx
+  on public.account_payments (received_at) where reversed_at is null;
+create index if not exists account_calls_placed_idx
+  on public.account_calls (placed_at) where placed_by is not null;
+create index if not exists account_notes_written_idx
+  on public.account_notes (created_at) where source = 'manual' and created_by is not null;
+create index if not exists account_emails_sent_idx
+  on public.account_emails (occurred_at) where direction = 'out' and sent_by is not null;
+create index if not exists sms_messages_sent_idx
+  on public.sms_messages (created_at) where direction = 'outbound' and account_id is not null;
+create index if not exists promises_to_pay_made_idx
+  on public.promises_to_pay (created_at) where created_by is not null;
