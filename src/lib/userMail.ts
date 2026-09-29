@@ -733,9 +733,23 @@ export async function raiseTicketFromEmail(input: {
   category?: string | null
   ownerId?: string | null
   chaseOn?: string | null
+  /**
+   * ADD IT TO A TICKET THAT IS ALREADY OPEN instead of raising a new one.
+   *
+   * The firm's own sequence: a debtor disputes on the telephone and says they will email it, the
+   * invitation goes out, and when the email arrives it is LINKED rather than raised again. On a
+   * dispute not yet in writing that link is what sets `received_on` and `in_writing`, which ends
+   * the invitation sequence and starts the real one. Nothing is charged -- item 3 was raised when
+   * the dispute was.
+   */
+  queryId?: string | null
 }): Promise<{
   ok: boolean
   ticketId: string | null
+  /** True where this was added to an existing ticket rather than raising one. */
+  linked: boolean
+  /** True where this email is what made a verbal dispute a written one. */
+  nowInWriting: boolean
   /** Filenames that came across onto the account, against this ticket. */
   attached: string[]
   /** And the ones that did not, each saying why. */
@@ -754,21 +768,26 @@ export async function raiseTicketFromEmail(input: {
       category: input.category ?? null,
       ownerId: input.ownerId ?? null,
       chaseOn: input.chaseOn ?? null,
+      queryId: input.queryId ?? null,
     }),
   })
   const body = await res.json().catch(() => ({})) as {
     ok?: boolean; ticketId?: string; attached?: string[]; failed?: string[]
+    linked?: boolean; nowInWriting?: boolean
     charged?: number | null; error?: string
   }
   if (!res.ok || !body.ok) {
     return {
-      ok: false, ticketId: null, attached: [], failed: [], charged: null,
+      ok: false, ticketId: null, linked: false, nowInWriting: false,
+      attached: [], failed: [], charged: null,
       problem: body.error ?? 'The ticket could not be raised.',
     }
   }
   return {
     ok: true,
     ticketId: body.ticketId ?? null,
+    linked: !!body.linked,
+    nowInWriting: !!body.nowInWriting,
     attached: body.attached ?? [],
     failed: body.failed ?? [],
     charged: body.charged ?? null,

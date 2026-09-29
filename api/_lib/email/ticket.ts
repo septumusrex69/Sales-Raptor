@@ -88,8 +88,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     category?: string | null
     ownerId?: string | null
     chaseOn?: string | null
+    queryId?: string | null
   }
   const accountEmailId = typeof body.accountEmailId === 'string' ? body.accountEmailId : ''
+  /*
+   * LINK IT TO THE TICKET THAT IS ALREADY OPEN, rather than raising a second one.
+   *
+   * THE FIRM'S OWN SEQUENCE: "if the debtor disputes something and says he's going to email it,
+   * then the moment that the email comes, you can say, link it to a current dispute and then you
+   * can choose the dispute that is there available. Then it's that email and they need to
+   * automatically know that we've received the dispute."
+   *
+   * That is exactly what `alleged_on`, `received_on` and `in_writing` are three columns for, and
+   * until now nothing reached them from an email. A verbal dispute is raised on the telephone,
+   * the invitation goes out asking for it in writing, the writing arrives -- and somebody had to
+   * open the dispute and retype the date. Worse, the only button on the email raised a SECOND
+   * ticket, which `one_open_dispute_per_account` then refused after item 3 had been charged.
+   *
+   * NOTHING IS CHARGED ON THIS PATH. Item 3 was raised when the dispute was; the debtor does not
+   * pay twice because their objection arrived in two parts.
+   */
+  const queryId = typeof body.queryId === 'string' && body.queryId ? body.queryId : null
   /* TWO KINDS ONLY. A decision and a litigation recommendation are things somebody DECIDES, not
      things that arrive in the post; offering them here would be a door onto the wrong ladder. */
   const kind = body.kind === 'request' ? 'request' : 'dispute'
@@ -153,37 +172,89 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     || 'An email with no text in it.'
 
   /*
-   * THE TICKET, IN ONE INSERT.
+   * THE TICKET: either the one already open on this account, or a new one.
    *
-   * `alleged_on` AND `received_on` TOGETHER on a dispute: it arrived in writing, which is what
-   * this button means. The column's own comment says why alleged is always set -- the
-   * deemed-undisputed notice quotes the date, so a null there is a {{brace}} on a notice.
+   * On the insert, `alleged_on` AND `received_on` go on together on a dispute: it arrived in
+   * writing, which is what this button means. The column's own comment says why alleged is always
+   * set -- the deemed-undisputed notice quotes the date, so a null there is a {{brace}} on a
+   * notice.
    */
-  const { data: ticket, error: ticketError } = await admin
-    .from('account_queries')
-    .insert({
-      account_id: accountId,
-      kind,
-      description,
-      category: kind === 'dispute' ? (body.category?.trim() || null) : null,
-      request_for: requestFor,
-      owner_id: body.ownerId || null,
-      /* Where it lands follows who it was given to; unassigned, it sits with the desk it came to. */
-      stage: body.ownerId ? 'liaison' : 'agent',
-      chase_on: body.chaseOn || null,
-      raised_by: caller.id,
-      alleged_on: kind === 'dispute' ? today : null,
-      received_on: kind === 'dispute' ? today : null,
-      in_writing: kind === 'dispute',
-      status: 'open',
-    })
-    .select('*')
-    .single()
-  if (ticketError) {
-    /* The refusals here are good ones and their sentences are written to be read -- a second open
-       dispute says what to do instead. Passed through rather than replaced. */
-    res.status(409).json({ error: ticketError.message })
-    return
+  let ticket: { id: string; kind: string | null } | null = null
+  /* What the answer to the caller says happened, and what the timeline records. Only ever true on
+     the link path, where a verbal dispute has just become a written one. */
+  let nowInWriting = false
+  let ticketKind: 'dispute' | 'request' = kind
+
+  if (queryId) {
+    const { data: openRow, error: openError } = await admin
+      .from('account_queries')
+      .select('id, account_id, kind, status, in_writing, received_on')
+      .eq('id', queryId)
+      .maybeSingle()
+    const open = openRow as unknown as {
+      id: string; account_id: string | null; kind: string | null
+      status: string | null; in_writing: boolean | null; received_on: string | null
+    } | null
+    if (openError) { res.status(500).json({ error: openError.message }); return }
+    /* THE THREE REFUSALS ARE THE THREE WAYS THIS COULD FILE A DEBTOR'S LETTER SOMEWHERE IT DOES
+       NOT BELONG: onto another debtor's ticket, onto one that has already been answered, or onto
+       nothing at all. Each says which, because the caller picked from a list and a bare "no" here
+       reads as the screen being broken. */
+    if (!open) { res.status(404).json({ error: 'That ticket no longer exists.' }); return }
+    if (open.account_id !== accountId) {
+      res.status(400).json({ error: 'That ticket is on a different account.' })
+      return
+    }
+    if (open.status === 'closed') {
+      res.status(409).json({ error: 'That ticket has been closed. Raise a new one from this email.' })
+      return
+    }
+    ticket = { id: open.id, kind: open.kind }
+    ticketKind = open.kind === 'request' ? 'request' : 'dispute'
+    /*
+     * AND THE DISPUTE IS NOW IN WRITING. Only where it was not already -- `workflow_start_on_dispute`
+     * fires on this very update, ends the invitation sequence and starts the real one, and it
+     * guards on the OLD row for exactly this reason. Writing the same values again on a dispute
+     * that already carried them changes nothing, but it would put a second "received in writing"
+     * line on the timeline for an email that only confirmed what we had.
+     */
+    nowInWriting = open.kind === 'dispute'
+      && !open.in_writing && !open.received_on
+    if (nowInWriting) {
+      const { error: markError } = await admin
+        .from('account_queries')
+        .update({ received_on: today, in_writing: true })
+        .eq('id', open.id)
+      if (markError) { res.status(500).json({ error: markError.message }); return }
+    }
+  } else {
+    const { data: created, error: ticketError } = await admin
+      .from('account_queries')
+      .insert({
+        account_id: accountId,
+        kind,
+        description,
+        category: kind === 'dispute' ? (body.category?.trim() || null) : null,
+        request_for: requestFor,
+        owner_id: body.ownerId || null,
+        /* Where it lands follows who it was given to; unassigned, it sits with the desk it came to. */
+        stage: body.ownerId ? 'liaison' : 'agent',
+        chase_on: body.chaseOn || null,
+        raised_by: caller.id,
+        alleged_on: kind === 'dispute' ? today : null,
+        received_on: kind === 'dispute' ? today : null,
+        in_writing: kind === 'dispute',
+        status: 'open',
+      })
+      .select('id, kind')
+      .single()
+    if (ticketError) {
+      /* The refusals here are good ones and their sentences are written to be read -- a second open
+         dispute says what to do instead. Passed through rather than replaced. */
+      res.status(409).json({ error: ticketError.message })
+      return
+    }
+    ticket = created as unknown as { id: string; kind: string | null }
   }
 
   /*
@@ -260,7 +331,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * chasing a client for a statement is the client's failing.
    */
   let charged: number | null = null
-  if (escalationChargeable(kind)) {
+  /* NOT ON THE LINK PATH. Item 3 was raised when the dispute was raised; a debtor does not pay
+     twice because their objection arrived on the telephone first and in the post afterwards. */
+  if (!queryId && escalationChargeable(kind)) {
     try {
       const result = await chargeItemWith(admin, {
         accountId,
@@ -280,10 +353,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   /* ON THE ACCOUNT'S OWN TIMELINE, where somebody reading the history tomorrow sees why the
      sequences stopped -- and in the same words the browser's path writes. */
+  const filedNote = attached.length > 0
+    ? ` (${attached.length} attachment${attached.length === 1 ? '' : 's'} filed)`
+    : ''
   await admin.from('account_notes').insert({
     account_id: accountId,
-    body: `${escalationNote(kind, description.slice(0, 200))}`
-      + (attached.length > 0 ? ` (${attached.length} attachment${attached.length === 1 ? '' : 's'} filed)` : ''),
+    /* ON THE LINK PATH THE NOTE IS THE EVENT, not the escalation: nothing was raised, an email
+       was filed against something that already existed. And where that email is what made a
+       verbal dispute a written one, the timeline has to say so -- it is the moment the collection
+       sequences stopped, and somebody reading the history tomorrow needs to see why. */
+    body: queryId
+      ? (nowInWriting
+        ? `The dispute was received in writing by email${filedNote}`
+        : `An email was filed against this ${ticketKind === 'request' ? 'request' : 'dispute'}${filedNote}`)
+      : `${escalationNote(kind, description.slice(0, 200))}${filedNote}`,
     created_by: caller.id,
     query_id: ticket.id,
     kind: 'query',
@@ -292,7 +375,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.status(200).json({
     ok: true,
     ticketId: ticket.id,
-    kind,
+    kind: ticketKind,
+    /* Whether this email is what turned a verbal dispute into a written one, so the screen can
+       say the thing that actually matters: the collection sequences have stopped. */
+    linked: !!queryId,
+    nowInWriting,
     attached,
     failed,
     charged,

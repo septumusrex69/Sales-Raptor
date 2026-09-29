@@ -10,6 +10,7 @@ import {
   ageInDays, canSendToClient, fetchAllQueries, isStale, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL, type QueryStage, type QueueRow,
 } from '../../lib/accountQueries'
+import { escalationCard } from '../../lib/disputeCategories'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -305,11 +306,11 @@ export function DisputesBoard() {
                     </td>
                     <td className="px-3 py-2 text-slate-600 max-w-[26rem]">
                       <span className="line-clamp-2 wrap-anywhere">{q.description}</span>
-                      {q.kind === 'dispute'
-                        ? q.category && <span className="block text-xs text-slate-400">{q.category}</span>
-                        : <span className="block text-xs font-medium text-[var(--c-navy-mid)]">
-                            {q.kind === 'help' ? 'Team leader asked' : 'For litigation'}
-                          </span>}
+                      {/* The same chip as the card, from the same record -- see DisputeCard. */}
+                      <span className={`mt-1 text-[10px] font-semibold uppercase tracking-wide inline-block px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
+                        {escalationCard(q.kind).label}
+                      </span>
+                      {q.kind === 'dispute' && q.category && <span className="block text-xs text-slate-400">{q.category}</span>}
                     </td>
                     <td className="px-3 py-2 text-slate-500">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
                     <td className="px-3 py-2"><StageChip column={columnOf(q)} /></td>
@@ -373,18 +374,22 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       <p className="text-[11px] text-slate-300">{q.accountNumber}</p>
       <p className="text-[13px] font-semibold leading-snug text-navy-950 mt-1.5 line-clamp-2 wrap-anywhere">{q.description}</p>
       {/*
-        A board called Disputes now carries two things that are not disputes — an agent asking a
-        team leader for a decision, and a recommendation to instruct the attorneys. Both belong
-        in the same queue (same owner, same chase date, same answer) but a litigation
-        recommendation reading as an unlabelled dispute would be actively misleading, so the kind
-        is said on the card. A dispute keeps showing its classification instead, which is the more
-        useful line and the one people already read.
+        EVERY KIND WEARS ITS OWN CHIP, AND THEY ARE DIFFERENT COLOURS. This board carries four
+        things that are not all disputes, and it used to name only two of them -- with a chain
+        that fell through, so a request announced itself as a recommendation to sue. The words
+        and the tint now live on the kind (escalationCard), which is a record: a new kind is a
+        type error rather than somebody else's label.
+
+        The firm asked for the colour: "a request and a dispute looks exactly the same." They are
+        not the same object -- a dispute holds every collection sequence on the account and a
+        request holds nothing -- so the one that stops the work wears the rust and the rest stay
+        quiet. A dispute still shows its classification under the chip, which is the line people
+        already read.
       */}
-      {q.kind === 'dispute'
-        ? q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>
-        : <p className="text-[10px] font-semibold uppercase tracking-wide mt-1.5 inline-block px-1.5 py-0.5 rounded bg-[var(--tint-steel)] text-[var(--c-navy-mid)]">
-            {q.kind === 'help' ? 'Team leader asked' : 'For litigation'}
-          </p>}
+      <p className={`text-[10px] font-semibold uppercase tracking-wide mt-1.5 inline-block px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
+        {escalationCard(q.kind).label}
+      </p>
+      {q.kind === 'dispute' && q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>}
       <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
         <span className="text-slate-500 truncate">{ownerName ?? 'Unassigned'}</span>
         {closed

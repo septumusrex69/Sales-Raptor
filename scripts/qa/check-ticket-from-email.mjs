@@ -113,7 +113,7 @@ ok('...capped rather than unbounded', /written\.length > 4000/.test(api))
  * refusal has to come first and it has to come from the email.
  */
 ok('an email that already raised a ticket refuses a second', /if \(mail\.query_id\) \{/.test(api))
-ok('...and the screen does not offer one either', /email\.queryId \?/.test(panel))
+ok('...and the screen does not offer one either', /email\.queryId\s*\n?\s*\?/.test(panel))
 /* WHICH MEANS THE COLUMN HAS TO REACH THE SCREEN. CLAUDE.md's own warning: a column in the table,
    the type and the select but missing from the hand-written mapper reads as undefined for ever and
    nothing fails -- here that is a button that reappears after it has been used. */
@@ -126,7 +126,23 @@ ok('...and the select asks for it', /occurred_at, query_id'/.test(mailLib))
  * A DISPUTE IS SOMETHING THE DEBTOR SAYS. Raising one off a letter the firm itself sent would be
  * the firm objecting to its own demand -- and it would stop the very sequence that sent it.
  */
-ok('the buttons are offered on inbound mail only', /\{inbound && \(/.test(panel))
+ok('the buttons are offered on inbound mail only', /extra=\{inbound \?/.test(panel))
+/*
+ * AND THEY OPEN THE BOX RATHER THAN RAISING ANYTHING. The firm: "if it says this is a dispute, it
+ * should take you to kind of like creating a real dispute... it should ask you, what is the issue
+ * where you can dictate and stuff." The buttons used to post straight to the endpoint, which
+ * produced a dispute with no classification, no dictated issue, nobody's name on it and no chase
+ * date -- and charged the debtor item 3 on the press.
+ */
+ok('...and they open the Escalate box rather than raising anything',
+  /onClassify\(email, 'dispute'\)/.test(panel) && /onClassify\(email, 'request'\)/.test(panel))
+ok('...so the panel does not reach the endpoint at all',
+  !/raiseTicketFromEmail/.test(panel))
+/* BESIDE REPLY AND FORWARD, at the firm's asking: "the dispute and the stuff is here at the
+   bottom. Put it up there by the reply and the forward." On a long message they were three
+   screens down. */
+ok('...from the actions bar, not the foot of the message',
+  /<MessageActions[\s\S]{0,1200}?extra=\{inbound \?/.test(panel))
 
 /* ---------------- the attachments ---------------- */
 
@@ -156,7 +172,7 @@ check('...and a request is not', escalationChargeable('request'), false)
  * was free.
  */
 ok('the endpoint asks that function rather than deciding for itself',
-  /if \(escalationChargeable\(kind\)\)/.test(api))
+  /if \(!queryId && escalationChargeable\(kind\)\)/.test(api))
 /* A FEE THAT WILL NOT WRITE IS NOT A REASON TO UNDO A DISPUTE that has been recorded and has
    already stopped the collection sequences. */
 ok('...and a fee that fails does not undo the dispute', /catch \{[\s\S]{0,200}?charged = null/.test(api))

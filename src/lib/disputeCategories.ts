@@ -240,6 +240,23 @@ export interface EscalationMeta {
    * a FINDING needs somebody with standing to make it.
    */
   goesTo: 'liaison' | 'team_leader' | 'anyone'
+  /**
+   * WHAT THE CARD ON THE BOARD IS CHIPPED WITH, and the tint it wears.
+   *
+   * ON THE KIND FOR THE SAME REASON `submitLabel` IS, and found the same way. The board drew the
+   * chip with `kind === 'help' ? 'Team leader asked' : 'For litigation'` -- a chain with a
+   * fallback -- so the day `request` was added every request on the board announced itself as a
+   * recommendation to sue, and so did every import correction. A record cannot fall through.
+   *
+   * AND THE TINT IS NOT DECORATION. The firm, looking at the board: "a request and a dispute
+   * looks exactly the same. Maybe there should be different colors." They are not the same
+   * object at all -- a dispute holds every collection sequence on the account and a request holds
+   * nothing -- and a queue where the one that stops the work is indistinguishable from the one
+   * that does not is a queue people work in the wrong order.
+   */
+  cardLabel: string
+  /** Tailwind classes for the chip. Rust for the one that stops collecting; quieter for the rest. */
+  cardTint: string
 }
 
 export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
@@ -251,6 +268,8 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     prompt: 'What is the issue?',
     placeholder: 'Says she settled it directly with the client in March and has the proof.',
     goesTo: 'liaison',
+    cardLabel: 'Dispute',
+    cardTint: 'bg-[var(--tint-rust)] text-negative-700',
     submitLabel: 'Raise dispute',
     freeNote: '',
   },
@@ -275,6 +294,8 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     prompt: 'What do you need?',
     placeholder: 'Need the statement for March to June — it was not attached to the handover.',
     goesTo: 'anyone',
+    cardLabel: 'Request',
+    cardTint: 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]',
     submitLabel: 'Raise request',
     freeNote: 'Asking for a document is not something the debtor caused. Where they asked for it '
       + 'themselves, what earns a fee is sending it — item 1(a) on the email, charged when it goes.',
@@ -287,6 +308,8 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     prompt: 'What do you need decided?',
     placeholder: 'Debtor keeps agreeing to pay and never does. Worth a letter of demand?',
     goesTo: 'team_leader',
+    cardLabel: 'Team leader asked',
+    cardTint: 'bg-slate-100 text-slate-600',
     submitLabel: 'Ask for help',
     freeNote: 'Asking a team leader what to do is the firm supervising its own staff, not an '
       + 'expense of collecting from this debtor.',
@@ -299,6 +322,8 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     prompt: 'Why has collecting run out of road?',
     placeholder: 'Refuses to pay, has the means, ignored three letters. Recommend we sue.',
     goesTo: 'liaison',
+    cardLabel: 'For litigation',
+    cardTint: 'bg-gold-100 text-[var(--c-gold-deep)]',
     submitLabel: 'Recommend litigation',
     freeNote: 'Deciding whether to sue is the firm\u2019s own business. The attorneys\u2019 costs '
       + 'are a separate matter if it goes ahead.',
@@ -320,6 +345,8 @@ export const ESCALATION_KINDS: Record<EscalationKind, EscalationMeta> = {
     prompt: 'What is wrong with the handover?',
     placeholder: 'The ID number on the handover sheet is a telephone number.',
     goesTo: 'liaison',
+    cardLabel: 'Client data',
+    cardTint: 'bg-[var(--tint-green)] text-[var(--c-green)]',
     submitLabel: 'Raise it',
     freeNote: 'A client\u2019s data being wrong is not something a debtor pays for.',
   },
@@ -375,6 +402,18 @@ export const ESCALATION_KIND_ORDER: EscalationKind[] = ['dispute', 'request', 'h
  */
 export function escalationChargeable(kind: EscalationKind | null | undefined): boolean {
   return !!kind && ESCALATION_KINDS[kind]?.chargeable === true
+}
+
+/**
+ * The chip for a row off the board, including a row raised before the kind column existed.
+ *
+ * `clientSection` already reads a null kind as a dispute -- which is what it was, because a
+ * dispute was the only thing this table held then -- and the chip has to agree with it or the
+ * same row says two things on two screens.
+ */
+export function escalationCard(kind: EscalationKind | null | undefined): { label: string; tint: string } {
+  const meta = ESCALATION_KINDS[kind ?? 'dispute'] ?? ESCALATION_KINDS.dispute
+  return { label: meta.cardLabel, tint: meta.cardTint }
 }
 
 /** How the timeline records it. */

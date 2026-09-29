@@ -21,7 +21,7 @@ import { Forward, Mail, Reply, ReplyAll } from 'lucide-react'
  * reply-all on a message nobody else was on, and no mark-unread on one you sent yourself.
  */
 export function MessageActions({
-  onReply, onReplyAll, onForward, onMarkUnread, replyNote, canSend = true, disabledNote,
+  onReply, onReplyAll, onForward, onMarkUnread, replyNote, canSend = true, disabledNote, extra,
 }: {
   /** Null where there is nobody to answer — an outbound message. */
   onReply: (() => void) | null
@@ -46,8 +46,22 @@ export function MessageActions({
   /** False when the agent has no mailbox connected. The buttons say why rather than failing. */
   canSend?: boolean
   disabledNote?: string
+  /**
+   * WHAT ELSE THIS PARTICULAR SCREEN CAN DO WITH THE MESSAGE, drawn on the end of the same row.
+   *
+   * A debtor's account is the only one of the four screens where a message is also a THING TO
+   * CLASSIFY -- "this is a dispute", "this is a request" -- and those buttons used to sit under
+   * the body and the attachments. The firm: "the dispute and the stuff is here at the bottom. Put
+   * it up there by the reply and the forward." They are the same kind of act as replying: what
+   * you decided to do with the message you just opened.
+   *
+   * A SLOT RATHER THAN MORE PROPS, because what belongs here is different on every screen that
+   * might want it, and three more nullable callbacks on a shared component is how it stops being
+   * shared. Nothing is drawn where nothing is passed.
+   */
+  extra?: React.ReactNode
 }) {
-  const nothingToDo = !onReply && !onReplyAll && !onForward && !onMarkUnread
+  const nothingToDo = !onReply && !onReplyAll && !onForward && !onMarkUnread && !extra
   if (nothingToDo) return null
 
   const why = canSend ? undefined : (disabledNote ?? 'Connect your mailbox in Settings → Integrations first')
@@ -88,6 +102,7 @@ export function MessageActions({
           Mark unread
         </ActionButton>
       )}
+      {extra}
     </div>
   )
 }

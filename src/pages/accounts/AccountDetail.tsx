@@ -230,6 +230,8 @@ export function AccountDetail() {
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
+  /* The message the Escalate box was opened on, and which of its two buttons was pressed. */
+  const [classifying, setClassifying] = useState<{ email: AccountEmail; kind: 'dispute' | 'request' } | null>(null)
   const [freezing, setFreezing] = useState(false)
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
@@ -1262,12 +1264,12 @@ export function AccountDetail() {
       {tab === 'Emails' && (
         <EmailsPanel
           emails={emails}
-          userId={currentUser?.id ?? null}
           canSend={!!mailbox}
-          /* A dispute raised off an email stops every collection sequence and files its
-             attachments as documents, so three panels are stale the moment it returns. See
-             EmailsPanel's onRaised. */
-          onRaised={reload}
+          /* "This is a dispute" / "This is a request" opens the Escalate box on the message
+             rather than raising anything -- the buttons used to post straight to the endpoint and
+             produce a dispute with no classification, nobody's name on it and no chase date, with
+             item 3 charged on the press. See EmailsPanel's onClassify. */
+          onClassify={(e, k) => setClassifying({ email: e, kind: k })}
           onCompose={() => { startCompose(); setComposeTo(emailContact?.value ?? '') }}
           onReply={(e) => { startCompose(); setReplyTo(e); setComposeTo(e.debtorAddress) }}
           /*
@@ -1382,6 +1384,35 @@ export function AccountDetail() {
             : null}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setAskingClient(false)}
+          onDone={reload}
+        />
+      )}
+
+      {/*
+        THE SAME BOX, OPENED ON A MESSAGE.
+        
+        Not a second modal: everything it asks -- the classification, the dictated issue, who gets
+        it, when it comes back -- is the same question whether the dispute arrived by telephone or
+        by email, and two boxes asking it would be two boxes to keep in step. What the email adds
+        is the words already in the box, the attachments that come across with it, and the option
+        of adding it to the dispute already open instead of raising a second one.
+      */}
+      {classifying && (
+        <EscalateModal
+          accountId={account.id}
+          users={users}
+          clientLiaison={clientLiaison}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
+          alreadyDisputed={openDisputeOn(queries) !== null}
+          fromEmail={{
+            id: classifying.email.id,
+            subject: classifying.email.subject,
+            body: classifying.email.body,
+            attachmentNames: classifying.email.attachmentNames,
+          }}
+          initialKind={classifying.kind}
+          openQueries={queries}
+          onClose={() => setClassifying(null)}
           onDone={reload}
         />
       )}

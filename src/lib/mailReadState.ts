@@ -14,9 +14,13 @@
  * omit the header) simply cannot be paired, and are skipped rather than guessed at by subject
  * and timestamp — a wrong pairing would silently mark an unrelated message read.
  *
- * Neither function widens anybody's reach. Both go through PostgREST as the signed-in user, and
- * both tables' policies scope the update to that user: account_emails by `received_by`,
- * user_emails by `user_id`. Handing either one a colleague's message id changes nothing.
+ * The two copies are scoped differently ON PURPOSE, and the difference is the firm's answer to
+ * what "unread" means where. `user_emails` is a person's own inbox, so its policy scopes the
+ * update to `user_id` and handing this a colleague's message id changes nothing there. The
+ * account's copy is the floor's correspondence, and unread on it means nobody at all has looked
+ * — so account_emails is deliberately open to any signed-in user, with `protect_account_mail_fields`
+ * reverting every column but the read state. What that buys: reading a debtor's reply in YOUR
+ * mailbox clears it on the account even though it arrived in somebody else's.
  *
  * Neither throws. The copy you actually opened has already been marked read by the caller;
  * failing to mirror it is a stale badge, not lost work, and is not worth an error over a
@@ -33,9 +37,10 @@ function usable(messageIds: (string | null | undefined)[]): string[] {
 export async function mirrorReadToAccount(messageIds: (string | null | undefined)[]): Promise<void> {
   const ids = usable(messageIds)
   if (ids.length === 0) return
+  const { data: me } = await supabase.auth.getUser()
   const { error } = await supabase
     .from('account_emails')
-    .update({ read_at: new Date().toISOString() })
+    .update({ read_at: new Date().toISOString(), read_by: me.user?.id ?? null })
     .in('message_id', ids)
     .is('read_at', null)
   if (error) console.error('[mailReadState] the account copy stayed unread:', error.message)
@@ -54,7 +59,8 @@ export async function mirrorUnreadToAccount(messageIds: (string | null | undefin
   if (ids.length === 0) return
   const { error } = await supabase
     .from('account_emails')
-    .update({ read_at: null })
+    // read_by goes with it — a row that is unread has no reader to name.
+    .update({ read_at: null, read_by: null })
     .in('message_id', ids)
     .not('read_at', 'is', null)
   if (error) console.error('[mailReadState] the account copy stayed read:', error.message)

@@ -12,7 +12,7 @@ import type { AccountEmail } from '../../lib/accountEmails'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
-import { downloadAttachment, raiseTicketFromEmail } from '../../lib/userMail'
+import { downloadAttachment } from '../../lib/userMail'
 import { useAuth } from '../../store/AuthContext'
 
 /**
@@ -26,11 +26,9 @@ import { useAuth } from '../../store/AuthContext'
  * subject lines makes a person open ten things to find the one that matters.
  */
 export function EmailsPanel({
-  emails, userId, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread, onRaised,
+  emails, canSend, onCompose, onReply, onReplyAll, onForward, onRead, onUnread, onClassify,
 }: {
   emails: AccountEmail[]
-  /** Who is looking. Only the agent a message arrived for can mark it read. */
-  userId: string | null
   /** False when the agent has no mailbox connected — the buttons say so rather than failing. */
   canSend: boolean
   onCompose: () => void
@@ -46,17 +44,18 @@ export function EmailsPanel({
   onForward: (email: AccountEmail) => void
   /** Called when an unread message is actually opened, so the Messages count can drop. */
   onRead: (email: AccountEmail) => void
-  /** Put it back on the unread list. Only the agent it arrived for may — see the RLS policy. */
+  /** Put it back on the unread list. Anybody may — on an account it is the account's read state. */
   onUnread: (email: AccountEmail) => void
   /**
-   * Reload the account after a ticket was raised off one of these.
+   * "This is a dispute" / "This is a request" — open the Escalate box on this message.
    *
-   * A dispute raised this way STOPS EVERY COLLECTION SEQUENCE and files the attachments as
-   * documents -- so the disputes panel, the workflow rail and the documents list are all out of
-   * date the moment it returns. Reloading is the only honest answer; patching three panels from
-   * here would be three places that have to know what the endpoint did.
+   * THE PANEL RAISES NOTHING ITSELF ANY MORE. It used to post straight to the endpoint, which
+   * produced a dispute with no classification, no dictated issue, nobody's name on it and no
+   * chase date -- and charged the debtor item 3 on the press. What it hands up is the message and
+   * which button was pressed; what gets raised, who it goes to, and whether it is instead ADDED
+   * to the dispute already open on the account are the box's to ask.
    */
-  onRaised: () => Promise<void> | void
+  onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
 }) {
   /*
    * Nothing opens on its own.
@@ -70,12 +69,17 @@ export function EmailsPanel({
   const [view, setView] = useEmailView()
 
   /*
-   * Reading it is what marks it read — and only for the agent it arrived for, because that is
-   * all the RLS policy permits. For anyone else it stays unread, which is correct: it is not
-   * their message to have dealt with.
+   * Reading it is what marks it read, FOR EVERYBODY.
+   *
+   * It used to be scoped to the agent the message arrived for, because that was all the RLS
+   * policy permitted -- so a reply that landed in one collector's mailbox stayed bold on the
+   * account no matter who read it or what they did about it. The firm, looking at exactly that:
+   * "These things remain unread. But I don't know if it was because it was Stefan that was
+   * reading and not to Itumeleng." On an account, unread means NOBODY has looked. See
+   * markRepliesRead.
    */
   function markRead(email: AccountEmail) {
-    if (!email.readAt && email.receivedBy && email.receivedBy === userId) onRead(email)
+    if (!email.readAt) onRead(email)
   }
 
   /** Select and read, without the list's close-on-second-click. */
@@ -154,7 +158,7 @@ export function EmailsPanel({
                   )}
                 </p>
               </div>
-              <EmailBody email={e} canSend={canSend} userId={userId} onRaised={onRaised}
+              <EmailBody email={e} canSend={canSend} onClassify={onClassify}
                 onReply={() => onReply(e)} onReplyAll={() => onReplyAll(e)}
                 onForward={() => onForward(e)} onUnread={() => onUnread(e)} />
             </div>
@@ -165,7 +169,7 @@ export function EmailsPanel({
           {emails.map((e) => (
             <EmailRow key={e.id} email={e} expanded={open === e.id}
               onToggle={() => toggle(e)}
-              canSend={canSend} userId={userId} onRaised={onRaised}
+              canSend={canSend} onClassify={onClassify}
               onReply={() => onReply(e)} onReplyAll={() => onReplyAll(e)}
               onForward={() => onForward(e)} onUnread={() => onUnread(e)} />
           ))}
@@ -247,13 +251,11 @@ export function othersOn(email: AccountEmail): boolean {
 }
 
 /** The message itself, shared by the expanded row and the reading pane. */
-function EmailBody({ email, canSend, userId, onReply, onReplyAll, onForward, onUnread, onRaised }: {
+function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, onClassify }: {
   email: AccountEmail
   canSend: boolean
-  /** Who is looking, because only the agent a message arrived for may unread it. */
-  userId: string | null
-  /** Reload the account once a ticket has been raised — see EmailsPanel. */
-  onRaised: () => Promise<void> | void
+  /** Open the Escalate box on this message — see EmailsPanel. */
+  onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
   onReply: () => void
   onReplyAll: () => void
   onForward: () => void
@@ -282,46 +284,25 @@ function EmailBody({ email, canSend, userId, onReply, onReplyAll, onForward, onU
   const inbound = email.direction === 'in'
 
   /*
-   * RAISE A TICKET OFF THIS EMAIL.
+   * CLASSIFY THIS EMAIL.
    *
    * THE FIRM: "if we've received a dispute... we could create the ticket like it already exists
    * and somehow attach the email and the attachments from there to that ticket and then have a
    * note there."
    *
+   * IT NO LONGER RAISES ANYTHING FROM HERE, AND THAT IS THE FIX. The two buttons used to post
+   * straight to the endpoint: a dispute with no classification, no dictated issue, nobody's name
+   * on it and no chase date -- and item 3 charged on the press. The firm, on the same screen:
+   * "if it says this is a dispute, it should take you to kind of like creating a real dispute...
+   * it should ask you, what is the issue where you can dictate and stuff."
+   *
+   * So the button OPENS THE BOX, prefilled from the email, and the box decides what is raised,
+   * who gets it and whether it is added to the dispute that is already open. See EscalateModal.
+   *
    * OFFERED ON INBOUND MAIL ONLY, and only once. A dispute is something the DEBTOR says; raising
    * one off a letter the firm itself sent would be the firm objecting to its own demand. And an
-   * email that has already raised a ticket says so instead, because a second press is a second
-   * ticket for one objection -- on a dispute the database would refuse it, but only after item 3
-   * had been charged for the first.
+   * email already on a ticket says so instead.
    */
-  const [raising, setRaising] = useState<'dispute' | 'request' | null>(null)
-  const [raised, setRaised] = useState<string | null>(null)
-
-  async function raise(kind: 'dispute' | 'request') {
-    const token = session?.access_token
-    if (!token || raising) return
-    setRaising(kind)
-    setError(null)
-    const result = await raiseTicketFromEmail({
-      accessToken: token,
-      accountEmailId: email.id,
-      kind,
-      /* WHAT it is asking for is left to the server's honest default of Other: the email itself
-         becomes the description, which says what is wanted better than anything this button could
-         infer from a subject line. Re-picked on the ticket in one press. */
-    })
-    setRaising(null)
-    if (!result.ok) { setError(result.problem); return }
-    /* WHAT CAME ACROSS AND WHAT DID NOT. The ticket IS raised, so a file the mailbox no longer
-       holds is a line to read and act on rather than a failure to report. */
-    const filed = result.attached.length > 0
-      ? `${result.attached.length} attachment${result.attached.length === 1 ? '' : 's'} filed against it`
-      : 'nothing attached'
-    setRaised(`${kind === 'dispute' ? 'Dispute' : 'Request'} raised — ${filed}.`)
-    if (result.failed.length > 0) setError(`Could not file: ${result.failed.join('; ')}`)
-    await onRaised()
-  }
-
   return (
     <>
       {/*
@@ -342,9 +323,31 @@ function EmailBody({ email, canSend, userId, onReply, onReplyAll, onForward, onU
           Only the agent it actually arrived for, which is all the RLS policy permits. Offering
           it to anybody else would be a button that silently does nothing.
         */
-        onMarkUnread={inbound && email.readAt && email.receivedBy && email.receivedBy === userId
-          ? onUnread
-          : null}
+        onMarkUnread={inbound && email.readAt ? onUnread : null}
+        /*
+          AND THE TWO THAT SAY WHAT THIS MESSAGE IS. Moved up here off the bottom of the message
+          at the firm's asking -- "put it up there by the reply and the forward" -- because
+          deciding an email is a dispute is the same kind of act as answering it, and on a long
+          message they were three screens down.
+
+          They open the Escalate box rather than raising anything: see the note above.
+        */
+        extra={inbound ? (
+          email.queryId
+            ? <span className="text-[11px] text-slate-400 self-center">Already on a ticket</span>
+            : (
+              <>
+                <ClassifyButton icon={<ShieldAlert size={13} />} tone="dispute"
+                  onClick={() => onClassify(email, 'dispute')}>
+                  This is a dispute
+                </ClassifyButton>
+                <ClassifyButton icon={<MessageCircleQuestion size={13} />} tone="request"
+                  onClick={() => onClassify(email, 'request')}>
+                  This is a request
+                </ClassifyButton>
+              </>
+            )
+        ) : null}
       />
       {/* `whitespace-pre-wrap` because an email's own line breaks are part of what it said —
           collapsing them turns a numbered arrangement into a paragraph. */}
@@ -373,59 +376,48 @@ function EmailBody({ email, canSend, userId, onReply, onReplyAll, onForward, onU
           ))}
         </div>
       )}
-      {/*
-        MAKE THIS A TICKET.
-        
-        UNDER THE ATTACHMENTS ON PURPOSE: what decides whether this is a dispute or a request is
-        usually what came WITH it, so the buttons sit where somebody has just read the file names.
-      */}
-      {inbound && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {email.queryId ? (
-            <span className="text-[11px] text-slate-400">A ticket was already raised from this email.</span>
-          ) : (
-            <>
-              <button type="button" onClick={() => void raise('dispute')} disabled={!!raising}
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-                {raising === 'dispute'
-                  ? <Loader2 size={11} className="animate-spin" />
-                  : <ShieldAlert size={11} />}
-                This is a dispute
-              </button>
-              <button type="button" onClick={() => void raise('request')} disabled={!!raising}
-                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-                {raising === 'request'
-                  ? <Loader2 size={11} className="animate-spin" />
-                  : <MessageCircleQuestion size={11} />}
-                This is a request
-              </button>
-              {/* WHAT THE DISPUTE ONE DOES, said before it is pressed. It stops every collection
-                  sequence on the account and charges the debtor R25 -- neither is a thing to
-                  discover afterwards. */}
-              <span className="text-[10px] text-slate-400 basis-full leading-snug">
-                A dispute is received in writing by definition here: collection stops and item 3
-                (R25) is charged. A request stops nothing and charges nothing.
-              </span>
-            </>
-          )}
-        </div>
-      )}
-
-      {raised && <p className="text-xs text-gold-600 mt-1.5">{raised}</p>}
       {error && <p className="text-xs text-negative-700 mt-1.5">{error}</p>}
     </>
   )
 }
 
+/**
+ * THE TWO BUTTONS THAT SAY WHAT A MESSAGE IS, and they are not the same colour.
+ *
+ * The firm, of the board: "a request and a dispute looks exactly the same." It is truer here,
+ * because this is where the two get confused in the first place -- a dispute holds every
+ * collection sequence on the account and charges the debtor item 3, and a request holds nothing
+ * and charges nothing. They sit beside each other in a row of grey outlined buttons, and the one
+ * with consequences wore the same grey as Forward.
+ *
+ * The tints are the board's, so the button somebody presses and the chip that turns up on the
+ * queue are the same colour.
+ */
+function ClassifyButton({ tone, icon, onClick, children }: {
+  tone: 'dispute' | 'request'
+  icon: React.ReactNode
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  const skin = tone === 'dispute'
+    ? 'border-[#e0cbc7] text-negative-700 bg-[var(--tint-rust)] hover:border-negative-700'
+    : 'border-[#cfdbe8] text-[var(--c-navy-mid)] bg-[var(--tint-steel)] hover:border-[var(--c-steel-deep)]'
+  return (
+    <button type="button" onClick={onClick}
+      className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border ${skin}`}>
+      {icon} {children}
+    </button>
+  )
+}
+
 function EmailRow({
-  email, expanded, onToggle, canSend, userId, onReply, onReplyAll, onForward, onUnread, onRaised,
+  email, expanded, onToggle, canSend, onReply, onReplyAll, onForward, onUnread, onClassify,
 }: {
   email: AccountEmail
   expanded: boolean
   onToggle: () => void
   canSend: boolean
-  userId: string | null
-  onRaised: () => Promise<void> | void
+  onClassify: (email: AccountEmail, kind: 'dispute' | 'request') => void
   onReply: () => void
   onReplyAll: () => void
   onForward: () => void
@@ -444,7 +436,7 @@ function EmailRow({
 
       {expanded && (
         <div className="px-5 pb-4 pl-[3.75rem]">
-          <EmailBody email={email} canSend={canSend} userId={userId} onRaised={onRaised}
+          <EmailBody email={email} canSend={canSend} onClassify={onClassify}
             onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onUnread={onUnread} />
         </div>

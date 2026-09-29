@@ -10,6 +10,7 @@ import {
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
+import { escalationCard } from '../../lib/disputeCategories'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -238,10 +239,9 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
         {q.kind !== 'dispute' && (
           <span className="inline-flex items-center gap-1.5">
             <span className="text-slate-300">&middot;</span>
-            <span className="text-slate-600">
-              {q.kind === 'request' ? 'Request' : q.kind === 'help' ? 'For decision'
-                : q.kind === 'litigation' ? 'For litigation' : 'Handover data'}
-            </span>
+            {/* One vocabulary, off the kind itself. This was a fourth chain with a fallback,
+                and a fallback is how a new kind ends up wearing "Handover data". */}
+            <span className="text-slate-600">{escalationCard(q.kind).label}</span>
             {/* WHAT IS WANTED, straight through: it is already the firm's own words from a
                 closed list, so there is nothing here to translate. It replaced "from the client",
                 which said who was being asked -- a thing the ticket already answers with whose

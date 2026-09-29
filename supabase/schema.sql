@@ -14443,3 +14443,63 @@ create policy finance_setting_changes_read on public.finance_setting_changes
 drop policy if exists finance_setting_changes_insert on public.finance_setting_changes;
 create policy finance_setting_changes_insert on public.finance_setting_changes
   for insert to authenticated with check (public.current_user_role() = 'Administrator');
+
+-- ---------- On an account, "unread" means nobody has looked ----------
+--
+-- The firm, looking at a section 129 reply sitting unread on the account: "These things remain
+-- unread. But I don't know if it was because it was Stefan that was reading and not to
+-- Itumeleng." Exactly right. `account_emails_mark_read` above scopes the update to
+-- `received_by`, so the reply that arrived in Itumeleng's mailbox could only ever be cleared by
+-- Itumeleng -- and everybody else on the account sees it unread for ever.
+--
+-- That scoping is right for a MAILBOX and wrong for an ACCOUNT. `user_emails` is a person's own
+-- inbox and stays per-person; `account_emails` is the account's correspondence, which the whole
+-- floor works. Asked what unread should mean here, the firm chose "unread by anybody": the
+-- account's copy is read once someone has read it, whoever that was.
+--
+-- Opening it up means the UPDATE policy can no longer be what protects the record, so a trigger
+-- does it instead: every column except the read state is reverted for anyone who is not an
+-- Administrator. `auth.uid() is null` is the server -- the mail sync and api/_lib/email/ticket.ts
+-- file messages with the service key, and they must still be able to set query_id and the rest.
+alter table public.account_emails
+  add column if not exists read_by uuid references public.profiles(id) on delete set null;
+
+comment on column public.account_emails.read_by is
+  'Who cleared the account''s copy. The read state is the account''s, not a mailbox''s -- see the trigger below.';
+
+drop policy if exists account_emails_mark_read on public.account_emails;
+create policy account_emails_mark_read on public.account_emails
+  for update to authenticated
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null);
+
+create or replace function public.protect_account_mail_fields() returns trigger
+language plpgsql security invoker set search_path to 'public'
+as $$
+begin
+  -- The server (service key, no auth.uid()) and an Administrator may write the record.
+  if auth.uid() is null or public.current_user_role() = 'Administrator' then
+    return new;
+  end if;
+  -- Everybody else may change only read_at / read_by. Reverted silently, in the manner of
+  -- protect_closed_diary_entries and protect_filed_mail_target: a browser has no business
+  -- editing correspondence, so there is nothing to report.
+  new.account_id := old.account_id;
+  new.query_id := old.query_id;
+  new.direction := old.direction;
+  new.subject := old.subject;
+  new.body := old.body;
+  new.debtor_address := old.debtor_address;
+  new.message_id := old.message_id;
+  new.received_by := old.received_by;
+  new.occurred_at := old.occurred_at;
+  new.attachment_names := old.attachment_names;
+  new.email_folder := old.email_folder;
+  new.email_uid := old.email_uid;
+  return new;
+end $$;
+
+drop trigger if exists protect_account_mail_fields on public.account_emails;
+create trigger protect_account_mail_fields
+  before update on public.account_emails
+  for each row execute function public.protect_account_mail_fields();

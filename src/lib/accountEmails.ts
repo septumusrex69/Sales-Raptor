@@ -63,9 +63,11 @@ export interface AccountEmail {
    * one_open_dispute_per_account -- after the first has already charged item 3.
    */
   queryId: string | null
-  /** Null means nobody has opened it yet. Only ever set on an inbound message. */
+  /** Null means NOBODY has opened it yet — the account's read state, not a mailbox's. */
   readAt: string | null
-  /** Whose inbox it arrived in. Only they can mark it read — see markRepliesRead. */
+  /** Who cleared it for the account. Null on an old row read before the column existed. */
+  readBy: string | null
+  /** Whose inbox it arrived in. No longer who may read it — see markRepliesRead. */
   receivedBy: string | null
   occurredAt: string
 }
@@ -86,6 +88,7 @@ interface EmailRow {
   sent_by_name: string | null
   charged_excl_vat: number | string | null
   read_at: string | null
+  read_by: string | null
   received_by: string | null
   occurred_at: string
 }
@@ -112,6 +115,7 @@ function toEmail(r: EmailRow): AccountEmail {
     // was ever due, which the list shows differently from a fee that came out at zero.
     chargedExclVat: r.charged_excl_vat === null ? null : Number(r.charged_excl_vat),
     readAt: r.read_at,
+    readBy: r.read_by ?? null,
     receivedBy: r.received_by,
     occurredAt: r.occurred_at,
   }
@@ -121,7 +125,7 @@ function toEmail(r: EmailRow): AccountEmail {
 export async function fetchAccountEmails(accountId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, received_by, occurred_at, query_id')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id')
     .eq('account_id', accountId)
     .order('occurred_at', { ascending: false })
   if (error) throw new Error(error.message)
@@ -202,14 +206,22 @@ export async function fetchUnreadReplies(userId: string): Promise<DebtorReply[]>
 /**
  * Mark replies read.
  *
- * Only ever your own — the RLS policy is scoped to received_by, so this cannot clear somebody
- * else's count even if it is handed their ids.
+ * ON AN ACCOUNT, UNREAD MEANS NOBODY HAS LOOKED. The firm, of a section 129 reply still bold
+ * days after it was dealt with: "These things remain unread. But I don't know if it was because
+ * it was Stefan that was reading and not to Itumeleng." That was exactly it — the policy used
+ * to scope this update to `received_by`, so the account's copy could only be cleared by whoever
+ * the message happened to arrive for, and everybody else on the file saw it unread for ever.
+ *
+ * A mailbox's read state is one person's; an account's correspondence is the floor's. So this
+ * now clears it for everybody and records WHO cleared it, which is the honest version of the
+ * same information — "read by Stephan" says more than a message that quietly stopped being bold.
  */
 export async function markRepliesRead(ids: string[]): Promise<void> {
   if (ids.length === 0) return
+  const { data: me } = await supabase.auth.getUser()
   const { data, error } = await supabase
     .from('account_emails')
-    .update({ read_at: new Date().toISOString() })
+    .update({ read_at: new Date().toISOString(), read_by: me.user?.id ?? null })
     .in('id', ids)
     .is('read_at', null)
     .select('message_id')
@@ -229,14 +241,14 @@ export async function markRepliesRead(ids: string[]): Promise<void> {
  * put it back the way you found it so it is still waiting after lunch. Without it, opening a
  * message to see whether it was urgent is the same act as deciding it was not.
  *
- * Only the agent it arrived for can do this -- account_emails_mark_read scopes the update to
- * received_by -- which is correct: it is not anybody else's unread list to add to.
+ * The other half of the account rule above: if anybody may read it, anybody may put it back,
+ * and `read_by` is cleared with it so the row does not keep naming a reader it no longer has.
  */
 export async function markRepliesUnread(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const { data, error } = await supabase
     .from('account_emails')
-    .update({ read_at: null })
+    .update({ read_at: null, read_by: null })
     .in('id', ids)
     /* Only rows that were actually read, so the returned ids are the ones that genuinely
        changed and the mailbox copy is not touched for nothing. */

@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
-import { raiseQuery, stageForAssignee, REQUEST_KINDS } from '../../lib/accountQueries'
+import { raiseQuery, stageForAssignee, REQUEST_KINDS, type AccountQuery } from '../../lib/accountQueries'
 import {
   categoryExamples, explanationMissing,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER, type EscalationKind,
 } from '../../lib/disputeCategories'
 import { chargeMessage } from '../../lib/accountCharges'
+import { raiseTicketFromEmail } from '../../lib/userMail'
+import { useAuth } from '../../store/AuthContext'
 import type { User } from '../../types'
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -39,7 +41,10 @@ const TODAY = new Date().toISOString().slice(0, 10)
  * for either. raiseQuery refuses to charge on anything but a dispute; this screen simply does not
  * offer the box.
  */
-export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyDisputed, onClose, onDone }: {
+export function EscalateModal({
+  accountId, users, clientLiaison, actor, alreadyDisputed, fromEmail, initialKind, openQueries = [],
+  onClose, onDone,
+}: {
   accountId: string
   users: User[]
   /** The liaison on this debtor's client, which is who a client query goes to by default. */
@@ -59,14 +64,91 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
    * start no clock and hold nothing; an open dispute is no reason to refuse either.
    */
   alreadyDisputed: boolean
+  /**
+   * THE MESSAGE THIS WAS OPENED ON, where it was opened on one.
+   *
+   * THE FIRM, LOOKING AT THE TWO BUTTONS ON AN EMAIL: "if it says this is a dispute, it should
+   * take you to kind of like creating a real dispute... it should ask you, what is the issue
+   * where you can dictate and stuff. But you should be able to decide what to do with it as well.
+   * Maybe you don't want to escalate it. Maybe you can resolve it yourself."
+   *
+   * What those buttons used to do was post straight to /api/email/ticket: a dispute with no
+   * classification, nobody's name on it, no chase date and no words but the email's own -- and
+   * item 3 charged on the press. Now they open this box, and the box submits through the SAME
+   * endpoint, because the endpoint is what files the attachments and links the thread. Nothing
+   * about the questions changes; what changes is that they get asked.
+   */
+  fromEmail?: {
+    id: string
+    subject: string | null
+    body: string | null
+    attachmentNames: string[]
+  }
+  /** Which of the two buttons was pressed. Ignored where there is no email. */
+  initialKind?: EscalationKind
+  /**
+   * THE TICKETS ALREADY OPEN ON THIS ACCOUNT, so this email can be ADDED to one.
+   *
+   * THE FIRM'S OWN SEQUENCE, in full: "if the debtor disputes something and says he's going to
+   * email it, then the moment that the email comes, you can say, link it to a current dispute and
+   * then you can choose the dispute that is there available. Then it's that email and they need
+   * to automatically know that we've received the dispute."
+   *
+   * That last clause is the whole of it. A dispute carries `alleged_on`, `received_on` and
+   * `in_writing` as three separate columns precisely so a verbal dispute and a written one are
+   * different events -- and until now nothing reached the second two from an email. Linking sets
+   * them, which ends the sequence that was asking for it in writing and starts the real one.
+   */
+  openQueries?: AccountQuery[]
   onClose: () => void
   onDone: () => Promise<void>
 }) {
+  const { session } = useAuth()
+  /*
+   * WHAT THIS EMAIL BELONGS TO: a ticket already open, or a new one.
+   *
+   * `link:<id>` or `new`. Only meaningful in fromEmail mode -- without an email there is nothing
+   * to attach to anything, and the box is the ordinary Escalate box it has always been.
+   *
+   * IT DEFAULTS TO LINKING A DISPUTE AND NEVER TO LINKING ANYTHING ELSE. Pressing "this is a
+   * dispute" on an account that already has one open has exactly one honest reading -- the
+   * writing the debtor promised has arrived -- and it is also the only reading the database
+   * permits, because one_open_dispute_per_account refuses a second. A request is the opposite:
+   * several are open at once and a new email is usually a new one, so it starts on `new` with the
+   * open ones offered underneath.
+   */
+  const linkable = useMemo(
+    () => (fromEmail ? openQueries.filter((q) => q.status !== 'closed') : []),
+    [fromEmail, openQueries],
+  )
+  const openDispute = linkable.find((q) => q.kind === 'dispute') ?? null
+  const [target, setTarget] = useState<string>(
+    fromEmail && initialKind === 'dispute' && openDispute ? `link:${openDispute.id}` : 'new',
+  )
+  const linkedTo = target.startsWith('link:')
+    ? linkable.find((q) => q.id === target.slice(5)) ?? null
+    : null
+
   /* DISPUTE IS THE DEFAULT, EXCEPT WHERE IT IS NOT AVAILABLE -- a box opening on an option that
-     cannot be chosen reads as broken. */
-  const [kind, setKind] = useState<EscalationKind>(alreadyDisputed ? 'help' : 'dispute')
+     cannot be chosen reads as broken. On an email it is whichever button was pressed. */
+  const [kind, setKind] = useState<EscalationKind>(
+    fromEmail && initialKind ? initialKind : (alreadyDisputed ? 'help' : 'dispute'),
+  )
   const [toId, setToId] = useState(clientLiaison?.id ?? '')
-  const [description, setDescription] = useState('')
+  /*
+   * THE EMAIL'S OWN WORDS, ALREADY IN THE BOX.
+   *
+   * THE RETYPING IS WHERE DISPUTES GET MIS-RECORDED -- it is the step most likely to be shortened
+   * at half past four, and what the debtor actually wrote is the thing a finding has to answer.
+   * Capped at the same 4 000 the endpoint caps at, so what is shown is what would be stored;
+   * anything longer is a quoted thread and the full text is one press away on the email itself.
+   */
+  const [description, setDescription] = useState(() => {
+    if (!fromEmail) return ''
+    const written = (fromEmail.body ?? '').replace(/\r\n/g, '\n').trim()
+    const capped = written.length > 4000 ? `${written.slice(0, 4000)}…` : written
+    return capped || (fromEmail.subject ?? '').trim()
+  })
   const [category, setCategory] = useState('')
   const [chaseOn, setChaseOn] = useState('')
   /*
@@ -166,22 +248,77 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
    * Still a checkbox: the rule is right almost always, and the person doing it knows when it is
    * not.
    */
-  const assigned = !!toId
+  /*
+   * THE SAME QUESTION ASKED PLAINLY, BECAUSE THE FIRM ASKED FOR IT TO BE.
+   *
+   * "You should be able to decide what to do with it as well. Maybe you don't want to escalate
+   * it. Maybe you can resolve it yourself... you can escalate it or basically resolve it
+   * yourself."
+   *
+   * The Give it to picker has always been able to express both -- your own name is in it -- but
+   * it never SAID so, and a picker headed "Give it to" reads as a question about which colleague
+   * rather than a question about whether. On a written dispute that matters: collection has
+   * stopped either way, and somebody who thinks the only options are other people's names parks
+   * it with a liaison who did not need it.
+   *
+   * ONLY ON A DISPUTE OFF AN EMAIL. Everywhere else the picker's own wording is the question, and
+   * a second fieldset above it would be a screen asking twice.
+   */
+  const askKeepOrEscalate = !!fromEmail && (linkedTo ? linkedTo.kind === 'dispute' : kind === 'dispute')
+  const [keepIt, setKeepIt] = useState(false)
+  /* Keeping it means it is YOURS, not that it is nobody's: an unassigned ticket sits on the board
+     and is counted on nobody's badge -- nav_counts reads owner_id. */
+  const ownerId = keepIt ? (actor.id ?? null) : (toId || null)
+
+  const assigned = !!ownerId
   const [chargeTouched, setChargeTouched] = useState(false)
   const [charge, setCharge] = useState(assigned)
   const chargeDebtor = chargeTouched ? charge : assigned
 
+
   async function submit() {
-    if (!description.trim()) return
+    if (!linkedTo && !description.trim()) return
     setBusy(true); setError(null)
+
+    /*
+     * OFF AN EMAIL IT GOES THROUGH THE ENDPOINT, NOT raiseQuery. The endpoint is what fetches the
+     * attachments out of the mailbox, files them as documents against the ticket, and writes
+     * query_id onto the thread -- none of which a browser can do, because the attachments were
+     * deliberately never copied into Raptor. What is raised is the same row either way.
+     */
+    if (fromEmail) {
+      const token = session?.access_token
+      if (!token) { setBusy(false); setError('Your session has expired. Sign in again.'); return }
+      const result = await raiseTicketFromEmail({
+        accessToken: token,
+        accountEmailId: fromEmail.id,
+        queryId: linkedTo?.id ?? null,
+        kind: kind === 'request' ? 'request' : 'dispute',
+        requestFor: kind === 'request' ? requestFor : undefined,
+        category: kind === 'dispute' ? (category || null) : null,
+        /* On a link, only where the ticket has nobody on it -- see the picker's own note. */
+        ownerId: linkedTo && linkedTo.ownerId ? null : ownerId,
+        chaseOn: linkedTo ? null : (chaseOn || null),
+      })
+      setBusy(false)
+      if (!result.ok) { setError(result.problem); return }
+      /* WHAT CAME ACROSS AND WHAT DID NOT. The ticket IS raised, so a file the mailbox no longer
+         holds is a line to read and act on rather than a failure to report -- and it is reported
+         after the reload, not instead of it. */
+      if (result.failed.length > 0) setError(`Could not file: ${result.failed.join('; ')}`)
+      await onDone()
+      if (result.failed.length === 0) onClose()
+      return
+    }
+
     try {
       const { charge: raised } = await raiseQuery({
         accountId,
         description,
         kind,
         category,
-        ownerId: toId || null,
-        stage: stageForAssignee(users.find((u) => u.id === toId)?.role, !!toId && toId === clientLiaison?.id),
+        ownerId: ownerId,
+        stage: stageForAssignee(users.find((u) => u.id === ownerId)?.role, !!ownerId && ownerId === clientLiaison?.id),
         chaseOn: chaseOn || null,
         raisedBy: actor.id,
         raisedByName: actor.name,
@@ -204,16 +341,87 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
   }
 
   return (
-    <Modal title="Escalate this account" onClose={onClose} width={520}>
+    <Modal
+      title={fromEmail ? 'What is this email?' : 'Escalate this account'}
+      onClose={onClose}
+      width={520}
+    >
       <div className="space-y-3">
+        {/*
+          ADD IT TO SOMETHING OPEN, OR START SOMETHING NEW — the first question on an email, and
+          the one the two buttons on the message could not ask.
+
+          THE FIRM: "if the debtor disputes something and says he's going to email it, then the
+          moment that the email comes, you can say, link it to a current dispute and then you can
+          choose the dispute that is there available."
+
+          The open ones come FIRST because on a dispute that is nearly always the right answer:
+          one_open_dispute_per_account refuses a second, so "this is a dispute" on an account that
+          already has one can only mean the writing has arrived.
+        */}
+        {fromEmail && linkable.length > 0 && (
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium text-slate-700 mb-1.5">Is this about something already open?</legend>
+            {linkable.map((q) => {
+              const willBeInWriting = q.kind === 'dispute' && !q.inWriting && !q.receivedOn
+              return (
+                <label key={q.id}
+                  className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                    target === `link:${q.id}` ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+                  }`}>
+                  <input type="radio" name="escalation-target" checked={target === `link:${q.id}`}
+                    onChange={() => setTarget(`link:${q.id}`)} className="mt-0.5" />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-slate-800">
+                      Add it to the open {q.kind === 'request' ? 'request' : 'dispute'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500 line-clamp-2 wrap-anywhere">{q.description}</span>
+                    {/* WHAT LINKING ACTUALLY DOES, said before it is pressed, because on a verbal
+                        dispute it is the thing that stops every collection sequence on the
+                        account. That is not a consequence to discover afterwards. */}
+                    {willBeInWriting && (
+                      <span className="block text-[11px] text-gold-600 mt-1">
+                        We have it in writing from today. The letter asking for it in writing is
+                        cancelled, the real dispute sequence starts, and collection stops until it
+                        is answered.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              )
+            })}
+            <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+              target === 'new' ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+            }`}>
+              <input type="radio" name="escalation-target" checked={target === 'new'}
+                onChange={() => setTarget('new')} className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-800">No — raise a new one</span>
+                <span className="block text-[11px] text-slate-500">
+                  {alreadyDisputed
+                    ? 'A second dispute cannot be opened while one is. A request can.'
+                    : 'Nothing open covers what this email is about.'}
+                </span>
+              </span>
+            </label>
+          </fieldset>
+        )}
+
         {/*
           WHY it is being escalated, before who it goes to — because the reason decides everything
           underneath it: whether there is a classification to pick, who it would normally go to,
           and whether the debtor pays.
+
+          HIDDEN WHERE THE EMAIL IS BEING LINKED: the ticket already exists and already knows what
+          kind it is. Offering the ladder there would be offering to change it.
         */}
-        <fieldset className="space-y-1.5">
+        <fieldset className={`space-y-1.5 ${linkedTo ? 'hidden' : ''}`}>
           <legend className="text-sm font-medium text-slate-700 mb-1.5">Why are you escalating it?</legend>
-          {ESCALATION_KIND_ORDER.map((k) => {
+          {/* OFF AN EMAIL, ONLY THE TWO THINGS THAT CAN ARRIVE IN ONE. A decision and a
+              litigation recommendation are things somebody DECIDES, not things that come in the
+              post -- /api/email/ticket refuses them for the same reason, so offering them here
+              would be a button that is refused after the words have been typed. */}
+          {(fromEmail ? ESCALATION_KIND_ORDER.filter((k) => k === 'dispute' || k === 'request') : ESCALATION_KIND_ORDER).map((k) => {
             /* SHOWN AND UNSELECTABLE RATHER THAN REMOVED. A missing option reads as a screen that
                is broken or a permission somebody lacks; a greyed one with the reason under it
                reads as the rule it is. */
@@ -263,7 +471,11 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           EACH SAYS WHAT WILL HAPPEN, because one of them stops a statutory sequence and the other
           does not, and that is not something to discover afterwards.
         */}
-        {kind === 'dispute' && (
+        {/* NOT ASKED ON AN EMAIL. An email IS the writing -- that is what makes it the event
+            the firm wanted the real sequence started from -- so a box asking whether we have it
+            in writing would be asking somebody to confirm what they are looking at. The endpoint
+            sets received_on and in_writing itself. */}
+        {kind === 'dispute' && !fromEmail && (
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium text-slate-700 mb-1.5">How did it reach us?</legend>
             {([
@@ -301,7 +513,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           who is being asked is already on the ticket, because it is whoever it is given to. See
           REQUEST_KINDS.
         */}
-        {kind === 'request' && (
+        {kind === 'request' && !linkedTo && (
           <label className="block">
             <span className="text-sm font-medium text-slate-700">What are we asking for?</span>
             <select value={requestFor} onChange={(e) => setRequestFor(e.target.value)}
@@ -316,7 +528,54 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           </label>
         )}
 
-        <label className="block">
+        {/*
+          ESCALATE IT, OR KEEP IT AND DEAL WITH IT YOURSELF.
+
+          THE FIRM, of a dispute that has arrived in writing: "you should be able to decide what
+          to do with it as well. Maybe you don't want to escalate it. Maybe you can resolve it
+          yourself."
+
+          IT IS NOT A QUESTION ABOUT WHETHER COLLECTION STOPS -- it has stopped, that is what a
+          written dispute does, and the line under it says so rather than leaving somebody to
+          think keeping it is the quiet option. It is a question about whose desk it sits on.
+        */}
+        {askKeepOrEscalate && (
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium text-slate-700 mb-1.5">What happens to it now?</legend>
+            {([
+              [false, 'Escalate it', 'Somebody else answers the debtor. Pick them below.'],
+              [true, 'Keep it — I will deal with it myself',
+                'It stays on your desk, on your list, and nobody else is waiting on it.'],
+            ] as const).map(([value, label, what]) => (
+              <label key={String(value)}
+                className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                  keepIt === value ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+                }`}>
+                <input type="radio" name="escalation-keep" checked={keepIt === value}
+                  onChange={() => setKeepIt(value)} className="mt-0.5" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-slate-800">{label}</span>
+                  <span className="block text-[11px] text-slate-500">{what}</span>
+                </span>
+              </label>
+            ))}
+            <p className="text-[11px] text-slate-500">
+              Either way the collection sequences stop until the dispute is answered. This only
+              decides who answers it.
+            </p>
+          </fieldset>
+        )}
+
+        {/* WHOSE IT ALREADY IS. A ticket somebody is holding does not change hands because an
+            email arrived on it -- that is a decision made on the ticket, by whoever is on it. */}
+        {linkedTo?.ownerId && (
+          <p className="text-[11px] text-slate-500">
+            It is with {users.find((u) => u.id === linkedTo.ownerId)?.name ?? 'somebody'}. The email
+            and its attachments are filed against it; who answers it is unchanged.
+          </p>
+        )}
+
+        <label className={`block ${keepIt || linkedTo?.ownerId ? 'hidden' : ''}`}>
           <span className="text-sm font-medium text-slate-700">Give it to</span>
           <select
             value={toId}
@@ -369,14 +628,38 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
               This client has no liaison set. Set one on the client record and it will be offered here.
             </span>
           )}
+          {/*
+            UNASSIGNED MEANS NOBODY IS TOLD, and it is worth saying because the screen does not
+            look like that -- the ticket appears on the board, which reads as having been sent
+            somewhere. It has not. `nav_counts` counts open tickets by `owner_id`, so one with
+            nobody on it is on nobody's badge; the firm noticed the effect before the cause ("I
+            see that requests don't show up at the liaison"), and the commonest way in was a
+            request raised off an email, which used to send no owner at all.
+
+            A WARNING THAT FIRES WHEN SOMETHING IS ACTUALLY WRONG. It is shown only when nobody is
+            picked, not as a standing note under the picker -- see CLAUDE.md on warnings people
+            stop reading.
+          */}
+          {!ownerId && (
+            <span className="block text-[11px] text-gold-600 mt-1">
+              Nobody is on it, so it will sit on the board and be counted on nobody&rsquo;s list.
+              Put your own name on it if you are keeping it.
+            </span>
+          )}
         </label>
 
-        <label className="block">
+        {/*
+          NOT SHOWN WHERE THE EMAIL IS BEING LINKED. The ticket already carries the words somebody
+          dictated when the debtor first said it, and a box here would either overwrite them or
+          quietly do nothing. What arrived is the EMAIL, and the email is what gets filed against
+          the ticket -- with its attachments -- where anybody answering it can read it whole.
+        */}
+        <label className={`block ${linkedTo ? 'hidden' : ''}`}>
           <span className="flex items-baseline justify-between gap-3">
             <span className="text-sm font-medium text-slate-700">
               {/* The third copy of the fallback chain, found by the check that guards the other
                   two -- a request was asking "why has collecting run out of road?". */}
-              {ESCALATION_KINDS[kind].prompt}
+              {fromEmail ? 'What is the issue?' : ESCALATION_KINDS[kind].prompt}
             </span>
             {/*
               DICTATED, AT THE FIRM'S REQUEST: "if we raise a dispute, first of all, there should
@@ -400,7 +683,7 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           />
         </label>
 
-        <div className={ESCALATION_KINDS[kind].needsCategory ? 'grid grid-cols-2 gap-3' : ''}>
+        <div className={linkedTo ? 'hidden' : (ESCALATION_KINDS[kind].needsCategory ? 'grid grid-cols-2 gap-3' : '')}>
           {/* A classification says why the DEBTOR is objecting, so it exists only on a dispute.
               The database refuses one on the other two — account_queries_category_only_on_dispute. */}
           <label className={ESCALATION_KINDS[kind].needsCategory ? 'block' : 'hidden'}>
@@ -435,7 +718,11 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           whatever this screen sends. Asking an agent whether to bill a debtor for the firm
           supervising its own staff is a question with one right answer, so it is not asked.
         */}
-        {ESCALATION_KINDS[kind].chargeable ? (
+        {/* AND NOTHING IS CHARGED ON A LINK. Item 3 was raised when the dispute was raised; the
+            debtor does not pay twice because their objection arrived on the telephone first and
+            in writing afterwards. The endpoint enforces it -- this only stops the screen offering
+            a box that would be ignored. */}
+        {ESCALATION_KINDS[kind].chargeable && !linkedTo ? (
         <label className="flex items-start gap-2.5 p-3 rounded-lg bg-slate-50 border border-slate-100">
           <input
             type="checkbox"
@@ -477,6 +764,17 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
           </p>
         )}
 
+        {/* WHAT PRESSING IT WILL DO, on the one path where it is not obvious from the words
+            above: an email carrying the attachments is about to become documents on the account,
+            and on a verbal dispute this is the press that stops collecting. */}
+        {linkedTo && (
+          <p className="text-sm text-slate-500">
+            The email{fromEmail && fromEmail.attachmentNames.length > 0
+              ? ` and its ${fromEmail.attachmentNames.length} attachment${fromEmail.attachmentNames.length === 1 ? '' : 's'}`
+              : ''} will be filed against this {linkedTo.kind === 'request' ? 'request' : 'dispute'}.
+          </p>
+        )}
+
         {needsExplanation && (
           <p className="text-sm text-slate-500">
             &ldquo;Other&rdquo; needs an explanation — at least {EXPLANATION_MIN_LENGTH} characters saying what this
@@ -488,12 +786,16 @@ export function EscalateModal({ accountId, users, clientLiaison, actor, alreadyD
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={submit}
-            disabled={busy || !description.trim() || needsExplanation}
+            disabled={busy || (!linkedTo && !description.trim()) || (!linkedTo && needsExplanation)}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
           >
             <ShieldAlert size={15} />
             {/* The same fault as the fee line above, on the button a person actually presses. */}
-            {busy ? 'Escalating…' : ESCALATION_KINDS[kind].submitLabel}
+            {busy
+              ? (linkedTo ? 'Filing…' : 'Escalating…')
+              : linkedTo
+                ? `Add it to this ${linkedTo.kind === 'request' ? 'request' : 'dispute'}`
+                : ESCALATION_KINDS[kind].submitLabel}
           </button>
           <button onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
         </div>
