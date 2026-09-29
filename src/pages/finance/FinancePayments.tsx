@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, Loader2, Plus } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { FinanceTabs } from './FinanceTabs'
@@ -10,6 +10,7 @@ import { rand } from '../../lib/money'
 import { useAppStore } from '../../store/AppStore'
 import { BankImportCard } from './BankImportCard'
 import { UnallocatedReceipts } from './UnallocatedReceipts'
+import { RecordPaymentModal } from './RecordPaymentModal'
 
 /**
  * EVERY PAYMENT WITH ITS FULL ALLOCATION — the one screen where the whole split is visible.
@@ -57,6 +58,7 @@ export function FinancePayments() {
   /* Bumped whenever an import or a placement changes the ledger, so the queue and the table below
      reload together rather than disagreeing about what has been placed. */
   const [imported, setImported] = useState(0)
+  const [recording, setRecording] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -97,8 +99,28 @@ export function FinancePayments() {
         nowhere. The list below is the same list -- what changed is that something now puts rows
         in it other than the Swordfish migration.
       */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[13px] text-slate-500">
+          {/*
+            SAID HERE BECAUSE IT IS THE THING PEOPLE GET WRONG. A statement only ever carries money
+            that reached the firm's own bank; a debtor who paid the CLIENT direct never appears on
+            one, so a PTC has to be typed.
+          */}
+          Money the firm received comes in on the statement. A PTC never will — the debtor paid the
+          client, so it has to be recorded by hand.
+        </p>
+        <button type="button" onClick={() => setRecording(true)}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+            border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          <Plus size={14} /> Record a payment
+        </button>
+      </div>
       <BankImportCard onImported={() => { setImported((n) => n + 1); void load() }} />
       <UnallocatedReceipts refreshKey={imported} onPlaced={() => { setImported((n) => n + 1); void load() }} />
+      {recording && (
+        <RecordPaymentModal onClose={() => setRecording(false)}
+          onDone={async () => { setImported((n) => n + 1); await load() }} />
+      )}
       {error && (
         <div className="flex items-start gap-2 rounded-lg bg-rust-50 px-4 py-3 text-sm text-rust-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>

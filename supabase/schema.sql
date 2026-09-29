@@ -15674,3 +15674,144 @@ begin
     execute format('revoke execute on function public.%s from public, anon', fn);
   end loop;
 end $$;
+
+-- ---------- A payment typed in by hand, and the PTC that can only arrive that way ----------
+--
+-- THE FIRM: "we should be able to load a manual payment... and we need to account for the PTCs
+-- that we usually type in manually."
+--
+-- THE SECOND HALF IS NOT A CONVENIENCE, IT IS THE ONLY DOOR. A PTC is a debtor paying the CLIENT
+-- DIRECT -- the money never touches the firm's trust account, so it will never appear on any bank
+-- statement the firm can upload. Every PTC the firm will ever record has to be typed. The engine
+-- has handled them since it was written (allocate_payment's paid_to_client branch); there was
+-- simply no way to create one.
+--
+-- AND THE TWO ARE OPPOSITE DIRECTIONS OF MONEY, which is why the flag is the whole question on
+-- the form rather than a checkbox at the bottom. Measured on one account, same amount, same day:
+--
+--   TRUST RECEIPT   to_capital 500.00, commission 112.50, VAT 16.88
+--                   -> to_client 370.62, due_to_bf 0        the FIRM owes the CLIENT
+--   PTC             to_capital 500.00, commission 112.50, VAT 16.88
+--                   -> to_client 0,      due_to_bf 612.50   the CLIENT owes the FIRM
+--
+-- Getting that flag wrong does not produce a wrong figure. It produces the right figure pointing
+-- the wrong way, on an invoice, in a month that may already have been remitted.
+create or replace function public.record_manual_payment(
+  p_account uuid,
+  p_amount numeric,
+  p_received_on date,
+  p_paid_to_client boolean,
+  p_method text default 'EFT',
+  p_reference text default null,
+  p_details text default null,
+  p_confirm_duplicate boolean default false
+) returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_payment uuid;
+  v_dupes integer;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'A payment has to be more than nothing.';
+  end if;
+  if p_received_on is null then
+    raise exception 'Say when the money was received.';
+  end if;
+  -- NOT IN THE FUTURE. A payment dated forward lands in a payover cycle that has not been cut,
+  -- and quietly changes what a client is owed this month for money that has not arrived.
+  if p_received_on > (now() at time zone 'Africa/Johannesburg')::date then
+    raise exception 'That date is in the future. A payment is recorded when the money is in.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  -- THE SAME PAYMENT TYPED TWICE is the manual equivalent of a re-uploaded statement, and costs
+  -- the same: account_payments has no update or delete policy, so a duplicate can only be
+  -- REVERSED, leaving both rows on the ledger for ever after the client has been remitted for it.
+  -- There is no natural key to refuse on the way line_key does for a statement, so the caller is
+  -- told and decides. Reversed ones do not count: re-capturing a payment that bounced and came
+  -- back is exactly the case that must not be blocked.
+  if not p_confirm_duplicate then
+    select count(*) into v_dupes
+      from public.account_payments
+     where account_id = p_account
+       and amount = p_amount
+       and reversed_at is null
+       and (received_at at time zone 'Africa/Johannesburg')::date = p_received_on;
+    if v_dupes > 0 then
+      raise exception 'There is already a payment of % on this account on %. Confirm if this is a second one.',
+        to_char(p_amount, 'FM999999990.00'), to_char(p_received_on, 'YYYY-MM-DD')
+        using errcode = '23505';
+    end if;
+  end if;
+
+  -- received_at IS THE DATE THE MONEY CAME IN, not today: the payover cycle is cut on it, so a
+  -- PTC the client reports three weeks late belongs in the month the debtor actually paid. The
+  -- cut-over is tested on created_at rather than received_at (see allocate_payment), which is
+  -- what lets a back-dated capture still be split -- the cut-over is about when Raptor took over
+  -- the arithmetic, not about how old the payment is.
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details,
+    source, paid_to_client, created_by
+  ) values (
+    p_account,
+    (p_received_on::timestamp at time zone 'Africa/Johannesburg'),
+    p_amount,
+    coalesce(nullif(btrim(p_method), ''), 'EFT'),
+    nullif(btrim(p_reference), ''),
+    nullif(btrim(p_details), ''),
+    'manual', coalesce(p_paid_to_client, false), auth.uid()
+  ) returning id into v_payment;
+
+  return v_payment;
+end $$;
+
+comment on function public.record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean) is
+  'Capture one payment by hand. The only way a PTC can ever be recorded -- a debtor paying the '
+  'client direct never touches the firm''s trust account, so no bank statement will carry it.';
+
+revoke execute on function
+  public.record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean)
+  from public, anon;
+
+-- The list again, now that record_manual_payment has joined it. This is the second time the list
+-- has caught a new Finance RPC before it shipped, which is what it is for: a function revoked on
+-- its own line is a function the next person adds without noticing there is a list to be on.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)',
+    'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)',
+    'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)',
+    'money_position(uuid)',
+    'payover_work_queue(date)',
+    'payover_cycle_tiles(date)',
+    'payover_run_payments(uuid)',
+    'finance_exception_jobs()',
+    'payment_audit(uuid)',
+    'account_ledger(uuid)',
+    'expected_from_promises(date, date)',
+    'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)',
+    'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()',
+    'unreconciled_payouts()',
+    'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean)'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;

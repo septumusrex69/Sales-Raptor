@@ -1,0 +1,243 @@
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Check, Loader2, Search } from 'lucide-react'
+import { Modal, inputClass } from '../../components/ui/Modal'
+import { rand } from '../../lib/money'
+import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import { recordManualPayment, DuplicatePayment } from '../../lib/payover'
+
+/**
+ * RECORDING ONE PAYMENT BY HAND.
+ *
+ * THE FIRM asked for two things and this is both: "we should be able to load a manual payment...
+ * and we need to account for the PTCs that we usually type in manually."
+ *
+ * THE PTC HALF IS NOT A CONVENIENCE. A debtor paying the CLIENT direct never touches the firm's
+ * trust account, so no bank statement the firm can upload will ever carry it. This form is the
+ * only way a PTC can be recorded at all -- the engine has split them correctly since it was
+ * written, and nothing could create one.
+ *
+ * SO "WHO GOT THE MONEY" IS THE WHOLE QUESTION, asked as two choices with their consequences
+ * written out, rather than a checkbox called "PTC" that means nothing to somebody new. It sets
+ * `paid_to_client`, and the two directions come out opposite on identical figures: a trust
+ * receipt leaves the firm owing the client; a PTC leaves the client owing the firm.
+ */
+const METHODS = ['EFT', 'Cash', 'Debit order', 'Card', 'Cheque', 'Other']
+
+export function RecordPaymentModal({ onClose, onDone }: {
+  onClose: () => void
+  onDone: () => Promise<void> | void
+}) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+
+  const [term, setTerm] = useState('')
+  const [hits, setHits] = useState<DebtorAccount[]>([])
+  const [looking, setLooking] = useState(false)
+  const [account, setAccount] = useState<DebtorAccount | null>(null)
+
+  const [amount, setAmount] = useState('')
+  const [receivedOn, setReceivedOn] = useState(today)
+  const [paidToClient, setPaidToClient] = useState(false)
+  const [method, setMethod] = useState('EFT')
+  const [reference, setReference] = useState('')
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  /* The duplicate the database found, held so the person can look at it and say it is a second
+     payment. Never assumed -- see recordManualPayment. */
+  const [duplicate, setDuplicate] = useState<string | null>(null)
+
+  useEffect(() => {
+    const q = term.trim()
+    if (q.length < 2) { setHits([]); return }
+    let cancelled = false
+    setLooking(true)
+    const t = setTimeout(() => {
+      /* No count: the box shows ten and never says how many matched. */
+      void fetchAccounts({ search: q, pageSize: 10, countRows: false })
+        .then((r) => { if (!cancelled) setHits(r.accounts) })
+        .catch(() => { if (!cancelled) setHits([]) })
+        .finally(() => { if (!cancelled) setLooking(false) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [term])
+
+  const value = Number(amount.replace(/[^\d.]/g, ''))
+  const ready = !!account && Number.isFinite(value) && value > 0 && !!receivedOn
+
+  async function save(confirmDuplicate: boolean) {
+    if (!account || !ready || busy) return
+    setBusy(true); setError(null)
+    try {
+      await recordManualPayment({
+        accountId: account.id,
+        amount: value,
+        receivedOn,
+        paidToClient,
+        method,
+        reference: reference.trim() || null,
+        confirmDuplicate,
+      })
+      await onDone()
+      onClose()
+    } catch (e) {
+      if (e instanceof DuplicatePayment) { setDuplicate(e.message); setBusy(false); return }
+      setError(e instanceof Error ? e.message : 'That payment could not be recorded.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Record a payment" onClose={onClose} width={520}>
+      <div className="space-y-3">
+        {/* ---- which account ---- */}
+        {!account ? (
+          <>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">Which account?</span>
+              <span className="relative block mt-1">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input value={term} onChange={(e) => setTerm(e.target.value)} autoFocus
+                  placeholder="Case number, account number, reference or surname"
+                  className={`${inputClass} pl-8`} />
+              </span>
+            </label>
+            {looking && <p className="text-[12px] text-slate-400">Looking…</p>}
+            {hits.length > 0 && (
+              <ul className="max-h-52 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                {hits.map((a) => (
+                  <li key={a.id}>
+                    <button type="button" onClick={() => setAccount(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-slate-50">
+                      <span className="block text-[13px] text-slate-800">
+                        {[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || 'No name'}
+                      </span>
+                      <span className="block text-[11px] text-slate-500">
+                        {a.caseNumber} · {a.accountNumber} · {rand(a.capitalOutstanding)} outstanding
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <div className="rounded-lg border border-brand-500 bg-brand-50/50 px-3 py-2">
+            <p className="text-[13px] text-slate-800">
+              {[account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'No name'}
+            </p>
+            <p className="text-[11px] text-slate-500">
+              {account.caseNumber} · {account.accountNumber} · {rand(account.capitalOutstanding)} outstanding
+            </p>
+            <button type="button" onClick={() => { setAccount(null); setDuplicate(null) }}
+              className="text-[11px] text-slate-500 underline mt-1">Pick a different one</button>
+          </div>
+        )}
+
+        {/* ---- who got the money ---- */}
+        {/*
+          THE WHOLE QUESTION, asked in words rather than as a checkbox called PTC. The two options
+          say what each DOES, because the consequence is not visible anywhere else until a
+          remittance is drawn -- and by then it may have gone out.
+        */}
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium text-slate-700 mb-1.5">Who received the money?</legend>
+          {([
+            [false, 'We did — it is in our trust account',
+              'We owe the client the capital, less our commission. It goes out on the next remittance.'],
+            [true, 'The client did — the debtor paid them direct',
+              'A PTC. The client already has the money and now owes us the interest, the costs and our commission.'],
+          ] as const).map(([value_, label, what]) => (
+            <label key={String(value_)}
+              className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                paidToClient === value_ ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'
+              }`}>
+              <input type="radio" name="ptc" checked={paidToClient === value_}
+                onChange={() => { setPaidToClient(value_); setDuplicate(null) }} className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-800">{label}</span>
+                <span className="block text-[11px] text-slate-500">{what}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+
+        {/* ---- how much, when, how ---- */}
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Amount</span>
+            <input value={amount} onChange={(e) => { setAmount(e.target.value); setDuplicate(null) }}
+              inputMode="decimal" placeholder="0.00" className={`${inputClass} tabular-nums`} />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Received on</span>
+            {/*
+              THE DAY THE MONEY CAME IN, not today. The payover cycle is cut on this date, so a PTC
+              a client reports three weeks late belongs in the month the debtor actually paid.
+              max is today: a payment dated forward lands in a cycle that has not been cut.
+            */}
+            <input type="date" value={receivedOn} max={today}
+              onChange={(e) => { setReceivedOn(e.target.value); setDuplicate(null) }}
+              className={inputClass} />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">How</span>
+            <select value={method} onChange={(e) => setMethod(e.target.value)}
+              className={`${inputClass} bg-white`}>
+              {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Reference</span>
+            <input value={reference} onChange={(e) => setReference(e.target.value)}
+              placeholder="Optional" className={inputClass} />
+          </label>
+        </div>
+
+        {/* ---- the duplicate, if the database found one ---- */}
+        {duplicate && (
+          <div className="rounded-lg bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900">
+            <p className="flex items-start gap-1.5">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{duplicate}</span>
+            </p>
+            {/* A DEBTOR GENUINELY CAN PAY THE SAME AMOUNT TWICE IN A DAY, so this is a question
+                rather than a refusal -- but it is asked, because a payment cannot be deleted. */}
+            <button type="button" onClick={() => void save(true)} disabled={busy}
+              className="mt-2 text-xs font-medium px-2.5 py-1 rounded-md border border-amber-300
+                bg-white text-amber-900 hover:bg-amber-100 disabled:opacity-40">
+              Yes, this is a second payment — record it
+            </button>
+          </div>
+        )}
+
+        {/*
+          WHAT PRESSING IT DOES. account_payments has no update or delete policy: once recorded,
+          the only way back is a reversal with a reason, and both rows stay on the ledger.
+        */}
+        {ready && !duplicate && (
+          <p className="text-[12px] text-slate-500">
+            This splits immediately — receipt fee, interest, costs, capital and commission. It can
+            only be reversed afterwards, not removed.
+          </p>
+        )}
+
+        {error && <p className="text-[13px] text-negative-700">{error}</p>}
+
+        <div className="flex items-center gap-2 pt-1">
+          <button type="button" onClick={() => void save(false)} disabled={!ready || busy || !!duplicate}
+            className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
+              bg-brand-600 text-white disabled:opacity-40">
+            {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+            {busy ? 'Recording…' : paidToClient ? 'Record this PTC' : 'Record this payment'}
+          </button>
+          <button type="button" onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
