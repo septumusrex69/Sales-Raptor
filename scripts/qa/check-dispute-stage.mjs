@@ -67,7 +67,15 @@ ok('...and each says what it will do', /Collection carries on until it arrives/.
   && /the collection sequences stop/.test(modal))
 /* ONLY ON A DISPUTE. Nobody alleges an agent asking a team leader for a decision, and the database
    refuses the dates on the other two escalations. */
-ok('...asked only about a dispute', /\{kind === 'dispute' && \(/.test(modal))
+ok('...asked only about a dispute', /\{kind === 'dispute' && !fromEmail && \(/.test(modal))
+/*
+ * AND NOT ASKED AT ALL WHERE THE DISPUTE CAME IN ON AN EMAIL. An email IS the writing -- that is
+ * exactly what makes it the event the firm wanted the real sequence started from -- so a box
+ * asking whether we have it in writing would be asking somebody to confirm what they are looking
+ * at, with "no" as an answer that contradicts the screen. /api/email/ticket sets received_on and
+ * in_writing itself.
+ */
+ok('...and not asked at all on an email', /!fromEmail/.test(modal))
 ok('...and carried through as such', /reached: kind === 'dispute' \? reached : undefined/.test(modal))
 
 /* ---------------- the write ---------------- */
@@ -370,7 +378,12 @@ ok('...with the reason in place of the blurb',
   /barred\s*\?\s*'There is already an open dispute on this account\./.test(modal))
 /* AND IT DOES NOT OPEN ON AN OPTION THAT CANNOT BE CHOSEN. */
 ok('...and opens on one that can be',
-  /useState<EscalationKind>\(alreadyDisputed \? 'help' : 'dispute'\)/.test(modal))
+  /\(alreadyDisputed \? 'help' : 'dispute'\),/.test(modal))
+/* EXCEPT OFF AN EMAIL, WHERE IT OPENS ON THE BUTTON THAT WAS PRESSED -- and pressing "this is a
+   dispute" on an account that already has one is not barred, because the box offers to ADD it to
+   the open one rather than raise a second. See check-email-to-dispute. */
+ok('...or on the button that was pressed, off an email',
+  /fromEmail && initialKind \? initialKind :/.test(modal))
 /*
  * THE OTHER TWO KINDS ARE UNTOUCHED. Asking a team leader for help and recommending litigation
  * start no clock and hold nothing; an open dispute is no reason to refuse either, and barring them
