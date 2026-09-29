@@ -253,8 +253,21 @@ ok('an already-invoiced client is skipped rather than fatal', /continue;/.test(c
 
 /* ---------------- administrator only, and a ledger ---------------- */
 
-/* THE FIRM: "The Finance section is Administrator only. Sales representatives never see the
-   payment split." A run is the commission earned on a client's whole book. */
+/*
+ * THE FIRM: "The Finance section is Administrator only. Sales representatives never see the
+ * payment split." A run is the commission earned on a client's whole book.
+ *
+ * THIS ASSERTS THE POLICIES, AND POLICIES ARE ONLY ONE OF THE TWO LAYERS. An audit found nine of
+ * the fifteen finance RPCs were `security definer` with no role check -- and a definer function
+ * runs as the owner, so every policy asserted below is bypassed the moment somebody calls one.
+ * The section READ as locked down here while `preview_allocation` would hand the payment split to
+ * anybody who asked, including `anon`.
+ *
+ * SO THE FUNCTION LAYER IS HELD SEPARATELY, in check-finance-is-administrator-only.mjs. Nothing
+ * below is wrong; it is simply not the whole guarantee, and this note is here so the next person
+ * reading it does not conclude that it is. THAT IS THE GENERAL SHAPE WORTH WATCHING FOR: a check
+ * that is true about one enforcement layer and silent about the one carrying the weight.
+ */
 for (const t of ['payover_runs', 'payover_run_lines']) {
   ok(`${t} is readable by administrators only`,
     new RegExp(`create policy ${t}_read on public\\.${t}\\s*\\n\\s*for select to authenticated using \\(public\\.current_user_role\\(\\) = 'Administrator'\\)`).test(sql))
