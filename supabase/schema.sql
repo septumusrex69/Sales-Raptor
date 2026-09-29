@@ -15246,3 +15246,431 @@ begin
     execute format('revoke execute on function public.%s from public, anon', fn);
   end loop;
 end $$;
+
+-- ---------- The bank statement is the record, and payments are derived from it ----------
+--
+-- WHERE MONEY ACTUALLY ENTERS THE FIRM. Until now the only thing that could write a payment was
+-- the Swordfish migration: the allocation engine, the payover runs and the remittance advice were
+-- all built and had no front door. The firm asked where to import payments and the honest answer
+-- was nowhere.
+--
+-- THE STATEMENT IS STORED, NOT JUST READ. Every line of every upload lands here -- credits,
+-- debits and the zero-amount notices alike -- and a payment is something a line PRODUCES. Three
+-- things follow, and none works if only the payments are kept:
+--
+--   - A RE-UPLOAD CANNOT DOUBLE-CREDIT. Statements overlap at month ends, and a receipt imported
+--     twice is a debtor credited twice AND a client remitted twice -- which account_payments
+--     cannot undo, being immutable once remittance has run. `line_key` is unique, so the second
+--     import of a line is refused by the database rather than by a screen remembering.
+--   - THE 20% WITH NO REFERENCE HAVE SOMEWHERE TO BE. Measured on the firm's own September
+--     statement, 354 of 1 815 credits carry a depositor's name instead of an account number.
+--     They are money in the trust account belonging to a debtor nobody has identified yet.
+--   - THE STATEMENT RECONCILES. Keeping the debits and the notes means the line count and the
+--     totals tie back to the file the bank produced, so a line that was DROPPED can be told from
+--     one deliberately excluded.
+create table if not exists public.bank_statement_lines (
+  id uuid primary key default gen_random_uuid(),
+  bank_account text not null,
+  bank_account_label text,
+  -- Built by the parser from the account, date, amount, description and an OCCURRENCE NUMBER --
+  -- see BankLine.key. The occurrence number is load-bearing: without it a debtor who genuinely
+  -- paid R500 twice in one day is credited once.
+  line_key text not null,
+  txn_date date not null,
+  amount numeric(14,2) not null,
+  balance numeric(14,2),
+  description text not null,
+  direction text not null check (direction in ('credit', 'debit', 'note')),
+  -- A CANDIDATE. Matching it to an account is a separate step; one matching nothing goes to the queue.
+  reference text,
+  status text not null default 'unallocated'
+    check (status in ('unallocated', 'allocated', 'excluded', 'reconciled')),
+  account_id uuid references public.debtor_accounts(id) on delete set null,
+  payment_id uuid references public.account_payments(id) on delete set null,
+  payover_run_id uuid references public.payover_runs(id) on delete set null,
+  imported_at timestamptz not null default now(),
+  imported_by uuid references public.profiles(id) on delete set null,
+  placed_at timestamptz,
+  placed_by uuid references public.profiles(id) on delete set null
+);
+
+-- THE UNIQUE INDEX IS THE WHOLE PROTECTION. A screen that checks before inserting races with
+-- itself on a double-click, and with a colleague uploading the same statement at the next desk.
+create unique index if not exists bank_statement_lines_key_idx
+  on public.bank_statement_lines (line_key);
+create unique index if not exists bank_statement_lines_payment_idx
+  on public.bank_statement_lines (payment_id) where payment_id is not null;
+create index if not exists bank_statement_lines_unallocated_idx
+  on public.bank_statement_lines (txn_date desc)
+  where status = 'unallocated' and direction = 'credit';
+create index if not exists bank_statement_lines_account_idx
+  on public.bank_statement_lines (account_id) where account_id is not null;
+create index if not exists bank_statement_lines_run_idx
+  on public.bank_statement_lines (payover_run_id) where payover_run_id is not null;
+
+comment on table public.bank_statement_lines is
+  'Every line of every bank statement uploaded, credits and debits alike. A payment is something '
+  'a line produces; line_key is unique so a re-upload cannot credit a debtor twice.';
+
+alter table public.bank_statement_lines enable row level security;
+
+drop policy if exists bank_statement_lines_read on public.bank_statement_lines;
+create policy bank_statement_lines_read on public.bank_statement_lines
+  for select to authenticated
+  using (public.current_user_role() = 'Administrator');
+
+-- THE BANK'S FACTS ARE FROZEN AT WHAT THE BANK SAID -- the same rule as imported history, applied
+-- to the statement. The only thing anybody may change about a line is WHAT WAS DONE WITH IT.
+create or replace function public.protect_bank_statement_line() returns trigger
+language plpgsql security invoker set search_path to 'public'
+as $$
+begin
+  new.bank_account := old.bank_account;
+  new.line_key := old.line_key;
+  new.txn_date := old.txn_date;
+  new.amount := old.amount;
+  new.balance := old.balance;
+  new.description := old.description;
+  new.direction := old.direction;
+  new.imported_at := old.imported_at;
+  new.imported_by := old.imported_by;
+  -- A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is what FinancePayments
+  -- does, through the ledger, with a reason written on it.
+  if old.payment_id is not null then
+    new.payment_id := old.payment_id;
+    new.account_id := old.account_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists protect_bank_statement_line on public.bank_statement_lines;
+create trigger protect_bank_statement_line
+  before update on public.bank_statement_lines
+  for each row execute function public.protect_bank_statement_line();
+
+-- ---------- Importing a statement, and placing what it could not ----------
+--
+-- Insert every line, skip the ones already here, and turn each credit that names exactly one
+-- account into a payment -- which fires allocate_payment and runs the whole split the firm
+-- already has. Everything else is left where a person can see it.
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'credit' then 'unallocated' else 'excluded' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- EXACTLY ONE ACCOUNT, OR NOBODY. account_number is the reference the DEBTOR knows and types.
+    -- It is not unique the way case_number is, so a reference naming two accounts is counted and
+    -- left for a person -- guessing credits one debtor with another's money, and a payment is
+    -- immutable once processed. (array_agg, not min(): there is no min(uuid).)
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.account_number) = v_ref;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid()
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;
+
+comment on function public.import_bank_lines(text, text, jsonb) is
+  'Import a bank statement. Lines already present are skipped on line_key; each credit naming '
+  'exactly one account becomes a payment, which fires allocate_payment.';
+
+-- PLACING A RECEIPT NOBODY COULD MATCH. The firm chose this over skipping them: roughly 350
+-- credits a month carry a depositor's name instead of an account number, and the total of the
+-- queue is the firm's own measure of how much is sitting unplaced.
+create or replace function public.place_bank_line(p_line uuid, p_account uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_payment uuid;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  -- The three ways this could put money somewhere it does not belong, each refused by name.
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be placed against an account.';
+  end if;
+  if v_line.payment_id is not null then
+    raise exception 'That receipt has already been placed.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+  ) values (
+    p_account,
+    (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+    v_line.amount, 'EFT',
+    coalesce(v_line.reference, left(v_line.description, 60)),
+    v_line.description, 'bank', false, auth.uid()
+  ) returning id into v_payment;
+
+  update public.bank_statement_lines
+     set status = 'allocated', account_id = p_account, payment_id = v_payment,
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_payment;
+end $$;
+
+-- CONFIRMING A PAYOVER ACTUALLY LEFT THE BANK. The firm asked for this: match the money going out
+-- to the runs marked sent, so "paid" is witnessed by the statement rather than asserted by
+-- somebody pressing a button.
+create or replace function public.reconcile_bank_debit(p_line uuid, p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_status text;
+  v_net numeric;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  if v_line.direction <> 'debit' then
+    raise exception 'Only money paid out can settle a payover run.';
+  end if;
+  if v_line.payover_run_id is not null then
+    raise exception 'That payment out is already against a run.';
+  end if;
+
+  select status, net_payover into v_status, v_net from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if v_status not in ('approved', 'sent') then
+    raise exception 'Only an approved or sent run can be settled, and that one is %.', v_status;
+  end if;
+
+  -- THE AMOUNTS MUST AGREE. The statement's debit is negative and the run's net payover positive,
+  -- so they are compared as magnitudes. A mismatch means either the wrong run was picked or the
+  -- firm paid a different figure from the one on the remittance advice the client received, and
+  -- both are worth stopping for.
+  if abs(v_line.amount) <> v_net then
+    raise exception 'That payment out is % and the run is %. Pick the run that matches, or ask why they differ.',
+      to_char(abs(v_line.amount), 'FM999999990.00'), to_char(v_net, 'FM999999990.00');
+  end if;
+
+  update public.bank_statement_lines
+     set payover_run_id = p_run, status = 'reconciled',
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+
+  update public.payover_runs
+     set status = 'paid',
+         paid_at = coalesce(paid_at, (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg')),
+         eft_reference = coalesce(eft_reference, left(v_line.description, 80))
+   where id = p_run and status in ('approved', 'sent');
+end $$;
+
+-- ---------- What is still sitting in the trust account, unplaced ----------
+create or replace function public.unallocated_receipts()
+returns table (
+  id uuid, txn_date date, amount numeric, description text,
+  reference text, bank_account text, imported_at timestamptz,
+  -- Said out loud, because the two are different problems: a receipt with no reference needs
+  -- somebody to recognise a name, while one whose reference matched two accounts needs somebody
+  -- to decide which -- and the second is the more dangerous to hurry.
+  had_reference boolean
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description, l.reference, l.bank_account,
+         l.imported_at, l.reference is not null
+    from public.bank_statement_lines l
+   where public.current_user_role() = 'Administrator'
+     and l.status = 'unallocated'
+     and l.direction = 'credit'
+   order by l.txn_date desc, l.amount desc
+$$;
+
+-- THE DEBITS STILL WAITING TO BE MATCHED TO A RUN, with the runs they could plausibly settle.
+-- Offered rather than guessed: the amounts have to agree exactly, so a run is a candidate only
+-- when it already matches, and the person confirms which client it was.
+create or replace function public.unreconciled_payouts()
+returns table (
+  id uuid, txn_date date, amount numeric, description text,
+  candidate_run uuid, candidate_invoice text, candidate_client text
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description,
+         r.id, r.invoice_number, c.name
+    from public.bank_statement_lines l
+    left join public.payover_runs r
+      on r.status in ('approved', 'sent')
+     and r.net_payover = abs(l.amount)
+    left join public.companies c on c.id = r.company_id
+   where public.current_user_role() = 'Administrator'
+     and l.direction = 'debit'
+     and l.payover_run_id is null
+   order by l.txn_date desc
+$$;
+
+-- WHAT HAS BEEN UPLOADED, so somebody can see whether this month is already in.
+create or replace function public.bank_import_history()
+returns table (
+  bank_account text, bank_account_label text,
+  first_txn date, last_txn date, lines bigint,
+  allocated bigint, unallocated bigint, debits bigint,
+  received numeric, paid_out numeric, last_import timestamptz
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.bank_account, max(l.bank_account_label),
+         min(l.txn_date), max(l.txn_date), count(*),
+         count(*) filter (where l.status = 'allocated'),
+         count(*) filter (where l.status = 'unallocated'),
+         count(*) filter (where l.direction = 'debit'),
+         coalesce(sum(l.amount) filter (where l.direction = 'credit'), 0),
+         coalesce(abs(sum(l.amount) filter (where l.direction = 'debit')), 0),
+         max(l.imported_at)
+    from public.bank_statement_lines l
+   where public.current_user_role() = 'Administrator'
+   group by l.bank_account
+$$;
+
+-- AND NOBODY UNAUTHENTICATED REACHES ANY OF THEM -- see the Finance guard above.
+revoke execute on function public.import_bank_lines(text, text, jsonb) from public, anon;
+revoke execute on function public.place_bank_line(uuid, uuid) from public, anon;
+revoke execute on function public.reconcile_bank_debit(uuid, uuid) from public, anon;
+revoke execute on function public.unallocated_receipts() from public, anon;
+revoke execute on function public.unreconciled_payouts() from public, anon;
+revoke execute on function public.bank_import_history() from public, anon;
+
+-- ---------- One revoke list for the whole Finance surface ----------
+--
+-- The bank-statement functions were added above with revokes of their own, which works and is not
+-- the point: check-finance-is-administrator-only reads THE LIST, so a function revoked on its own
+-- line is a function the next person can add without noticing there is a list to be on. Restated
+-- here as one block covering every RPC the Finance screens call, which is the form the check
+-- holds and the form that fails loudly when somebody adds the twenty-second.
+--
+-- Running it again changes nothing: a revoke of a privilege already absent is a no-op.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)',
+    'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)',
+    'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)',
+    'money_position(uuid)',
+    'payover_work_queue(date)',
+    'payover_cycle_tiles(date)',
+    'payover_run_payments(uuid)',
+    'finance_exception_jobs()',
+    'payment_audit(uuid)',
+    'account_ledger(uuid)',
+    'expected_from_promises(date, date)',
+    'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)',
+    'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()',
+    'unreconciled_payouts()',
+    'bank_import_history()'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;

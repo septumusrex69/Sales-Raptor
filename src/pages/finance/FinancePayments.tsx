@@ -8,6 +8,8 @@ import { Modal, inputClass } from '../../components/ui/Modal'
 import { supabase } from '../../lib/supabase'
 import { rand } from '../../lib/money'
 import { useAppStore } from '../../store/AppStore'
+import { BankImportCard } from './BankImportCard'
+import { UnallocatedReceipts } from './UnallocatedReceipts'
 
 /**
  * EVERY PAYMENT WITH ITS FULL ALLOCATION — the one screen where the whole split is visible.
@@ -52,6 +54,9 @@ export function FinancePayments() {
   const [kind, setKind] = useState<'all' | 'trust' | 'ptc'>('all')
   const [page, setPage] = useState(0)
   const [reverseFor, setReverseFor] = useState<Row | null>(null)
+  /* Bumped whenever an import or a placement changes the ledger, so the queue and the table below
+     reload together rather than disagreeing about what has been placed. */
+  const [imported, setImported] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -85,6 +90,15 @@ export function FinancePayments() {
   return (
     <div className="space-y-4">
       <FinanceTabs />
+      {/*
+        THE IMPORT COMES FIRST, above the ledger it fills. This screen already listed every
+        payment with its full allocation and could reverse one; what it could not do was record a
+        payment arriving, which is why the firm asked where to import payments and the answer was
+        nowhere. The list below is the same list -- what changed is that something now puts rows
+        in it other than the Swordfish migration.
+      */}
+      <BankImportCard onImported={() => { setImported((n) => n + 1); void load() }} />
+      <UnallocatedReceipts refreshKey={imported} onPlaced={() => { setImported((n) => n + 1); void load() }} />
       {error && (
         <div className="flex items-start gap-2 rounded-lg bg-rust-50 px-4 py-3 text-sm text-rust-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>

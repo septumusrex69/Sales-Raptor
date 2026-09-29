@@ -589,3 +589,183 @@ export async function fetchSettingChanges(limit = 50): Promise<SettingChange[]> 
     reason: s(r.reason),
   }))
 }
+
+/* ---------------------------------------------------------------- the bank statement */
+
+/**
+ * IMPORTING A BANK STATEMENT, WHICH IS WHERE MONEY ENTERS THE FIRM.
+ *
+ * Everything above this line spends money the firm has already received. Until now nothing could
+ * record it arriving: the allocation engine, the payover runs and the remittance advice were all
+ * built and had no front door, and the only thing that could write a payment was the Swordfish
+ * migration. The firm asked where to import payments and the honest answer was nowhere.
+ *
+ * THE PARSING IS NOT HERE. `bankStatement.ts` reads the file and imports nothing from Supabase,
+ * so a check can exercise the whole of it in a second -- which matters more than usual, because
+ * what it gets wrong is which debtor is credited with somebody's money.
+ */
+
+/** What an upload did, counted the way the preview counts it. */
+export interface ImportOutcome {
+  inserted: number
+  /** Lines already present, skipped on `line_key`. A second upload of one month is all of these. */
+  duplicates: number
+  allocated: number
+  unallocated: number
+  debits: number
+  notes: number
+  /** A reference naming more than one account. Left for a person rather than guessed between. */
+  ambiguous: number
+}
+
+/** A receipt in the trust account that nobody has placed against a debtor yet. */
+export interface UnallocatedReceipt {
+  id: string
+  txnDate: string
+  amount: number
+  description: string
+  reference: string | null
+  bankAccount: string
+  importedAt: string
+  /**
+   * Whether the bank line carried a reference at all.
+   *
+   * TWO DIFFERENT PROBLEMS WEARING ONE LABEL. No reference means somebody has to recognise a
+   * depositor's name. A reference that IS here and still unplaced means it matched more than one
+   * account -- and that one is the more dangerous to hurry, because both candidates look right.
+   */
+  hadReference: boolean
+}
+
+/** Money that left the trust account and has not been tied to a payover run. */
+export interface UnreconciledPayout {
+  id: string
+  txnDate: string
+  amount: number
+  description: string
+  /** A run whose net payover already equals this amount exactly. Offered, never applied. */
+  candidateRun: string | null
+  candidateInvoice: string | null
+  candidateClient: string | null
+}
+
+export interface BankImportHistory {
+  bankAccount: string
+  bankAccountLabel: string | null
+  firstTxn: string | null
+  lastTxn: string | null
+  lines: number
+  allocated: number
+  unallocated: number
+  debits: number
+  received: number
+  paidOut: number
+  lastImport: string | null
+}
+
+/**
+ * Send a parsed statement to the database.
+ *
+ * THE WHOLE FILE IN ONE CALL, because the duplicate protection is a unique index and the counts
+ * have to be one answer. Split into batches, two uploads of the same month could interleave and
+ * the totals a person reads would describe neither.
+ */
+export async function importBankLines(input: {
+  bankAccount: string
+  bankAccountLabel: string | null
+  lines: {
+    key: string; date: string; amount: number; balance: number | null
+    description: string; direction: string; reference: string | null
+  }[]
+}): Promise<ImportOutcome> {
+  const { data, error } = await supabase.rpc('import_bank_lines', {
+    p_account: input.bankAccount,
+    p_label: input.bankAccountLabel,
+    /* Amounts as strings: the database column is numeric and JSON numbers are doubles, which is
+       the one place a cent could go missing between the file and the ledger. */
+    p_lines: input.lines.map((l) => ({
+      key: l.key,
+      date: l.date,
+      amount: l.amount.toFixed(2),
+      balance: l.balance === null ? '' : l.balance.toFixed(2),
+      description: l.description,
+      direction: l.direction,
+      reference: l.reference ?? '',
+    })),
+  })
+  if (error) throw new Error(error.message)
+  const r = (Array.isArray(data) ? data[0] : data) as Record<string, number> | null
+  return {
+    inserted: Number(r?.inserted ?? 0),
+    duplicates: Number(r?.duplicates ?? 0),
+    allocated: Number(r?.allocated ?? 0),
+    unallocated: Number(r?.unallocated ?? 0),
+    debits: Number(r?.debits ?? 0),
+    notes: Number(r?.notes ?? 0),
+    ambiguous: Number(r?.ambiguous ?? 0),
+  }
+}
+
+export async function fetchUnallocatedReceipts(): Promise<UnallocatedReceipt[]> {
+  const { data, error } = await supabase.rpc('unallocated_receipts')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    txnDate: String(r.txn_date),
+    amount: Number(r.amount),
+    description: String(r.description),
+    reference: s(r.reference),
+    bankAccount: String(r.bank_account),
+    importedAt: String(r.imported_at),
+    hadReference: !!r.had_reference,
+  }))
+}
+
+export async function fetchUnreconciledPayouts(): Promise<UnreconciledPayout[]> {
+  const { data, error } = await supabase.rpc('unreconciled_payouts')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    txnDate: String(r.txn_date),
+    amount: Number(r.amount),
+    description: String(r.description),
+    candidateRun: s(r.candidate_run),
+    candidateInvoice: s(r.candidate_invoice),
+    candidateClient: s(r.candidate_client),
+  }))
+}
+
+export async function fetchBankImportHistory(): Promise<BankImportHistory[]> {
+  const { data, error } = await supabase.rpc('bank_import_history')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    bankAccount: String(r.bank_account),
+    bankAccountLabel: s(r.bank_account_label),
+    firstTxn: s(r.first_txn),
+    lastTxn: s(r.last_txn),
+    lines: Number(r.lines),
+    allocated: Number(r.allocated),
+    unallocated: Number(r.unallocated),
+    debits: Number(r.debits),
+    received: Number(r.received),
+    paidOut: Number(r.paid_out),
+    lastImport: s(r.last_import),
+  }))
+}
+
+/** Place an unmatched receipt against an account. This is what creates the payment. */
+export async function placeBankLine(lineId: string, accountId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('place_bank_line', {
+    p_line: lineId, p_account: accountId,
+  })
+  if (error) throw new Error(error.message)
+  return String(data)
+}
+
+/** Tie a payment out to the run it settles, which marks the run paid. */
+export async function reconcileBankDebit(lineId: string, runId: string): Promise<void> {
+  const { error } = await supabase.rpc('reconcile_bank_debit', {
+    p_line: lineId, p_run: runId,
+  })
+  if (error) throw new Error(error.message)
+}
