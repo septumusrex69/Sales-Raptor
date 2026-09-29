@@ -117,8 +117,28 @@ export function EscalateModal({
    * several are open at once and a new email is usually a new one, so it starts on `new` with the
    * open ones offered underneath.
    */
+  /*
+   * A DISPUTE, AND ONLY A DISPUTE.
+   *
+   * THE FIRM: "it should be able to link to an open dispute for sure, but it should not be able to
+   * link to an open query, like an open information request, because an information request is an
+   * internal thing... it just creates the complexity of the dispute handling procedure much
+   * worse."
+   *
+   * IT USED TO OFFER EVERY OPEN TICKET OF EITHER KIND. On an account with two requests open and no
+   * dispute, pressing "This is a dispute" showed two options both reading "Add it to the open
+   * request" -- which is what the firm hit, and what they described as not being asked WHICH
+   * dispute. Worse than confusing: the endpoint accepted it, so a debtor's written dispute would
+   * have been filed as "an email was filed against this request", with no dispute recorded, no
+   * `in_writing`, no sequence started and the collection letters still running.
+   *
+   * A REQUEST IS THE FIRM'S OWN ERRAND -- asking a client for a statement or a proof of delivery.
+   * Nothing a debtor sends belongs on one.
+   */
   const linkable = useMemo(
-    () => (fromEmail ? openQueries.filter((q) => q.status !== 'closed') : []),
+    () => (fromEmail
+      ? openQueries.filter((q) => q.status !== 'closed' && q.kind === 'dispute')
+      : []),
     [fromEmail, openQueries],
   )
   const openDispute = linkable.find((q) => q.kind === 'dispute') ?? null
@@ -361,7 +381,7 @@ export function EscalateModal({
         */}
         {fromEmail && linkable.length > 0 && (
           <fieldset className="space-y-1.5">
-            <legend className="text-sm font-medium text-slate-700 mb-1.5">Is this about something already open?</legend>
+            <legend className="text-sm font-medium text-slate-700 mb-1.5">Is this about the open dispute?</legend>
             {linkable.map((q) => {
               const willBeInWriting = q.kind === 'dispute' && !q.inWriting && !q.receivedOn
               return (
@@ -372,9 +392,7 @@ export function EscalateModal({
                   <input type="radio" name="escalation-target" checked={target === `link:${q.id}`}
                     onChange={() => setTarget(`link:${q.id}`)} className="mt-0.5" />
                   <span className="min-w-0">
-                    <span className="block text-sm text-slate-800">
-                      Add it to the open {q.kind === 'request' ? 'request' : 'dispute'}
-                    </span>
+                    <span className="block text-sm text-slate-800">Add it to the open dispute</span>
                     <span className="block text-[11px] text-slate-500 line-clamp-2 wrap-anywhere">{q.description}</span>
                     {/* WHAT LINKING ACTUALLY DOES, said before it is pressed, because on a verbal
                         dispute it is the thing that stops every collection sequence on the
@@ -400,7 +418,7 @@ export function EscalateModal({
                 <span className="block text-[11px] text-slate-500">
                   {alreadyDisputed
                     ? 'A second dispute cannot be opened while one is. A request can.'
-                    : 'Nothing open covers what this email is about.'}
+                    : 'No dispute is open on this account — this will raise one.'}
                 </span>
               </span>
             </label>
@@ -771,7 +789,7 @@ export function EscalateModal({
           <p className="text-sm text-slate-500">
             The email{fromEmail && fromEmail.attachmentNames.length > 0
               ? ` and its ${fromEmail.attachmentNames.length} attachment${fromEmail.attachmentNames.length === 1 ? '' : 's'}`
-              : ''} will be filed against this {linkedTo.kind === 'request' ? 'request' : 'dispute'}.
+              : ''} will be filed against this dispute.
           </p>
         )}
 
@@ -794,7 +812,7 @@ export function EscalateModal({
             {busy
               ? (linkedTo ? 'Filing…' : 'Escalating…')
               : linkedTo
-                ? `Add it to this ${linkedTo.kind === 'request' ? 'request' : 'dispute'}`
+                ? 'Add it to this dispute'
                 : ESCALATION_KINDS[kind].submitLabel}
           </button>
           <button onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>

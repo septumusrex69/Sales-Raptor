@@ -65,9 +65,15 @@ ok('linking an email marks the dispute received in writing',
    the trigger guards on the OLD row -- but it would put a second "received in writing" line on
    the timeline for an email that only confirmed what we had. */
 ok('...only where it was not already',
-  /nowInWriting = open\.kind === 'dispute'\s*\n?\s*&& !open\.in_writing && !open\.received_on/.test(api))
-/* A REQUEST IS NOT A DISPUTE AND HAS NO SUCH STATE. */
-ok('...and never on a request', /open\.kind === 'dispute'/.test(api))
+  /nowInWriting = !open\.in_writing && !open\.received_on/.test(api))
+/*
+ * IT USED TO SAY `open.kind === 'dispute' && ...` HERE, and that clause is gone because the guard
+ * above it is stronger: a request can no longer be linked at all, so a linked ticket is a dispute
+ * by construction. Asserted as the guard rather than as the clause -- a check that kept insisting
+ * on the clause would be holding a belt whose braces do more work.
+ */
+ok('...and never on a request, because one cannot be linked',
+  /open\.kind !== 'dispute'/.test(api))
 
 /*
  * THE TRIGGER IS WHAT MAKES THAT UPDATE MEAN ANYTHING, and it has to fire on an UPDATE of those
@@ -175,6 +181,44 @@ ok('...and none of them still has a fallback chain',
 
 ok('the browser can hand the endpoint a ticket to link to', /queryId: input\.queryId \?\? null/.test(mailLib))
 ok('...and hears back whether that made it written', /nowInWriting: !!body\.nowInWriting/.test(mailLib))
+
+/* ---------------- and a request is not a dispute, on either side of the wire -------------- */
+
+/*
+ * THE FIRM: "it should be able to link to an open dispute for sure, but it should not be able to
+ * link to an open query, like an open information request, because an information request is an
+ * internal thing... it just creates the complexity of the dispute handling procedure much worse."
+ *
+ * THE OLD BEHAVIOUR WAS WORSE THAN CONFUSING. The box offered every open ticket of either kind, so
+ * on an account with two requests open and no dispute, "This is a dispute" showed two options both
+ * reading "Add it to the open request" -- which is exactly what the firm hit and described as not
+ * being asked WHICH dispute. And the endpoint ACCEPTED it: ticketKind followed the ticket, so a
+ * debtor's written dispute was filed as "an email was filed against this request". No dispute
+ * recorded, in_writing never set, workflow_start_on_dispute never fired, item 3 never raised, and
+ * the collection sequences still running against a debt the debtor had disputed in writing.
+ */
+ok('the box offers only an open dispute to link to',
+  /openQueries\.filter\(\(q\) => q\.status !== 'closed' && q\.kind === 'dispute'\)/.test(modal))
+ok('...and says so in the question it asks', /Is this about the open dispute\?/.test(modal))
+/* NO REQUEST WORDING LEFT ON THE LINK PATH, or the screen still offers what the server refuses. */
+ok('...with no "add it to the open request" left anywhere',
+  !/Add it to the open \{q\.kind/.test(modal) && !/Add it to the open request/.test(modal))
+
+/*
+ * AND THE ENDPOINT REFUSES IT, which is where the rule belongs. A filter in a browser is a
+ * convenience; anything that writes a debtor's dispute has to be guarded where it is written.
+ */
+ok('the endpoint refuses a request as the target', /open\.kind !== 'dispute'/.test(api))
+ok('...saying why, and what to do instead',
+  /cannot be added to an information request[\s\S]{0,120}?Raise a dispute from it instead/.test(read('api/_lib/email/ticket.ts')))
+/*
+ * THE BRANCH THAT FOLLOWED THE TICKET'S OWN KIND IS GONE. It is the line that turned a dispute
+ * into a request, and a guard above it is worth nothing if the assignment below still reaches for
+ * whatever the row happened to say.
+ */
+ok('a linked ticket is a dispute by construction', /ticketKind = 'dispute'/.test(api))
+ok('...not whatever the row happened to say',
+  !/ticketKind = open\.kind === 'request'/.test(api))
 
 console.log(`\ncheck-email-to-dispute: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

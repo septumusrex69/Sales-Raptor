@@ -209,8 +209,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(409).json({ error: 'That ticket has been closed. Raise a new one from this email.' })
       return
     }
+    /*
+     * A DISPUTE, AND ONLY A DISPUTE.
+     *
+     * THE FIRM: "it should not be able to link to an open query, like an open information request,
+     * because an information request is an internal thing... it just creates the complexity of the
+     * dispute handling procedure much worse."
+     *
+     * AND THE OLD BEHAVIOUR WAS WORSE THAN CONFUSING. This accepted a request as the target and
+     * quietly became one: `ticketKind` followed the ticket, so a debtor's WRITTEN DISPUTE was
+     * filed as "an email was filed against this request" -- no dispute recorded, `in_writing`
+     * never set, `workflow_start_on_dispute` never fired, item 3 never raised, and the collection
+     * sequences still running against a debt the debtor had disputed in writing.
+     *
+     * REFUSED HERE AND NOT ONLY ON THE SCREEN. The box no longer offers a request, but a filter in
+     * a browser is a convenience; this is the rule.
+     */
+    if (open.kind !== 'dispute') {
+      res.status(400).json({
+        error: 'An email cannot be added to an information request — those are ours to answer. '
+          + 'Raise a dispute from it instead.',
+      })
+      return
+    }
     ticket = { id: open.id, kind: open.kind }
-    ticketKind = open.kind === 'request' ? 'request' : 'dispute'
+    /* The guard above already refused anything else, so a linked ticket is a dispute by
+       construction -- the branch that used to follow the ticket's own kind is what let a written
+       dispute be filed as a request. */
+    ticketKind = 'dispute'
     /*
      * AND THE DISPUTE IS NOW IN WRITING. Only where it was not already -- `workflow_start_on_dispute`
      * fires on this very update, ends the invitation sequence and starts the real one, and it
@@ -218,8 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      * that already carried them changes nothing, but it would put a second "received in writing"
      * line on the timeline for an email that only confirmed what we had.
      */
-    nowInWriting = open.kind === 'dispute'
-      && !open.in_writing && !open.received_on
+    nowInWriting = !open.in_writing && !open.received_on
     if (nowInWriting) {
       const { error: markError } = await admin
         .from('account_queries')
@@ -365,7 +390,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     body: queryId
       ? (nowInWriting
         ? `The dispute was received in writing by email${filedNote}`
-        : `An email was filed against this ${ticketKind === 'request' ? 'request' : 'dispute'}${filedNote}`)
+        : `An email was filed against this dispute${filedNote}`)
       : `${escalationNote(kind, description.slice(0, 200))}${filedNote}`,
     created_by: caller.id,
     query_id: ticket.id,
