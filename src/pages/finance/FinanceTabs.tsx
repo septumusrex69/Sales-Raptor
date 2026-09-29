@@ -14,9 +14,18 @@ import clsx from 'clsx'
  * The queue is about paying clients; the back office is about what BF still has to come, and
  * mixing the two puts the firm's own income on the screen somebody works a client's money from.
  */
+/*
+ * PAYMENTS FIRST, THEN THE PAYOVER QUEUE. The firm: "the first pane and the first tab that I want
+ * to see... first I want to see the payments. So first we work with payments. And then we work
+ * with a pay over queue."
+ *
+ * AND IT IS THE ORDER THE WORK HAPPENS IN, which is why it is worth moving rather than arguing:
+ * money arrives, it is allocated and approved, and only then is there anything to pay a client
+ * with. The queue was the index because it was built first.
+ */
 const TABS = [
-  { to: '/finance', label: 'Payover queue', end: true },
-  { to: '/finance/payments', label: 'Payments' },
+  { to: '/finance', label: 'Payments', end: true },
+  { to: '/finance/payover', label: 'Payover queue' },
   { to: '/finance/exceptions', label: 'Exceptions' },
   { to: '/finance/back-office', label: 'Back office' },
   { to: '/finance/settings', label: 'Settings' },

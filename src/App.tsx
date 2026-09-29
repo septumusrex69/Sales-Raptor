@@ -120,9 +120,17 @@ function App() {
                 * prompt 7 replaced prompt 5's overview because this is the screen the team opens
                 * to find out what to do, not a set of figures to read.
                 */}
-              <Route path="/finance" element={<RequireFinance><FinanceWorkQueue /></RequireFinance>} handle={{ title: 'Finance' }} />
+              {/*
+                PAYMENTS IS THE FRONT OF THE FINANCE SECTION, at the firm's instruction: "the first
+                pane and the first tab that I want to see... first I want to see the payments. So
+                first we work with payments. And then we work with a pay over queue." The queue was
+                the index because it was built first, which is not a reason.
+              */}
+              <Route path="/finance" element={<RequireFinance><FinancePayments /></RequireFinance>} handle={{ title: 'Payments' }} />
+              <Route path="/finance/payover" element={<RequireFinance><FinanceWorkQueue /></RequireFinance>} handle={{ title: 'Payover queue' }} />
               <Route path="/finance/runs/:id" element={<RequireFinance><RunDetail /></RequireFinance>} handle={{ title: 'Payover run' }} />
-              <Route path="/finance/payments" element={<RequireFinance><FinancePayments /></RequireFinance>} handle={{ title: 'Payments' }} />
+              {/* The old address, kept so a bookmark or a link in somebody's email still lands. */}
+              <Route path="/finance/payments" element={<Navigate to="/finance" replace />} />
               <Route path="/finance/exceptions" element={<RequireFinance><FinanceExceptions /></RequireFinance>} handle={{ title: 'Finance exceptions' }} />
               <Route path="/finance/back-office" element={<RequireFinance><BackOffice /></RequireFinance>} handle={{ title: 'Back office' }} />
               <Route path="/finance/settings" element={<RequireFinance><FinanceSettings /></RequireFinance>} handle={{ title: 'Finance settings' }} />

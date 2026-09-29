@@ -164,7 +164,7 @@ export function FinanceWorkQueue() {
             label="Money received"
             value={rand(tiles?.moneyReceived ?? 0)}
             note="Trust account, this cycle"
-            to="/finance/payments"
+            to="/finance"
           />
           <Tile
             label="Due to clients"

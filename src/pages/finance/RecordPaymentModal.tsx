@@ -5,6 +5,8 @@ import { rand } from '../../lib/money'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { uploadDocument } from '../../lib/accountWorkspace'
 import { recordManualPayment, DuplicatePayment, ProofRequired } from '../../lib/recordPayment'
+import { chargePtcConfirmation } from '../../lib/accountCharges'
+import { chargeMessage } from '../../lib/accountCharges'
 import { useAuth } from '../../store/AuthContext'
 
 /**
@@ -94,9 +96,16 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
         kind: 'Proof of payment',
         uploadedBy: currentUser?.id ?? null,
         uploadedByName: currentUser?.name ?? null,
-        /* NO PERUSAL FEE. This is the CLIENT's confirmation, uploaded so the firm can invoice the
-           CLIENT -- item 3 recovers time the DEBTOR caused, and billing them for the firm's own
-           evidence would not survive being asked about. */
+        /*
+          NO PERUSAL FEE ON THE UPLOAD ITSELF -- but not because a PTC is free. The firm corrected
+          that: "you can charge a perusal fee for a PTC because the debtor has paid into the
+          client's account and it cost us administration to verify this."
+          
+          The charge is `ptc_confirmation`, raised ONCE AFTER THE PAYMENT LANDS (see save below).
+          Charging here as well would bill the debtor twice for one verification -- and would
+          charge them even when the payment is then refused, which is the case where no
+          confirmation happened at all.
+        */
         chargePerusalFee: false,
       })
       setProof({ id: document.id, name: document.name })
@@ -109,7 +118,7 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
     if (!accountId || !ready || busy) return
     setBusy(true); setError(null)
     try {
-      await recordManualPayment({
+      const paymentId = await recordManualPayment({
         accountId: accountId as string,
         amount: value,
         receivedOn,
@@ -119,6 +128,21 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
         confirmDuplicate,
         proofDocumentId: proof?.id ?? null,
       })
+      /*
+        AND THE DEBTOR PAYS FOR THE VERIFICATION, at the firm's instruction -- item 3, "other
+        necessary expenses", described as a PTC confirmation. AFTER the payment, never before: a
+        PTC that would not save has not been confirmed.
+
+        ONLY ON A PTC. A trust receipt is witnessed by the firm's own bank statement and costs
+        nobody any verifying.
+      */
+      if (paidToClient && paymentId) {
+        const charge = await chargePtcConfirmation({
+          accountId: accountId as string,
+          createdBy: currentUser?.id ?? null,
+        })
+        if (charge?.reason === 'charged') console.info(chargeMessage(charge, '3'))
+      }
       await onDone()
       onClose()
     } catch (e) {
@@ -229,7 +253,7 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
             <p className="text-[11px] text-slate-500 mt-0.5">
               A PDF, an email, a screenshot — whatever the client sent showing the debtor paid
               them. Required: we never saw this money, so this is what the commission invoice
-              rests on. The debtor is not charged for it.
+              rests on. Verifying it raises item 3, a PTC confirmation.
             </p>
             {proof ? (
               <p className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-[var(--c-green)]">

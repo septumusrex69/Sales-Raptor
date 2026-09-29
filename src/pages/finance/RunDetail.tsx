@@ -188,7 +188,7 @@ export function RunDetail() {
 
   return (
     <div className="space-y-4">
-      <Link to="/finance" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
+      <Link to="/finance/payover" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="w-4 h-4" /> Payover queue
       </Link>
 

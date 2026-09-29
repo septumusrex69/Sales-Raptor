@@ -177,6 +177,47 @@ ok('an upload can opt out of the perusal fee', /chargePerusalFee\?: boolean/.tes
 ok('...and the default is still to charge', /input\.chargePerusalFee === false/.test(workspace))
 ok('...and the PTC confirmation opts out', /chargePerusalFee: false/.test(modal))
 
+/* ---------------- and the debtor pays for the verification ---------------- */
+
+/*
+ * THE FIRM, CORRECTING A JUDGEMENT OF MINE: "You can charge a perusal fee for a PTC because the
+ * debtor has paid into the client's account and it cost us administration to verify this...
+ * handle it as other necessary expenses and call it a PTC confirmation."
+ *
+ * I HAD MADE IT FREE ON THE WRONG REASONING -- that the confirmation is the FIRM's evidence for
+ * invoicing the client. The work exists because the DEBTOR chose to pay somebody else, and
+ * somebody has to obtain the letter, read it and satisfy themselves the money is real before a
+ * balance moves. Item 3 is "other necessary expenses not specifically provided for".
+ */
+const charges = read('src/lib/accountCharges.ts')
+ok('a PTC confirmation is chargeable', /export async function chargePtcConfirmation/.test(charges))
+ok('...as item 3, other necessary expenses', /itemId: OTHER_EXPENSES_ITEM_ID/.test(charges))
+ok('...named the way the firm names it', /PTC_CONFIRMATION_DESCRIPTION = 'PTC confirmation'/.test(charges))
+
+/*
+ * ITS OWN ACTION CODE, NOT `perusal`, AND THAT IS THE LOAD-BEARING PART. A perusal is capped per
+ * period however many documents are read; a PTC confirmation is one verification of one payment.
+ * Sharing the code would make the second PTC of a period free.
+ */
+ok('...under an action code of its own', /'ptc_confirmation'/.test(read('src/lib/actionTariff.ts')))
+ok('...which the charge uses', /actionCode: 'ptc_confirmation'/.test(charges))
+const limits = read('src/lib/actionTariff.ts')
+const limitBlock = limits.slice(limits.indexOf('DAILY_LIMIT'), limits.indexOf('TARIFF_HISTORY'))
+ok('...and is not capped alongside perusals', !/ptc_confirmation/.test(limitBlock))
+
+/* ONLY ON A PTC. A trust receipt is witnessed by the firm's own bank statement and costs nobody
+   any verifying. */
+ok('only a PTC raises it', /if \(paidToClient && paymentId\)/.test(modal))
+/*
+ * AFTER THE PAYMENT, NEVER BEFORE. A PTC that would not save has not been confirmed, and charging
+ * first is how a debtor pays for work nobody did -- the same ordering chargePerusal uses.
+ */
+const payAt = modal.indexOf('await recordManualPayment')
+const feeAt = modal.indexOf('chargePtcConfirmation(')
+ok('...raised after the payment lands', payAt > 0 && feeAt > payAt)
+/* AND NOT TWICE. The upload no longer charges a perusal, so one verification is one fee. */
+ok('...and the upload does not charge as well', /chargePerusalFee: false/.test(modal))
+
 console.log(`\ncheck-record-payment: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

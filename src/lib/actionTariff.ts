@@ -33,6 +33,25 @@ export type ActionCode =
   | 'promise_to_pay'
   | 'trace'
   | 'whatsapp'
+  /*
+   * VERIFYING THAT A DEBTOR PAID THE CLIENT DIRECT.
+   *
+   * THE FIRM, correcting an earlier judgement of mine that this should be free: "You can charge a
+   * perusal fee for a PTC because the debtor has paid into the client's account and it cost us
+   * administration to verify this... handle it as other necessary expenses and call it a PTC
+   * confirmation."
+   *
+   * They are right and the reasoning I had was wrong. I read the confirmation as the FIRM's own
+   * evidence for invoicing the client, and therefore not the debtor's to pay. But the work is
+   * there because the DEBTOR chose to pay somebody else: the firm has to obtain the client's
+   * confirmation, read it, and satisfy itself the money is real before it touches a balance.
+   * Item 3 is "other necessary expenses not specifically provided for", and that is what this is.
+   *
+   * ITS OWN CODE RATHER THAN `perusal`, because the two are limited differently. A perusal is
+   * capped per period however many documents are read; a PTC confirmation is one verification of
+   * one payment, and two PTCs in a month are two pieces of work.
+   */
+  | 'ptc_confirmation'
 
 export interface ActionDefinition {
   code: ActionCode
@@ -49,6 +68,7 @@ export interface ActionDefinition {
 }
 
 export const ACTION_DEFINITIONS: ActionDefinition[] = [
+  { code: 'ptc_confirmation', label: 'PTC Confirmation' },
   { code: 'phone_call', label: 'Phone Call' },
   { code: 'sms', label: 'SMS', perSegment: true, electronicCommunication: true },
   { code: 'email_out', label: 'Email (Outgoing)', electronicCommunication: true },
