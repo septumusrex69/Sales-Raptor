@@ -101,7 +101,7 @@ export function FinanceSettings() {
       <FinanceTabs />
 
       {error && (
-        <div className="flex items-start gap-2 rounded-lg bg-rust-50 px-4 py-3 text-sm text-rust-700">
+        <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
@@ -357,7 +357,7 @@ function ChangeModal({ title, label, current, note, onClose, onSave }: {
           </p>
         </div>
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">{note}</p>
-        {error && <p className="rounded-lg bg-rust-50 px-3 py-2 text-[13px] text-rust-700">{error}</p>}
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
           <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
           <button type="button" disabled={!valid || busy}

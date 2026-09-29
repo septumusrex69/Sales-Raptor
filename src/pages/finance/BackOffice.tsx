@@ -118,7 +118,7 @@ export function BackOffice() {
     <div className="space-y-4">
       <FinanceTabs />
       {error && (
-        <div className="flex items-start gap-2 rounded-lg bg-rust-50 px-4 py-3 text-sm text-rust-700">
+        <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
@@ -177,13 +177,13 @@ export function BackOffice() {
                           <div className="flex h-3.5 w-full min-w-[120px] overflow-hidden rounded bg-slate-100">
                             <span className="block bg-emerald-500" style={{ width: `${(b.taken / total) * 100}%` }} />
                             <span className="block bg-gold-500" style={{ width: `${(b.left / total) * 100}%` }} />
-                            <span className="block bg-rust-500" style={{ width: `${(b.cant / total) * 100}%` }} />
+                            <span className="block bg-negative-500" style={{ width: `${(b.cant / total) * 100}%` }} />
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums">{rand(b.charged)}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{rand(b.taken)}</td>
                         <td className="px-4 py-3 text-right font-semibold tabular-nums">{rand(b.left)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-rust-600">{rand(b.cant)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-negative-600">{rand(b.cant)}</td>
                       </tr>
                     )
                   })}
@@ -209,7 +209,7 @@ export function BackOffice() {
             <div className="flex flex-wrap gap-4 px-4 py-3 text-xs text-slate-500">
               <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500" />Taken</span>
               <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-gold-500" />Left to take</span>
-              <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-rust-500" />Cannot take</span>
+              <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm bg-negative-500" />Cannot take</span>
             </div>
           </Card>
 
@@ -237,7 +237,7 @@ export function BackOffice() {
                       <td className="px-4 py-3">
                         <Link to={`/accounts?client=${c.id}`} className="font-medium text-slate-800 hover:underline">{c.name}</Link>
                         {c.capped > 0 && (
-                          <div className="text-xs text-rust-600">{c.capped} at the items 1–7 ceiling</div>
+                          <div className="text-xs text-negative-600">{c.capped} at the items 1–7 ceiling</div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{rand(c.capital)}</td>
@@ -337,7 +337,7 @@ function Kpi({ label, value, note, tone }: { label: string; value: string; note:
   return (
     <Card>
       <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">{label}</div>
-      <div className={clsx('mt-1 text-[22px] font-medium tabular-nums', tone === 'warn' ? 'text-rust-600' : 'text-slate-800')}>{value}</div>
+      <div className={clsx('mt-1 text-[22px] font-medium tabular-nums', tone === 'warn' ? 'text-negative-600' : 'text-slate-800')}>{value}</div>
       <div className="mt-1 text-xs text-slate-400">{note}</div>
     </Card>
   )

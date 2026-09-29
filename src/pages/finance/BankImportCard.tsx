@@ -93,7 +93,7 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
       </div>
 
       {error && (
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-rust-50 px-3 py-2 text-[13px] text-rust-700">
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}

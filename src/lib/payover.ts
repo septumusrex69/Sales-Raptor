@@ -874,3 +874,31 @@ export async function approvePayments(paymentIds: string[]): Promise<ApprovalOut
     problems: (r?.problems as string[] | null) ?? [],
   }
 }
+
+/**
+ * REVERSING ONE RECEIPT.
+ *
+ * THE FIRM: "so you can't reverse a payment." Two faults, and the second was the dangerous one.
+ * The confirm was drawn in a colour that did not exist, so it was white on white and could not be
+ * seen -- and underneath it the modal was PATCHing `account_payments` directly. That table is one
+ * of the four ledgers that carry no update policy on purpose, so RLS matched no rows: PostgREST
+ * answered 204, the error was null, the box closed and the list reloaded with the payment exactly
+ * as it was. A reversal that reads as done and did nothing leaves the account credited for money
+ * that came back.
+ *
+ * IT LIVES HERE RATHER THAN IN THE SCREEN for the reason every other finance write does: an RPC
+ * called from `payover.ts` is one `check-finance-is-administrator-only` reads off the source, so
+ * it is held to the Administrator rule and to the revoke list automatically. Called straight from
+ * a page it would have escaped both, which is the whole point of having one library.
+ *
+ * Everything that FOLLOWS a reversal -- the receipt fee cancelled, the invoiced capital given
+ * back, the later payments re-split -- is `reverse_payment_allocation`, the trigger on
+ * `reversed_at`, and is unchanged.
+ */
+export async function reversePayment(paymentId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('reverse_payment', {
+    p_payment: paymentId,
+    p_reason: reason,
+  })
+  if (error) throw new Error(error.message)
+}

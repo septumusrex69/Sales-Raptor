@@ -193,7 +193,7 @@ export function RunDetail() {
       </Link>
 
       {error && (
-        <div className="flex items-start gap-2 rounded-lg bg-rust-50 px-4 py-3 text-sm text-rust-700">
+        <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
@@ -310,7 +310,7 @@ export function RunDetail() {
               {shown.map((r) => (
                 <tr key={r.lineId} onClick={() => setOpen(r)}
                   className={clsx('cursor-pointer border-b border-slate-50 text-sm hover:bg-slate-50',
-                    r.lineKind === 'reversal' && 'text-rust-700')}>
+                    r.lineKind === 'reversal' && 'text-negative-700')}>
                   <td className="px-4 py-2.5">
                     <div className="font-medium">{r.lineKind === 'carried' ? 'Brought forward' : r.debtor}</div>
                     <div className="text-xs text-slate-400">
@@ -540,7 +540,7 @@ function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
             {advice.problems.map((p) => <div key={p}>{p}</div>)}
           </div>
         )}
-        {error && <p className="rounded-lg bg-rust-50 px-3 py-2 text-[13px] text-rust-700">{error}</p>}
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
           <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
           <button type="button" disabled={busy || !to.trim()}

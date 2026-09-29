@@ -92,6 +92,47 @@
 
   --color-gold-50: #faf5ea;
   --color-gold-100: #f4ead3;
+
+  /*
+   * THE REST OF EACH RAMP, and these are here because of what their absence did.
+   *
+   * A Tailwind utility naming a token that does not exist COMPILES TO NOTHING -- no warning, no
+   * error, no class in the stylesheet. `bg-rust-600 text-white` is therefore white text on
+   * whatever is behind it, and on a white modal that is an INVISIBLE BUTTON. The firm found one:
+   * the confirm on Reverse this payment, which they read, correctly, as "you can't reverse a
+   * payment". Ninety-odd utilities across the app were naming a shade nobody had defined; most
+   * were a tint or a border and merely did not draw, and two were a control that could not be
+   * seen at all.
+   *
+   * DERIVED FROM THE FAMILY, NOT PICKED -- the same rule as the tints above. A generic Tailwind
+   * red or emerald dropped in beside this navy reads as another app's palette pasted in.
+   *
+   * `rust` WAS NEVER A FAMILY AT ALL. It exists as --c-rust in the skin tokens below, and the
+   * finance pages spelled Tailwind classes for it; `negative` is that same colour (#794234 is
+   * --c-rust-deep), so those classes now name the family that always held it.
+   */
+  --color-brand-200: #cbd8e3;
+  --color-brand-300: #a7bccd;
+  --color-brand-400: #6e8ba5;
+  --color-brand-800: #0f161d;
+
+  --color-gold-200: #f0e3c5;
+  --color-gold-700: #8a6a26;
+  --color-gold-800: #6b521d;
+
+  --color-navy-50: #f2f5f8;
+
+  --color-negative-200: #e0c3b9;
+  --color-negative-300: #cda293;
+  --color-negative-400: #ae7562;
+  --color-negative-500: #8f5443;
+  /* 600 IS THE FAMILY'S OWN COLOUR. --color-negative carries no number and is what every
+     destructive control asks for by name; a 600 that was a shade off it would put two reds on
+     one screen. */
+  --color-negative-600: #794234;
+
+  --color-positive-600: #3b6550;
+  --color-positive-800: #2a4739;
 }
 
 /*

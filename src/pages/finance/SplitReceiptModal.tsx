@@ -114,14 +114,14 @@ export function SplitReceiptModal({ receipt, onClose, onDone }: {
 
         {/* ---- what is left ---- */}
         <div className={`flex items-baseline justify-between rounded-lg px-3 py-2 ${
-          balanced ? 'bg-positive-50' : leftCents < 0 ? 'bg-rust-50' : 'bg-amber-50'}`}>
+          balanced ? 'bg-positive-50' : leftCents < 0 ? 'bg-negative-50' : 'bg-amber-50'}`}>
           <span className="text-[12px] text-slate-600">
             {leftCents === 0 ? 'Every cent accounted for'
               : leftCents > 0 ? 'Still to allocate'
                 : 'Over the payment by'}
           </span>
           <span className={`text-[15px] font-semibold tabular-nums ${
-            balanced ? 'text-[var(--c-green)]' : leftCents < 0 ? 'text-rust-700' : 'text-amber-800'}`}>
+            balanced ? 'text-[var(--c-green)]' : leftCents < 0 ? 'text-negative-700' : 'text-amber-800'}`}>
             {rand(Math.abs(leftCents) / 100)}
           </span>
         </div>

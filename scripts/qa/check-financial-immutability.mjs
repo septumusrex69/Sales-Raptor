@@ -17,7 +17,8 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-financial-immutability.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 let pass = 0
 const failures = []
@@ -101,6 +102,73 @@ for (const table of LEDGERS) {
   const loose = grants.filter((g) => /\b(update|delete|all)\b/.test(g))
   check(`no grant hands out update or delete on ${table}`, loose, [])
 }
+
+/*
+ * ---------------- AND THE BROWSER MUST NOT TRY, BECAUSE TRYING LOOKS LIKE SUCCEEDING ----------
+ *
+ * THIS IS THE HALF THE RULE WAS MISSING, AND THE FIRM FOUND IT.
+ *
+ * "So you can't reverse a payment." The Reverse box was PATCHing `account_payments` directly.
+ * Postgres does not REFUSE such a write -- with RLS on and no update policy, IT MATCHES NO ROWS.
+ * PostgREST answers 204, the client's `error` is null, the modal closes and the list reloads, and
+ * the payment is exactly as it was. The immutability held perfectly and the screen reported a
+ * reversal that never happened, which on a bounced cheque leaves the debtor credited for money
+ * that came back and the client remitted for it.
+ *
+ * So a write to one of these tables from the browser is a bug whether or not it is refused. Every
+ * legitimate one goes through a security-definer function, where the refusal is an exception with
+ * a sentence on it. An INSERT is fine -- the ledgers have insert policies, and that is how money
+ * gets recorded in the first place.
+ */
+const SOURCE = ['src', 'api']
+function* files(dir) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name)
+    if (statSync(p).isDirectory()) { yield* files(p); continue }
+    if (p.endsWith('.ts') || p.endsWith('.tsx')) yield p
+  }
+}
+
+const writes = []
+let scanned = 0
+for (const root of SOURCE) {
+  for (const file of files(new URL(`../../${root}`, import.meta.url).pathname)) {
+    scanned += 1
+    const text = readFileSync(file, 'utf8')
+    for (const table of LEDGERS) {
+      /*
+       * `.from('x')` and the `.update(`/`.delete(` that follows it, within a short span -- the
+       * calls are chained and often wrapped over two or three lines. Matched on the span rather
+       * than the line for exactly that reason.
+       */
+      const chain = new RegExp(`from\\(\\s*'${table}'\\s*\\)[\\s\\S]{0,200}?\\.(update|delete)\\(`, 'g')
+      for (const m of text.matchAll(chain)) {
+        const line = text.slice(0, m.index).split('\n').length
+        writes.push(`${file.replace(/^.*\/(src|api)\//, '$1/')}:${line} .${m[1]}() on ${table}`)
+      }
+    }
+  }
+}
+/* The walk found the app rather than an empty directory -- otherwise the assertion below passes
+   over nothing, which is the vacuous pass this file already warns about elsewhere. */
+ok('the app was read', scanned > 200)
+check('no screen updates or deletes a ledger behind RLS’s back', writes, [])
+
+/* AND THE ONE THAT USED TO DO IT NOW ASKS THE FUNCTION. Assert the replacement is there, not only
+   that the old call is gone -- a check written the other way passes when the button is deleted. */
+const payover = readFileSync(new URL('../../src/lib/payover.ts', import.meta.url), 'utf8')
+ok('reversing goes through a function', /\.rpc\('reverse_payment'/.test(payover))
+ok('...which the schema defines',
+  /create or replace function public\.reverse_payment\(p_payment uuid, p_reason text\)/.test(clean))
+ok('...Administrator only, failing closed on a null role',
+  /reverse_payment[\s\S]{0,400}?current_user_role\(\) is distinct from 'Administrator'/.test(clean))
+/* ONCE. A second reversal fires the trigger again on a row that has already given its capital
+   back, and hands it back twice. */
+ok('...and refusing a payment already reversed',
+  /reverse_payment[\s\S]{0,900}?has already been reversed/.test(clean))
+/* The reason is not decoration: it becomes the cancellation reason on the receipt fee. */
+ok('...and refusing a blank reason',
+  /reverse_payment[\s\S]{0,700}?Say why the payment is being reversed/.test(clean))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

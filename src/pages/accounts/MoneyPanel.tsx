@@ -199,7 +199,7 @@ function Bucket({ label, charged, taken, left, cant }: {
       <td className="py-1.5 text-right tabular-nums text-slate-500">{rand(charged)}</td>
       <td className="py-1.5 text-right tabular-nums text-emerald-700">{rand(taken)}</td>
       <td className="py-1.5 text-right tabular-nums font-medium">{rand(left)}</td>
-      <td className="py-1.5 text-right tabular-nums text-rust-600">{randOrDash(cant)}</td>
+      <td className="py-1.5 text-right tabular-nums text-negative-600">{randOrDash(cant)}</td>
     </tr>
   )
 }
@@ -228,7 +228,7 @@ function After({ label, before, after }: { label: string; before: number; after:
 function Chip({ children, tone }: { children: React.ReactNode; tone: 'ok' | 'bad' | 'plain' }) {
   return (
     <span className={clsx('rounded-full px-2.5 py-1 font-medium',
-      tone === 'bad' ? 'bg-rust-50 text-rust-700'
+      tone === 'bad' ? 'bg-negative-50 text-negative-700'
         : tone === 'ok' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600')}>
       {children}
     </span>

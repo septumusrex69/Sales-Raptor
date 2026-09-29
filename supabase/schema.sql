@@ -16429,3 +16429,87 @@ do $$
 begin
   execute 'revoke execute on function public.split_bank_line(uuid, jsonb) from public, anon';
 end $$;
+-- ============================================================================
+-- REVERSING A PAYMENT WAS A BUTTON THAT COULD NOT BE SEEN AND WOULD NOT HAVE
+-- WORKED IF IT HAD BEEN.
+--
+-- The firm: "so you can't reverse a payment." They were right twice over. The confirm was drawn
+-- `bg-rust-600 text-white` against a white modal and rust was never a Tailwind family, so the
+-- button was invisible -- and underneath it the browser was posting a PATCH straight at
+-- account_payments, which has RLS on and NO UPDATE POLICY. Postgres does not refuse that; it
+-- matches no rows. PostgREST answers 204, the modal closes, the list reloads, and the payment is
+-- exactly as it was. A failure that looks like a success is the worst shape this could have taken,
+-- because the account stays credited with money that came back.
+--
+-- THE MISSING POLICY IS NOT THE BUG AND MUST NOT BE ADDED. account_payments is one of the four
+-- ledgers that carry no update or delete policy on purpose -- see check-financial-immutability.
+-- A reversal is not an edit; it is a privileged, reasoned, audited act, so it goes through a
+-- function like everything else in Finance, Administrator only, with the reason kept.
+--
+-- WHAT IT DOES NOT DO IS THE WORK. `reverse_payment_allocation` already fires on reversed_at and
+-- cancels the receipt fee, gives back the invoiced capital, marks the allocations and replays the
+-- account. This only opens the door, and does it once.
+-- ============================================================================
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator may reverse a payment.' using errcode = '42501';
+  end if;
+  -- THE REASON IS NOT DECORATION: it becomes the cancellation reason on the receipt fee, so the
+  -- account's own ledger says a fee was raised and then cancelled because the cheque came back,
+  -- rather than the fee simply vanishing.
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.account_payments where id = p_payment) then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  -- ONCE. A second reversal would fire the trigger again on a row that has already given its
+  -- capital back, and hand it back twice.
+  if exists (select 1 from public.account_payments where id = p_payment and reversed_at is not null) then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = now(), reversal_reason = v_reason
+   where id = p_payment;
+end $$;
+
+comment on function public.reverse_payment(uuid, text) is
+  'Reverses one receipt, Administrator only, with the reason kept. account_payments carries no '
+  'update policy on purpose, so this is the only way in.';
+
+-- Supabase grants EXECUTE on a public function to anon by default -- the unauthenticated
+-- PostgREST role. The whole finance surface is taken back off it; this joins the list.
+revoke execute on function public.reverse_payment(uuid, text) from anon;
+
+-- The list again, with reverse_payment on it. Fourth time it has caught a new Finance RPC before
+-- it shipped -- this one arrived because the reversal used to be a PATCH at the table, which RLS
+-- discarded in silence.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()', 'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)', 'money_position(uuid)', 'payover_work_queue(date)',
+    'payover_cycle_tiles(date)', 'payover_run_payments(uuid)', 'finance_exception_jobs()',
+    'payment_audit(uuid)', 'account_ledger(uuid)', 'expected_from_promises(date, date)',
+    'import_bank_lines(text, text, jsonb)', 'place_bank_line(uuid, uuid)',
+    'reconcile_bank_debit(uuid, uuid)', 'unallocated_receipts()', 'unreconciled_payouts()',
+    'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'split_bank_line(uuid, jsonb)',
+    'reverse_payment(uuid, text)'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;

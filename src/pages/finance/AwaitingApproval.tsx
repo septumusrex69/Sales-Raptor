@@ -108,7 +108,7 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 bg-rust-50 px-4 py-2.5 text-[13px] text-rust-700">
+        <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}

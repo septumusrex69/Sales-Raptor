@@ -283,7 +283,7 @@ export function CommunicationsDashboard() {
       </DashboardHero>
 
       {commsTeams.length === 0 && (
-        <Card className="border-gold-300 bg-gold-050">
+        <Card className="border-gold-300 bg-gold-50">
           <p className="text-sm text-slate-700">
             No team is set up as a Communications team yet, so there's no one to score here.{' '}
             <Link to="/settings" className="font-semibold text-brand-600 hover:underline">

@@ -7,6 +7,7 @@ import { FinanceTabs } from './FinanceTabs'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { supabase } from '../../lib/supabase'
 import { rand } from '../../lib/money'
+import { reversePayment } from '../../lib/payover'
 import { useAppStore } from '../../store/AppStore'
 import { BankImportCard } from './BankImportCard'
 import { UnallocatedReceipts } from './UnallocatedReceipts'
@@ -129,7 +130,7 @@ export function FinancePayments() {
           onDone={async () => { setImported((n) => n + 1); await load() }} />
       )}
       {error && (
-        <div className="flex items-start gap-2 rounded-lg bg-rust-50 px-4 py-3 text-sm text-rust-700">
+        <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
         </div>
       )}
@@ -258,21 +259,33 @@ function ReverseModal({ row, onClose, onDone }: { row: Row; onClose: () => void;
           <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}
             placeholder="Cheque returned, debit order unpaid, captured twice…" />
         </div>
-        {error && <p className="rounded-lg bg-rust-50 px-3 py-2 text-[13px] text-rust-700">{error}</p>}
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
         <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
           <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          {/*
+            THROUGH THE FUNCTION, NOT AT THE TABLE.
+
+            This used to PATCH account_payments directly, and account_payments is one of the four
+            ledgers that carry no update policy on purpose. Postgres does not refuse such a write;
+            RLS MATCHES NO ROWS. PostgREST answers 204, `error` is null, the box closes and the
+            list reloads -- and the payment is exactly as it was. The firm would have read that as
+            a reversal that worked, with the account still credited for money that came back.
+
+            `reverse_payment` is Administrator-only and keeps the reason. Everything that follows
+            -- the receipt fee cancelled, the capital given back, the later payments re-split --
+            is the trigger on reversed_at, as it always was.
+          */}
           <button type="button" disabled={busy || !reason.trim()}
             onClick={() => {
               setBusy(true); setError(null)
-              void supabase.from('account_payments')
-                .update({ reversed_at: new Date().toISOString(), reversal_reason: reason.trim() })
-                .eq('id', row.id)
-                .then(async ({ error: e }) => {
-                  if (e) { setError(e.message); setBusy(false); return }
-                  await onDone(); setBusy(false)
+              void reversePayment(row.id, reason.trim())
+                .then(async () => { await onDone(); setBusy(false) })
+                .catch((e: unknown) => {
+                  setError(e instanceof Error ? e.message : 'That payment could not be reversed.')
+                  setBusy(false)
                 })
             }}
-            className="rounded-lg bg-rust-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-rust-700 disabled:opacity-50">
+            className="rounded-lg bg-negative-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-negative-700 disabled:opacity-50">
             {busy ? 'Reversing…' : 'Reverse it'}
           </button>
         </div>
