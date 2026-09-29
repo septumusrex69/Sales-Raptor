@@ -291,6 +291,20 @@ export interface AccountQuery {
   commissionDriftOnly?: boolean
   page?: number
   pageSize?: number
+  /**
+   * WHETHER THE TOTAL IS WORTH WHAT IT COSTS.
+   *
+   * `count: 'exact'` is a SECOND pass over every row the filters match -- the page itself stops
+   * after 50, but the count cannot stop at all. On the book that is the whole table, and the
+   * database evaluates the row-level security policy on each row while it goes.
+   *
+   * THE LIST KEEPS IT, and should: the firm reads "1 to 50 of 735", and "50 shown" is the
+   * difference between trusting the page and wondering what is missing. What was paying for it
+   * and throwing it away were the SEARCH BOXES -- the mail page's debtor lookup counted every
+   * matching account in the book on each keystroke to show eight of them, and never displayed
+   * the number. Left null, `total` is simply how many rows came back.
+   */
+  countRows?: boolean
 }
 
 export interface AccountPage {
@@ -378,12 +392,17 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
 export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> {
   const pageSize = q.pageSize ?? 50
   const page = q.page ?? 0
+  /*
+   * count: 'exact' is what lets the list say "1 to 50 of 735" rather than "50 shown", which is
+   * the difference between a person trusting the page and wondering what is missing -- so it is
+   * the default and the list keeps it. It is not free: see countRows. A caller that never draws
+   * the total asks for none, and the page stops at the rows it wanted.
+   */
+  const counted = q.countRows !== false
   const query = applyAccountFilters(
     supabase
       .from('debtor_accounts')
-      // count: 'exact' is what lets the list say "1 to 50 of 735" rather than "50 shown", which
-      // is the difference between a person trusting the page and wondering what is missing.
-      .select('*', { count: 'exact' })
+      .select('*', counted ? { count: 'exact' } : undefined)
       .order('account_number')
       .range(page * pageSize, page * pageSize + pageSize - 1),
     q,

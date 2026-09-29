@@ -4054,7 +4054,9 @@ function LinkModal({ mail, actor, body, linked, replying, onClose, onDone, onSki
     const t = setTimeout(() => {
       // Reuses the accounts list's own search — account number, client reference or surname —
       // rather than introducing a second, subtly different way to find a debtor.
-      void fetchAccounts({ search: q, pageSize: 8 })
+      /* NO COUNT. The box shows eight and never says how many there were, and the exact count
+         is a second pass over every matching row in the book -- paid on every keystroke. */
+      void fetchAccounts({ search: q, pageSize: 8, countRows: false })
         .then((r) => { if (!cancelled) setHits(r.accounts) })
         .catch(() => { if (!cancelled) setHits([]) })
         .finally(() => { if (!cancelled) setLooking(false) })
@@ -4417,7 +4419,9 @@ function MoveModal({ mail, actor, onClose, onDone }: {
     let cancelled = false
     setLooking(true)
     const t = setTimeout(() => {
-      void fetchAccounts({ search: q, pageSize: 8 })
+      /* NO COUNT. The box shows eight and never says how many there were, and the exact count
+         is a second pass over every matching row in the book -- paid on every keystroke. */
+      void fetchAccounts({ search: q, pageSize: 8, countRows: false })
         .then((r) => { if (!cancelled) setHits(r.accounts) })
         .catch(() => { if (!cancelled) setHits([]) })
         .finally(() => { if (!cancelled) setLooking(false) })

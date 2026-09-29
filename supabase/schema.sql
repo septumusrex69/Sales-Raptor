@@ -14503,3 +14503,84 @@ drop trigger if exists protect_account_mail_fields on public.account_emails;
 create trigger protect_account_mail_fields
   before update on public.account_emails
   for each row execute function public.protect_account_mail_fields();
+
+-- ---------- The book is sorted by a column that had no index ----------
+--
+-- Fifteen indexes on debtor_accounts and not one on `account_number`, which is what the list
+-- orders by on every page load. The planner therefore read the WHOLE TABLE and top-N sorted it to
+-- hand back fifty rows. Measured on staging at 23 772 accounts, as the signed-in role with the
+-- policies in force:
+--
+--   before:  Seq Scan (rows=23772) -> Sort -> Limit 50    1 269 ms, 1 953 buffers
+--   after:   Index Scan -> Limit 50                          0.56 ms,    51 buffers
+--
+-- AND THE GAP WIDENS WITH THE BOOK. The seq scan is O(rows) and the index scan is not, so at the
+-- production size this is the difference between a list that opens and a list somebody waits for.
+create index if not exists debtor_accounts_account_number_idx
+  on public.debtor_accounts (account_number);
+
+-- THE FILTER THE BATCH SCREENS RUN ON. `applyAccountFilters` turns a handover into
+-- `eq('handover_id', ...)` -- how "the seven accounts in this batch" is asked -- and QueryDetail
+-- asks it with pageSize 2000. Unindexed, every one of those was a full scan.
+create index if not exists debtor_accounts_handover_idx
+  on public.debtor_accounts (handover_id) where handover_id is not null;
+
+-- THE FINANCE ENGINE READS BOTH OF THESE PER ACCOUNT. engine_balances, account_ledger and
+-- money_position all reach payment_allocations by account; the remittance advice reaches
+-- payover_run_lines the same way. Small today, and they grow with every payment the firm takes --
+-- which is the reason to index them now rather than when somebody notices.
+create index if not exists payment_allocations_account_idx
+  on public.payment_allocations (account_id);
+create index if not exists payover_run_lines_account_idx
+  on public.payover_run_lines (account_id);
+
+-- AND THE THREAD ON A TICKET, now written by the link path in api/_lib/email/ticket.ts.
+create index if not exists account_emails_query_idx
+  on public.account_emails (query_id) where query_id is not null;
+
+-- ---------- The book reads its policy once, not once per row ----------
+--
+-- Two things, and only both together were worth fixing -- each alone measured as noise.
+--
+-- ONE: `debtor_accounts_write` was `for all`, and `all` INCLUDES SELECT. Every read of the book
+-- was checked against two permissive policies, OR'd, and the second could never change the answer
+-- because it carried the identical condition.
+--
+-- TWO: `auth.uid()` in a policy is re-evaluated FOR EVERY ROW. Postgres hoists it to a one-time
+-- filter where it can, which is why the fifty-row page never showed this -- but a COUNT cannot be
+-- hoisted, and the list asks for an exact count so it can say "1 to 50 of 735". `(select
+-- auth.uid())` makes it an InitPlan: once, then compared. The expression reads a GUC and parses
+-- JSON out of it, so once versus 23 772 times is the whole of the difference.
+--
+-- MEASURED, as the exact count the list runs:
+--   both policies, bare auth.uid()      59.8 ms
+--   both policies, (select auth.uid())  58.2 ms   -- no help: the other policy still ran per row
+--   one policy,    (select auth.uid())   7.8 ms
+--
+-- THE SEMANTICS ARE UNCHANGED IN EVERY DIRECTION. Before, a select was permitted by
+-- (uid is not null) or (uid is not null); now by (uid is not null). Insert, update and delete
+-- carry exactly the condition `debtor_accounts_write` carried.
+--
+-- NOT DONE TO THE OTHER TABLES THE LINTER NAMES. account_contacts, account_queries,
+-- promises_to_pay, targets and teams carry the same shape and a few thousand rows between them;
+-- the arithmetic that makes this worth doing here does not reach them, and a policy rewritten for
+-- no measured gain is a policy rewritten for nothing.
+drop policy if exists debtor_accounts_select on public.debtor_accounts;
+create policy debtor_accounts_select on public.debtor_accounts
+  for select to authenticated
+  using ((select auth.uid()) is not null);
+
+drop policy if exists debtor_accounts_write on public.debtor_accounts;
+
+create policy debtor_accounts_insert on public.debtor_accounts
+  for insert to authenticated
+  with check ((select auth.uid()) is not null);
+
+create policy debtor_accounts_update on public.debtor_accounts
+  for update to authenticated
+  using ((select auth.uid()) is not null)
+  with check ((select auth.uid()) is not null);
+
+create policy debtor_accounts_delete on public.debtor_accounts
+  for delete to authenticated
+  using ((select auth.uid()) is not null);

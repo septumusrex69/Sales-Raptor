@@ -92,7 +92,8 @@ export function QueryDetail() {
         setDraft(await fetchDraftForHandover(found.batch.id, TODAY()).catch(() => null))
         /* The whole batch in one page: a handover is hundreds at the most, and a second page
            here would mean an answer silently having nowhere to go. */
-        const opened = await fetchAccounts({ handoverId: found.batch.id, pageSize: 2000 })
+        /* The rows themselves are the answer here; nothing draws a total. */
+        const opened = await fetchAccounts({ handoverId: found.batch.id, pageSize: 2000, countRows: false })
           .catch(() => ({ accounts: [], total: 0 }))
         setOpenedFor(new Map(opened.accounts
           .filter((a) => a.clientReference)
