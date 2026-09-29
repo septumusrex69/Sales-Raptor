@@ -24,6 +24,16 @@ import { emailBodyHtml } from '../lib/emailStyle.ts'
  */
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
 
+/**
+ * And how much the whole request may be.
+ *
+ * Vercel refuses a serverless body over 4.5 MB at the EDGE: the function never runs, so there is
+ * nothing in its logs and the browser gets a 413 with no JSON in it. Held just under, so the
+ * refusal is ours and says what to do -- see the check at the point of sending, which measures the
+ * JSON rather than the files, because a forwarded message's inline pictures are in it too.
+ */
+const MAX_REQUEST_BYTES = 4 * 1024 * 1024
+
 interface Attached { filename: string; contentType: string; size: number; content: string }
 
 /**
@@ -336,18 +346,41 @@ export function ComposeEmailModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    /* A forward may go out with no covering note -- the original IS the message. Without this,
-       "send" did nothing at all and said nothing about why. */
-    if (!address.trim() || !subject.trim() || (!body.trim() && !quotedHtml)) return
+    /*
+     * NOTHING HERE MAY RETURN WITHOUT SAYING SO, and this is the fix for the worst kind of bug
+     * this box can have.
+     *
+     * THE FIRM PRESSED SEND ON A REPLY WITH TWO PHOTOGRAPHS ON IT AND NOTHING HAPPENED AT ALL --
+     * no error, no spinner, no request. `/api/email/send` was never called, which the deployment's
+     * own logs confirm, so the fault was one of the three bare `return`s that used to stand here
+     * plus the browser silently refusing to submit an invalid form. A dead button teaches people
+     * that the app is broken, and there is no way for them to tell us which of the four it was.
+     *
+     * So: every failure sets a sentence, and the sentence names what to do about it.
+     */
+    const missingField = !address.trim() ? 'who it goes to'
+      : !subject.trim() ? 'a subject'
+      : (!body.trim() && !quotedHtml) ? 'a message' : null
+    if (missingField) {
+      setError(`This needs ${missingField} before it can go.`)
+      return
+    }
+    /*
+     * THE SESSION, WHICH IS THE ONE THAT COULD NOT BE GUESSED FROM THE SCREEN. An iPad left on a
+     * page for an afternoon can come back with the token refreshed away underneath it; everything
+     * already drawn keeps working, and the next thing that needs a bearer token does not. It said
+     * nothing at all. The Escalate box has said this since it was built -- the same words here,
+     * because it is the same fact about the same session.
+     */
     const accessToken = session?.access_token
-    if (!accessToken) return
+    if (!accessToken) {
+      setError('Your session has expired. Sign in again — what you have typed stays in this box.')
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch('/api/email/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({
+      const payload = JSON.stringify({
           to: address.trim(),
           /* Absent rather than empty, so a cleared box sends to the one recipient only. */
           ...(cc.trim() ? { cc: cc.trim() } : {}),
@@ -362,11 +395,41 @@ export function ComposeEmailModal({
             ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
             : {}),
           ...(inReplyTo ? { inReplyTo } : {}),
-        }),
+      })
+      /*
+       * THE WHOLE BODY, NOT JUST THE FILES.
+       *
+       * MAX_ATTACHMENT_BYTES guards what somebody attached, which was the only large thing this
+       * box carried when it was written. A FORWARD carries a second one: `quotedHtml` is the
+       * original's markup with its inline pictures already turned into data: URIs, and a signature
+       * with a logo and five social icons in it is most of a megabyte before anybody attaches
+       * anything. Over the platform's 4.5 MB the FUNCTION NEVER RUNS -- the 413 comes from the
+       * edge, so nothing appears in the server's logs and the only thing the person sees is a
+       * generic failure after the wait.
+       *
+       * Measured on the JSON that is actually about to be posted, because that is the thing the
+       * limit applies to, and said in the two halves somebody can act on: take a file off, or
+       * forward it as a link.
+       */
+      if (payload.length > MAX_REQUEST_BYTES) {
+        setError(`This message is ${fileSize(payload.length)}, and ${fileSize(MAX_REQUEST_BYTES)} `
+          + 'is as much as one can carry. Take an attachment off and send it separately.')
+        setSubmitting(false)
+        return
+      }
+      const res = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: payload,
       })
       const responseBody = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(responseBody.error ?? 'Could not send that email. Connect your mailbox in Settings → Integrations.')
+        /* 413 IS THE PLATFORM, NOT THE MAILBOX, and it arrives with no JSON in it -- so without
+           this it wore "connect your mailbox", which sends somebody to Settings to fix a mailbox
+           that was never the problem. */
+        setError(res.status === 413
+          ? 'That message is too large to send in one go. Take an attachment off and send it separately.'
+          : responseBody.error ?? 'Could not send that email. Connect your mailbox in Settings → Integrations.')
         setSubmitting(false)
         return
       }
@@ -386,7 +449,20 @@ export function ComposeEmailModal({
       below it would have been unreadable.
     */
     <Modal title={initialSubject ? `Reply to ${to ?? address}` : 'New Email'} onClose={onClose} width={760}>
-      <form onSubmit={handleSubmit}>
+      {/*
+        noValidate: THE BROWSER MAY NOT BE THE ONE TO REFUSE.
+
+        The controls keep their `required` attributes -- that is what a screen reader announces and
+        what marks the field -- but the browser's own enforcement is turned off, because when it
+        refuses it does so by blocking the submit and drawing a bubble on the offending control.
+        Inside a modal that scrolls, on an iPad, with the person looking at the Send button, that
+        bubble is off screen and the press reads as a dead button. Proved in a real browser: an
+        empty message box made Send do nothing, with no error anywhere on the page.
+
+        handleSubmit checks the same three fields and says which one is missing, where the errors
+        on this form already appear -- directly above the button that was pressed.
+      */}
+      <form onSubmit={handleSubmit} noValidate>
         {/*
           A DATALIST UNTIL NOW, AND IT REMEMBERED NOTHING. It offered only whoever was already
           attached to the client, lead or deal in front of you, so the address of somebody written
@@ -423,7 +499,9 @@ export function ComposeEmailModal({
         <FormField label="Subject" required>
           <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />
         </FormField>
-        <FormField label="Message" required>
+        {/* Required on everything except a forward, where the original IS the message -- and the
+            asterisk has to agree with the box, or it marks a field somebody can leave empty. */}
+        <FormField label="Message" required={!quotedHtml}>
           {/*
             SPELL-CHECKED IN THE LANGUAGE IT IS WRITTEN IN, which is not the same as spell-checked.
             The browser does this for nothing and has always done it here -- but with the page
