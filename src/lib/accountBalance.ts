@@ -37,7 +37,18 @@ export interface LedgerLines {
    * `receiptFeeExclVat` is the receipt fee as Swordfish actually charged it. Where it is given it
    * wins over the computed figure — see receiptFeeOn below for why that is the honest choice.
    */
-  payments: { date: string; amount: number; paidToClient?: boolean; receiptFeeExclVat?: number | null }[]
+  payments: {
+    /**
+     * The payment's own id, so an item 9 fee ROW can be matched to the payment it was raised on.
+     * Absent on a projected payment -- repaymentPlan invents those, and an invented payment has no
+     * fee row, which is exactly the case the computed figure exists for.
+     */
+    id?: string
+    date: string
+    amount: number
+    paidToClient?: boolean
+    receiptFeeExclVat?: number | null
+  }[]
   /** Every fee raised. `inclVat` is what was actually charged. */
   fees: {
     date: string
@@ -52,6 +63,24 @@ export interface LedgerLines {
     vat: number
     billed: boolean
     segments?: number
+    /**
+     * WHICH ANNEXURE B ITEM THIS IS, AND IT IS HERE BECAUSE OF A DOUBLE COUNT.
+     *
+     * A receipt fee is item 9 and `allocate_payment` writes it into account_fees like any other
+     * fee -- so it arrived in this list AND was computed again from the payment by receiptFeeOn.
+     * Every balance carrying receipt fees was overstated by exactly those fees: R 209 468,82
+     * across 331 accounts on staging, R 13 169,80 on the worst of them. The firm found it on their
+     * own test account -- "What is left to take" said R 624,51 of capital left and nothing else,
+     * while the summary beside it said R 1 211,01, the difference being R 586,50 of receipt fees
+     * counted twice.
+     *
+     * OPTIONAL, because a caller that synthesises a ledger has no item to give -- and undefined
+     * behaves exactly as this did before, which keeps a projection honest rather than silently
+     * reclassifying its invented fees.
+     */
+    annexureItem?: string | null
+    /** The payment an item 9 fee was raised on, where it was raised on one. */
+    paymentId?: string | null
   }[]
   /** Every interest accrual period. */
   interest: { from: string; days: number; amount: number }[]
@@ -123,6 +152,33 @@ export interface BalanceBreakdown {
  * Nothing is netted before it is returned: a statement has to show the receipt fees and the
  * payments as different things, and a caller that only wants the total can add them up.
  */
+/**
+ * TELLING A RECEIPT FEE FROM A COST, ONCE.
+ *
+ * ITEM 9 IS A FEE ROW LIKE ANY OTHER. `allocate_payment` writes it into account_fees when a
+ * payment is split, so it arrives in `ledgers.fees` -- and `receiptFeeOn` then computed the very
+ * same fee a second time off the payment. Both were added to the balance. The firm found it by
+ * reading two panels on one screen: "What is left to take" said R 624,51 of capital and nothing
+ * else outstanding, while the summary beside it said the balance was R 1 211,01. The difference
+ * was R 586,50 -- their receipt fees, counted twice.
+ *
+ * THE ROW WINS WHERE THERE IS ONE, which is `receiptFeeOn`'s own rule stated at the level above
+ * it: what was actually charged beats what would be computed. The computed figure is left for the
+ * payments that carry no row -- a projected instalment in the repayment calculator, and any
+ * migrated payment whose fee never became a row.
+ *
+ * READ ONCE AND SHARED, because computeBalance and buildStatement have to agree about this or the
+ * statement's lines stop adding up to the figure at its foot -- which is the one thing a statement
+ * may never do.
+ */
+function splitFeeLedger(ledgers: LedgerLines) {
+  const receiptRows = ledgers.fees.filter((f) => f.annexureItem === '9')
+  const costRows = ledgers.fees.filter((f) => f.annexureItem !== '9')
+  /* Which payments already have their fee as a row, so it is not computed for them as well. */
+  const covered = new Set(receiptRows.map((f) => f.paymentId).filter((id): id is string => !!id))
+  return { receiptRows, costRows, covered }
+}
+
 export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
   const stopAt = input.writtenOffAt ?? null
@@ -132,13 +188,21 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const interest = roundToCents(
     ledgers.interest.filter((i) => within(i.from)).reduce((t, i) => t + i.amount, 0),
   )
-  const chargedFees = ledgers.fees.filter((f) => within(f.date))
+  const { receiptRows, costRows, covered } = splitFeeLedger(ledgers)
+  /* `fees` IS ITEMS 1-7 ONLY now, which is what the account's own "What is left to take" panel
+     has always called it. Item 9 is counted below, once. */
+  const chargedFees = costRows.filter((f) => within(f.date))
   const fees = roundToCents(chargedFees.reduce((t, f) => t + f.exclVat + f.vat, 0))
   const feeVat = roundToCents(chargedFees.reduce((t, f) => t + f.vat, 0))
   const payments = roundToCents(ledgers.payments.reduce((t, p) => t + p.amount, 0))
 
   const receiptFees = roundToCents(
-    ledgers.payments.reduce((t, p) => t + receiptFeeOn(p, vatRate), 0),
+    /* What was actually charged... */
+    receiptRows.filter((f) => within(f.date)).reduce((t, f) => t + f.exclVat + f.vat, 0)
+    /* ...plus the computed figure for the payments that carry no row of their own. */
+    + ledgers.payments.reduce(
+      (t, p) => t + (p.id && covered.has(p.id) ? 0 : receiptFeeOn(p, vatRate)), 0,
+    ),
   )
 
   // Interest between the last posted accrual and today. Computed, never written: see
@@ -330,6 +394,10 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
   const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
   const breakdown = computeBalance(input)
   const stopAt = input.writtenOffAt ?? null
+  /* THE SAME SPLIT THE BALANCE USED. The statement printed the item 9 ROW as an ordinary fee and
+     then printed the computed receipt fee under the payment as well -- the same fee on two lines,
+     and a running balance that ended at the doubled figure. */
+  const { receiptRows, costRows, covered } = splitFeeLedger(ledgers)
 
   type Pending = Omit<StatementLine, 'balance'> & { at?: string }
   const pending: Pending[] = []
@@ -387,7 +455,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     })
   }
 
-  for (const f of ledgers.fees) {
+  for (const f of costRows) {
     if (stopAt && f.date > stopAt) continue
     /*
      * AN ACTION PAST THE CEILING IS SHOWN AT NOUGHT RATHER THAN DROPPED. See `fee-no-charge`: the
@@ -419,6 +487,25 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     })
   }
 
+  /*
+   * THE FEE THAT WAS ACTUALLY RAISED, dated as the ledger dates it and described in its own words
+   * -- "Receipt of instalment", which is what the firm's engine writes. It is a `receipt-fee` line
+   * rather than a `fee` line so it still sorts under the payment that produced it.
+   */
+  for (const f of receiptRows) {
+    if (stopAt && f.date > stopAt) continue
+    const charged = roundToCents(f.exclVat + f.vat)
+    if (charged <= 0) continue
+    pending.push({
+      date: f.date,
+      kind: 'receipt-fee',
+      at: f.at,
+      description: feeLabel(f.description, f.segments),
+      debit: charged,
+      credit: 0,
+    })
+  }
+
   for (const p of ledgers.payments) {
     pending.push({
       date: p.date,
@@ -427,6 +514,9 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
       debit: 0,
       credit: p.amount,
     })
+    /* ONLY WHERE NO ROW COVERS IT -- see splitFeeLedger. A payment whose fee is already a row
+       above would otherwise be charged for it twice on one page. */
+    if (p.id && covered.has(p.id)) continue
     const fee = receiptFeeOn(p, vatRate, schedule)
     if (fee > 0) {
       pending.push({

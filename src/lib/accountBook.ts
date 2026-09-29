@@ -478,6 +478,10 @@ export interface LedgerFee {
   segments: number
   cancelledAt: string | null
   performedBy: string | null
+  /** Which Annexure B item the fee was raised under. '9' is the receipt fee on a payment. */
+  annexureItem: string | null
+  /** The payment an item 9 fee was raised on. Null on every other item. */
+  paymentId: string | null
 }
 
 export interface LedgerAccrual {
@@ -521,7 +525,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,receipt_fee_legacy')
       .eq('account_id', accountId).order('received_at', { ascending: false }),
     supabase.from('account_fees')
-      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by')
+      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id')
       .eq('account_id', accountId).order('incurred_at', { ascending: false }),
     supabase.from('account_interest_accruals')
       .select('id,accrued_on,days,amount_accrued,amount_recoverable')
@@ -555,6 +559,11 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       segments: Number(r.segments ?? 1),
       cancelledAt: r.cancelled_at,
       performedBy: r.performed_by,
+      /* WHICH ITEM, AND WHICH PAYMENT. Item 9 is the receipt fee and it is already a fee ROW --
+         without these two the balance computed it a second time off the payment and added both.
+         See splitFeeLedger in accountBalance. */
+      annexureItem: r.annexure_item ?? null,
+      paymentId: r.payment_id ?? null,
     })),
     accruals: (accruals.data ?? []).map((r: any) => ({
       id: r.id,

@@ -445,6 +445,9 @@ export function AccountDetail() {
         payments: ledgers.payments
           .filter((p) => !p.reversedAt)
           .map((p) => ({
+            /* THE ID TRAVELS, so an item 9 fee row can be matched to the payment it was raised
+               on and the same fee is not counted a second time. See splitFeeLedger. */
+            id: p.id,
             date: p.receivedAt.slice(0, 10),
             amount: p.amount,
             paidToClient: p.paidToClient,
@@ -458,6 +461,9 @@ export function AccountDetail() {
           vat: f.vatAmount,
           billed: f.billed,
           segments: f.segments,
+          /* Item 9 is the receipt fee and is counted as one, not as a cost. See splitFeeLedger. */
+          annexureItem: f.annexureItem,
+          paymentId: f.paymentId,
         })),
         interest: ledgers.accruals.map((i) => ({ from: i.accruedOn, days: i.days, amount: i.amountAccrued })),
       },
