@@ -781,19 +781,15 @@ export function AccountDetail() {
         onAddDirector={() => setDirector({ editing: null })}
         onEditDirector={(d) => setDirector({ editing: d })} />
       {/*
-        * WHAT BF STILL HAS TO COME OFF THIS DEBTOR, and what a payment would do before anybody
-        * agrees to it. ADMINISTRATOR ONLY -- it draws nothing at all for a collector, because it
-        * shows the firm's own cut, which is the one figure the company dashboard may never carry.
+        * RECORD A PAYMENT USED TO SIT HERE and the firm moved it: "record a payment, I think should
+        * be in this pane. Like you put it on the overview, but it should be in here. On the
+        * transactions list."
+        *
+        * They are right and the reason is what the button produces. A captured payment becomes a
+        * LINE ON THE STATEMENT, and the statement is on the Transactions tab -- so the press and
+        * its result now sit on one screen, where somebody can see what they just did instead of
+        * changing a tab to find out. See StatementTable.
         */}
-      {canRecordPayment(currentUser?.role) && (
-        <div className="flex justify-end">
-          <button type="button" onClick={() => setPayingIn(true)}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
-              border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-            <Banknote size={14} /> Record a payment
-          </button>
-        </div>
-      )}
       <MoneyPanel accountId={account.id} />
       <LedgerPanel accountId={account.id} />
     </div>
@@ -1275,6 +1271,7 @@ export function AccountDetail() {
             audience={account.debtorKind}
             /* The firm's own word for where the account stands -- derived, never stored. */
             status={DESK_POSITIONS[position]?.label ?? null}
+            onRecordPayment={canRecordPayment(currentUser?.role) ? () => setPayingIn(true) : null}
             /*
              * THE PRESS THAT EMAILS ONE. The control draws the PDF and merges the firm's covering
              * wording; this opens the one compose box on the account with both already on the
@@ -3512,7 +3509,8 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, on
  * black and white.
  */
 function StatementTable({
-  statement, account, breakdown, handedOver, asAt, money, values, reference, audience, status, onEmail,
+  statement, account, breakdown, handedOver, asAt, money, values, reference, audience, status,
+  onEmail, onRecordPayment,
 }: {
   statement: StatementLine[]
   account: DebtorAccount
@@ -3526,6 +3524,8 @@ function StatementTable({
   audience?: 'individual' | 'company' | null
   status?: string | null
   onEmail?: React.ComponentProps<typeof AccountDocuments>['onEmail']
+  /** Null where the signed-in person may not capture one -- see canRecordPayment. */
+  onRecordPayment?: (() => void) | null
 }) {
   if (statement.length === 0) return <p className="text-sm text-slate-400 py-6 text-center">Nothing has happened on this account.</p>
   return (
@@ -3547,6 +3547,19 @@ function StatementTable({
           <button onClick={() => window.print()} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
             <Printer size={13} /> Print
           </button>
+          {/*
+            AND THE ONE PRESS THAT ADDS A LINE TO THIS TABLE, at the firm's asking. It is the gold
+            one because it is the only thing on this row that CHANGES the account -- the other
+            three read it out. Absent, not disabled, for anybody who may not capture: a button that
+            cannot be pressed is a promise the app will not keep.
+          */}
+          {onRecordPayment && (
+            <button type="button" onClick={onRecordPayment}
+              className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg
+                border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+              <Banknote size={13} /> Record a payment
+            </button>
+          )}
         </div>
       </div>
       <div className="overflow-x-auto">

@@ -170,6 +170,66 @@ check('the split is written once', (bal.match(/function splitFeeLedger/g) ?? [])
 check('...and read by both the balance and the statement',
   (bal.match(/splitFeeLedger\(ledgers\)/g) ?? []).length, 2)
 
+/* ---------------- and the statement opens where a statement opens ---------------- */
+
+/*
+ * THE FIRM, READING THE TRANSACTION LIST: "it looks funny, like and disorganized. Things should
+ * happen chronologically, and it didn't happen here."
+ *
+ * Two payments dated 28 September sat ABOVE "Capital handed over" on the 29th. Correct by date,
+ * and unreadable: the page opened with money coming off a debt that did not exist yet, and the
+ * running balance went four thousand rand negative before the first debit.
+ *
+ * THE HANDOVER IS THE OPENING BALANCE, NOT A MOVEMENT. Sorting it among the movements by date is
+ * what let a back-dated payment get above it.
+ */
+const backDated = buildStatement({
+  ...THEIRS,
+  handoverDate: '2026-09-29',
+  ledgers: {
+    ...THEIRS.ledgers,
+    /* Received the day BEFORE the account arrived -- which is what their test capture did. */
+    payments: [{ id: PAY_A, date: '2026-09-28', amount: 100 }],
+    fees: [],
+  },
+})
+check('the handover opens the statement whatever its date',
+  backDated.lines[0].kind, 'handover')
+/* AND THE RUNNING BALANCE NEVER STARTS BELOW NOUGHT because of it. */
+ok('...so the balance does not open negative', backDated.lines[0].balance > 0)
+
+/* THE ORDINARY CASE IS UNCHANGED: a handover on the first day is still first, and everything
+   after it is still in date order. */
+const normal = buildStatement(THEIRS)
+check('...and on an ordinary account it is still first', normal.lines[0].kind, 'handover')
+ok('...with the rest in date order',
+  normal.lines.slice(1).every((l, i, a) => i === 0 || a[i - 1].date <= l.date))
+/*
+ * A RECEIPT FEE SORTS UNDER THE PAYMENT THAT CAUSED IT. It used to be an ordinary `fee` line,
+ * which ranks ABOVE a payment -- so the firm's list opened with two receipt fees before the two
+ * payments they were charged on.
+ */
+const dayLines = normal.lines.filter((l) => l.date === '2026-09-28')
+check('a payment comes before the fee it produced',
+  dayLines.map((l) => l.kind), ['payment', 'payment', 'receipt-fee', 'receipt-fee'])
+
+/* ---------------- and the press that adds a line is on the page the line lands ------------- */
+
+/*
+ * THE FIRM: "record a payment, I think should be in this pane. Like you put it on the overview,
+ * but it should be in here. On the transactions list." A captured payment becomes a line on this
+ * table, so the press and its result belong on one screen.
+ */
+const page = read('src/pages/accounts/AccountDetail.tsx')
+ok('Record a payment is on the transactions pane',
+  /onRecordPayment && \([\s\S]{0,400}?Record a payment/.test(page))
+ok('...offered only to whoever may capture one',
+  /onRecordPayment=\{canRecordPayment\(currentUser\?\.role\) \? \(\) => setPayingIn\(true\) : null\}/.test(page))
+/* AND NOT IN TWO PLACES. Two buttons doing one thing is how the firm ends up asking which is
+   which; it was moved, not copied. */
+check('...and it is not still on the overview as well',
+  (page.match(/Record a payment/g) ?? []).length, 1)
+
 console.log(`\ncheck-receipt-fee-once: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

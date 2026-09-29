@@ -16855,3 +16855,153 @@ begin
 
   return v_payment;
 end $$;
+
+-- Re-stated so a payment cannot predate the handover. See the guard's own comment.
+create or replace function public.record_manual_payment(
+  p_account uuid,
+  p_amount numeric,
+  p_received_on date,
+  p_paid_to_client boolean,
+  p_method text default 'EFT',
+  p_reference text default null,
+  p_details text default null,
+  p_confirm_duplicate boolean default false,
+  p_proof_document uuid default null
+) returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_payment uuid;
+  v_dupes integer;
+  v_doc_account uuid;
+  v_doc_payment uuid;
+  v_reference text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_handover date;
+begin
+  if not public.may_record_payment() then
+    raise exception 'You are not allowed to record payments.' using errcode = '42501';
+  end if;
+
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'A payment has to be more than nothing.';
+  end if;
+  if p_received_on is null then
+    raise exception 'Say when the money was received.';
+  end if;
+  -- NOT IN THE FUTURE: it would land in a payover cycle that has not been cut, and change what a
+  -- client is owed this month for money that has not arrived.
+  if p_received_on > (now() at time zone 'Africa/Johannesburg')::date then
+    raise exception 'That date is in the future. A payment is recorded when the money is in.';
+  end if;
+  -- NOT BEFORE THE ACCOUNT EXISTED.
+  --
+  -- THE FIRM, READING A TRANSACTION LIST: "it looks funny, like and disorganized. Things should
+  -- happen chronologically, and it didn't happen here." Two payments dated 28 September sat above
+  -- "Capital handed over" on the 29th -- correctly, by date, and unreadably: money coming off a
+  -- debt that did not exist yet, and a running balance four thousand rand negative before the
+  -- first debit.
+  --
+  -- THE STATEMENT NOW OPENS WITH THE HANDOVER WHATEVER ITS DATE, because that is the opening
+  -- balance rather than a movement. This is the other half: the case should not arise. The firm
+  -- had nothing to receive before the client gave them the account, and none of the 1 070 payments
+  -- that came across from Swordfish predates its own handover -- only back-dated test capture did.
+  --
+  -- ON the handover day is fine. Before it is not.
+  select handover_date into v_handover from public.debtor_accounts where id = p_account;
+  if not found then
+    raise exception 'That account no longer exists.';
+  end if;
+  if v_handover is not null and p_received_on < v_handover then
+    raise exception 'That date is before the account was handed over on %. The firm had nothing to receive yet.',
+      to_char(v_handover, 'DD Mon YYYY');
+  end if;
+
+  -- THE REFERENCE IS COMPULSORY, and the firm asked for it looking at the box: "this reference
+  -- here should be compulsory."
+  --
+  -- IT IS WHAT TIES A CAPTURED PAYMENT BACK TO SOMETHING OUTSIDE RAPTOR. Money that arrives on a
+  -- bank statement carries the debtor's own reference and is matched on it; a payment typed in by
+  -- hand has nothing at all unless somebody writes it down. The firm said why when the statement
+  -- import was built: "all the reference numbers used on the bank should be saved as well per
+  -- payment, so that if we, for example, in the future have to reverse a payment" -- a reversal
+  -- three months later has to be findable in the bank's own records, and "R 5 000, 29 September"
+  -- is not a way to find it.
+  --
+  -- ON A PTC IT IS THE CLIENT'S REFERENCE, not ours. The firm never saw that money; what is being
+  -- recorded is a claim, and the reference is how the claim can be checked against the client's
+  -- own books when they query the commission.
+  --
+  -- REFUSED BEFORE ANYTHING IS WRITTEN, like the proof below and for the same reason:
+  -- account_payments has no delete, so a payment recorded without one could only be reversed.
+  if v_reference is null then
+    raise exception 'Put the reference on it — the one on the bank statement, or the client''s own.'
+      using errcode = '23502';
+  end if;
+
+  -- THE PROOF, AND ONLY ON A PTC. Checked BEFORE anything is written, so a refusal leaves no
+  -- payment behind -- a PTC recorded and then failing to attach its confirmation is exactly the
+  -- state this rule exists to prevent, and account_payments cannot be deleted.
+  if coalesce(p_paid_to_client, false) then
+    if p_proof_document is null then
+      raise exception 'A PTC needs the client''s confirmation attached — a PDF, an email, a screenshot.'
+        using errcode = '23514';
+    end if;
+    select account_id, payment_id into v_doc_account, v_doc_payment
+      from public.account_documents where id = p_proof_document;
+    if v_doc_account is null then
+      raise exception 'That confirmation is no longer on the account.';
+    end if;
+    -- ON THIS ACCOUNT. A document id from another debtor's file would attach one client's proof
+    -- to another client's invoice.
+    if v_doc_account <> p_account then
+      raise exception 'That confirmation belongs to a different account.';
+    end if;
+    -- AND NOT ALREADY SPENT. One confirmation proves one payment; re-used, a single letter from a
+    -- client would justify a second reduction of the debt.
+    if v_doc_payment is not null then
+      raise exception 'That confirmation is already the proof of another payment.';
+    end if;
+  end if;
+
+  -- THE DUPLICATE IS A QUESTION, NOT A REFUSAL: a debtor genuinely can pay the same amount twice
+  -- in a day. But it is ASKED, because account_payments has no delete. A reversed payment never
+  -- counts -- re-capturing one that bounced and came back must not be blocked.
+  if not p_confirm_duplicate then
+    select count(*) into v_dupes
+      from public.account_payments
+     where account_id = p_account
+       and amount = p_amount
+       and reversed_at is null
+       and (received_at at time zone 'Africa/Johannesburg')::date = p_received_on;
+    if v_dupes > 0 then
+      raise exception 'There is already a payment of % on this account on %. Confirm if this is a second one.',
+        to_char(p_amount, 'FM999999990.00'), to_char(p_received_on, 'YYYY-MM-DD')
+        using errcode = '23505';
+    end if;
+  end if;
+
+  -- received_at IS THE DAY THE MONEY CAME IN, not the day it was typed: the payover cycle cuts on
+  -- it, so a PTC a client reports three weeks late belongs in the month the debtor actually paid.
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details,
+    source, paid_to_client, created_by
+  ) values (
+    p_account,
+    (p_received_on::timestamp at time zone 'Africa/Johannesburg'),
+    p_amount,
+    coalesce(nullif(btrim(p_method), ''), 'EFT'),
+    v_reference,
+    nullif(btrim(p_details), ''),
+    'manual', coalesce(p_paid_to_client, false), auth.uid()
+  ) returning id into v_payment;
+
+  -- THE PROOF IS TIED TO THE PAYMENT, so the document list says what it is for and the payment can
+  -- be traced back to what justified it.
+  if p_proof_document is not null then
+    update public.account_documents set payment_id = v_payment where id = p_proof_document;
+  end if;
+
+  return v_payment;
+end $$;

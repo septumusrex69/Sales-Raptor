@@ -548,8 +548,27 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
    * where two traces taken ten minutes apart were coming out backwards, because the fee ledger is
    * fetched newest-first and a stable sort kept it that way.
    */
+  /*
+   * AND THE HANDOVER OPENS IT, WHATEVER ITS DATE.
+   *
+   * THE FIRM: "it looks funny, like and disorganized. Things should happen chronologically, and it
+   * didn't happen here." On the account they were reading, two payments dated 28 September sat
+   * ABOVE "Capital handed over" on the 29th -- correct by date and nonsense to read, because the
+   * statement opened with money coming off a debt that did not exist yet and a running balance
+   * that went four thousand rand negative before the first debit.
+   *
+   * THE HANDOVER IS NOT A MOVEMENT, IT IS THE OPENING BALANCE. Every statement starts from what
+   * was owed when the account arrived, and sorting it among the movements by date is what let a
+   * back-dated payment get above it. It cannot be reached by an earlier line now.
+   *
+   * THE UNDERLYING DATA IS STILL WRONG WHERE THIS HAPPENS, and it is refused at the door rather
+   * than tidied here -- record_manual_payment will not take a payment dated before the handover.
+   * This is about how a statement reads; that is about what may be recorded.
+   */
+  const opening = (k: StatementKind) => (k === 'handover' ? 0 : 1)
   pending.sort((a, b) =>
-    a.date.localeCompare(b.date)
+    opening(a.kind) - opening(b.kind)
+    || a.date.localeCompare(b.date)
     || rank[a.kind] - rank[b.kind]
     || (a.at ?? a.date).localeCompare(b.at ?? b.date))
 
