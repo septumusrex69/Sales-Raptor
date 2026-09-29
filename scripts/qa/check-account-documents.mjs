@@ -119,27 +119,57 @@ ok('...and an ordinary account says neither',
 /* ------------------------------------------------ the bar the firm asked for */
 
 /*
- * MEASURED AGAINST THE HAND-OVER BALANCE, which is a different question from the arrangement
- * bar and deliberately so: this page is about the debt the client gave us. R1 000 of R6 000 is
- * 17%, which is the figure on the firm's own template.
+ * MEASURED AGAINST WHAT IT TAKES TO CLEAR THE ACCOUNT -- and it used to be measured against the
+ * HAND-OVER BALANCE, on the argument that this page is about the debt the client gave us.
+ *
+ * THE FIRM SENT THAT BACK: "all across the board, wherever this bar is visible, it should be
+ * calculated like that." And on this page the old measure was the worse of the two. Their own
+ * test account was handed over at R 5 000 and has paid R 5 100 -- so the summary letter read
+ * 100% PAID and then asked the debtor for R 1 350,28. progressPercent refuses to round to 100 a
+ * rand short of the end precisely so that cannot happen, and a different denominator one line
+ * lower undid it.
+ *
+ * R 1 000 paid, R 5 741.30 owing and no fee to settle is R 1 000 of R 6 741.30 -- 15%, where the
+ * hand-over measure said 17%.
  */
 const bar = summary.blocks.find((b) => b.kind === 'progress')
 ok('the summary carries a drawn bar', bar !== undefined)
-check('...at the proportion of the handover that has been paid', Math.round(bar.fraction * 100), 17)
-ok('...with the percentage under it as the evidence', /17% of the handed-over balance/.test(sText))
+check('...at the proportion of what it takes to clear it', Math.round(bar.fraction * 100), 15)
+ok('...with the percentage under it as the evidence', /15% paid/.test(sText))
+/* THE FIGURES THE PERCENTAGE CAME FROM, because this page goes to a debtor and they are entitled
+   to add it up themselves. */
+ok('...and the two figures beside it', /R 1000\.00 of R 6741\.30/.test(sText))
+ok('...named as what settling costs rather than as what is "still owed"',
+  /R 5741\.30 to settle today/.test(sText))
+
 /*
- * AND ON A FIXTURE WHERE THE TWO MEASURES DISAGREE, because on the firm's own numbers they do
- * not: R1 000 of R6 000 handed over is 17%, and R1 000 against R5 741.30 still owing is 17% too.
- * A check that only walked their template would pass with the bar measured against the wrong
- * thing. R1 000 of R2 000 handed over is half; against the same balance it is still 17%.
+ * AND THE HAND-OVER FIGURE NO LONGER MOVES IT, which is what proves the old rule is gone rather
+ * than merely agreeing by coincidence. R 1 000 of R 2 000 handed over used to read as half; the
+ * balance is unchanged, so the bar must not move at all.
  */
-const halfPaid = summaryOfAccount({ ...INPUT, handedOver: 2000 })
-check('the bar is the handover’s proportion, not the balance’s',
-  Math.round(halfPaid.blocks.find((b) => b.kind === 'progress').fraction * 100), 50)
-/* NEVER PAST FULL. A debtor who has paid more than was handed over -- interest and fees on top --
-   is at 100% of the handover, not at 140% of a bar that would draw past its own track. */
-check('...and never past full',
-  summaryOfAccount({ ...INPUT, handedOver: 500 }).blocks.find((b) => b.kind === 'progress').fraction, 1)
+const smallerHandover = summaryOfAccount({ ...INPUT, handedOver: 2000 })
+check('the hand-over balance no longer decides it',
+  Math.round(smallerHandover.blocks.find((b) => b.kind === 'progress').fraction * 100), 15)
+
+/*
+ * AND THE FEE ON SETTLING IS IN IT. The firm: "the receipt fee should be added and also included
+ * always in that bar if the person settles the full amount." R 1 000 of R 6 741.30 is 15%; with a
+ * R 610 fee to settle it is R 1 000 of R 7 351.30, which is 14.
+ */
+const withFee = summaryOfAccount({
+  ...INPUT,
+  breakdown: { ...BREAKDOWN, settlementFee: 610, settlement: 6351.30 },
+})
+check('the fee for settling is counted as still to come',
+  Math.round(withFee.blocks.find((b) => b.kind === 'progress').fraction * 100), 14)
+
+/* A SETTLED ACCOUNT IS FULL. It owes nothing and costs nothing to close, so the bar reaches its
+   end rather than stopping short of it by a fee that will never be charged. */
+check('...and a settled account is full',
+  summaryOfAccount({
+    ...INPUT,
+    breakdown: { ...BREAKDOWN, payments: 6741.30, balance: 0, settlementFee: 610, settlement: 0 },
+  }).blocks.find((b) => b.kind === 'progress').fraction, 1)
 
 /* ------------------------------------------------ the statement is the working */
 

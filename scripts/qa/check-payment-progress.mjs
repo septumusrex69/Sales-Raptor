@@ -29,7 +29,7 @@ const ok = (name, actual) => check(name, actual, true)
 
 /* ---------- the money ---------- */
 
-const m = moneyProgress({ payments: 4200, balance: 8280 })
+const m = moneyProgress({ payments: 4200, balance: 8280, settlementFee: 0 })
 check('what has come in', m.recovered, 4200)
 check('what is still owed', m.owed, 8280)
 /*
@@ -47,42 +47,42 @@ check('...as a fraction', Math.round(m.fraction * 1000) / 1000, 0.337)
  * and is the thing a debtor paying the minimum needs to see.
  */
 ok('a payment advances the bar',
-  moneyProgress({ payments: 5200, balance: 7280 }).fraction > m.fraction)
+  moneyProgress({ payments: 5200, balance: 7280, settlementFee: 0 }).fraction > m.fraction)
 ok('...and interest accruing moves it back',
-  moneyProgress({ payments: 4200, balance: 9280 }).fraction < m.fraction)
+  moneyProgress({ payments: 4200, balance: 9280, settlementFee: 0 }).fraction < m.fraction)
 
 /* NEVER PAST ITS OWN END. An overpayment awaiting refund would otherwise draw past 100%. */
 check('an overpayment does not draw past the end',
-  moneyProgress({ payments: 13000, balance: 0 }).fraction, 1)
+  moneyProgress({ payments: 13000, balance: 0, settlementFee: 0 }).fraction, 1)
 /* NEVER BELOW NOUGHT. A credit balance would otherwise draw a negative bar. */
 check('a credit balance does not draw backwards',
-  moneyProgress({ payments: 500, balance: -200 }).fraction, 1)
+  moneyProgress({ payments: 500, balance: -200, settlementFee: 0 }).fraction, 1)
 check('...and reports nothing owed rather than a negative',
-  moneyProgress({ payments: 500, balance: -200 }).owed, 0)
+  moneyProgress({ payments: 500, balance: -200, settlementFee: 0 }).owed, 0)
 
 /*
  * AN EMPTY LEDGER IS NOT A SETTLED ONE. 0/0 drawn as 100% would be a full green bar on an
  * account with no capital on it, which is the worst possible thing for it to say.
  */
 check('nothing charged is no progress, not full progress',
-  moneyProgress({ payments: 0, balance: 0 }).fraction, 0)
-check('nothing paid is nought', moneyProgress({ payments: 0, balance: 12480 }).fraction, 0)
+  moneyProgress({ payments: 0, balance: 0, settlementFee: 0 }).fraction, 0)
+check('nothing paid is nought', moneyProgress({ payments: 0, balance: 12480, settlementFee: 0 }).fraction, 0)
 
 /* ---------- what it says beside itself ---------- */
 
-check('a third reads as a third', progressPercent(moneyProgress({ payments: 4160, balance: 8320 })), 33)
-check('paid in full reads as full', progressPercent(moneyProgress({ payments: 12480, balance: 0 })), 100)
+check('a third reads as a third', progressPercent(moneyProgress({ payments: 4160, balance: 8320, settlementFee: 0 })), 33)
+check('paid in full reads as full', progressPercent(moneyProgress({ payments: 12480, balance: 0, settlementFee: 0 })), 100)
 /*
  * NEVER ROUNDED TO 100 SHORT OF IT. R12 479 of R12 480 is 99.99%, and a notice telling somebody
  * they have paid 100% while demanding a rand is the kind of thing that gets read out in court.
  */
 check('a rand short is not "paid in full"',
-  progressPercent(moneyProgress({ payments: 12479, balance: 1 })), 99)
+  progressPercent(moneyProgress({ payments: 12479, balance: 1, settlementFee: 0 })), 99)
 /* And nor is a rand paid nothing: a debtor who has started must not read as one who has not. */
 check('a rand paid is not "nothing"',
-  progressPercent(moneyProgress({ payments: 1, balance: 12479 })), 1)
+  progressPercent(moneyProgress({ payments: 1, balance: 12479, settlementFee: 0 })), 1)
 check('nothing paid really is nothing',
-  progressPercent(moneyProgress({ payments: 0, balance: 12480 })), 0)
+  progressPercent(moneyProgress({ payments: 0, balance: 12480, settlementFee: 0 })), 0)
 
 /* ---------- the instalments ---------- */
 
@@ -129,13 +129,13 @@ check('kept is bounded by the arrangement',
  * which the notice already says in words, twice, and better.
  */
 ok('an account that has paid something has progress to show',
-  hasProgress({ money: moneyProgress({ payments: 100, balance: 12380 }), instalments: null }))
+  hasProgress({ money: moneyProgress({ payments: 100, balance: 12380, settlementFee: 0 }), instalments: null }))
 check('an account that has paid nothing has none',
-  hasProgress({ money: moneyProgress({ payments: 0, balance: 12480 }), instalments: null }), false)
+  hasProgress({ money: moneyProgress({ payments: 0, balance: 12480, settlementFee: 0 }), instalments: null }), false)
 /* But an arrangement being KEPT is progress even before the first payment clears. */
 ok('...unless an instalment has been kept',
   hasProgress({
-    money: moneyProgress({ payments: 0, balance: 12480 }),
+    money: moneyProgress({ payments: 0, balance: 12480, settlementFee: 0 }),
     instalments: instalmentProgress({ amount: 300, totalPromised: 900, instalmentsKept: 1, arrangement: 'monthly', due: 1 }),
   }))
 
@@ -190,7 +190,7 @@ const detail = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx'
  * rather than a second opinion about the account.
  */
 ok('the bar is the ratio of the figures beside it',
-  /moneyProgress\(\{ payments: bal\.payments, balance: bal\.balance \}\)/.test(detail))
+  /payments: bal\.payments, balance: bal\.balance, settlementFee: bal\.settlementFee/.test(detail))
 /*
  * AND THE HOOK IS ABOVE THE EARLY RETURNS. Placed beside the panel it feeds -- which is after the
  * `loading` branch -- it ran on some renders and not others; React refuses that outright, the
@@ -215,6 +215,72 @@ ok('...with the two figures it was worked out from',
    current is not the same account as 60% paid having missed the last three. */
 ok('...and a missed instalment is marked rather than merely counted',
   /run\.missed > 0 \? 'font-medium text-\[var\(--c-gold-dark\)\]' : ''/.test(detail))
+
+/* ---------------- and the fee for settling is part of what is still to come ---------------- */
+
+/*
+ * THE FIRM, POINTING AT THE BAR ON AN ACCOUNT: "that doesn't include the receipt fee. So the
+ * receipt fee should be added and also included always in that bar if the person settles the full
+ * amount... if the person was about to close this account, in this scenario it would be 1350.28.
+ * All across the board, wherever this bar is visible, it should be calculated like that."
+ *
+ * THE BAR WAS SAYING THE ACCOUNT COULD BE CLOSED FOR LESS THAN IT COULD. Item 9 is charged the
+ * moment a settlement is received, so a debtor quoted the balance is quoted short -- and the same
+ * card, four lines up, already said what settling really costs.
+ */
+const theirs = moneyProgress({ payments: 5100, balance: 1211.01, settlementFee: 139.27 })
+check('the firm\u2019s own account: what it takes to close it', theirs.owed, 1350.28)
+check('...counted against everything it would have taken', theirs.charged, 6450.28)
+check('...which moves the bar off the figure that was too kind', progressPercent(theirs), 79)
+/* THE PLAIN BALANCE IS STILL READABLE. A caller reporting both must not have to subtract. */
+check('...with the balance still on its own', theirs.balance, 1211.01)
+check('...and the fee said separately', theirs.settlementFee, 139.27)
+
+/*
+ * A SETTLED ACCOUNT COSTS NOTHING TO CLOSE. There is no settlement to charge item 9 on, so adding
+ * one would draw a bar short of its end on an account that is finished -- and tell a debtor who
+ * has paid in full that they have not.
+ */
+const settled = moneyProgress({ payments: 6450.28, balance: 0, settlementFee: 139.27 })
+check('a settled account owes nothing, fee or no fee', settled.owed, 0)
+check('...and reads as finished', progressPercent(settled), 100)
+
+/*
+ * AND NOUGHT IS A REAL ANSWER. Under in duplum, once non-capital has reached the capital there is
+ * no headroom left and the fee for settling is nil -- computeBalance caps it. The bar reports what
+ * it is given rather than inventing a fee the debtor may not be charged.
+ */
+check('at the in duplum ceiling there is no fee to add',
+  moneyProgress({ payments: 3000, balance: 500, settlementFee: 0 }).owed, 500)
+/* A NEGATIVE FEE IS NOT A DISCOUNT. Clamped, like the balance above it. */
+check('a negative fee cannot shrink what is owed',
+  moneyProgress({ payments: 100, balance: 500, settlementFee: -50 }).owed, 500)
+
+/*
+ * ---- ALL FOUR BARS, WHICH IS WHAT "ALL ACROSS THE BOARD" MEANS ----
+ *
+ * The parameter is REQUIRED rather than defaulted for exactly this reason: a fifth bar written
+ * next year cannot quietly reproduce the short figure, because it will not compile without
+ * answering the question. These assert the four that exist today pass something real.
+ */
+const calc = readFileSync(new URL('../../src/components/collections/RepaymentCalculator.tsx', import.meta.url), 'utf8')
+const letter = readFileSync(new URL('../../src/lib/repaymentLetter.ts', import.meta.url), 'utf8')
+const summary = readFileSync(new URL('../../src/lib/accountSummaryLetter.ts', import.meta.url), 'utf8')
+
+ok('the account screen counts the fee', /settlementFee: bal\.settlementFee/.test(detail))
+ok('...and says the larger figure is what settles it', /to settle today/.test(detail))
+ok('the repayment calculator counts it', /settlementFee: settlementFeeToday \?\? 0/.test(calc))
+ok('...fed from the panel that holds the breakdown', /settlementFeeToday=\{settlementFee\}/.test(detail))
+ok('the repayment letter counts it', /settlementFee: input\.settlementFeeToday \?\? 0/.test(letter))
+/*
+ * THE SUMMARY LETTER IS THE ONE THAT CHANGED MEANING. It measured against the HAND-OVER BALANCE,
+ * so the firm's own debtor -- R 5 000 handed over, R 5 100 paid -- read as 100% PAID on a letter
+ * that then asked them for R 1 350,28. That is exactly what progressPercent refuses to do a rand
+ * short of the end, undone one line lower by a different denominator.
+ */
+ok('the summary letter is on the same arithmetic',
+  /moneyProgress\(\{[\s\S]{0,200}?settlementFee: input\.breakdown\.settlementFee/.test(summary))
+ok('...and no longer measures against the hand-over balance', !/paid \/ input\.handedOver/.test(summary))
 
 console.log(`${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

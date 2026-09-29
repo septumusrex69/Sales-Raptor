@@ -80,6 +80,12 @@ export interface RepaymentLetterInput {
   purpose?: 'simulation' | 'schedule'
   /** What is owed today, before any of this. Printed so the debtor can see where it starts. */
   balanceToday: number
+  /**
+   * The item 9 fee on settling in full today. The progress bar counts it as still to come, at the
+   * firm's instruction -- see moneyProgress. Optional because the caller may not have a breakdown
+   * to hand; nought there is an honest "no fee known", and in duplum can genuinely make it nil.
+   */
+  settlementFeeToday?: number
   /** "a month" / "a week", already in the firm's words. */
   each: string
   /**
@@ -387,7 +393,11 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
    * money is a sentence that makes an arrangement less likely, not more.
    */
   if ((input.paidSoFar ?? 0) > 0) {
-    const m = moneyProgress({ payments: input.paidSoFar as number, balance: input.balanceToday })
+    const m = moneyProgress({
+      payments: input.paidSoFar as number,
+      balance: input.balanceToday,
+      settlementFee: input.settlementFeeToday ?? 0,
+    })
     blocks.push(h(2, 'What you have paid so far'))
     /*
      * A DRAWN BAR, WHICH THE FIRM ASKED FOR BY NAME: "the bar, it should be literally like a

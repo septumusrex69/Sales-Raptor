@@ -35,7 +35,7 @@ import type { AttachedFile } from '../../lib/letterAttachment.ts'
  * however the receipt fee is still applicable" -- is on the screen, because the number goes to a
  * debtor and an account that is charged for a call next week will not match it.
  */
-export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday, paidSoFar, audience, onEmail }: {
+export function RepaymentCalculator({ account, amount, schedule, money, values, reference, balanceToday, settlementFeeToday, paidSoFar, audience, onEmail }: {
   /** The statement's own assembly, so this cannot be a second opinion about the same money. */
   account: Omit<BalanceInput, 'accrueTo'>
   amount: number
@@ -50,6 +50,15 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
   reference?: string | null
   /** What is owed today, printed at the top of the schedule so the debtor sees where it starts. */
   balanceToday?: number
+  /**
+   * The item 9 fee on settling in full today, which the progress bar counts as still to come.
+   *
+   * THE FIRM: "the receipt fee should be added and also included always in that bar if the person
+   * settles the full amount." Passed in rather than worked out here, off the same computeBalance
+   * the statement beside it is drawn from -- recomputed it would be a second opinion about the
+   * same money, and in duplum can cap it to nothing.
+   */
+  settlementFeeToday?: number
   /**
    * WHAT HAS ALREADY BEEN PAID ON THIS ACCOUNT, for the progress bar.
    *
@@ -138,7 +147,9 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
    * already and better.
    */
   const progress = paidSoFar !== undefined && paidSoFar > 0 && balanceToday !== undefined
-    ? moneyProgress({ payments: paidSoFar, balance: balanceToday })
+    ? moneyProgress({
+      payments: paidSoFar, balance: balanceToday, settlementFee: settlementFeeToday ?? 0,
+    })
     : null
 
   if (!plan) return null
@@ -181,6 +192,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
     if (!plan) return null
     return repaymentLetter({
       plan, money, each, balanceToday: balanceToday ?? plan.rows[0].balanceAfter + plan.rows[0].offDebt,
+      settlementFeeToday,
       /* The same two the screen is showing, so the page the debtor reads and the panel the
          collector quoted from are one set of figures. */
       faster: ladder,

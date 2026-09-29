@@ -30,6 +30,7 @@
 import type { Block, LetterDocument, TableCell } from './letterDocument.ts'
 import type { BalanceBreakdown, StatementLine } from './accountBalance.ts'
 import { longDate } from './messageTemplates.js'
+import { moneyProgress, progressPercent } from './paymentProgress.js'
 
 /** The face the firm's own notices are set in. See charter.ts. */
 const CHARTER = '"Charter", "Bitstream Charter", Georgia, serif'
@@ -149,22 +150,38 @@ function addressBlock(input: AccountLetterInput, title: string): Block[] {
  * faster than three amounts, and the bar is the same one the arrangement schedule carries, for
  * the same reason the firm gave: "the percentage is nice, but there should be an image."
  *
- * MEASURED AGAINST THE HAND-OVER BALANCE, not against everything charged. That is a different
- * question from the arrangement bar deliberately: this page is about the debt the client gave us,
- * and a bar that moved backwards as interest accrued would be answering "how much of the total
- * have you paid" when the debtor asked "how much of my debt have I paid off".
+ * MEASURED AGAINST WHAT IT TAKES TO CLEAR THE ACCOUNT, and this used to be measured against the
+ * HAND-OVER BALANCE instead -- deliberately, on the argument that this page is about the debt the
+ * client gave us rather than about everything since.
+ *
+ * THE FIRM SENT THAT BACK, looking at the same bar on the account screen: "all across the board,
+ * wherever this bar is visible, it should be calculated like that." And on this page the old
+ * measure was the worse of the two by a long way. A debtor handed over at R 5 000 who has paid
+ * R 5 100 read as 100% PAID on a letter that went on to ask them for R 1 350,28 -- the exact
+ * thing progressPercent refuses to do a rand short of the end, undone here by a different
+ * denominator. Capital is not the debt; interest, fees and the receipt fee on settling are the
+ * rest of it, and a bar that leaves them out finishes early.
+ *
+ * THE SAME ARITHMETIC AS EVERY OTHER BAR, through moneyProgress, so the letter and the screen
+ * cannot disagree about how far somebody is.
  */
 function standsBlock(input: AccountLetterInput): Block[] {
-  const paid = input.breakdown.payments
-  const fraction = input.handedOver > 0 ? Math.min(1, Math.max(0, paid / input.handedOver)) : 0
-  const pct = Math.round(fraction * 100)
+  const m = moneyProgress({
+    payments: input.breakdown.payments,
+    balance: input.breakdown.balance,
+    settlementFee: input.breakdown.settlementFee,
+  })
+  const pct = progressPercent(m)
   return [
     h(2, 'Where the account stands'),
     {
       kind: 'progress',
-      fraction,
-      note: `${pct}% of the handed-over balance has been paid · ${input.money(paid)} paid of `
-        + `${input.money(input.handedOver)} handed over`,
+      fraction: m.fraction,
+      /* THE FIGURES THE PERCENTAGE CAME FROM, because this goes to a debtor and they are entitled
+         to add it up. "To settle today" rather than "still owed": the larger figure is what
+         closing the account costs, fee included. */
+      note: `${pct}% paid · ${input.money(m.recovered)} of ${input.money(m.charged)}`
+        + `${m.owed > 0 ? ` · ${input.money(m.owed)} to settle today` : ''}`,
     } as Block,
   ]
 }

@@ -672,7 +672,11 @@ export function AccountDetail() {
   const progress = useMemo((): PaymentProgress | null => {
     const bal = statement?.breakdown
     if (!bal) return null
-    const money = moneyProgress({ payments: bal.payments, balance: bal.balance })
+    /* The receipt fee on settling belongs in the bar -- the firm's own instruction. It comes off
+       the same breakdown as the balance, already capped under in duplum. See moneyProgress. */
+    const money = moneyProgress({
+      payments: bal.payments, balance: bal.balance, settlementFee: bal.settlementFee,
+    })
     const live = (workspace?.promises ?? []).find((x) => x.status === 'open') ?? null
     return {
       money,
@@ -890,6 +894,7 @@ export function AccountDetail() {
       successRatio={account.ptpSuccessRatio}
       balance={b?.balance}
       settlement={b?.settlement}
+      settlementFee={b?.settlementFee}
       paidSoFar={b?.payments}
       /* The very assembly the statement above was built from -- see `position`. */
       position={statement?.input ?? null}
@@ -2262,7 +2267,14 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
       </div>
       <p className="text-[11px] text-slate-500 mt-1 tabular-nums">
         {formatMoney(progress.money.recovered)} of {formatMoney(progress.money.charged)}
-        {progress.money.owed > 0 && <> &middot; {formatMoney(progress.money.owed)} still owed</>}
+        {/*
+          "TO SETTLE TODAY", NOT "STILL OWED", because that is now what the figure is: the balance
+          plus the item 9 fee on closing the account. The firm: "if the person was about to close
+          this account, in this scenario it would be 1350.28." A caption still reading "still
+          owed" beside the larger number would be the old wording on the new arithmetic, which is
+          worse than either.
+        */}
+        {progress.money.owed > 0 && <> &middot; {formatMoney(progress.money.owed)} to settle today</>}
       </p>
       {run && (
         <p className="text-[11px] text-slate-500 mt-1">
@@ -2289,7 +2301,7 @@ export function PaymentProgressBar({ progress }: { progress: PaymentProgress }) 
  * never touches a balance — it is kept or it is broken, and a person says which. Matching one
  * against an incoming payment is the collections engine's job, and that does not exist yet.
  */
-function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation }: {
+function PromisePanel({ accountId, promises, userName, userId, onChange, open, setOpen, successRatio, balance, settlement, settlementFee, paidSoFar, position, letterValues, letterReference, audience, onEmailSimulation }: {
   accountId: string
   promises: PromiseToPay[]
   userName: string | null
@@ -2303,6 +2315,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   balance: number | undefined
   /** What it takes to close the account today, including the item 9 receipt fee on settling. */
   settlement: number | undefined
+  /** That receipt fee on its own, for the calculator's progress bar. See moneyProgress. */
+  settlementFee: number | undefined
   /** Payments received, for the calculator's progress bar. Off the same breakdown as `balance`. */
   paidSoFar: number | undefined
   /**
@@ -2521,6 +2535,9 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               values={letterValues}
               reference={letterReference}
               balanceToday={balance}
+              /* The fee on settling belongs in the bar -- the firm's instruction, and the same
+                 figure the statement above quotes as "Receipt fee if settled". */
+              settlementFeeToday={settlementFee}
               /* What has already been paid, for the progress bar. The same figure the statement
                  above shows, off the same breakdown. */
               paidSoFar={paidSoFar}

@@ -11,8 +11,11 @@
  *
  * ---- TWO MEASURES, AND THEY ANSWER DIFFERENT QUESTIONS ----
  *
- * MONEY is "how much of what this account has been charged has come in". It is true of every
- * account, arrangement or no arrangement, and it is what a client asks about.
+ * MONEY is "how much of what it would take to clear this account has come in". It is true of
+ * every account, arrangement or no arrangement, and it is what a client asks about.
+ *
+ * IT INCLUDES THE RECEIPT FEE ON SETTLING, at the firm's instruction, and that is the whole of
+ * what `settlementFee` is doing on this module. See `owed`.
  *
  * INSTALMENTS is "are they keeping to what they agreed". It exists only where there IS an
  * agreement, and it is the one that tells a collector whether to ring. A debtor 60% paid who has
@@ -25,13 +28,31 @@
 
 import type { Arrangement } from './arrangements.ts'
 
-/** What has come in against what has been charged. */
+/** What has come in against what it takes to clear the account. */
 export interface MoneyProgress {
   /** Payments received, net of reversals -- see computeBalance. */
   recovered: number
-  /** What is still owed today. */
+  /**
+   * WHAT IT TAKES TO CLOSE THE ACCOUNT TODAY: the balance plus the receipt fee on settling it.
+   *
+   * THE FIRM, POINTING AT THE BAR: "that doesn't include the receipt fee. So the receipt fee
+   * should be added and also included always in that bar if the person settles the full amount...
+   * if the person was about to close this account, in this scenario it would be 1350.28."
+   *
+   * The bar said R 1 211,01 still owed on an account that could not be closed for less than
+   * R 1 350,28. A debtor reading it, or a collector quoting it down the telephone, is out by the
+   * item 9 fee -- and that fee is not optional: it is charged the moment the settlement is
+   * received.
+   */
   owed: number
-  /** Everything this account has ever been charged: capital, interest, fees and receipt fees. */
+  /** The part of `owed` that is the fee for settling, so a caption can explain the difference. */
+  settlementFee: number
+  /** What is owed before that fee -- the plain balance, for callers that report both. */
+  balance: number
+  /**
+   * Everything it would take to have cleared this account: capital, interest, fees, the receipt
+   * fees already charged, and the one on settling.
+   */
   charged: number
   /** recovered / charged, 0..1. Zero where nothing has been charged, never NaN. */
   fraction: number
@@ -70,13 +91,37 @@ export interface PaymentProgress {
  * NEVER ABOVE ONE AND NEVER BELOW NOUGHT. An overpayment awaiting refund would otherwise draw a
  * bar past its own end, and a credit balance would draw a negative one.
  */
-export function moneyProgress(input: { payments: number; balance: number }): MoneyProgress {
+export function moneyProgress(input: {
+  payments: number
+  balance: number
+  /**
+   * THE ITEM 9 FEE ON SETTLING, AND IT IS NOT OPTIONAL ON THIS CALL.
+   *
+   * The firm: "all across the board, wherever this bar is visible, it should be calculated like
+   * that." A parameter with a default of nought would let a fourth bar be written next year that
+   * quietly reports the old, short figure and looks exactly like the other three. Required, the
+   * compiler asks the question at every call site.
+   *
+   * `computeBalance` works it out and caps it under in duplum, where it can be nil -- so nought
+   * here is a real answer on an account at its ceiling, not a caller who forgot.
+   */
+  settlementFee: number
+}): MoneyProgress {
   const recovered = Math.max(0, input.payments)
-  const owed = Math.max(0, input.balance)
+  const balance = Math.max(0, input.balance)
+  /*
+   * ONLY WHERE THERE IS A BALANCE TO SETTLE. A settled account is owed nothing and costs nothing
+   * to close; adding a fee to nought would draw a bar short of its end on an account that is
+   * finished, and tell a debtor who has paid in full that they have not.
+   */
+  const settlementFee = balance > 0 ? Math.max(0, input.settlementFee) : 0
+  const owed = balance + settlementFee
   const charged = recovered + owed
   return {
     recovered,
     owed,
+    settlementFee,
+    balance,
     charged,
     /* Nothing charged is not "fully paid": an account with no capital on it has no progress to
        report, and 0/0 drawn as 100% would be a full green bar on an empty ledger. */
