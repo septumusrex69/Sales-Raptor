@@ -127,13 +127,25 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
               <th className="px-2 py-2 text-left font-medium">Debtor</th>
               <th className="px-2 py-2 text-right font-medium">Payment</th>
               <th className="px-2 py-2 text-right font-medium">Receipt fee</th>
-              {/* INTEREST BEFORE FEES, which is the firm's own order and the reverse of
-                  Swordfish's -- VAT is on fees and not on interest, so taking interest first
-                  carries less risk if the debtor stops paying. */}
-              <th className="px-2 py-2 text-right font-medium">Interest</th>
-              <th className="px-2 py-2 text-right font-medium">Costs</th>
+              {/*
+                THE FIRM'S OWN WORDS, off their export: retained interest, retained legal fees,
+                retained collection commission.
+
+                AND THE THIRD ONE IS THE POINT. "Swordfish made that part of the retained legal
+                fees. Not anything else. So I think it's important for us to split this." It is
+                already split here and always has been -- to_interest, to_costs, commission and
+                commission_vat are four columns on payment_allocations, never one. What was
+                missing was the firm's names on them, so nobody could see that the thing they
+                asked for was already true.
+
+                INTEREST BEFORE FEES is the firm's order and the reverse of Swordfish's: VAT is on
+                fees and not on interest, so taking interest first carries less risk if the debtor
+                stops paying.
+              */}
+              <th className="px-2 py-2 text-right font-medium">Retained interest</th>
+              <th className="px-2 py-2 text-right font-medium">Retained legal fees</th>
               <th className="px-2 py-2 text-right font-medium">Capital</th>
-              <th className="px-2 py-2 text-right font-medium">Commission</th>
+              <th className="px-2 py-2 text-right font-medium">Retained col. commission</th>
               <th className="px-2 py-2 text-right font-medium">VAT</th>
               <th className="px-2 py-2 text-right font-medium">To client</th>
               <th className="px-2 py-2 text-right font-medium">Due to BF</th>

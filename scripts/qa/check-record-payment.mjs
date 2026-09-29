@@ -218,6 +218,61 @@ ok('...raised after the payment lands', payAt > 0 && feeAt > payAt)
 /* AND NOT TWICE. The upload no longer charges a perusal, so one verification is one fee. */
 ok('...and the upload does not charge as well', /chargePerusalFee: false/.test(modal))
 
+/* ---------------- one receipt, several debtors ---------------- */
+
+/*
+ * THE FIRM: "in case we have, for example, debt counsellors that pay one payment for five
+ * different debtors."
+ */
+const split = liveFn('split_bank_line')
+ok('a receipt can be split between accounts', split !== null)
+ok('...by whoever may record a payment', /if not public\.may_record_payment\(\) then/.test(split ?? ''))
+
+/*
+ * THE PARTS MUST ADD UP EXACTLY, AND THIS IS THE ASSERTION THE WHOLE FEATURE RESTS ON. Short, and
+ * money the bank received belongs to nobody. Over, and the firm has credited debtors with more
+ * than arrived and will remit clients for it. Neither is recoverable once a remittance has gone
+ * out, because account_payments has no delete.
+ */
+ok('...and the parts must come to the whole payment', /v_total <> v_line\.amount/.test(split ?? ''))
+/* A TOLERANCE HERE WOULD BE MONEY INVENTED OR LOST, so the comparison is exact. */
+ok('...with no tolerance on it', !/abs\(v_total - v_line\.amount\)/.test(split ?? ''))
+/*
+ * CHECKED BEFORE THE FIRST INSERT, so a split that does not balance creates NO payments rather
+ * than three of five -- which would be the worst outcome of all, since the three cannot be
+ * deleted.
+ */
+const totalAt = (split ?? '').indexOf('v_total <> v_line.amount')
+const firstInsert = (split ?? '').indexOf('insert into public.account_payments')
+ok('...before any payment is written', totalAt > 0 && firstInsert > totalAt)
+/* AND EVERY ACCOUNT VERIFIED IN THE SAME PASS, for the same reason. */
+const acctAt = (split ?? '').indexOf('One of those accounts no longer exists')
+ok('...as are the accounts', acctAt > 0 && firstInsert > acctAt)
+
+/* A SPLIT OF ONE IS NOT A SPLIT -- it is Place it, and saying so is kinder than a silent success
+   that produces a differently-shaped record for the same act. */
+ok('...and one account is refused', /jsonb_array_length\(p_parts\) < 2/.test(split ?? ''))
+/* ALREADY PLACED CANNOT BE SPLIT AGAIN. */
+ok('...and a receipt already placed cannot be split',
+  /v_line\.payment_id is not null or v_line\.status = 'allocated'/.test(split ?? ''))
+
+/*
+ * THE LINK TURNS ROUND. One line, many payments -- so the payment knows its line, not the other
+ * way about. Without this the second part of a split would overwrite the first on the line.
+ */
+ok('a payment knows which bank line it came from',
+  /add column if not exists bank_line_id uuid references public\.bank_statement_lines\(id\)/.test(sql))
+ok('...and every part of a split carries it', /created_by, bank_line_id/.test(split ?? ''))
+/* THE LINE IS TAKEN OFF SUSPENSE, or it would be offered for splitting a second time. */
+ok('...and the line leaves suspense', /set status = 'allocated', placed_at = now\(\)/.test(split ?? ''))
+
+/* THE SCREEN WILL NOT OFFER AN UNBALANCED SPLIT EITHER, so nobody types five rows and then meets
+   the database's refusal. Compared in CENTS -- two floats compared for equality is how a split
+   that looks balanced is refused for a hundredth of a cent nobody can see. */
+const splitUi = read('src/pages/finance/SplitReceiptModal.tsx')
+ok('the screen requires it to balance too', /const balanced = leftCents === 0 && parts\.length >= 2/.test(splitUi))
+ok('...counting in cents, not rands', /Math\.round\(receipt\.amount \* 100\)/.test(splitUi))
+
 console.log(`\ncheck-record-payment: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

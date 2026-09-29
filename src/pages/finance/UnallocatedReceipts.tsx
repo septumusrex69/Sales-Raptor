@@ -5,6 +5,7 @@ import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
+import { SplitReceiptModal } from './SplitReceiptModal'
 import {
   fetchUnallocatedReceipts, placeBankLine,
   fetchUnreconciledPayouts, reconcileBankDebit,
@@ -37,6 +38,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [placing, setPlacing] = useState<UnallocatedReceipt | null>(null)
+  const [splitting, setSplitting] = useState<UnallocatedReceipt | null>(null)
   const [tying, setTying] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -67,15 +69,28 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
       <Card padded={false}>
         <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 px-4 py-3">
           <div>
-            <h3 className="text-[15px] font-semibold text-slate-800">Receipts waiting to be placed</h3>
+            {/*
+              SUSPENSE, WHICH IS THE FIRM'S OWN WORD FOR IT: "all payments that do not have
+              reference numbers go into something we call the suspense account. So now we have to
+              create a suspense account for all unallocated payments that we can allocate later."
+              It is a LIST rather than a standing account in the book -- asked directly, the firm
+              chose the queue: no money is posted to a debtor until somebody places it.
+            */}
+            <h3 className="text-[15px] font-semibold text-slate-800">Suspense</h3>
             <p className="text-[12px] text-slate-500">
-              Money in the trust account with no account number on it. Until it is placed, the
-              debtor is not credited and the client is not remitted.
+              Money received with no account number on it. Until it is placed the debtor is not
+              credited and the client is not remitted — so somebody who has paid stays on the book.
             </p>
           </div>
           {rows.length > 0 && (
-            <span className="text-[15px] font-semibold tabular-nums text-amber-700">
-              {rand(waiting)} <span className="text-[12px] font-normal text-slate-500">· {rows.length}</span>
+            <span className="text-right">
+              {/* THE BALANCE IS THE POINT AS MUCH AS THE LIST: it is the firm's own measure of how
+                  much is sitting in trust belonging to nobody yet. */}
+              <span className="block text-[11px] uppercase tracking-wide text-slate-500">In suspense</span>
+              <span className="block text-[17px] font-semibold tabular-nums text-amber-700">{rand(waiting)}</span>
+              <span className="block text-[11px] text-slate-500">
+                {rows.length} receipt{rows.length === 1 ? '' : 's'}
+              </span>
             </span>
           )}
         </div>
@@ -90,7 +105,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
           <div className="py-8 text-center"><Loader2 className="mx-auto w-4 h-4 animate-spin text-slate-400" /></div>
         ) : rows.length === 0 ? (
           <p className="px-4 py-6 text-center text-[13px] text-slate-500">
-            Nothing waiting. Every receipt imported has been placed against an account.
+            Nothing in suspense. Every receipt imported has been placed against an account.
           </p>
         ) : (
           <table className="w-full text-[13px]">
@@ -122,11 +137,19 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <button type="button" onClick={() => setPlacing(r)}
-                      className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
-                        text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-                      Place it
-                    </button>
+                    <span className="inline-flex gap-1.5">
+                      <button type="button" onClick={() => setPlacing(r)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                        Place it
+                      </button>
+                      {/* ONE DEPOSIT, SEVERAL DEBTORS -- a debt counsellor paying for five. */}
+                      <button type="button" onClick={() => setSplitting(r)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                        Split it
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -175,6 +198,11 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
       {placing && (
         <PlaceModal receipt={placing} onClose={() => setPlacing(null)}
           onDone={async () => { setPlacing(null); await load(); onPlaced() }} />
+      )}
+
+      {splitting && (
+        <SplitReceiptModal receipt={splitting} onClose={() => setSplitting(null)}
+          onDone={async () => { setSplitting(null); await load(); onPlaced() }} />
       )}
     </>
   )

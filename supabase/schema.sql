@@ -16292,3 +16292,140 @@ begin
     execute format('revoke execute on function public.%s from public, anon', fn);
   end loop;
 end $$;
+
+-- ---------- One payment, split between several accounts ----------
+--
+-- THE FIRM: "Every payment that cannot be allocated into the suspense should also have an option
+-- to split the payment between different accounts... in case we have, for example, debt
+-- counsellors that pay one payment for five different debtors."
+--
+-- THE LINK HAD TO TURN ROUND FIRST. `bank_statement_lines.payment_id` is one column with a unique
+-- index -- one line, one payment -- right for an ordinary receipt and unable to express a debt
+-- counsellor's R5 000 becoming five payments. The truth is the other way about: a PAYMENT knows
+-- which bank line it came from, and a line can have produced many.
+--
+-- BOTH LINKS ARE KEPT, DELIBERATELY. `payment_id` on the line stays for the one-to-one case,
+-- where it says "this line has been placed" in a single read; `bank_line_id` on the payment is
+-- the authoritative answer to "where did this money come from". On a split the line's payment_id
+-- stays NULL -- no single payment is the answer -- and its status still moves to 'allocated', so
+-- suspense does not offer it again.
+--
+-- AND IT IS WHAT MAKES A WRONG ALLOCATION RECOVERABLE, which the firm asked for in the same
+-- breath: "if we allocated it wrongly or a debtor used the wrong reference number, we can reverse
+-- the payment and allocate it to the right account." Reversing leaves the bank line behind, with
+-- the reference the debtor actually typed still on it.
+alter table public.account_payments
+  add column if not exists bank_line_id uuid references public.bank_statement_lines(id) on delete set null;
+
+create index if not exists account_payments_bank_line_idx
+  on public.account_payments (bank_line_id) where bank_line_id is not null;
+
+comment on column public.account_payments.bank_line_id is
+  'The statement line this payment came from. Many payments may share one line -- a debt '
+  'counsellor paying for five debtors is one credit and five payments.';
+
+update public.account_payments p
+   set bank_line_id = l.id
+  from public.bank_statement_lines l
+ where l.payment_id = p.id and p.bank_line_id is null;
+
+create or replace function public.split_bank_line(p_line uuid, p_parts jsonb)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_part jsonb;
+  v_total numeric := 0;
+  v_count integer := 0;
+  v_account uuid;
+  v_amount numeric;
+  v_payment uuid;
+begin
+  if not public.may_record_payment() then
+    raise exception 'You are not allowed to record payments.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be split between accounts.';
+  end if;
+  if v_line.payment_id is not null or v_line.status = 'allocated' then
+    raise exception 'That receipt has already been placed.';
+  end if;
+
+  -- THE PARTS MUST ADD UP TO THE PAYMENT, EXACTLY, AND THIS IS THE RULE THE FUNCTION IS FOR.
+  -- Short, and money the bank received belongs to nobody and leaves the trust account
+  -- unreconciled; over, and the firm has credited debtors with more than arrived and will remit
+  -- clients for it. Neither is recoverable once a remittance has gone out, because
+  -- account_payments has no delete. CHECKED BEFORE ANYTHING IS WRITTEN, so a split that does not
+  -- balance creates no payments at all rather than three of five.
+  if p_parts is null or jsonb_array_length(p_parts) < 2 then
+    raise exception 'A split needs at least two accounts. Use Place it for a single account.';
+  end if;
+
+  for v_part in select * from jsonb_array_elements(p_parts) loop
+    v_amount := (v_part->>'amount')::numeric;
+    if v_amount is null or v_amount <= 0 then
+      raise exception 'Every part of a split has to be more than nothing.';
+    end if;
+    v_total := v_total + v_amount;
+  end loop;
+
+  if v_total <> v_line.amount then
+    raise exception 'The parts come to % and the payment was %. A split has to account for all of it.',
+      to_char(v_total, 'FM999999990.00'), to_char(v_line.amount, 'FM999999990.00');
+  end if;
+
+  for v_part in select * from jsonb_array_elements(p_parts) loop
+    v_account := (v_part->>'account_id')::uuid;
+    if not exists (select 1 from public.debtor_accounts where id = v_account) then
+      raise exception 'One of those accounts no longer exists.';
+    end if;
+  end loop;
+
+  for v_part in select * from jsonb_array_elements(p_parts) loop
+    v_account := (v_part->>'account_id')::uuid;
+    v_amount := (v_part->>'amount')::numeric;
+    -- EACH PART IS AN ORDINARY PAYMENT: unapproved like every other, split by the engine on
+    -- approval, carrying the bank line so the five can be found together later. `details` keeps
+    -- the bank's own words, which is what somebody reads when asking why a debtor was credited
+    -- R900 out of a R5 000 deposit.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details,
+      source, paid_to_client, created_by, bank_line_id
+    ) values (
+      v_account,
+      (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+      v_amount, 'EFT',
+      coalesce(v_line.reference, left(v_line.description, 60)),
+      v_line.description, 'bank', false, auth.uid(), p_line
+    ) returning id into v_payment;
+    v_count := v_count + 1;
+  end loop;
+
+  -- THE LINE IS PLACED, AND ITS OWN payment_id STAYS NULL -- no single payment is the answer. The
+  -- reverse link carries that, and the status is what keeps it off the suspense list.
+  update public.bank_statement_lines
+     set status = 'allocated', placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_count;
+end $$;
+
+comment on function public.split_bank_line(uuid, jsonb) is
+  'Split one received payment between several accounts -- a debt counsellor paying for five '
+  'debtors. The parts must add up to the payment exactly, checked before anything is written.';
+
+revoke execute on function public.split_bank_line(uuid, jsonb) from public, anon;
+
+-- split_bank_line joins the revoke list. It is guarded by may_record_payment rather than the
+-- Administrator test, so it is not among the RPCs payover.ts calls -- but anon has no business
+-- reaching it either.
+do $$
+begin
+  execute 'revoke execute on function public.split_bank_line(uuid, jsonb) from public, anon';
+end $$;

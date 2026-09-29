@@ -82,3 +82,30 @@ export async function recordManualPayment(input: ManualPayment): Promise<string>
   }
   return String(data)
 }
+
+/**
+ * SPLITTING ONE RECEIPT BETWEEN SEVERAL ACCOUNTS.
+ *
+ * THE FIRM: "this would happen for us in case we have, for example, debt counsellors that pay one
+ * payment for five different debtors."
+ *
+ * NOT IN payover.ts, for the reason capture is not: `split_bank_line` is guarded by
+ * may_record_payment, which is wider than Administrator, and check-finance-is-administrator-only
+ * asserts every RPC in that module is Administrator-only.
+ */
+export interface SplitPart {
+  accountId: string
+  amount: number
+}
+
+export async function splitBankLine(lineId: string, parts: SplitPart[]): Promise<number> {
+  const { data, error } = await supabase.rpc('split_bank_line', {
+    p_line: lineId,
+    /* Amounts as strings, as everywhere: the column is numeric and a JSON number is a double.
+       Here it matters twice over, because the parts have to add up to the penny or the database
+       refuses the whole split. */
+    p_parts: parts.map((p) => ({ account_id: p.accountId, amount: p.amount.toFixed(2) })),
+  })
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
+}
