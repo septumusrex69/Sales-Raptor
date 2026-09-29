@@ -91,7 +91,21 @@ for (const fn of called) {
    */
   const raises = /is distinct from 'Administrator'/.test(body)
   const filters = /current_user_role\(\) = 'Administrator'/.test(body)
-  ok(`...and refuses anybody who is not an Administrator`, raises || filters)
+  /*
+   * A THIRD SHAPE: DELEGATING TO A NAMED GUARD. `approve_payment` asks `may_approve_payment()`
+   * rather than repeating the role test, which is better than inlining it -- one place decides
+   * who may approve.
+   *
+   * THE DELEGATE IS VERIFIED, NOT TRUSTED BY NAME. Accepting any function call here would let
+   * `if not some_helper()` pass while some_helper returned true for everybody; the chain only
+   * counts if the thing at the end of it actually tests for Administrator. Held below.
+   */
+  /* Two forms of the same delegation, because the codebase legitimately has both: a plpgsql
+     function REFUSES, and a `sql` function returning a set FILTERS -- the same split as the
+     inline guards above. */
+  const delegates = /if not public\.may_approve_payment\(\) then/.test(body)
+    || /where public\.may_approve_payment\(\)/.test(body)
+  ok(`...and refuses anybody who is not an Administrator`, raises || filters || delegates)
 
   /*
    * `is distinct from`, NEVER a bare `<>`. current_user_role() reads a row from profiles by
@@ -111,6 +125,18 @@ for (const fn of called) {
   ok(`...and anon cannot execute it`,
     new RegExp(`'${fn}\\(`).test(sql) && /revoke execute on function public\.%s from public, anon/.test(sql))
 }
+
+/*
+ * AND THE GUARD IT DELEGATES TO REALLY IS THE ADMINISTRATOR TEST. This is the end of the chain:
+ * every function that says `if not may_approve_payment()` is only as good as this one line, and
+ * widening it would quietly widen all of them at once.
+ */
+const approveGuard = liveBody('may_approve_payment')
+ok('the approval guard exists', approveGuard !== null)
+ok('...and it is Administrator, nothing wider',
+  /current_user_role\(\) = 'Administrator'/.test(approveGuard ?? ''))
+ok('...with no second role beside it',
+  !/current_user_role\(\) in \(/.test(approveGuard ?? ''))
 
 /* ---------------- the revoke really is applied over the whole list ---------------- */
 

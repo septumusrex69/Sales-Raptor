@@ -15980,3 +15980,315 @@ revoke execute on function
   public.record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)
   from public, anon;
 revoke execute on function public.may_record_payment() from public, anon;
+
+-- ---------- A payment waits to be approved ----------
+--
+-- THE FIRM: "There should be a state of payments and payments that should be approved, for
+-- example, on a daily basis... every day at seven o'clock, it will feed you the payments that are
+-- made. It has to go in a state like this. You should be able to approve every payment singly, or
+-- approve all payments, or highlight certain ones and approve them."
+--
+-- APPROVAL ONLY MEANS SOMETHING IF AN UNAPPROVED PAYMENT DOES NOT COUNT YET. Until now
+-- allocate_payment fired on INSERT, so a receipt was live the instant it landed: the balance
+-- moved, and the payover run could carry it to a client, before anybody had looked. Asked
+-- directly, the firm chose the real gate.
+--
+-- THE PAYOVER RUN NEEDS NO CHANGE AT ALL. It gathers ALLOCATIONS, and an unapproved payment has
+-- none -- so it is invisible to remittance by construction rather than by a second filter
+-- somebody has to remember. One rule, enforced once.
+alter table public.account_payments
+  add column if not exists approved_at timestamptz,
+  add column if not exists approved_by uuid references public.profiles(id) on delete set null;
+
+create index if not exists account_payments_awaiting_idx
+  on public.account_payments (received_at desc)
+  where approved_at is null and reversed_at is null;
+
+comment on column public.account_payments.approved_at is
+  'When somebody accepted this payment. Until it is set the payment has no allocation, so it '
+  'moves no balance and no payover run can see it.';
+
+-- EVERYTHING THAT EXISTED BEFORE THE GATE IS ALREADY APPROVED, and getting this wrong was
+-- immediately visible: a first attempt marked only allocated and pre-cut-over payments, leaving
+-- 3 090 Swordfish-imported receipts waiting -- the screen would have opened on three thousand
+-- historical payments asking somebody to approve them one at a time.
+--
+-- The rule is about TIME, not shape. The firm has been working these for months; approval is
+-- RECOGNISED here, not granted. Dated created_at rather than now(), so the record does not claim
+-- four thousand payments were approved in one second, and approved_by stays null because there is
+-- no honest name to put on it.
+update public.account_payments set approved_at = created_at where approved_at is null;
+create or replace function public.allocate_payment(p_payment_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_acct public.debtor_accounts%rowtype;
+  v_cutover timestamptz;
+  v_vat numeric;
+  v_fee_rate numeric;
+  v_fee_cap numeric;
+  v_tariff_from date;
+  b record;
+  v_rate numeric;
+  v_bands jsonb;
+  v_cumulative numeric;
+  v_mandate timestamptz;
+  s record;
+  v_commission numeric;
+  v_commission_vat numeric;
+  v_status text := 'allocated';
+  v_to_client numeric;
+  v_due_to_bf numeric;
+  v_id uuid;
+begin
+  select * into v_pay from public.account_payments where id = p_payment_id;
+  if not found then return null; end if;
+
+  /* THREE REASONS NOT TO TOUCH IT, and none of them is an error: invented data, money already
+     given back, and history that Swordfish settled and a client has been paid on. */
+  if v_pay.is_demo or v_pay.reversed_at is not null then return null; end if;
+
+  /*
+   * A FOURTH REASON, AND IT IS THE ORDINARY ONE: not approved yet.
+   *
+   * THE FIRM: "there should be a state of payments and payments that should be approved... on a
+   * daily basis." Until now a receipt was live the instant it landed -- the balance moved and the
+   * payover run could carry it to a client before anybody had looked.
+   *
+   * AND THE PAYOVER RUN NEEDS NO SECOND FILTER, which is why the gate is here. A run gathers
+   * ALLOCATIONS; an unapproved payment has none, so it is invisible to remittance by construction
+   * rather than by a rule somebody has to remember in two places.
+   */
+  if v_pay.approved_at is null then return null; end if;
+
+  select vat_rate, finance_cutover_at into v_vat, v_cutover from public.firm_settings limit 1;
+  if v_cutover is null or v_pay.created_at < v_cutover then return null; end if;
+
+  select * into v_acct from public.debtor_accounts where id = v_pay.account_id;
+  if not found then return null; end if;
+
+  /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. */
+  select rate, cap_excl_vat, effective_from into v_fee_rate, v_fee_cap, v_tariff_from
+    from public.annexure_b_tariffs
+   where item = '9'
+     and v_pay.received_at::date >= effective_from
+     and (effective_to is null or v_pay.received_at::date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then
+    raise exception 'No Annexure B item 9 tariff covers %', v_pay.received_at::date;
+  end if;
+
+  select * into b from public.engine_balances(v_acct.id, p_payment_id);
+
+  select * into s from public.finance_split(
+    v_pay.amount, b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description,
+    amount_excl_vat, vat_rate, vat_amount, counts_toward_fee_cap,
+    incurred_at, source, payment_id, billed, action_code
+  ) values (
+    v_acct.id, '9', v_tariff_from, 'Receipt of instalment',
+    s.fee_excl, v_vat * 100, s.fee_vat, false,
+    v_pay.received_at - interval '1 second', 'raptor', p_payment_id, true, 'receipt'
+  ) on conflict do nothing;
+
+  select c.commission_rate, c.commission_bands, c.mandate_signed_at
+    into v_rate, v_bands, v_mandate
+    from public.companies c where c.id = v_acct.company_id;
+  v_rate := coalesce(v_acct.commission_rate, v_rate);
+
+  v_cumulative := 0;
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_acct.company_id
+       and a.status <> 'reversed'
+       and a.payment_id <> p_payment_id
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  v_commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+
+  if v_commission is null then
+    v_status := 'needs_rate';
+    v_commission := 0;
+  end if;
+  v_commission_vat := round(v_commission * v_vat, 2);
+
+  if v_pay.paid_to_client then
+    v_to_client := 0;
+    v_due_to_bf := s.to_interest + s.to_costs + v_commission;
+  else
+    v_to_client := s.to_capital - v_commission - v_commission_vat;
+    v_due_to_bf := 0;
+  end if;
+
+  insert into public.payment_allocations (
+    payment_id, account_id, payment_amount, half_a,
+    receipt_fee_excl, receipt_fee_vat,
+    to_interest, to_costs, to_capital, excess_credit,
+    to_receipt_fee, to_fees,
+    commission, commission_vat, to_client, due_to_bf,
+    capital_before, capital_after, commission_rate, vat_rate,
+    paid_to_client, status, engine_version, computed_at
+  ) values (
+    p_payment_id, v_acct.id, v_pay.amount, s.half_a,
+    s.fee_excl, s.fee_vat,
+    s.to_interest, s.to_costs, s.to_capital, s.excess,
+    0, 0,
+    v_commission, v_commission_vat, v_to_client, v_due_to_bf,
+    b.capital, b.capital - s.to_capital, v_rate, v_vat,
+    v_pay.paid_to_client, v_status, 'v1-5050', now()
+  ) returning id into v_id;
+
+  update public.debtor_accounts
+     set capital_outstanding = greatest(b.capital - s.to_capital, 0),
+         last_payment_at = greatest(coalesce(last_payment_at, v_pay.received_at), v_pay.received_at)
+   where id = v_acct.id;
+
+  return v_id;
+end $$;
+-- WHO MAY APPROVE. Administrator, like the rest of the Finance section -- the screen sits behind
+-- RequireFinance, so a wider rule would grant a permission nobody could reach. Capture stays
+-- wider (may_record_payment): a collector or a liaison may record that money arrived, and
+-- accepting it as true -- which moves a balance and lets a client be paid -- is the Finance
+-- decision.
+create or replace function public.may_approve_payment() returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select public.current_user_role() = 'Administrator'
+$$;
+
+create or replace function public.approve_payment(p_payment uuid)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to approve payments.' using errcode = '42501';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then raise exception 'That payment no longer exists.'; end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed. It cannot be approved.';
+  end if;
+  -- ALREADY APPROVED IS A NO-OP, NOT A FAILURE: two people pressing Approve all at the same
+  -- moment is the ordinary case on a morning's list, and the second must not see an error.
+  if v_pay.approved_at is not null then return p_payment; end if;
+
+  update public.account_payments
+     set approved_at = now(), approved_by = auth.uid()
+   where id = p_payment;
+
+  -- AND THE SPLIT HAPPENS NOW, which is the whole point of the gate.
+  perform public.allocate_payment(p_payment);
+  return p_payment;
+end $$;
+
+-- APPROVING SEVERAL, which is how the firm will work: "approve all payments, or highlight certain
+-- ones and approve them." ONE AT A TIME INSIDE A SINGLE CALL, so a payment that cannot be
+-- approved names itself and the rest still go through -- and because each allocation reads
+-- balances the one before it moved, a set-based update would allocate nothing.
+create or replace function public.approve_payments(p_payments uuid[])
+returns table (approved integer, skipped integer, problems text[])
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_problems text[] := array[]::text[];
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to approve payments.' using errcode = '42501';
+  end if;
+  approved := 0; skipped := 0;
+  foreach v_id in array coalesce(p_payments, array[]::uuid[]) loop
+    begin
+      perform public.approve_payment(v_id);
+      approved := approved + 1;
+    exception when others then
+      skipped := skipped + 1;
+      v_problems := array_append(v_problems, sqlerrm);
+    end;
+  end loop;
+  problems := v_problems;
+  return next;
+end $$;
+
+-- ---------- The day's payments, with what each one would do ----------
+--
+-- THE SPLIT IS SHOWN WITHOUT BEING COMMITTED. `preview_allocation` already does exactly this
+-- arithmetic for the collector's dry run -- the SAME function, so what somebody approves is what
+-- they were shown rather than a second calculation. It also returns the balances before and
+-- after, so no second lateral into engine_balances is needed: asking twice would be two answers
+-- to one question.
+--
+-- UNAPPROVED ONES CARRY OVER BY THEMSELVES. The firm: "if there's a payment that has not been
+-- approved on a specific day, then it carries over and it stays there." No carry-over logic is
+-- needed -- the list is everything not yet approved, whatever day it arrived, the same reason the
+-- diary's carry-over is a view rather than a nightly job that might not run.
+create or replace function public.payments_awaiting_approval()
+returns table (
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric,
+  paid_to_client boolean, method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join lateral public.preview_allocation(p.account_id, p.amount, p.paid_to_client) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+-- The list again, with the approval functions on it. Third time it has caught a new Finance RPC
+-- before it shipped.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()', 'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)', 'money_position(uuid)', 'payover_work_queue(date)',
+    'payover_cycle_tiles(date)', 'payover_run_payments(uuid)', 'finance_exception_jobs()',
+    'payment_audit(uuid)', 'account_ledger(uuid)', 'expected_from_promises(date, date)',
+    'import_bank_lines(text, text, jsonb)', 'place_bank_line(uuid, uuid)',
+    'reconcile_bank_debit(uuid, uuid)', 'unallocated_receipts()', 'unreconciled_payouts()',
+    'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;

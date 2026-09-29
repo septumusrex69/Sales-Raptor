@@ -11,6 +11,7 @@ import { useAppStore } from '../../store/AppStore'
 import { BankImportCard } from './BankImportCard'
 import { UnallocatedReceipts } from './UnallocatedReceipts'
 import { RecordPaymentModal } from './RecordPaymentModal'
+import { AwaitingApproval } from './AwaitingApproval'
 
 /**
  * EVERY PAYMENT WITH ITS FULL ALLOCATION — the one screen where the whole split is visible.
@@ -115,6 +116,12 @@ export function FinancePayments() {
           <Plus size={14} /> Record a payment
         </button>
       </div>
+      {/*
+        WAITING FOR APPROVAL COMES FIRST, above the import and above the ledger. It is the day's
+        work: money arrives, somebody checks what each payment would do, and approves it. Nothing
+        below this has happened until they do.
+      */}
+      <AwaitingApproval refreshKey={imported} onApproved={() => { setImported((n) => n + 1); void load() }} />
       <BankImportCard onImported={() => { setImported((n) => n + 1); void load() }} />
       <UnallocatedReceipts refreshKey={imported} onPlaced={() => { setImported((n) => n + 1); void load() }} />
       {recording && (

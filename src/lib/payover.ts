@@ -769,3 +769,108 @@ export async function reconcileBankDebit(lineId: string, runId: string): Promise
   })
   if (error) throw new Error(error.message)
 }
+
+/* ---------------------------------------------------------------- the day's payments */
+
+/**
+ * A PAYMENT WAITING TO BE APPROVED, with what it WOULD do.
+ *
+ * THE FIRM: "when a payment comes in, it goes into this payment state, where it automatically
+ * calculates everything that is necessary... this is what we will see on a daily basis."
+ *
+ * THE FIGURES ARE A PREVIEW, NOT A RECORD. Nothing has been committed: the balance has not
+ * moved, no fee has been raised and no payover run can see it. Approving is what makes it real.
+ */
+export interface AwaitingPayment {
+  paymentId: string
+  accountId: string
+  caseNumber: string | null
+  accountNumber: string | null
+  debtor: string | null
+  client: string | null
+  receivedOn: string
+  amount: number
+  paidToClient: boolean
+  method: string | null
+  reference: string | null
+  details: string | null
+  source: string | null
+  receiptFee: number
+  receiptFeeVat: number
+  toInterest: number
+  toCosts: number
+  toCapital: number
+  excess: number
+  commission: number
+  commissionVat: number
+  toClient: number
+  dueToBf: number
+  /** False where no commission rate could be found -- the firm's own cut is the one unknown. */
+  hasRate: boolean
+  capitalBefore: number
+  capitalAfter: number
+  /** The bank line it came from, so a wrong reference can be traced to what the debtor typed. */
+  bankLineId: string | null
+  bankDescription: string | null
+}
+
+export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
+  const { data, error } = await supabase.rpc('payments_awaiting_approval')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paymentId: String(r.payment_id),
+    accountId: String(r.account_id),
+    caseNumber: s(r.case_number),
+    accountNumber: s(r.account_number),
+    debtor: s(r.debtor),
+    client: s(r.client),
+    receivedOn: String(r.received_on),
+    amount: Number(r.amount),
+    paidToClient: !!r.paid_to_client,
+    method: s(r.method),
+    reference: s(r.reference),
+    details: s(r.details),
+    source: s(r.source),
+    receiptFee: Number(r.receipt_fee ?? 0),
+    receiptFeeVat: Number(r.receipt_fee_vat ?? 0),
+    toInterest: Number(r.to_interest ?? 0),
+    toCosts: Number(r.to_costs ?? 0),
+    toCapital: Number(r.to_capital ?? 0),
+    excess: Number(r.excess ?? 0),
+    commission: Number(r.commission ?? 0),
+    commissionVat: Number(r.commission_vat ?? 0),
+    toClient: Number(r.to_client ?? 0),
+    dueToBf: Number(r.due_to_bf ?? 0),
+    hasRate: r.has_rate !== false,
+    capitalBefore: Number(r.capital_before ?? 0),
+    capitalAfter: Number(r.capital_after ?? 0),
+    bankLineId: s(r.bank_line_id),
+    bankDescription: s(r.bank_description),
+  }))
+}
+
+export interface ApprovalOutcome {
+  approved: number
+  skipped: number
+  /** One sentence per payment that could not be approved, as the database wrote it. */
+  problems: string[]
+}
+
+/**
+ * Approve some payments.
+ *
+ * ONE CALL FOR ANY NUMBER, because the firm works a morning's list: "approve every payment
+ * singly, or approve all payments, or highlight certain ones and approve them." The database
+ * approves them one at a time inside it -- each allocation reads balances the one before it
+ * moved -- and a payment that cannot go through names itself while the rest still do.
+ */
+export async function approvePayments(paymentIds: string[]): Promise<ApprovalOutcome> {
+  const { data, error } = await supabase.rpc('approve_payments', { p_payments: paymentIds })
+  if (error) throw new Error(error.message)
+  const r = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
+  return {
+    approved: Number(r?.approved ?? 0),
+    skipped: Number(r?.skipped ?? 0),
+    problems: (r?.problems as string[] | null) ?? [],
+  }
+}
