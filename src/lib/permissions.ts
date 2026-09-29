@@ -256,3 +256,32 @@ export function canEditLibrary(role: Pick<User, 'role'>['role'] | undefined): bo
 export function canViewFinance(role: Pick<User, 'role'>['role'] | undefined): boolean {
   return role === 'Administrator'
 }
+
+/**
+ * WHO MAY RECORD THAT MONEY ARRIVED.
+ *
+ * NOT THE SAME QUESTION AS canViewFinance, and keeping them apart is the point. The firm's rule
+ * is about the SPLIT -- "The Finance section is Administrator only. Sales representatives never
+ * see the payment split" -- and capturing a receipt shows none of it. What capture needs is
+ * somebody who works the book or talks to the client, because that is who learns that a debtor
+ * paid the client direct. The firm: "let's do it in the finance section and you will be able to
+ * do it on the account as well."
+ *
+ * AN ALLOW LIST, NOT A DENY LIST. A role added to the firm later is refused until somebody
+ * decides it belongs, which is the safe direction for something that creates money.
+ *
+ * THE SALES SIDE IS ABSENT ON PURPOSE -- CLAUDE.md: fees are charged on ACCOUNTS ONLY and the
+ * sales side raises nothing. A representative has no business writing a ledger entry.
+ *
+ * THE REAL BOUNDARY IS may_record_payment() IN THE DATABASE. This is the browser's copy of it,
+ * for deciding whether to draw a button; the two lists are held against each other by
+ * check-record-payment.
+ */
+export function canRecordPayment(role: Pick<User, 'role'>['role'] | undefined): boolean {
+  return role === 'Administrator'
+    || role === 'Call Centre Manager'
+    || role === 'Pre-legal Team Leader'
+    || role === 'Pre-legal Agent'
+    || role === 'Liaison Manager'
+    || role === 'Liaison'
+}

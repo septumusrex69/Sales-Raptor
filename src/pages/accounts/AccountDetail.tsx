@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import {
-  AlertTriangle, ArrowLeft, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2,
-  Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote,
-  User, Users, X, XCircle,
-} from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { PhoneLink } from '../../components/PhoneLink'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -34,6 +30,8 @@ import type { Selection } from '../../lib/accountAllocation'
 import { timeOnDesk } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
+import { RecordPaymentModal } from '../finance/RecordPaymentModal'
+import { canRecordPayment } from '../../lib/permissions'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -232,6 +230,17 @@ export function AccountDetail() {
   const [disputing, setDisputing] = useState(false)
   /* The message the Escalate box was opened on, and which of its two buttons was pressed. */
   const [classifying, setClassifying] = useState<{ email: AccountEmail; kind: 'dispute' | 'request' } | null>(null)
+  /*
+   * RECORDING A PAYMENT FROM THE ACCOUNT, at the firm's asking: "let's do it in the finance
+   * section and you will be able to do it on the account as well."
+   *
+   * NOT GATED ON canViewFinance. That test is about who may see the payment SPLIT -- the firm's
+   * rule is "sales representatives never see the payment split" -- and capturing a receipt shows
+   * none of it. What capture needs is somebody who works the book or talks to the client, which
+   * is who learns that a debtor paid the client direct. See may_record_payment() in the database,
+   * which is the boundary this only mirrors.
+   */
+  const [payingIn, setPayingIn] = useState(false)
   const [freezing, setFreezing] = useState(false)
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
@@ -766,6 +775,15 @@ export function AccountDetail() {
         * agrees to it. ADMINISTRATOR ONLY -- it draws nothing at all for a collector, because it
         * shows the firm's own cut, which is the one figure the company dashboard may never carry.
         */}
+      {canRecordPayment(currentUser?.role) && (
+        <div className="flex justify-end">
+          <button type="button" onClick={() => setPayingIn(true)}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+              border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+            <Banknote size={14} /> Record a payment
+          </button>
+        </div>
+      )}
       <MoneyPanel accountId={account.id} />
       <LedgerPanel accountId={account.id} />
     </div>
@@ -1397,6 +1415,19 @@ export function AccountDetail() {
         is the words already in the box, the attachments that come across with it, and the option
         of adding it to the dispute already open instead of raising a second one.
       */}
+      {payingIn && (
+        <RecordPaymentModal
+          fixedAccount={{
+            id: account.id,
+            caseNumber: account.caseNumber,
+            accountNumber: account.accountNumber,
+            name: [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'No name',
+          }}
+          onClose={() => setPayingIn(false)}
+          onDone={reload}
+        />
+      )}
+
       {classifying && (
         <EscalateModal
           accountId={account.id}

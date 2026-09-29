@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, Loader2, Search } from 'lucide-react'
+import { AlertTriangle, Check, FileUp, Loader2, Paperclip, Search } from 'lucide-react'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
-import { recordManualPayment, DuplicatePayment } from '../../lib/payover'
+import { uploadDocument } from '../../lib/accountWorkspace'
+import { recordManualPayment, DuplicatePayment, ProofRequired } from '../../lib/recordPayment'
+import { useAuth } from '../../store/AuthContext'
 
 /**
  * RECORDING ONE PAYMENT BY HAND.
@@ -23,16 +25,31 @@ import { recordManualPayment, DuplicatePayment } from '../../lib/payover'
  */
 const METHODS = ['EFT', 'Cash', 'Debit order', 'Card', 'Cheque', 'Other']
 
-export function RecordPaymentModal({ onClose, onDone }: {
+export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
   onClose: () => void
   onDone: () => Promise<void> | void
+  /**
+   * The account this was opened on, where it was opened on one.
+   *
+   * ON THE ACCOUNT PAGE THERE IS NOTHING TO SEARCH FOR -- the debtor is already on the screen,
+   * and offering a search there invites recording a payment against the account somebody meant
+   * to look at rather than the one they are on.
+   */
+  fixedAccount?: { id: string; caseNumber: string | null; accountNumber: string | null; name: string }
 }) {
+  const { currentUser } = useAuth()
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<DebtorAccount[]>([])
   const [looking, setLooking] = useState(false)
   const [account, setAccount] = useState<DebtorAccount | null>(null)
+  const accountId = fixedAccount?.id ?? account?.id ?? null
+
+  /* The client's confirmation. Uploaded before the payment, so a PTC is never recorded without
+     it -- see the note on the file input below. */
+  const [proof, setProof] = useState<{ id: string; name: string } | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   const [amount, setAmount] = useState('')
   const [receivedOn, setReceivedOn] = useState(today)
@@ -62,25 +79,51 @@ export function RecordPaymentModal({ onClose, onDone }: {
   }, [term])
 
   const value = Number(amount.replace(/[^\d.]/g, ''))
-  const ready = !!account && Number.isFinite(value) && value > 0 && !!receivedOn
+  /* A PTC is not ready until its confirmation is attached. The database refuses one without --
+     this only stops the button offering to do something that will be refused. */
+  const ready = !!accountId && Number.isFinite(value) && value > 0 && !!receivedOn
+    && (!paidToClient || !!proof)
+
+  async function attach(file: File) {
+    if (!accountId) return
+    setUploading(true); setError(null)
+    try {
+      const { document } = await uploadDocument({
+        accountId,
+        file,
+        kind: 'Proof of payment',
+        uploadedBy: currentUser?.id ?? null,
+        uploadedByName: currentUser?.name ?? null,
+        /* NO PERUSAL FEE. This is the CLIENT's confirmation, uploaded so the firm can invoice the
+           CLIENT -- item 3 recovers time the DEBTOR caused, and billing them for the firm's own
+           evidence would not survive being asked about. */
+        chargePerusalFee: false,
+      })
+      setProof({ id: document.id, name: document.name })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That confirmation could not be attached.')
+    } finally { setUploading(false) }
+  }
 
   async function save(confirmDuplicate: boolean) {
-    if (!account || !ready || busy) return
+    if (!accountId || !ready || busy) return
     setBusy(true); setError(null)
     try {
       await recordManualPayment({
-        accountId: account.id,
+        accountId: accountId as string,
         amount: value,
         receivedOn,
         paidToClient,
         method,
         reference: reference.trim() || null,
         confirmDuplicate,
+        proofDocumentId: proof?.id ?? null,
       })
       await onDone()
       onClose()
     } catch (e) {
       if (e instanceof DuplicatePayment) { setDuplicate(e.message); setBusy(false); return }
+      if (e instanceof ProofRequired) { setError(e.message); setBusy(false); return }
       setError(e instanceof Error ? e.message : 'That payment could not be recorded.')
       setBusy(false)
     }
@@ -90,7 +133,14 @@ export function RecordPaymentModal({ onClose, onDone }: {
     <Modal title="Record a payment" onClose={onClose} width={520}>
       <div className="space-y-3">
         {/* ---- which account ---- */}
-        {!account ? (
+        {fixedAccount ? (
+          <div className="rounded-lg bg-slate-50 px-3 py-2">
+            <p className="text-[13px] text-slate-800">{fixedAccount.name}</p>
+            <p className="text-[11px] text-slate-500">
+              {fixedAccount.caseNumber} · {fixedAccount.accountNumber}
+            </p>
+          </div>
+        ) : !account ? (
           <>
             <label className="block">
               <span className="text-sm font-medium text-slate-700">Which account?</span>
@@ -160,6 +210,48 @@ export function RecordPaymentModal({ onClose, onDone }: {
             </label>
           ))}
         </fieldset>
+
+        {/* ---- the client's confirmation ---- */}
+        {/*
+          THE FIRM: "whenever a PTC is uploaded, it should ask you for a confirmation and you
+          should upload the confirmation. It just will be in the form of a PDF or an email or
+          something like that."
+
+          ONLY ON A PTC, and the asymmetry is the point. A trust receipt is WITNESSED -- the money
+          is in the firm's own bank and the statement says so. A PTC is CLAIMED: the firm never
+          sees the money, and on the strength of that claim it reduces a debtor's balance AND
+          invoices the client for commission on money it never handled. The confirmation is what
+          that invoice rests on.
+        */}
+        {paidToClient && (
+          <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+            <p className="text-sm font-medium text-slate-700">The client's confirmation</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              A PDF, an email, a screenshot — whatever the client sent showing the debtor paid
+              them. Required: we never saw this money, so this is what the commission invoice
+              rests on. The debtor is not charged for it.
+            </p>
+            {proof ? (
+              <p className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-[var(--c-green)]">
+                <Paperclip size={12} /> {proof.name}
+                <button type="button" onClick={() => setProof(null)}
+                  className="text-slate-500 underline ml-1">Replace</button>
+              </p>
+            ) : (
+              <label className={`mt-2 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5
+                rounded-md border border-slate-200 text-slate-600 ${accountId ? 'cursor-pointer hover:border-[#c9a052] hover:bg-gold-50' : 'opacity-40'}`}>
+                {uploading ? <Loader2 size={12} className="animate-spin" /> : <FileUp size={12} />}
+                {uploading ? 'Attaching…' : 'Attach the confirmation'}
+                <input type="file" className="hidden" disabled={!accountId || uploading}
+                  accept=".pdf,.eml,.msg,image/*"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void attach(f) }} />
+              </label>
+            )}
+            {!accountId && (
+              <p className="text-[11px] text-slate-400 mt-1">Pick the account first.</p>
+            )}
+          </div>
+        )}
 
         {/* ---- how much, when, how ---- */}
         <div className="grid grid-cols-2 gap-3">

@@ -594,6 +594,17 @@ export async function uploadDocument(input: {
   kind?: string | null
   uploadedBy?: string | null
   uploadedByName?: string | null
+  /**
+   * WHETHER THE DEBTOR PAYS FOR THIS ONE. Defaults true, which is the firm's rule: saving a
+   * document is a perusal, once a day.
+   *
+   * FALSE FOR A PTC CONFIRMATION, and the reason is the same one that keeps a client's own
+   * paperwork off a debtor's bill. Item 3 recovers time the DEBTOR caused somebody to spend. A
+   * PTC confirmation is the CLIENT's letter, uploaded so the firm can invoice the CLIENT for
+   * commission on money it never handled -- billing the debtor for the firm's own evidence
+   * would not survive being asked about.
+   */
+  chargePerusalFee?: boolean
 }): Promise<{ document: AccountDocument; charge: ChargeResult | null }> {
   const safe = input.file.name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
   const path = `${input.accountId}/${crypto.randomUUID()}-${safe}`
@@ -629,7 +640,9 @@ export async function uploadDocument(input: {
    * AFTER the row lands: a document that would not save has not been perused, and charging for it
    * first is how a debtor pays for a file nobody has.
    */
-  const charge = await chargePerusal({ accountId: input.accountId, createdBy: input.uploadedBy })
+  const charge = input.chargePerusalFee === false
+    ? null
+    : await chargePerusal({ accountId: input.accountId, createdBy: input.uploadedBy })
   return { document: toDocument(data), charge }
 }
 

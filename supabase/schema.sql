@@ -15815,3 +15815,168 @@ begin
     execute format('revoke execute on function public.%s from public, anon', fn);
   end loop;
 end $$;
+
+-- ---------- A PTC arrives with its proof, or it does not arrive ----------
+--
+-- THE FIRM: "whenever a PTC is uploaded, it should ask you for a confirmation and you should
+-- upload the confirmation. It just will be in the form of a PDF or an email or something."
+--
+-- WHY THIS ONE NEEDS PAPER AND A TRUST RECEIPT DOES NOT. A trust receipt is WITNESSED: the money
+-- is in the firm's own bank and the statement says so. A PTC is CLAIMED -- somebody reports that
+-- a debtor paid the client direct, the firm never sees the money, and on the strength of that
+-- claim it reduces a debtor's balance AND raises an invoice to the client for commission on money
+-- it never handled. The proof is what that invoice rests on, and it is the client's own
+-- confirmation rather than the firm's note of a telephone call.
+--
+-- ENFORCED HERE RATHER THAN ON THE FORM, because two screens now capture payments -- Finance and
+-- the account page -- and a rule living in a component is a rule the second screen forgets.
+alter table public.account_documents
+  add column if not exists payment_id uuid references public.account_payments(id) on delete set null;
+
+create index if not exists account_documents_payment_idx
+  on public.account_documents (payment_id) where payment_id is not null;
+
+comment on column public.account_documents.payment_id is
+  'The payment this document is the proof of. Required on a PTC: the firm never saw that money, '
+  'so the client''s confirmation is what the commission invoice rests on.';
+
+-- WHO MAY RECORD A PAYMENT AT ALL.
+--
+-- NOT THE SAME QUESTION AS WHO MAY SEE THE FINANCE SECTION, and keeping them apart is the point.
+-- The firm's rule is about the SPLIT -- "Sales representatives never see the payment split" --
+-- and capturing a receipt does not show it. What capture needs is somebody who works the book or
+-- talks to the client, because that is who learns a PTC happened.
+--
+-- AN ALLOW LIST, NOT A DENY LIST. A role added to the firm later is refused until somebody
+-- decides it should be there, which is the safe direction for a function that creates money.
+-- Held against canRecordPayment in permissions.ts by check-record-payment.
+--
+-- THE SALES SIDE IS ABSENT ON PURPOSE. CLAUDE.md: fees are charged on ACCOUNTS ONLY, and the
+-- sales side raises nothing -- a representative has no business creating a ledger entry.
+create or replace function public.may_record_payment() returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select public.current_user_role() in (
+    'Administrator', 'Call Centre Manager', 'Pre-legal Team Leader',
+    'Pre-legal Agent', 'Liaison Manager', 'Liaison'
+  )
+$$;
+
+-- The parameter list changes, so the old function is a separate OVERLOAD rather than a
+-- replacement: left in place it would be a second door with no proof requirement behind it.
+drop function if exists public.record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean);
+
+create or replace function public.record_manual_payment(
+  p_account uuid,
+  p_amount numeric,
+  p_received_on date,
+  p_paid_to_client boolean,
+  p_method text default 'EFT',
+  p_reference text default null,
+  p_details text default null,
+  p_confirm_duplicate boolean default false,
+  p_proof_document uuid default null
+) returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_payment uuid;
+  v_dupes integer;
+  v_doc_account uuid;
+  v_doc_payment uuid;
+begin
+  if not public.may_record_payment() then
+    raise exception 'You are not allowed to record payments.' using errcode = '42501';
+  end if;
+
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'A payment has to be more than nothing.';
+  end if;
+  if p_received_on is null then
+    raise exception 'Say when the money was received.';
+  end if;
+  -- NOT IN THE FUTURE: it would land in a payover cycle that has not been cut, and change what a
+  -- client is owed this month for money that has not arrived.
+  if p_received_on > (now() at time zone 'Africa/Johannesburg')::date then
+    raise exception 'That date is in the future. A payment is recorded when the money is in.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  -- THE PROOF, AND ONLY ON A PTC. Checked BEFORE anything is written, so a refusal leaves no
+  -- payment behind -- a PTC recorded and then failing to attach its confirmation is exactly the
+  -- state this rule exists to prevent, and account_payments cannot be deleted.
+  if coalesce(p_paid_to_client, false) then
+    if p_proof_document is null then
+      raise exception 'A PTC needs the client''s confirmation attached — a PDF, an email, a screenshot.'
+        using errcode = '23514';
+    end if;
+    select account_id, payment_id into v_doc_account, v_doc_payment
+      from public.account_documents where id = p_proof_document;
+    if v_doc_account is null then
+      raise exception 'That confirmation is no longer on the account.';
+    end if;
+    -- ON THIS ACCOUNT. A document id from another debtor's file would attach one client's proof
+    -- to another client's invoice.
+    if v_doc_account <> p_account then
+      raise exception 'That confirmation belongs to a different account.';
+    end if;
+    -- AND NOT ALREADY SPENT. One confirmation proves one payment; re-used, a single letter from a
+    -- client would justify a second reduction of the debt.
+    if v_doc_payment is not null then
+      raise exception 'That confirmation is already the proof of another payment.';
+    end if;
+  end if;
+
+  -- THE DUPLICATE IS A QUESTION, NOT A REFUSAL: a debtor genuinely can pay the same amount twice
+  -- in a day. But it is ASKED, because account_payments has no delete. A reversed payment never
+  -- counts -- re-capturing one that bounced and came back must not be blocked.
+  if not p_confirm_duplicate then
+    select count(*) into v_dupes
+      from public.account_payments
+     where account_id = p_account
+       and amount = p_amount
+       and reversed_at is null
+       and (received_at at time zone 'Africa/Johannesburg')::date = p_received_on;
+    if v_dupes > 0 then
+      raise exception 'There is already a payment of % on this account on %. Confirm if this is a second one.',
+        to_char(p_amount, 'FM999999990.00'), to_char(p_received_on, 'YYYY-MM-DD')
+        using errcode = '23505';
+    end if;
+  end if;
+
+  -- received_at IS THE DAY THE MONEY CAME IN, not the day it was typed: the payover cycle cuts on
+  -- it, so a PTC a client reports three weeks late belongs in the month the debtor actually paid.
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details,
+    source, paid_to_client, created_by
+  ) values (
+    p_account,
+    (p_received_on::timestamp at time zone 'Africa/Johannesburg'),
+    p_amount,
+    coalesce(nullif(btrim(p_method), ''), 'EFT'),
+    nullif(btrim(p_reference), ''),
+    nullif(btrim(p_details), ''),
+    'manual', coalesce(p_paid_to_client, false), auth.uid()
+  ) returning id into v_payment;
+
+  -- THE PROOF IS TIED TO THE PAYMENT, so the document list says what it is for and the payment can
+  -- be traced back to what justified it.
+  if p_proof_document is not null then
+    update public.account_documents set payment_id = v_payment where id = p_proof_document;
+  end if;
+
+  return v_payment;
+end $$;
+
+comment on function public.record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid) is
+  'Capture one payment by hand, from Finance or from the account. The only way a PTC can be '
+  'recorded -- and a PTC is refused without the client''s confirmation attached.';
+
+revoke execute on function
+  public.record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)
+  from public, anon;
+revoke execute on function public.may_record_payment() from public, anon;

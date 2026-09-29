@@ -172,64 +172,17 @@ ok('...and the payouts through theirs', /rpc\('unreconciled_payouts'\)/.test(lib
 ok('amounts are sent as decimal strings, not JSON numbers',
   /amount: l\.amount\.toFixed\(2\)/.test(lib))
 
-/* ---------------- a payment typed in, and the PTC that has no other way in ---------------- */
+/* ---------------- capture by hand is a different rule, held elsewhere ---------------- */
 
 /*
- * THE FIRM: "we should be able to load a manual payment... and we need to account for the PTCs
- * that we usually type in manually."
- *
- * THE PTC HALF IS THE ONLY DOOR, not a convenience. A debtor paying the CLIENT direct never
- * touches the firm's trust account, so no statement the firm can upload will ever carry it. The
- * engine has split PTCs correctly since it was written; nothing could create one.
+ * record_manual_payment USED TO BE ASSERTED HERE and has moved to check-record-payment, because
+ * it stopped belonging to this file's subject. The bank import is Administrator-only Finance
+ * work; capture by hand is allowed to whoever works the book or talks to the client, and the
+ * firm asked for it on the account page as well. Two different rules -- keeping both in one file
+ * is how the weaker one quietly becomes the assertion for both.
  */
-const manual = liveFn('record_manual_payment')
-ok('a payment can be recorded by hand', manual !== null)
-ok('...Administrator only', /is distinct from 'Administrator'/.test(manual ?? ''))
-ok('...and it is the manual path, not the bank one', /'manual', coalesce\(p_paid_to_client, false\)/.test(manual ?? ''))
-
-/*
- * THE FLAG IS CARRIED THROUGH RATHER THAN ASSUMED. Hard-coding false here would make the form's
- * only consequential question do nothing -- and the failure is invisible until a remittance is
- * drawn, because every figure would still be arithmetically right.
- */
-ok('...the PTC flag reaches the payment', /coalesce\(p_paid_to_client, false\)/.test(manual ?? ''))
-ok('...and the two directions are genuinely different in the engine',
-  /if v_pay\.paid_to_client then[\s\S]{0,200}?v_to_client := 0;/.test(liveFn('allocate_payment') ?? ''))
-/* TRUST: the firm owes the client. PTC: the client owes the firm. Measured on one account, same
-   amount, same day -- to_client 370.62 / due_to_bf 0, against to_client 0 / due_to_bf 612.50. */
-ok('...trust money leaves the firm owing the client',
-  /v_to_client := s\.to_capital - v_commission - v_commission_vat;/.test(liveFn('allocate_payment') ?? ''))
-ok('...and a PTC leaves the client owing the firm',
-  /v_due_to_bf := s\.to_interest \+ s\.to_costs \+ v_commission;/.test(liveFn('allocate_payment') ?? ''))
-
-/* THE THREE REFUSALS, each verified against staging. */
-ok('...refusing nothing or less', /p_amount is null or p_amount <= 0/.test(manual ?? ''))
-/* A PAYMENT DATED FORWARD lands in a payover cycle that has not been cut, and changes what a
-   client is owed this month for money that has not arrived. */
-ok('...refusing a date in the future',
-  /p_received_on > \(now\(\) at time zone 'Africa\/Johannesburg'\)::date/.test(manual ?? ''))
-ok('...and an account that is gone',
-  /not exists \(select 1 from public\.debtor_accounts where id = p_account\)/.test(manual ?? ''))
-
-/*
- * THE DUPLICATE IS A QUESTION, NOT A REFUSAL. A debtor genuinely can pay the same amount twice in
- * a day -- refusing outright sends somebody to the database. But it is ASKED, because
- * account_payments has no delete: a duplicate can only be reversed, leaving both rows for ever.
- */
-ok('...asking about a same-day, same-amount payment', /if not p_confirm_duplicate then/.test(manual ?? ''))
-ok('...and never counting a reversed one as the duplicate',
-  /and reversed_at is null/.test(manual ?? ''))
-/* RAISED WITH 23505 ON PURPOSE, so the screen can tell this apart from a real failure and offer
-   the confirm rather than showing an error. */
-ok('...raised so the screen can ask rather than fail', /using errcode = '23505'/.test(manual ?? ''))
-ok('...and the browser tells the two apart', /error\.code === '23505'/.test(lib))
-ok('...without ever defaulting the confirmation to true',
-  /input\.confirmDuplicate \?\? false/.test(lib))
-
-/* received_at IS THE DAY THE MONEY CAME IN. The payover cycle cuts on it, so a PTC reported three
-   weeks late belongs in the month the debtor actually paid. */
-ok('...dated when the money came in, not when it was typed',
-  /\(p_received_on::timestamp at time zone 'Africa\/Johannesburg'\)/.test(manual ?? ''))
+ok('capture by hand is held in its own check',
+  /record_manual_payment/.test(read('scripts/qa/check-record-payment.mjs')))
 
 console.log(`\ncheck-bank-import: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
