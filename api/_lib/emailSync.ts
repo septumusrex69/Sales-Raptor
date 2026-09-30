@@ -25,6 +25,9 @@ export interface EmailConnectionRow {
   last_seen_uid_sent: number | null
   /* A high-water mark per folder, for everything beyond INBOX, Junk and Sent. See otherFolders. */
   folder_uids?: Record<string, number> | null
+  /* When this mailbox was last read to the end. Read by sync-all, which skips a mailbox somebody
+     pressed a moment ago rather than walking eighteen folders of it again. */
+  last_synced_at?: string | null
 }
 
 /** On the very first sync of a mailbox there's no watermark yet — pull only the most recent messages instead of its entire history. */

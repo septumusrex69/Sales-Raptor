@@ -2,7 +2,7 @@ import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } f
 import { useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
@@ -2160,6 +2160,21 @@ function EmailIntegrationCard() {
   const [submitting, setSubmitting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
+  /*
+   * A SECOND BUTTON FOR EVERYBODY'S MAILBOX, at the firm's asking: "give an option to sync your
+   * email address and to sync for the whole company for now, just for in the interim."
+   *
+   * THE CASE IS THEIR OWN AND IT IS EXACT. An account allocated to somebody sends from that
+   * person's address and the debtor replies to it -- "however, it doesn't sync because... only
+   * after she's been logged in. So if she's not logged in or it did not sync, how does that sync
+   * work?" It did not: the whole company's mail was read once a night at 05:00 UTC by the cron and
+   * by nothing else. Now a collector who can see the reply is sitting in a colleague's inbox can
+   * go and get it.
+   *
+   * ITS OWN SPINNER, not `syncing`. The two can be pressed one after the other and a shared flag
+   * would put the spinner on the wrong button and disable the one that is free.
+   */
+  const [syncingAll, setSyncingAll] = useState(false)
 
   useEffect(() => {
     if (!accessToken) return
@@ -2209,6 +2224,41 @@ function EmailIntegrationCard() {
     if (!confirm('Disconnect this mailbox? Sending and automatic email logging will stop.')) return
     await fetch('/api/email/disconnect', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } })
     setStatus({ connected: false })
+  }
+
+  /*
+   * WHAT IT SAYS AFTERWARDS IS THE WHOLE POINT OF THE BUDGET. The run stops itself before Vercel
+   * kills it and hands back how far it got, so "9 of 15, press again" reaches the person instead
+   * of a spinner that dies. Skipped is not a failure and is worded as what it is: somebody else
+   * just did those.
+   */
+  async function handleSyncEveryone() {
+    if (!accessToken) return
+    setSyncingAll(true)
+    setSyncMessage(null)
+    try {
+      const res = await fetch('/api/email/sync-all', {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSyncMessage(body.error ?? 'Could not sync the company mailboxes.')
+      } else {
+        const bits = [
+          `${body.syncedMailboxes ?? 0} of ${body.mailboxes ?? 0} mailboxes read`,
+          `${body.logged ?? 0} new message${body.logged === 1 ? '' : 's'}`,
+        ]
+        if (body.skipped) bits.push(`${body.skipped} synced moments ago`)
+        if (body.failed) bits.push(`${body.failed} could not be reached`)
+        if (body.remaining) bits.push(`${body.remaining} left — press again to finish`)
+        setSyncMessage(`${bits.join(' · ')}.`)
+        await refreshSyncedData()
+      }
+    } catch {
+      setSyncMessage('Could not reach the server.')
+    } finally {
+      setSyncingAll(false)
+    }
   }
 
   async function handleSync() {
@@ -2273,6 +2323,16 @@ function EmailIntegrationCard() {
               className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5 disabled:opacity-50"
             >
               <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
+            </button>
+            {/* BESIDE YOUR OWN, because the question a person has is "is the mail in yet" and the
+                answer is sometimes in somebody else's inbox. Worded as what it does rather than as
+                a scope: "Sync everyone" reads at a glance, "Sync all connections" does not. */}
+            <button
+              onClick={handleSyncEveryone}
+              disabled={syncingAll}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Users size={13} className={syncingAll ? 'animate-pulse' : ''} /> Sync everyone
             </button>
             <button
               onClick={handleDisconnect}
