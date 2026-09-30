@@ -4,7 +4,7 @@ import { Modal } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
 import { raiseQuery, stageForAssignee, REQUEST_KINDS, type AccountQuery } from '../../lib/accountQueries'
 import {
-  categoryExamples, explanationMissing,
+  categoryExamples, classificationMissing, explanationMissing, CLASSIFICATION_REQUIRED,
   CATEGORY_NEEDING_EXPLANATION, EXPLANATION_MIN_LENGTH, QUERY_CATEGORIES,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER, type EscalationKind,
 } from '../../lib/disputeCategories'
@@ -268,6 +268,17 @@ export function EscalateModal({
    * stray keystroke do not pass, short enough that a real sentence always does.
    */
   const needsExplanation = ESCALATION_KINDS[kind].needsCategory && explanationMissing(category, description)
+  /*
+   * AND THE CLASSIFICATION ITSELF IS NOT OPTIONAL. The firm: "you should be able to say what is a
+   * dispute about." It was a picker whose first option was None, and None is what twelve of the
+   * twenty disputes on the book carry -- so the reports that group by it describe two disputes in
+   * five. Nothing is guessed on their behalf: the list is the firm's own, the tenth entry is
+   * Other, and Other still has to say what it was.
+   *
+   * ON A LINK IT IS NOT ASKED, because the classification belongs to the dispute this email is
+   * being added to and that dispute already carries one.
+   */
+  const needsClassification = !linkedTo && classificationMissing(kind, category)
 
   /*
    * The debtor pays when the dispute is given to somebody.
@@ -317,6 +328,13 @@ export function EscalateModal({
      */
     if (!linkedTo && !description.trim()) {
       setError('Say what this is about in your own words — that is what the ticket is worked from.')
+      return
+    }
+    /* THE SAME SECOND LOCK ON THE CLASSIFICATION. raiseQuery and the endpoint both refuse it too,
+       and so does the database -- this is the one that can say it in the box rather than as a
+       Postgres error. */
+    if (needsClassification) {
+      setError(CLASSIFICATION_REQUIRED)
       return
     }
     setBusy(true); setError(null)
@@ -756,7 +774,10 @@ export function EscalateModal({
             <span className="text-sm font-medium text-slate-700">Classification</span>
             <select value={category} onChange={(e) => setCategory(e.target.value)}
               className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 bg-white">
-              <option value="">None</option>
+              {/* A PLACEHOLDER THAT CANNOT BE CHOSEN, not "None". It starts unselected so nobody is
+                  given a default they did not mean -- Amount dispute first in the list would become
+                  what half the book said -- and it is `disabled` so the way out of it is forwards. */}
+              <option value="" disabled>Pick one…</option>
               {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
             </select>
             {/* The examples sit under the choice, where somebody on a call can actually read them.
@@ -841,6 +862,13 @@ export function EscalateModal({
           </p>
         )}
 
+        {needsClassification && !needsExplanation && (
+          <p className="text-sm text-slate-500">
+            Pick what the debtor is disputing. It is what every dispute report groups by, and what
+            tells whoever picks this up which kind of answer it needs.
+          </p>
+        )}
+
         {needsExplanation && (
           <p className="text-sm text-slate-500">
             &ldquo;Other&rdquo; needs an explanation — at least {EXPLANATION_MIN_LENGTH} characters saying what this
@@ -852,7 +880,7 @@ export function EscalateModal({
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={submit}
-            disabled={busy || (!linkedTo && !description.trim()) || (!linkedTo && needsExplanation)}
+            disabled={busy || (!linkedTo && !description.trim()) || (!linkedTo && needsExplanation) || needsClassification}
             className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-40"
           >
             <ShieldAlert size={15} />

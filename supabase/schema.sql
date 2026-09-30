@@ -17182,3 +17182,191 @@ as $$
     'Liaison Manager', 'Liaison'
   )
 $$;
+
+
+-- ============================================================================
+-- A DISPUTE SAYS WHAT IT IS ABOUT.
+--
+-- THE FIRM: "you can dispute should be compulsory. You should be able to say about what is a
+-- dispute about."
+--
+-- THE COLUMN WAS OPTIONAL ON PURPOSE AND THE REASON EXPIRED. The table's own comment records it:
+-- "it could be anything: already paid, goods not delivered, wrong person, wrong amount. A required
+-- taxonomy would be a guess dressed as a field." That was true of the SEVEN LABELS SOMEBODY HERE
+-- INVENTED. It stopped being true the day the firm wrote their own ten, because a taxonomy the
+-- people using it produced is not a guess -- and the tenth is Other, so there is no dispute it
+-- cannot classify.
+--
+-- WHAT OPTIONAL COST: twelve of the twenty disputes on the book carry no classification, which is
+-- 60% of every report that groups by one. A field two people in three skip is not optional, it is
+-- a field that does not work.
+--
+-- A TRIGGER RATHER THAN A CHECK CONSTRAINT, and that is the whole design of this migration.
+-- Postgres enforces a CHECK on UPDATE as well as INSERT, even one added NOT VALID -- so a
+-- constraint would make those twelve existing disputes unopenable: assigning one, answering one,
+-- closing one would be refused with errcode 23514 over a field the screen does not even offer
+-- after the dispute is raised. The rule the firm asked for is about RAISING a dispute. So:
+--
+--   INSERT       a dispute must carry a classification.
+--   UPDATE       a dispute that already has one may never have it taken away.
+--   UPDATE       a dispute raised before today, with none, stays workable exactly as it is.
+--
+-- The last line is the imported-history rule in miniature: what is already recorded is what was
+-- recorded, and nothing here backfills a guess into a legal objection. Those twelve are on the
+-- firm's own test accounts; the reports will show them as unclassified for ever, which is honest.
+--
+-- NOT CONSTRAINED TO THE TEN VALUES, for the same reason `request_for` is not: the list lives in
+-- src/lib/disputeCategories.ts, the screens are the only writers, and a second copy of ten labels
+-- in SQL is a thing that drifts silently. What this refuses is the ABSENCE of an answer.
+-- ============================================================================
+create or replace function public.dispute_says_what_it_is_about() returns trigger
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+begin
+  -- Only a dispute is classified. A request says what it wants through `request_for`, and nobody
+  -- classifies an agent asking a team leader for a ruling.
+  if new.kind is distinct from 'dispute' then return new; end if;
+  if new.category is not null and length(btrim(new.category)) > 0 then return new; end if;
+
+  -- A dispute that was ALREADY an unclassified dispute may carry on being worked. `old.kind` is
+  -- part of the test on purpose: 'help' changed to 'dispute' arrives with a null category (the
+  -- category_only_on_dispute constraint guarantees it), and that is a dispute being raised.
+  if tg_op = 'UPDATE'
+     and old.kind = 'dispute'
+     and (old.category is null or length(btrim(old.category)) = 0) then
+    return new;
+  end if;
+
+  raise exception 'Say what the dispute is about — pick a classification.' using errcode = '23502';
+end $$;
+
+comment on function public.dispute_says_what_it_is_about() is
+  'A dispute must be classified when it is raised, and a classification may not be removed. '
+  'Disputes raised before this rule keep working unclassified: nothing guesses what they were.';
+
+-- EVERY UPDATE, not `update of kind, category`. A column list means the trigger fires only when
+-- that column is in the SET clause, and the browser sends partial patches -- so the exemption above
+-- would never run for the twelve legacy rows and the removal guard would be one PostgREST quirk
+-- away from silence. Firing on every update costs a function call on a table with 31 rows.
+drop trigger if exists queries_dispute_says_what_it_is_about on public.account_queries;
+create trigger queries_dispute_says_what_it_is_about
+  before insert or update on public.account_queries
+  for each row execute function public.dispute_says_what_it_is_about();
+
+comment on column public.account_queries.category is
+  'WHAT the debtor is objecting to, from QUERY_CATEGORIES. Required on a dispute when it is raised '
+  '-- the firm: "you should be able to say what a dispute is about". Null on every other kind, '
+  'which account_queries_category_only_on_dispute refuses outright.';
+
+
+-- ============================================================================
+-- AN IMPORTED RECEIPT IS REVERSIBLE TOO.
+--
+-- THE FIRM: "any payment should be able to be reversed, even if it's going to be imported from
+-- Swordfish."
+--
+-- WHAT THE GUARD SAID, AND WHY IT WAS WRONG TWICE.
+--
+-- It said: "that payment came across from Swordfish. Imported history is not corrected here -- ask
+-- first", on the argument that a reversed imported receipt would come back as a fresh copy and be
+-- re-split under TODAY'S schedule against figures a client was invoiced on years ago. That is the
+-- thing swordfishImport rule 1 exists to prevent, so the caution was the right instinct.
+--
+-- THE FIRST WAY IT WAS WRONG IS THE FIRM'S DECISION, and that is the end of the argument: a
+-- receipt that went on the wrong debtor is on the wrong debtor whichever system recorded it, and a
+-- reversal somebody has to ASK for is a correction that does not happen on a Friday afternoon.
+--
+-- THE SECOND WAY MATTERS MORE, BECAUSE IT MEANS THE PROTECTION WAS NEVER THERE. The guard read
+-- `swordfish_payment_id is not null`, and that column is NULL on all 1 070 imported receipts on the
+-- book -- the import identifies them by `source = 'swordfish'`. So it refused nothing, an imported
+-- receipt has been reversible since the day the function was written, and a comment two paragraphs
+-- long was describing a rule the database did not have. A guard nobody has tested against real
+-- rows is worth exactly what this one was worth.
+--
+-- SO WHAT ACTUALLY KEEPS THE COPY HONEST, and it is not this function:
+--
+--   THE FEE IS PRICED ON THE RECEIPT'S OWN DATE. `allocate_payment` dates the item 9 fee at the
+--   payment's `received_at`, and `scheduleFor` takes the ACTION's date -- so a 2019 receipt raised
+--   again is priced on the 2019 schedule. The re-split the guard feared is a re-split on the same
+--   figures. (This was not true until it was fixed earlier; the guard and the bug were the same
+--   week's work.)
+--
+--   THE IMPORTED ROW IS NOT EDITED. The reversal writes `reversed_at` and the reason, and nothing
+--   else -- and `reverse_payment_allocation` cancels only `annexure_item = '9' and source =
+--   'raptor'`. Every one of the 59 158 imported fees carries a null annexure_item and source
+--   'swordfish', so not one of them can be touched by a reversal. What the client was invoiced on
+--   stays exactly as it was imported, which is the rule the guard claimed to be keeping.
+--
+--   `swordfish_payment_id` IS STILL NOT CARRIED ONTO THE COPY. It is unique -- two rows cannot
+--   claim one Swordfish receipt -- and the copy is honestly a new Raptor receipt of the same money.
+--   Nor is `receipt_fee_legacy`: that is what the OLD system charged, and the engine prices this
+--   one.
+--
+-- PROBED BEFORE THIS RAN, on a real imported receipt inside a transaction that rolled back: R 2 000
+-- reversed, R 1 770 of capital handed back, the raptor item 9 fee cancelled, the allocation marked
+-- reversed. It already worked; what was missing was permission to do it.
+-- ============================================================================
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator may reverse a payment.' using errcode = '42501';
+  end if;
+  -- The reason is not decoration: it becomes the cancellation reason on the receipt fee, and it
+  -- is what the queue shows beside the copy so the next person knows why it is back.
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  -- ONCE. The trigger on reversed_at gives the capital back; fired twice it gives it back twice.
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  -- ONLY AN APPROVED PAYMENT COMES BACK, and that is what stops the loop. Reversing something still
+  -- sitting in the queue -- the copy of a cheque that turned out to have bounced -- simply takes it
+  -- out. Without that, every reversal would breed another copy and a bounced cheque could never be
+  -- got rid of.
+  --
+  -- swordfish_payment_id is NOT carried: it is unique, and the copy is honestly a new Raptor
+  -- receipt of the same money rather than a second claim on one imported row. receipt_fee_legacy is
+  -- not carried either -- that is what the old system charged, and the engine prices this one, on
+  -- the schedule in force on the date the money actually arrived.
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id
+    ) values (
+      -- received_at is the BANK's date and does not move. The money arrived when it arrived; what
+      -- was wrong was where it was put. It is also what prices the new receipt fee.
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo, v_pay.bank_line_id, auth.uid(), v_pay.id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+comment on function public.reverse_payment(uuid, text) is
+  'Reverses one receipt, Administrator only, with the reason kept. An APPROVED one comes back as a '
+  'fresh unapproved copy in the day''s queue; an unapproved one simply leaves it. An IMPORTED '
+  'receipt reverses like any other, at the firm''s instruction -- the imported row itself is never '
+  'edited, and the copy is priced on the date the money arrived, not today. Returns the copy''s id, '
+  'or null.';

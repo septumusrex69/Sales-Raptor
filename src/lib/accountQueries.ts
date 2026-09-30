@@ -48,6 +48,7 @@ import {
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
   type DisputeStage as QueryStage, type QueryOutcome, type QueryEffect, type EscalationKind,
   type ClientSection, REQUEST_KINDS,
+  classificationMissing, explanationMissing, CLASSIFICATION_REQUIRED,
 } from './disputeCategories'
 
 export {
@@ -452,6 +453,19 @@ export async function raiseQuery(input: {
   allegedOn?: string | null
 }): Promise<{ query: AccountQuery; charge: ChargeResult | null }> {
   const isDispute = (input.kind ?? 'dispute') === 'dispute'
+  /*
+   * A DISPUTE SAYS WHAT IT IS ABOUT. The firm: "you should be able to say what is a dispute
+   * about." Refused here rather than only in the box, because the box is not the only caller --
+   * and refused BEFORE the insert, so the failure is a sentence in the firm's words rather than
+   * the trigger's errcode arriving as a Postgres string. The trigger is still there: this is the
+   * message, that is the guarantee.
+   */
+  if (classificationMissing(input.kind, input.category)) throw new Error(CLASSIFICATION_REQUIRED)
+  /* AND "OTHER" IS NOT A CLASSIFICATION ON ITS OWN. Same rule the box draws, asked here so it
+     holds on every path into the table. */
+  if (explanationMissing(input.category, input.description)) {
+    throw new Error('\u201cOther\u201d needs an explanation \u2014 say what the debtor is actually disputing.')
+  }
   /*
    * ALLEGED IS ALWAYS SET ON A DISPUTE, WRITTEN OR NOT. A written dispute was alleged the day it
    * arrived if it was never alleged before it, and the deemed-undisputed notice quotes the date --

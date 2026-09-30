@@ -4,7 +4,10 @@ import { credentialsKeyProblem } from '../crypto.js'
 import { adminClient, requireCaller } from '../auth.js'
 import { fetchAttachment } from '../emailSync.js'
 import { chargeItemWith } from '../../../src/lib/chargeEngine.js'
-import { escalationNote, escalationChargeable } from '../../../src/lib/disputeCategories.js'
+import {
+  escalationNote, escalationChargeable,
+  classificationMissing, explanationMissing, CLASSIFICATION_REQUIRED,
+} from '../../../src/lib/disputeCategories.js'
 
 const BUCKET = 'account-documents'
 
@@ -196,6 +199,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   /*
+   * AND A DISPUTE RAISED FROM AN EMAIL IS CLASSIFIED LIKE ANY OTHER. The firm: "you should be able
+   * to say what is a dispute about." The classification is asked in the same box on this path -- it
+   * simply posts here instead of inserting -- so refusing it is the one thing that keeps this door
+   * from being the way round the rule. Not on a LINK: the dispute being added to already carries
+   * one.
+   */
+  const category = typeof body.category === 'string' ? body.category.trim() : ''
+  if (!queryId && classificationMissing(kind, category)) {
+    res.status(400).json({ error: CLASSIFICATION_REQUIRED })
+    return
+  }
+  if (!queryId && explanationMissing(category, description)) {
+    res.status(400).json({
+      error: '\u201cOther\u201d needs an explanation \u2014 say what the debtor is actually disputing.',
+    })
+    return
+  }
+
+  /*
    * THE TICKET: either the one already open on this account, or a new one.
    *
    * On the insert, `alleged_on` AND `received_on` go on together on a dispute: it arrived in
@@ -283,7 +305,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         account_id: accountId,
         kind,
         description,
-        category: kind === 'dispute' ? (body.category?.trim() || null) : null,
+        category: kind === 'dispute' ? (category || null) : null,
         request_for: requestFor,
         owner_id: body.ownerId || null,
         /* Where it lands follows who it was given to; unassigned, it sits with the desk it came to. */

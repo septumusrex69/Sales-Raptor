@@ -58,6 +58,34 @@ export function explanationMissing(category: string | null | undefined, descript
   return category === CATEGORY_NEEDING_EXPLANATION && description.trim().length < EXPLANATION_MIN_LENGTH
 }
 
+/**
+ * IS THE DISPUTE UNCLASSIFIED? Asked in one place, because four places ask it.
+ *
+ * THE FIRM: "you should be able to say what is a dispute about." It was optional, and the schema
+ * comment said why: "it could be anything: already paid, goods not delivered, wrong person, wrong
+ * amount. A required taxonomy would be a guess dressed as a field." That reasoning was sound
+ * against the SEVEN LABELS SOMEBODY INVENTED. It stopped being sound the moment the firm wrote
+ * their own ten -- a taxonomy the people using it produced is not a guess, and the tenth is
+ * "Other", so there is no dispute it cannot classify.
+ *
+ * WHAT OPTIONAL ACTUALLY COST: twelve of the twenty disputes on the book carry no classification
+ * at all, which is 60% of every report that groups by it. A field two people in three skip is not
+ * an optional field, it is a field that does not work.
+ *
+ * ONLY A DISPUTE. A request says what it wants through `request_for`, and nobody classifies an
+ * agent asking a team leader for a ruling -- `needsCategory` is the one place that is decided.
+ */
+export function classificationMissing(
+  kind: EscalationKind | null | undefined,
+  category: string | null | undefined,
+): boolean {
+  if (!ESCALATION_KINDS[kind ?? 'dispute']?.needsCategory) return false
+  return !category || category.trim().length === 0
+}
+
+/** What the refusal says, in the firm's words, wherever the refusal is raised. */
+export const CLASSIFICATION_REQUIRED = 'Say what the dispute is about — pick a classification.'
+
 export function categoryExamples(value: string | null | undefined): string | null {
   return QUERY_CATEGORIES.find((c) => c.value === value)?.examples ?? null
 }

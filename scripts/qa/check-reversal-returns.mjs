@@ -84,13 +84,44 @@ ok('...and the bank line it came from', /v_pay\.bank_line_id/.test(rev ?? ''))
 ok('...and not the imported id, which is unique', !/swordfish_payment_id,/.test(rev ?? ''))
 
 /*
- * AND IMPORTED HISTORY IS NOT REVERSED HERE AT ALL. A Swordfish receipt reversed and raised again
- * would be re-split under TODAY's schedule against figures a client was invoiced on years ago --
- * the one thing swordfishImport rule 1 exists to prevent. Corrections are the firm's decision,
- * case by case, so it says to ask.
+ * AND AN IMPORTED RECEIPT REVERSES LIKE ANY OTHER, WHICH IS THE OPPOSITE OF WHAT THIS ASSERTED.
+ *
+ * THE FIRM: "any payment should be able to be reversed, even if it's going to be imported from
+ * Swordfish."
+ *
+ * It used to hold that the function REFUSED a Swordfish receipt, on the argument that the copy
+ * would be re-split under today's schedule against figures a client was invoiced on years ago.
+ * Two things were wrong with that, and the second is why this assertion is inverted rather than
+ * merely deleted: the guard read `swordfish_payment_id is not null`, and that column is NULL on
+ * all 1 070 imported receipts on the book -- the import marks them with `source = 'swordfish'`.
+ * It refused nothing. A check that passed on it was checking that a sentence existed.
+ *
+ * SO WHAT IS ASSERTED NOW IS THE THING THAT ACTUALLY KEEPS THE COPY HONEST, in two halves, both
+ * outside this function:
  */
-ok('an imported payment is refused rather than re-split',
-  /swordfish_payment_id is not null then[\s\S]{0,200}?Imported history is not corrected here/.test(rev ?? ''))
+ok('an imported receipt is not refused', !/swordfish_payment_id is not null/.test(rev ?? ''))
+/*
+ * ONE: THE COPY IS PRICED ON THE DAY THE MONEY ARRIVED. `allocate_payment` dates the item 9 fee at
+ * the payment's own received_at and `scheduleFor` takes the ACTION's date, so a 2019 receipt raised
+ * again is priced on the 2019 schedule. This is the assertion the old one should always have been:
+ * the re-split the guard feared is a re-split on the same figures, and if this line ever stops
+ * being true the reversal really does rewrite an invoice.
+ */
+const alloc = liveFn('allocate_payment')
+ok('the engine exists to be asked', !!alloc)
+ok('...and dates the receipt fee at the day the money arrived',
+  /v_pay\.received_at/.test(alloc ?? ''))
+/*
+ * TWO: THE IMPORTED ROW ITSELF IS NEVER EDITED, and the fee cancellation is where that is decided.
+ * `reverse_payment_allocation` cancels only the engine's own item 9 -- every one of the 59 158
+ * imported fees carries a null annexure_item and source 'swordfish', so a reversal cannot reach
+ * one. Widen that WHERE and a reversal starts cancelling fees a client has already been invoiced
+ * on, which is what swordfishImport rule 1 exists to prevent.
+ */
+const undo = liveFn('reverse_payment_allocation')
+ok('the reversal trigger exists', !!undo)
+ok('...and cancels only the fees Raptor raised itself',
+  /annexure_item = '9' and source = 'raptor'/.test(undo ?? ''))
 
 /* ---------------- and the reversed row is still there ---------------- */
 
