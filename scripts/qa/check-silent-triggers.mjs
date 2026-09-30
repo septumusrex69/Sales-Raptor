@@ -143,9 +143,20 @@ function triggerStatement(name, table) {
   }
 
   if (body) {
-    /* The role test, which the audit replaced with `if false then` to no effect anywhere. */
+    /*
+     * The role test, which the audit replaced with `if false then` to no effect anywhere.
+     *
+     * NOW `is distinct from` RATHER THAN A BARE `<>`, AND REQUIRED THAT WAY. This assertion used
+     * to demand the bare form, which is the fail-open comparison CLAUDE.md records:
+     * current_user_role() is NULL with no session, `null <> 'Administrator'` is NULL, `if NULL
+     * then` does not run, and every restoring line below it is skipped -- for exactly the caller
+     * that should be refused hardest. So the check now holds the SAFE form, and the old spelling
+     * fails here rather than sitting in the schema looking deliberate.
+     */
     ok('...and it lets an Administrator through and nobody else',
-      /if\s+public\.current_user_role\(\)\s*<>\s*'Administrator'\s+then/i.test(body))
+      /if\s+public\.current_user_role\(\)\s+is distinct from\s+'Administrator'\s+then/i.test(body))
+    ok('...failing closed rather than open when there is no session',
+      !/current_user_role\(\)\s*<>/.test(body))
 
     /*
      * ALL FIVE LINKS, each re-asserted ONLY where the old value was not null. The `is not null`
@@ -202,9 +213,15 @@ function triggerStatement(name, table) {
     /*
      * THE GUARD, and the exact mutation that proved this file needed a third block: replaced with
      * `if false then`, the trigger still fires, still returns the row, and restores nothing.
+     *
+     * AND `is distinct from`, FOR THE SAME REASON AS ITS SIBLING ABOVE -- with the sharper edge
+     * that this one now also protects the capability grants, so a comparison that yields NULL
+     * would leave a self-edit free to write them.
      */
     ok('...and it lets an Administrator through and nobody else',
-      /if\s+public\.current_user_role\(\)\s*<>\s*'Administrator'\s+then/i.test(body))
+      /if\s+public\.current_user_role\(\)\s+is distinct from\s+'Administrator'\s+then/i.test(body))
+    ok('...failing closed rather than open when there is no session',
+      !/current_user_role\(\)\s*<>/.test(body))
 
     /*
      * THE THREE FIELDS, one assertion each so a failure names the one somebody removed.

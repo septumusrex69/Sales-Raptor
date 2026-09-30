@@ -17699,3 +17699,112 @@ revoke all on function public.all_capabilities() from public;
 grant execute on function public.has_capability(text) to authenticated;
 grant execute on function public.role_capabilities(text) to authenticated;
 grant execute on function public.all_capabilities() to authenticated;
+
+-- ============================================================================
+-- NOBODY GRANTS THEMSELVES A CAPABILITY.
+--
+-- A HOLE OPENED BY THE MIGRATION BEFORE THIS ONE, found while building the screen that edits these
+-- columns and asking the obvious question: what stops somebody editing them on themselves?
+--
+-- NOTHING DID. `profiles_update` deliberately lets anybody update THEIR OWN row -- that is how a
+-- person edits their name, phone and email signature -- and the trigger that exists precisely to
+-- stop a self-edit smuggling something privileged through reverted `role`, `status` and `team_id`.
+-- It knew nothing about `grants`, because `grants` did not exist when it was written.
+--
+-- So between those two migrations, any signed-in person could PATCH their own profile with
+-- grants = ['finance.view','payment.approve','payment.reverse'] and have every one of them:
+-- has_capability reads the column directly, and the Finance section, the approval queue and the
+-- reversal button are all downstream of it. Staging only, and no client data was exposed -- but it
+-- is exactly the shape of thing that ships unnoticed, because the feature WORKS either way.
+--
+-- AND THE SECOND FAULT IS OLDER AND IS WRITTEN DOWN IN CLAUDE.md: `current_user_role() <> 'x'`
+-- FAILS OPEN ON NULL. current_user_role() reads a row from profiles by auth.uid(), so it is NULL
+-- when there is no session; `null <> 'Administrator'` is NULL; `if NULL then` does not run; and
+-- the protection is SKIPPED for exactly the caller it should refuse hardest. RLS stops that caller
+-- reaching the table today, so it was never reachable -- which is why it survived. It guards
+-- capability grants now, so it is fixed rather than left as a second lock that does not turn.
+--
+-- REVERTED, NOT RAISED, which is this trigger's existing habit and is kept deliberately: a person
+-- editing their own name sends the whole row back, grants included, and refusing that would make
+-- every self-edit fail for everybody. Silently keeping the old values is what lets the honest
+-- write through and the dishonest one do nothing.
+-- ============================================================================
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+  end if;
+  return new;
+end;
+$$;
+
+comment on function public.protect_profile_privileged_fields() is
+  'Silently keeps role, status, team and the capability grants at their old values for anybody but '
+  'an Administrator. Reverts rather than raising, because an ordinary self-edit sends the whole '
+  'row back and refusing it would break editing your own name.';
+
+drop trigger if exists protect_profile_privileged_fields on public.profiles;
+create trigger protect_profile_privileged_fields
+  before update on public.profiles
+  for each row execute function public.protect_profile_privileged_fields();
+
+-- ============================================================================
+-- THE OTHER GUARD THAT FAILED OPEN, FIXED IN THE SAME BREATH.
+--
+-- Fixing `protect_profile_privileged_fields` meant reading its sibling, and it has exactly the
+-- same fault, written the same way and for the same reason:
+-- `current_user_role() <> 'Administrator'`.
+--
+-- CLAUDE.md RECORDS THE TRAP AND THIS IS IT. current_user_role() reads a row from profiles by
+-- auth.uid(), so it is NULL when there is no session. `null <> 'Administrator'` is NULL, `if NULL
+-- then` does not run, and the whole restoring block is SKIPPED -- for precisely the caller that
+-- should be refused hardest. RLS keeps that caller off user_emails today, so it was never
+-- reachable, which is why it has sat here.
+--
+-- FIXED RATHER THAN LEFT, because leaving a known fail-open comparison standing next to one that
+-- was just fixed is worse than either: the next person reads the two and concludes the difference
+-- was deliberate.
+--
+-- WHAT IT DOES IS UNCHANGED. It re-asserts a link that was ALREADY set, so filing UNFILED mail
+-- stays open to everybody -- that is the everyday action -- and only MOVING already-filed mail is
+-- an Administrator's, because that raises a second item 6 fee on the account it lands on.
+-- ============================================================================
+create or replace function public.protect_filed_mail_target()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip every line below.
+  if public.current_user_role() is distinct from 'Administrator' then
+    -- Only ever re-assert a link that was ALREADY set. Filing unfiled mail stays open to
+    -- everyone, which is the everyday action.
+    if old.linked_account_id is not null then new.linked_account_id := old.linked_account_id; end if;
+    if old.linked_lead_id is not null then new.linked_lead_id := old.linked_lead_id; end if;
+    if old.linked_deal_id is not null then new.linked_deal_id := old.linked_deal_id; end if;
+    if old.linked_company_id is not null then new.linked_company_id := old.linked_company_id; end if;
+    if old.linked_contact_id is not null then new.linked_contact_id := old.linked_contact_id; end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_filed_mail_target on public.user_emails;
+create trigger protect_filed_mail_target
+  before update on public.user_emails
+  for each row execute function public.protect_filed_mail_target();

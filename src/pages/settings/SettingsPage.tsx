@@ -2,13 +2,14 @@ import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } f
 import { useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapsed'
-import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
 import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
+import { CapabilitiesModal } from '../../components/settings/CapabilitiesModal'
 import { customFields as initialCustomFields, industries, leadSources as initialLeadSources } from '../../data/mockData'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import { useAuth } from '../../store/AuthContext'
@@ -333,6 +334,12 @@ function UsersTab() {
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [removingUser, setRemovingUser] = useState<User | null>(null)
   const [emailUser, setEmailUser] = useState<User | null>(null)
+  /*
+   * WHO IS HAVING THEIR PERMISSIONS LOOKED AT. The firm asked for Swordfish's shape -- "you can
+   * choose, for example, for a user to have a management template, but you can add them more
+   * functionality" -- and the role picker in the row beside this is the template half of it.
+   */
+  const [capabilityUser, setCapabilityUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   /*
@@ -452,6 +459,17 @@ function UsersTab() {
                       </button>
                       <button onClick={() => setSignatureUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email signature">
                         <ImageIcon size={14} />
+                      </button>
+                      {/*
+                        * WHAT THEY MAY DO, beside the role rather than inside the edit box. The
+                        * role is a template and this is the departure from it, so they are two
+                        * different questions about one person -- and burying the second inside the
+                        * first would mean opening a form about somebody's name and team to answer
+                        * "may she approve a payment?".
+                      */}
+                      <button onClick={() => setCapabilityUser(u)} className="text-slate-400 hover:text-brand-600"
+                        title={`What ${u.name.split(' ')[0]} may do`}>
+                        <KeyRound size={14} />
                       </button>
                       <button onClick={() => setEditingUser(u)} className="text-slate-400 hover:text-brand-600" title="Edit user">
                         <Pencil size={14} />
@@ -600,6 +618,16 @@ function UsersTab() {
       )}
       {signatureUser && (
         <AdminSignatureModal user={signatureUser} onClose={() => setSignatureUser(null)} onSave={(patch) => updateUser(signatureUser.id, patch)} />
+      )}
+      {capabilityUser && (
+        <CapabilitiesModal
+          user={capabilityUser}
+          onClose={() => setCapabilityUser(null)}
+          /* BOTH COLUMNS AT ONCE, because they are derived together from one set of ticks -- a
+             capability is the template's, or added, or removed, and writing one column without the
+             other would leave a name in both. */
+          onSave={(patch) => updateUser(capabilityUser.id, patch)}
+        />
       )}
     </Card>
 
