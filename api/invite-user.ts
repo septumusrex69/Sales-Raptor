@@ -132,7 +132,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const patch: Record<string, string> = {}
     if (role) patch.role = role
     if (teamId) patch.team_id = teamId
-    await admin.from('profiles').update(patch).eq('id', data.user.id)
+    const { error: patchError } = await admin.from('profiles').update(patch).eq('id', data.user.id)
+    if (patchError) {
+      res.status(400).json({ error: `The invitation was sent, but the role could not be set: ${patchError.message}` })
+      return
+    }
+    /*
+     * AND READ IT BACK, WHICH IS THE PART THAT WOULD HAVE CAUGHT THIS.
+     *
+     * THE FIRM: "I added Camille as an administrator and she came on as a salesperson."
+     * `protect_profile_privileged_fields` reverts role, status and team by assigning over `new` --
+     * it does NOT raise. So the update above succeeded, `error` was null, this endpoint returned
+     * ok, and the box told an administrator their colleague had the role they had just chosen. She
+     * did not. There is no error anywhere in that chain to check for.
+     *
+     * A trigger that reverts in silence can only be caught by looking at what is actually in the
+     * row, so that is what this does. The cause is fixed in the database -- the server is allowed
+     * through now -- and this stays, because the next silent revert will be a different one.
+     */
+    const { data: saved } = await admin
+      .from('profiles').select('role, team_id').eq('id', data.user.id).maybeSingle()
+    const got = (saved ?? {}) as { role?: string; team_id?: string | null }
+    const wrong: string[] = []
+    if (role && got.role !== role) wrong.push(`role is ${got.role ?? 'unset'} rather than ${role}`)
+    if (teamId && got.team_id !== teamId) wrong.push('the team did not take')
+    if (wrong.length > 0) {
+      res.status(500).json({
+        error: `${email.trim()} was invited, but ${wrong.join(' and ')}. The database refused the `
+          + 'change without reporting an error. Set it on their row in the list once they accept, '
+          + 'and tell whoever maintains Raptor — this should not happen.',
+      })
+      return
+    }
   }
 
   res.status(200).json({ ok: true, userId: data.user?.id })
@@ -176,6 +207,8 @@ async function addFormerUser(
     return
   }
 
+  /* status AND role are both protected columns -- see the read-back on the invite path above.
+     Reverted here, the record would sit on the list as an ACTIVE colleague who has left. */
   const { error: profileError } = await admin.from('profiles')
     .update({ name, status: 'Inactive', ...(role ? { role } : {}) })
     .eq('id', data.user.id)

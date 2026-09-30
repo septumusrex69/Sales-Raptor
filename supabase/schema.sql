@@ -19151,3 +19151,75 @@ begin
     end;
   end loop;
 end $$;
+
+-- ============================================================================
+-- THE SERVER IS THE ADMINISTRATOR'S HAND, AND THIS TRIGGER HAD STOPPED BELIEVING IT.
+--
+-- THE FIRM: "I added Camille as an administrator and she came on as a salesperson."
+--
+-- WHAT HAPPENED, AND IT WAS THIS SESSION'S DOING. `handle_new_user` creates every profile as a
+-- Sales Representative; `api/invite-user.ts` then updates the row to the role the administrator
+-- chose. That update runs on the SERVICE KEY, which has no signed-in user, so
+-- `current_user_role()` is NULL inside this trigger -- and the comparison was changed earlier the
+-- same day from a bare `<>` to `is distinct from` to close a fail-open. With `<>`,
+-- `null <> 'Administrator'` evaluated to NULL, the `if` never fired, and the server's update went
+-- through. The invite path had been working BECAUSE of the bug that was fixed.
+--
+-- So the trigger did exactly what it says and reverted the role. SILENTLY -- it assigns over `new`
+-- rather than raising -- so PostgREST returned success, the endpoint returned ok, and the box said
+-- "Invite sent ... they'll appear with the role you just set."
+--
+-- IT BROKE THE OTHER DOOR TOO, and worse. Recording somebody who has LEFT writes
+-- `status: 'Inactive'` and their role in one update; both are protected columns, so both were
+-- reverted and the departed colleague's profile stayed ACTIVE on the list. (They still could not
+-- sign in -- that account is banned at the auth layer -- but the firm was shown a live colleague
+-- who is gone.)
+--
+-- THE FIX IS NOT TO LOOSEN THE COMPARISON BACK. Relying on a NULL comparison to let the server
+-- through is the same hole pointing the other way: it also let through anybody PostgREST could not
+-- identify. The server is a DIFFERENT CALLER and is named as one.
+--
+-- `current_setting('role')` IS THE ONE THING THAT SURVIVES THE DEFINER BOUNDARY. This function is
+-- `security definer` owned by postgres, so inside it `current_user` is 'postgres' for EVERY caller
+-- -- authenticated, anon and service_role alike -- and testing that would open the door to
+-- everyone. PostgREST issues `set local role` per request from the key's own claims, and a GUC is
+-- transaction state that SECURITY DEFINER does not touch. Measured on staging: an authenticated
+-- request reads 'authenticated' in here, the service key reads 'service_role'.
+--
+-- AND THE SERVER HAS ALREADY DONE THE CHECK THIS TRIGGER EXISTS TO DO. invite-user.ts refuses
+-- anybody who is not an Administrator (`callerIsAdmin`) before it creates or writes anything. The
+-- service key never reaches the browser -- it is a server-only secret -- so nothing a user can
+-- send makes PostgREST run their request under that role.
+-- ============================================================================
+create or replace function public.protect_profile_privileged_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* THE SERVER, ACTING FOR AN ADMINISTRATOR IT HAS ALREADY VERIFIED. See the note above for why
+     this is the role GUC and not current_user, and why it cannot be reached from a browser. */
+  if coalesce(current_setting('role', true), '') = 'service_role' then
+    return new;
+  end if;
+
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip the whole block.
+  if public.current_user_role() is distinct from 'Administrator' then
+    new.role := old.role;
+    new.status := old.status;
+    new.team_id := old.team_id;
+    -- WHAT A PERSON MAY DO IS NOT SOMETHING THEY DECIDE. Both columns, because a revoke somebody
+    -- clears on themselves is a grant by another route.
+    new.grants := old.grants;
+    new.revokes := old.revokes;
+  end if;
+  return new;
+end $$;
+
+comment on function public.protect_profile_privileged_fields() is
+  'Reverts role, status, team and capability grants unless the caller is an Administrator, or the '
+  'server acting on the service key -- which api/invite-user.ts uses only after checking the '
+  'caller is an Administrator itself. Reverts silently rather than raising, so a caller that is '
+  'refused still gets a success: anything relying on this must not report the write as applied.';

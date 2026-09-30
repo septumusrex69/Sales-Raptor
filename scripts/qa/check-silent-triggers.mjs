@@ -224,6 +224,34 @@ function triggerStatement(name, table) {
       !/current_user_role\(\)\s*<>/.test(body))
 
     /*
+     * AND THE SERVER GETS THROUGH, which is a carve-out this trigger did not have and cost the
+     * firm a colleague's role.
+     *
+     * THE FIRM: "I added Camille as an administrator and she came on as a salesperson."
+     * `api/invite-user.ts` creates the account, then updates the profile to the chosen role --
+     * on the SERVICE KEY, which has no signed-in user. `current_user_role()` is NULL there, so
+     * once the comparison above became `is distinct from` (correctly), the server's own update
+     * started being reverted. Silently. The endpoint saw success and told the administrator the
+     * role was set.
+     *
+     * IT IS THE `role` GUC AND IT HAS TO BE. This function is `security definer` owned by
+     * postgres, so `current_user` inside it is 'postgres' for EVERY caller -- authenticated, anon
+     * and service_role alike. A carve-out written `current_user = 'service_role'` would never
+     * match; written `current_user = 'postgres'` it would match everybody and silently delete the
+     * whole protection. PostgREST sets the role GUC per request and SECURITY DEFINER does not
+     * touch it: measured on staging, an authenticated request reads 'authenticated' in here.
+     */
+    ok('...while the server, which has already checked the caller, is let through',
+      /current_setting\('role', true\)[\s\S]{0,40}=\s*'service_role'/.test(body))
+    /* THE TRAP, ASSERTED AS AN ABSENCE because it is the version that looks right and is not. */
+    ok('...not by a current_user that is the definer for everybody',
+      !/current_user\s*=\s*'/.test(body))
+    /* AND NOBODY ELSE IS NAMED. 'postgres' or 'supabase_admin' here would be a second door. */
+    const roles = [...body.matchAll(/'(service_role|postgres|supabase_admin|authenticated|anon)'/g)]
+      .map((m) => m[1])
+    check('...and the server is the only caller excused', [...new Set(roles)], ['service_role'])
+
+    /*
      * THE THREE FIELDS, one assertion each so a failure names the one somebody removed.
      *
      *   role     what the app is allowed to show and do
@@ -260,7 +288,12 @@ for (const name of [
   ok(`${name} runs as its definer`, /security\s+definer/i.test(body))
   /* And with a fixed search_path, or a table of the same name earlier on somebody's path is the
      table it silently protects instead. */
-  ok(`...with search_path pinned`, /set\s+search_path\s*=\s*public/i.test(body))
+  /* EITHER SPELLING. `set search_path = public` and `set search_path to 'public'` pin the same
+     thing, and CLAUDE.md writes the second -- a check that knew only the first reported a
+     correctly written function as unpinned. The guarantee is that it is fixed, not how it is
+     spelt. */
+  ok(`...with search_path pinned`,
+    /set\s+search_path\s*(=|to)\s*'?public'?/i.test(body))
   /*
    * NONE OF THEM RAISES, and that is the documented design rather than an oversight -- CLAUDE.md
    * says
