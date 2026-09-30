@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Trash2, X } from 'lucide-react'
-import { inputClass } from '../ui/Modal'
+import { inputClass, controlClass } from '../ui/Modal'
 import { accountFieldsNeeded } from '../../lib/messageTemplates'
 import {
   CHANNELS, DAY_UNITS, NODE_KINDS, dayLabel, orderedNodes, triggerMeta, type Channel,
@@ -236,7 +236,7 @@ export function StepDrawer({
             <Field label={`Workflow day (${DAY_UNITS[workflow.version.dayUnit].label})`}>
               <div className="flex items-center gap-2">
                 <input type="number" min={workflow.version.dayUnit === 'business' ? 1 : 0}
-                  className={`${inputClass} w-24`} value={draft.day} disabled={readOnly}
+                  className={`${controlClass} w-24`} value={draft.day} disabled={readOnly}
                   onChange={(e) => set('day', Number(e.target.value))} />
                 <span className="text-xs text-slate-500">
                   {DAY_UNITS[workflow.version.dayUnit].label} from{' '}
@@ -256,7 +256,7 @@ export function StepDrawer({
               Period given to the debtor
             </legend>
             <div className="flex items-center gap-2">
-              <input type="number" min={1} placeholder="None" className={`${inputClass} w-20`}
+              <input type="number" min={1} placeholder="None" className={`${controlClass} w-20`}
                 disabled={readOnly} value={draft.deadlineDays ?? ''}
                 onChange={(e) => {
                   const days = e.target.value === '' ? null : Number(e.target.value)
@@ -264,7 +264,7 @@ export function StepDrawer({
                      a period, it is twenty of something nobody has said. */
                   setDraft((d) => ({ ...d, deadlineDays: days, deadlineUnit: days === null ? null : (d.deadlineUnit ?? 'calendar') }))
                 }} />
-              <select className={`${inputClass} w-40`} disabled={readOnly || draft.deadlineDays === null}
+              <select className={`${controlClass} w-40`} disabled={readOnly || draft.deadlineDays === null}
                 value={draft.deadlineUnit ?? 'calendar'}
                 onChange={(e) => set('deadlineUnit', e.target.value as DeadlineUnit)}>
                 <option value="calendar">calendar days</option>

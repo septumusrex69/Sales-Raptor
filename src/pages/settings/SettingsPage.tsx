@@ -5,7 +5,7 @@ import { useCollapsed, useSettingsNavCollapsed } from '../../lib/sidebarCollapse
 import { Plus, Trash2, Pencil, Check, X, Mail, Link2, Unlink, RefreshCw, Image as ImageIcon, Volume2, VolumeX, PhoneCall, ChevronDown, ChevronRight, Search, Users, KeyRound } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { UserAvatar, Avatar } from '../../components/ui/Avatar'
-import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
 import { SignatureEditor } from '../../components/settings/SignatureEditor'
 import { DataImportTab } from '../../components/settings/DataImportTab'
 import { CollectorsPanel } from '../../components/settings/CollectorsPanel'
@@ -1543,11 +1543,27 @@ function TeamsTab() {
           }}
           className="flex gap-2 mt-4 pt-4 border-t border-slate-100"
         >
-          <input className={inputClass} placeholder="New team name" value={name} onChange={(e) => setName(e.target.value)} />
-          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)} className={`${inputClass} w-40 shrink-0`}>
+          {/* flex-1 min-w-0: the name is the field that should take the slack, and min-w-0 is
+              what lets a flex child actually narrow rather than hold its content's width. */}
+          <input className={`${controlClass} flex-1 min-w-0`} placeholder="New team name"
+            value={name} onChange={(e) => setName(e.target.value)} />
+          {/* controlClass, NOT inputClass: the latter carries w-full, which beats the w-40 below
+              in the generated stylesheet however they are ordered here. See Modal.tsx. */}
+          <select value={kind} onChange={(e) => setKind(e.target.value as TeamKind)}
+            aria-label="What kind of team"
+            className={`${controlClass} w-40 shrink-0`}>
             {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
-          <button type="submit" className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700 shrink-0">
+          {/*
+            REFUSED VISIBLY RATHER THAN SILENTLY. The submit handler returns early on a blank name,
+            which is right -- and it did it without a word, so pressing the button looked exactly
+            like a feature that does not work. A button that cannot act says so by being unpressable.
+          */}
+          <button type="submit" disabled={!name.trim()}
+            title={name.trim() ? 'Add this team' : 'Give the team a name first'}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+              bg-brand-600 text-white hover:bg-brand-700 shrink-0
+              disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed">
             <Plus size={15} /> Add Team
           </button>
         </form>

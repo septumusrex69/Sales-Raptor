@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Check, Loader2, Plus, Search, X } from 'lucide-react'
-import { Modal, inputClass } from '../../components/ui/Modal'
+import { Modal, inputClass, controlClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
@@ -102,7 +102,7 @@ export function SplitReceiptModal({ receipt, onClose, onDone }: {
                 <input value={p.amount} inputMode="decimal" placeholder="0.00"
                   onChange={(e) => setParts((all) =>
                     all.map((x, n) => (n === i ? { ...x, amount: e.target.value } : x)))}
-                  className={`${inputClass} w-28 text-right tabular-nums`} />
+                  className={`${controlClass} w-28 text-right tabular-nums`} />
                 <button type="button" onClick={() => setParts((all) => all.filter((_, n) => n !== i))}
                   className="text-slate-400 hover:text-slate-700" title="Take this account off">
                   <X size={14} />

@@ -81,5 +81,25 @@ export function FormField({ label, children, required }: { label: string; childr
   )
 }
 
-export const inputClass =
-  'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 bg-white'
+/**
+ * A field's look, WITHOUT a width.
+ *
+ * THE WIDTH IS SPLIT OFF BECAUSE PUTTING IT IN COST THE FIRM A FEATURE. `inputClass` begins with
+ * `w-full`, and the way to make a narrow control was to append one: `${inputClass} w-40`. Tailwind
+ * does not resolve that by the order you wrote it -- both are width utilities and whichever the
+ * generated stylesheet emits LAST wins, which is `w-full`. So the "narrow" control was full width
+ * all along.
+ *
+ * On the Teams form that select also carried `shrink-0`, so it took the whole row and refused to
+ * give any back: the team NAME box was squeezed to about forty pixels, a sliver with a cursor in
+ * it. The firm typed nothing into a field they could not see, pressed Add Team, and reported that
+ * teams do not add.
+ *
+ * So a control that wants its own width composes from THIS and adds one. Nothing to override, and
+ * nothing to lose an argument with.
+ */
+export const controlClass =
+  'rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 bg-white'
+
+/** The same field, filling whatever it is put in — which is what most of them want. */
+export const inputClass = `w-full ${controlClass}`

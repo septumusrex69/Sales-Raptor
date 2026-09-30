@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, ChevronRight, Loader2, Play, Plus, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
-import { inputClass } from '../../components/ui/Modal'
+import { inputClass, controlClass } from '../../components/ui/Modal'
 import { PhaseStrip, WorkflowSchedule } from '../../components/workflows/WorkflowSchedule'
 import { StepDrawer } from '../../components/workflows/StepDrawer'
 import { useAuth } from '../../store/AuthContext'
@@ -472,7 +472,7 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
           <label className="text-xs text-slate-500 flex items-center gap-2 mr-1">
             Dated from {triggerMeta(workflow.version.trigger).dayZero}
             <input type="date" value={from} onChange={(e) => setFrom(e.target.value || from)}
-              className={`${inputClass} w-auto py-1`} />
+              className={`${controlClass} w-auto py-1`} />
           </label>
           {/*
             TEST IS DISABLED AND SAYS WHY. The brief is explicit that nothing may fake working
@@ -608,7 +608,7 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
                     offering the controls would be offering a refusal.
                   */
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.trigger}
+                    <select className={`${controlClass} w-auto py-1 text-xs`} value={workflow.version.trigger}
                       disabled={busy} aria-label="What starts this workflow"
                       onChange={(e) => {
                         const next = e.target.value as TriggerKind
@@ -619,7 +619,7 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
                       ))}
                     </select>
                     <span className="text-white/40">counted in</span>
-                    <select className={`${inputClass} w-auto py-1 text-xs`} value={workflow.version.dayUnit}
+                    <select className={`${controlClass} w-auto py-1 text-xs`} value={workflow.version.dayUnit}
                       disabled={busy} aria-label="What kind of day this workflow counts in"
                       onChange={(e) => {
                         void act(() => setDayUnit(workflow.version.id, e.target.value as DayUnit))
@@ -701,7 +701,7 @@ function AddStep({ workflow, disabled, onAdd }: {
   const [phaseId, setPhaseId] = useState<string>(workflow.phases[0]?.id ?? '')
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select className={`${inputClass} w-auto`} value={kind} disabled={disabled}
+      <select className={`${controlClass} w-auto`} value={kind} disabled={disabled}
         onChange={(e) => setKind(e.target.value as NodeKind)}>
         {(Object.keys(NODE_KINDS) as NodeKind[]).map((k) => (
           <option key={k} value={k}>{NODE_KINDS[k].label}</option>
@@ -709,7 +709,7 @@ function AddStep({ workflow, disabled, onAdd }: {
       </select>
       {/* Where it belongs is asked before it is made, not after: a step with no phase draws
           nowhere, and a card that has vanished is worse than one in the wrong row. */}
-      <select className={`${inputClass} w-auto`} value={phaseId} disabled={disabled}
+      <select className={`${controlClass} w-auto`} value={phaseId} disabled={disabled}
         onChange={(e) => setPhaseId(e.target.value)}>
         {workflow.phases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
