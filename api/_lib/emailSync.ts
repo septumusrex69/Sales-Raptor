@@ -395,19 +395,53 @@ function headerFields(parsed: {
   }
 }
 
+/**
+ * AND THE TICKET, WHERE THE THREAD LEADS TO ONE.
+ *
+ * THE FIRM, ASKING HOW A REPLY SHOULD FIND ITS WAY BACK: "a response should also be linked to
+ * this. If the client responds, for example, or if I want to respond as a liaison to a clerk, they
+ * should also be able to respond towards that. I don't know how we will link it. Would it be the
+ * subject line and the debtor's email address, or the client's email address, that takes it to a
+ * specific ticket and files it there? What do you suggest?"
+ *
+ * MESSAGE-ID, WHICH IS WHAT IS ALREADY HERE. The two candidates they offer both break:
+ *
+ *   A SUBJECT LINE IS NOT AN IDENTIFIER. Mail clients rewrite it -- "Re:", "Fwd: Re:", a
+ *   translated prefix -- people edit it mid-thread, and two disputes on one account share it word
+ *   for word. Matching on it would file a reply about March's statement onto a dispute about
+ *   delivery.
+ *
+ *   AN ADDRESS IS NOT ONE EITHER. A client replies from whichever of four people opened the mail,
+ *   and a debtor's attorney is not in account_contacts at all.
+ *
+ * In-Reply-To and References carry the Message-ID of what is being answered, every mail client
+ * echoes them, and they are unique by construction. `threadIds` already walks them to find the
+ * ACCOUNT; carrying the ticket back at the same time costs one column on the same query.
+ *
+ * IT ONLY WORKS DOWN A THREAD, and that is worth being honest about rather than papering over: a
+ * client who starts a NEW message instead of replying lands on the account (or on nothing, if they
+ * are not a debtor contact) and somebody files it by hand. There is no way to guess a ticket from
+ * a message that points at nothing.
+ */
 async function findAccount(
   admin: SupabaseClient,
   fromAddress: string,
   parsed: { inReplyTo?: string; references?: string | string[] },
-): Promise<{ accountId: string; via: 'thread' | 'address' } | null> {
+): Promise<{ accountId: string; queryId: string | null; via: 'thread' | 'address' } | null> {
   for (const id of threadIds(parsed.inReplyTo, parsed.references)) {
     const { data } = await admin
       .from('account_emails')
-      .select('account_id')
+      .select('account_id, query_id')
       .eq('message_id', id)
       .limit(1)
       .maybeSingle()
-    if (data) return { accountId: data.account_id as string, via: 'thread' }
+    if (data) {
+      return {
+        accountId: data.account_id as string,
+        queryId: (data.query_id as string | null) ?? null,
+        via: 'thread',
+      }
+    }
   }
 
   const address = normaliseAddress(fromAddress)
@@ -419,7 +453,10 @@ async function findAccount(
     .ilike('value', address)
     .limit(1)
     .maybeSingle()
-  if (contact) return { accountId: contact.account_id as string, via: 'address' }
+  /* NO TICKET DOWN THIS ROUTE. Matching a sender to a debtor contact says WHOSE account this is
+     and nothing about which of its tickets, and guessing one would be worse than leaving it on the
+     account where somebody can see it. */
+  if (contact) return { accountId: contact.account_id as string, queryId: null, via: 'address' }
   return null
 }
 
@@ -466,6 +503,14 @@ async function fileAccountEmail(
     at: string
     /** The mailbox this arrived in: whose Messages count it belongs to, and its address. */
     mailbox: { userId: string; address: string }
+    /**
+     * THE TICKET THIS ANSWERS, where the thread leads to one.
+     *
+     * `mail_ticket_same_account` refuses a ticket belonging to another account on this very
+     * column, so a threading mistake is a refusal rather than one debtor's dispute quietly
+     * carrying another debtor's correspondence.
+     */
+    queryId?: string | null
   },
 ): Promise<boolean> {
   const { data: inserted, error } = await admin
@@ -492,6 +537,8 @@ async function fileAccountEmail(
         // header is who it reads as on the timeline.
         sent_by_name: message.fromName || message.fromAddress,
         occurred_at: message.at,
+        /* Null on everything that did not thread back to a ticket, which is most inbound mail. */
+        query_id: message.queryId ?? null,
       },
       { onConflict: 'message_id', ignoreDuplicates: true },
     )
@@ -1189,9 +1236,14 @@ async function syncMailbox(
           uid: msg.uid,
           at: (parsed.date ?? new Date()).toISOString(),
           mailbox: { userId: conn.user_id, address: conn.email },
+          /* THE REPLY LANDS ON THE TICKET IT ANSWERS. The firm asked for exactly this and asked
+             how it should be matched -- see findAccount for why it is Message-ID and not a
+             subject line. */
+          queryId: accountMatch.queryId,
         })
         console.log(
           `[emailSync] ${path} UID ${uid}: debtor account ${accountMatch.accountId} via ${accountMatch.via}` +
+          `${accountMatch.queryId ? ` on ticket ${accountMatch.queryId}` : ''}` +
           `${filedOnAccount ? ', filed' : ', already filed'}`,
         )
         // The mailbox row says "already on an account", which is also what stops the Mail page

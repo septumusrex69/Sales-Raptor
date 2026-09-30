@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Download, Loader2, Upload } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Building2, Download, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
 import { formatDate } from '../../data/mockData'
@@ -27,6 +27,7 @@ import {
 } from '../../lib/accountEmails'
 import { forwardBody, forwardSubject } from '../../lib/emailRules.ts'
 import { canSendToClient } from '../../lib/disputeCategories.ts'
+import { canViewClients } from '../../lib/permissions.ts'
 import { fetchAccounts } from '../../lib/accountBook'
 import { rejectedSheetName, rejectedSheetRows } from '../../lib/rejectedSheet.ts'
 import { buildXlsx, downloadBytes, XLSX_MIME } from '../../lib/xlsxWrite.ts'
@@ -257,10 +258,36 @@ export function QueryDetail() {
 
   return (
     <div className="space-y-4">
-      <Link to={data.batch ? `/companies/${data.batch.companyId}` : `/accounts/${q.accountId}`}
-        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={14} /> {data.clientName ?? 'Back'}
-      </Link>
+      {/*
+        BACK WHERE YOU CAME FROM, AND THE CLIENT BESIDE IT.
+
+        THE FIRM: "there should also be an option on the ticket file to go to the client folder,
+        the client's particulars and stuff."
+
+        TWO LINKS, NOT ONE RELABELLED. On an account ticket the back link goes to the ACCOUNT --
+        that is the debtor whose dispute this is, and it is where the ledger, the correspondence
+        and the workflow are. The client is a second place worth reaching, not the same place: a
+        liaison about to write to them needs the contact, the mandate and the commission rate, and
+        finding it meant going out to Clients and searching by name.
+
+        AND IT IS ONLY OFFERED TO SOMEBODY WHO MAY LOOK. `client.view` is a capability, and a
+        pre-legal agent does not have it -- they work debtors, not the firm's relationships. A link
+        that 404s on a permission is worse than no link.
+      */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <Link to={data.batch ? `/companies/${data.batch.companyId}` : `/accounts/${q.accountId}`}
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
+          <ArrowLeft size={14} />
+          {data.batch ? (data.clientName ?? 'Back') : (data.account?.debtorName ?? 'Back to the account')}
+        </Link>
+        {!data.batch && data.account && canViewClients(currentUser) && (
+          <Link to={`/companies/${data.account.companyId}`}
+            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
+            <Building2 size={14} />
+            {data.clientName ?? 'The client'}
+          </Link>
+        )}
+      </div>
 
       <Card>
         <CardHeader
