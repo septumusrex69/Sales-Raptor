@@ -6,7 +6,8 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
-  fetchAwaitingApproval, approvePayments, setPaymentAccount, type AwaitingPayment,
+  fetchAwaitingApproval, approvePayments, setPaymentAccount, suspendPayment,
+  type AwaitingPayment,
 } from '../../lib/payover'
 
 /**
@@ -36,6 +37,15 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
   const [picked, setPicked] = useState<Set<string>>(new Set())
   /* The receipt whose debtor is being corrected, if one is. */
   const [moving, setMoving] = useState<AwaitingPayment | null>(null)
+  /*
+   * AND THE RECEIPT NOBODY IS READY TO PLACE AT ALL.
+   *
+   * THE FIRM: "when something is in that state of approval, it should also give you an option to
+   * put it into suspense... Otherwise you have to go and look for it in suspense and allocate it
+   * later." Move is for when you KNOW the right debtor; this is for when you do not, and the
+   * alternative was leaving it on the queue where the next person approves it onto the wrong one.
+   */
+  const [parking, setParking] = useState<AwaitingPayment | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -189,6 +199,17 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                       hover:text-slate-700">
                     Move
                   </button>
+                  {/*
+                    BESIDE MOVE, BECAUSE THEY ARE THE SAME QUESTION ANSWERED TWO WAYS. Move is "I
+                    know whose this is"; Suspense is "I know it is not this debtor's and I do not
+                    yet know whose". The second had no button at all, so the only ways out of the
+                    queue were approving it onto an account somebody doubted or leaving it there.
+                  */}
+                  <button type="button" onClick={() => setParking(r)}
+                    className="ml-1.5 text-[11px] font-medium text-slate-400 underline underline-offset-2
+                      hover:text-slate-700">
+                    Suspense
+                  </button>
                 </td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
@@ -243,7 +264,106 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
           onDone={async () => { setMoving(null); await load() }}
         />
       )}
+      {parking && (
+        <SuspendModal
+          payment={parking}
+          onClose={() => setParking(null)}
+          onDone={async () => { setParking(null); await load() }}
+        />
+      )}
     </Card>
+  )
+}
+
+/**
+ * PARKING A RECEIPT NOBODY IS READY TO APPROVE.
+ *
+ * THE FIRM: "when something is in that state of approval, it should also give you an option to put
+ * it into suspense. So, for example, if you reverse a payment, it goes to a state of approval and
+ * then you just say move to suspense."
+ *
+ * THE REASON IS REQUIRED AND THAT IS THE WHOLE OF THE BOX. `suspend_payment` refuses without one,
+ * because a receipt sitting in suspense with no words is one nobody can place without going to
+ * find whoever parked it -- and the person who parked it is the only one who knows why the account
+ * it is on is wrong.
+ *
+ * IT STAYS ON ITS ACCOUNT, WRONGLY, AND ON PURPOSE. Detaching it would leave money belonging to
+ * nobody and throw away the one clue to where it came from: the account somebody thought it was
+ * for. The history then reads "received, reversed, parked, placed on the right debtor", which is
+ * what happened.
+ */
+function SuspendModal({ payment, onClose, onDone }: {
+  payment: AwaitingPayment
+  onClose: () => void
+  onDone: () => Promise<void> | void
+}) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function park() {
+    if (!reason.trim()) return
+    setBusy(true); setError(null)
+    try {
+      await suspendPayment(payment.paymentId, reason.trim())
+      await onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not move it to suspense.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Move this receipt to suspense"
+      subtitle={`${rand(payment.amount)} received ${formatDate(payment.receivedOn)}`}
+      onClose={onClose} width={460}>
+      <p className="text-sm text-slate-500">
+        It leaves the approval queue and waits in suspense until somebody places it on the right
+        debtor. Nothing is split and no fee is raised.
+      </p>
+
+      {/* WHERE IT IS SITTING NOW, said plainly: it is still on this account, and that is the only
+          clue the next person has to where the money came from. */}
+      <p className="text-[11px] text-slate-400 mt-2">
+        It stays recorded against {payment.caseNumber ?? payment.accountNumber ?? 'this account'}
+        {payment.debtor ? ` — ${payment.debtor}` : ''} until it is placed.
+      </p>
+
+      {/* AND WHY IT CAME BACK, where a reversal put it here. The person parking it should not have
+          to go and find the words somebody else already wrote. */}
+      {payment.cameBackReason && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-2 mt-2">
+          Came back {payment.cameBackOn ? formatDate(payment.cameBackOn) : ''} — {payment.cameBackReason}
+        </p>
+      )}
+
+      <div className="mt-3">
+        <label htmlFor="suspense-reason" className="text-sm font-medium text-slate-700">
+          Why is it going to suspense?
+        </label>
+        <textarea id="suspense-reason" rows={3} value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reference matched two accounts — waiting for the client to confirm which."
+          className={`${inputClass} mt-1 resize-none`} />
+        <span className="block text-[11px] text-slate-400 mt-1">
+          This is what the next person reads when they come to place it.
+        </span>
+      </div>
+
+      {error && <p className="text-sm text-negative-700 mt-2">{error}</p>}
+
+      <div className="flex items-center gap-2 mt-4">
+        <button type="button" onClick={() => void park()} disabled={busy || !reason.trim()}
+          className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
+            bg-brand-600 text-white disabled:opacity-40">
+          {busy && <Loader2 size={15} className="animate-spin" />}
+          Move it to suspense
+        </button>
+        <button type="button" onClick={onClose} className="text-sm text-slate-600 hover:text-slate-800 px-2">
+          Cancel
+        </button>
+      </div>
+    </Modal>
   )
 }
 

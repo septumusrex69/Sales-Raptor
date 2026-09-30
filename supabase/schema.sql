@@ -17808,3 +17808,256 @@ drop trigger if exists protect_filed_mail_target on public.user_emails;
 create trigger protect_filed_mail_target
   before update on public.user_emails
   for each row execute function public.protect_filed_mail_target();
+
+-- ============================================================================
+-- PARK IT IN SUSPENSE FROM THE QUEUE, RATHER THAN GOING TO LOOK FOR IT LATER.
+--
+-- THE FIRM: "when something is in that state of approval, it should also give you an option to put
+-- it into suspense. So, for example, if you reverse a payment, it goes to a state of approval and
+-- then you just say move to suspense. Otherwise you have to go and look for it in suspense and
+-- allocate it later."
+--
+-- THE TWO HALVES OF SUSPENSE ARE NOT THE SAME THING, AND THAT IS THE WHOLE DESIGN HERE.
+--
+--   A BANK LINE NOBODY HAS PLACED has never been attributed to anybody. "CAPITEC L SOLOMONS" with
+--   no reference is somebody's money and no debtor's account. That is `bank_statement_lines` with
+--   status 'unallocated', and it is what suspense has meant until now.
+--
+--   A PAYMENT SOMEBODY PARKED was attributed and then un-attributed -- most often by a reversal,
+--   where the firm's own rule sends the copy back to the approval queue: "not really the suspense
+--   account, it goes back into a state ready for approval." It is on an account, wrongly, and the
+--   person looking at it knows it is wrong and does not yet know where it belongs.
+--
+-- SO THE PAYMENT KEEPS ITS ROW AND ITS ACCOUNT, AND GAINS A DATE. `account_id` is not null and
+-- must stay so: the alternative was detaching it, which would leave a receipt belonging to nobody
+-- and lose the only clue to where it came from -- the account somebody thought it was for. The
+-- history then reads "received, reversed, parked, placed on the right debtor", which is what
+-- happened. Deleting the row and putting the bank line back would read "received, reversed" and
+-- then nothing, on money that is still in the trust account.
+--
+-- IT IS NOT AN EDIT TO A FINANCIAL RECORD, and the guards are what make that true. Nothing has
+-- been split, no fee raised, no remittance run -- which is the whole reason the approval gate
+-- exists. The moment it is approved this refuses and says to reverse it instead, exactly as
+-- `set_payment_account` does.
+-- ============================================================================
+alter table public.account_payments
+  add column if not exists suspended_at timestamptz,
+  add column if not exists suspense_reason text;
+
+comment on column public.account_payments.suspended_at is
+  'When this unapproved receipt was parked in suspense: on an account, but nobody is prepared to '
+  'approve it there yet. Cleared when it is placed or put back in the queue.';
+comment on column public.account_payments.suspense_reason is
+  'Why it was parked, in the words of whoever parked it. What the next person reads.';
+
+create index if not exists account_payments_suspended_idx
+  on public.account_payments (suspended_at) where suspended_at is not null;
+
+create or replace function public.suspend_payment(p_payment uuid, p_reason text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+begin
+  -- THE SAME PEOPLE WHO WORK THE QUEUE. Parking is a decision about a receipt sitting in that
+  -- list, so it belongs to whoever may clear the list.
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to move a payment to suspense.' using errcode = '42501';
+  end if;
+  -- THE REASON IS NOT DECORATION. It is the whole of what the next person has to go on: a receipt
+  -- in suspense with no words is one nobody can place without asking who parked it and why.
+  if v_reason is null then
+    raise exception 'Say why it is going to suspense.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.approved_at is not null then
+    raise exception 'That payment has been approved and split. Reverse it instead.' using errcode = '22023';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed.' using errcode = '22023';
+  end if;
+  -- ALREADY THERE IS A NO-OP, NOT A FAILURE: two people clearing one morning's queue is ordinary,
+  -- and the second must not see an error for agreeing with the first.
+  if v_pay.suspended_at is not null then return; end if;
+
+  update public.account_payments
+     set suspended_at = now(), suspense_reason = v_reason
+   where id = p_payment;
+end $$;
+
+comment on function public.suspend_payment(uuid, text) is
+  'Parks an unapproved receipt in suspense with a reason. Refuses an approved one -- that is a '
+  'reversal -- and refuses a reversed one.';
+
+-- TWO WAYS OUT AND THEY ARE THE SAME CLEARING. Putting it back in the queue is this function;
+-- placing it on the right debtor is `set_payment_account`, which clears the parking itself --
+-- because a receipt that has just been given the account it belongs to is not in suspense any
+-- more, and making somebody press a second button to say so is a second chance to leave it there.
+create or replace function public.release_payment_from_suspense(p_payment uuid)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to move a payment out of suspense.' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.account_payments where id = p_payment) then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  update public.account_payments
+     set suspended_at = null, suspense_reason = null
+   where id = p_payment;
+end $$;
+
+comment on function public.release_payment_from_suspense(uuid) is
+  'Puts a parked receipt back in the approval queue, for one parked by mistake.';
+
+create or replace function public.set_payment_account(p_payment uuid, p_account uuid)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to change a payment.' using errcode = '42501';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.approved_at is not null then
+    raise exception 'That payment has been approved and split. Reverse it instead.' using errcode = '22023';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed.' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.' using errcode = 'P0002';
+  end if;
+
+  -- AND IT COMES OUT OF SUSPENSE BY DOING SO. Giving a parked receipt the account it belongs to IS
+  -- taking it out of suspense; leaving the flag set would keep it on a list of things nobody has
+  -- placed, after somebody just placed it.
+  update public.account_payments
+     set account_id = p_account, suspended_at = null, suspense_reason = null
+   where id = p_payment;
+end $$;
+
+-- THE QUEUE NO LONGER OFFERS WHAT SOMEBODY PARKED. Without this the button does nothing visible:
+-- the receipt would sit in the queue looking exactly as it did, and the firm's complaint -- having
+-- to go and look for it -- would be true of a list it never left.
+--
+-- Replaced rather than dropped: the return type is unchanged, and the three came_back_* columns
+-- added when a reversal learned to explain itself stay exactly as they were.
+create or replace function public.payments_awaiting_approval()
+returns table (
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric,
+  paid_to_client boolean, method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  left join lateral public.preview_allocation(p.account_id, p.amount, p.paid_to_client) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and p.suspended_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+create or replace function public.suspended_payments()
+returns table (
+  payment_id uuid, account_id uuid, case_number text, debtor text,
+  received_on date, amount numeric, reference text, details text, source text,
+  suspended_on date, reason text,
+  -- WHY IT IS HERE, where that is knowable. A receipt parked straight after a reversal carries
+  -- the reversal's own words, and the person placing it should not have to go and find them.
+  came_back_from uuid, came_back_reason text
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.reference, p.details, p.source,
+    (p.suspended_at at time zone 'Africa/Johannesburg')::date,
+    p.suspense_reason,
+    was.id, was.reversal_reason
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  where public.may_approve_payment()
+    and p.suspended_at is not null
+    and p.approved_at is null
+    and p.reversed_at is null
+    and not p.is_demo
+  order by p.suspended_at desc
+$$;
+
+comment on function public.suspended_payments() is
+  'Receipts somebody parked from the approval queue: on an account, unapproved, and not yet placed '
+  'where they belong. The other half of suspense -- bank lines nobody has placed at all are '
+  'unallocated_receipts().';
+
+-- THE WHOLE LIST AGAIN, with the three suspense functions on it.
+--
+-- AND IT HAS TO BE THE WHOLE LIST, which check-finance-is-administrator-only caught within a
+-- minute of this being written the short way: it reads the LAST of these blocks in the file and
+-- holds every finance RPC to it, so a block naming only what this migration added reports every
+-- earlier one as un-revoked. That reading is right -- Supabase grants EXECUTE on a public function
+-- to anon by default, and a partial list here is a list somebody trusts.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()', 'preview_allocation(uuid, numeric, boolean)',
+    'reallocate_account(uuid)', 'money_position(uuid)', 'payover_work_queue(date)',
+    'payover_cycle_tiles(date)', 'payover_run_payments(uuid)', 'finance_exception_jobs()',
+    'payment_audit(uuid)', 'account_ledger(uuid)', 'expected_from_promises(date, date)',
+    'import_bank_lines(text, text, jsonb)', 'place_bank_line(uuid, uuid)',
+    'reconcile_bank_debit(uuid, uuid)', 'unallocated_receipts()', 'unreconciled_payouts()',
+    'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'split_bank_line(uuid, jsonb)',
+    'reverse_payment(uuid, text)', 'set_payment_account(uuid, uuid)',
+    'suspend_payment(uuid, text)', 'release_payment_from_suspense(uuid)', 'suspended_payments()'
+  ] loop
+    execute format('revoke execute on function public.%s from public, anon', fn);
+  end loop;
+end $$;

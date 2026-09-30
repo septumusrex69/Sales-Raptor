@@ -943,3 +943,86 @@ export async function setPaymentAccount(paymentId: string, accountId: string): P
   })
   if (error) throw new Error(error.message)
 }
+
+/* ---------------- suspense, the half that is a PAYMENT rather than a bank line ---------------- */
+
+/**
+ * A RECEIPT SOMEBODY PARKED FROM THE APPROVAL QUEUE.
+ *
+ * THE FIRM: "when something is in that state of approval, it should also give you an option to put
+ * it into suspense... Otherwise you have to go and look for it in suspense and allocate it later."
+ *
+ * NOT THE SAME AS AN UNPLACED BANK LINE, and the two lists stay apart on purpose. A line in
+ * `unallocated_receipts` has never been attributed to anybody -- "CAPITEC L SOLOMONS" with no
+ * reference. One of these WAS attributed, usually by a reversal putting it back in the queue, and
+ * the person looking at it knows the account is wrong without yet knowing the right one.
+ */
+export interface SuspendedPayment {
+  paymentId: string
+  /** The account it is sitting on, which is wrong -- and the only clue to where it came from. */
+  accountId: string
+  caseNumber: string | null
+  debtor: string | null
+  receivedOn: string
+  amount: number
+  reference: string | null
+  details: string | null
+  source: string | null
+  suspendedOn: string
+  /** Why it was parked, in the words of whoever parked it. */
+  reason: string | null
+  /** Where a reversal put it here, the reversed receipt and the reason given then. */
+  cameBackFrom: string | null
+  cameBackReason: string | null
+}
+
+export async function fetchSuspendedPayments(): Promise<SuspendedPayment[]> {
+  const { data, error } = await supabase.rpc('suspended_payments')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paymentId: String(r.payment_id),
+    accountId: String(r.account_id),
+    caseNumber: s(r.case_number),
+    debtor: s(r.debtor),
+    receivedOn: String(r.received_on),
+    amount: Number(r.amount),
+    reference: s(r.reference),
+    details: s(r.details),
+    source: s(r.source),
+    suspendedOn: String(r.suspended_on),
+    reason: s(r.reason),
+    cameBackFrom: s(r.came_back_from),
+    cameBackReason: s(r.came_back_reason),
+  }))
+}
+
+/**
+ * PARK IT, WITH A REASON.
+ *
+ * The reason is required by the function and not only by the box: a receipt in suspense with no
+ * words is one nobody can place without going to ask who parked it. It is the whole of what the
+ * next person has to work from.
+ *
+ * REFUSED ONCE IT IS APPROVED, which is the same line `setPaymentAccount` draws: past that point
+ * it has been split, a fee has been raised and it may be on a remittance, so the only way back is
+ * a reversal.
+ */
+export async function suspendPayment(paymentId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('suspend_payment', {
+    p_payment: paymentId,
+    p_reason: reason,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * BACK INTO THE QUEUE, for one parked by mistake.
+ *
+ * THE OTHER WAY OUT IS `setPaymentAccount`, which clears the parking itself -- giving a receipt
+ * the account it belongs to IS taking it out of suspense, and a second button to say so is a
+ * second chance to leave it there.
+ */
+export async function releasePaymentFromSuspense(paymentId: string): Promise<void> {
+  const { error } = await supabase.rpc('release_payment_from_suspense', { p_payment: paymentId })
+  if (error) throw new Error(error.message)
+}

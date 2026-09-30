@@ -193,9 +193,26 @@ ok('...onto an account that exists',
  * else. The amount and the date are what the bank said, and a function that could set them would
  * be a way to turn R 5 000 into R 500 with nothing on the ledger to show it.
  */
-ok('the amount and the date are not its business',
-  /update public\.account_payments set account_id = p_account where id = p_payment;/.test(move ?? '')
-  && !/set amount =/.test(move ?? '') && !/received_at =/.test(move ?? ''))
+/*
+ * ASSERTED AS WHAT IT MAY NOT TOUCH, not as the exact text of one UPDATE.
+ *
+ * It used to match the whole statement, `set account_id = p_account where id = p_payment`, which
+ * meant the assertion broke the moment the same UPDATE also cleared the suspense flags -- a change
+ * that does not go near the amount or the date and is the very thing the firm asked for: placing a
+ * parked receipt IS taking it out of suspense. Matching a whole line makes every future edit to it
+ * look like a violation, which teaches people to loosen the check rather than read it.
+ *
+ * So: the account is what it sets, and the bank's own facts are named as forbidden.
+ */
+ok('the account is what it sets', /set account_id = p_account/.test(move ?? ''))
+for (const forbidden of ['amount', 'received_at', 'approved_at', 'reversed_at', 'is_demo']) {
+  ok(`...and ${forbidden} is not its business`,
+    !new RegExp(`(set|,)\\s*${forbidden} =`).test(move ?? ''))
+}
+/* AND IT CLEARS THE PARKING IN THE SAME BREATH, because a receipt that has just been given the
+   account it belongs to is not in suspense any more -- and a second button to say so is a second
+   chance to leave it there. */
+ok('...while taking it out of suspense', /suspended_at = null/.test(move ?? ''))
 
 /* ---------------- and the browser reaches all of it through the one library ---------------- */
 

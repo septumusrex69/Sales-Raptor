@@ -9,7 +9,8 @@ import { SplitReceiptModal } from './SplitReceiptModal'
 import {
   fetchUnallocatedReceipts, placeBankLine,
   fetchUnreconciledPayouts, reconcileBankDebit,
-  type UnallocatedReceipt, type UnreconciledPayout,
+  fetchSuspendedPayments, releasePaymentFromSuspense, setPaymentAccount,
+  type UnallocatedReceipt, type UnreconciledPayout, type SuspendedPayment,
 } from '../../lib/payover'
 
 /**
@@ -40,12 +41,24 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
   const [placing, setPlacing] = useState<UnallocatedReceipt | null>(null)
   const [splitting, setSplitting] = useState<UnallocatedReceipt | null>(null)
   const [tying, setTying] = useState<string | null>(null)
+  /*
+   * THE OTHER HALF OF SUSPENSE, and it is a different kind of thing from the list above.
+   *
+   * A bank line up there has never been attributed to anybody. These were attributed and then
+   * un-attributed -- somebody looked at the approval queue, decided the account was wrong and
+   * parked it. The firm asked for the button that puts them here: "otherwise you have to go and
+   * look for it in suspense and allocate it later."
+   */
+  const [parked, setParked] = useState<SuspendedPayment[]>([])
+  const [placingParked, setPlacingParked] = useState<SuspendedPayment | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [r, p] = await Promise.all([fetchUnallocatedReceipts(), fetchUnreconciledPayouts()])
-      setRows(r); setPayouts(p)
+      const [r, p, sp] = await Promise.all([
+        fetchUnallocatedReceipts(), fetchUnreconciledPayouts(), fetchSuspendedPayments(),
+      ])
+      setRows(r); setPayouts(p); setParked(sp)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the unplaced receipts.')
     } finally { setLoading(false) }
@@ -158,6 +171,79 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
         )}
       </Card>
 
+      {/* ---------------- receipts somebody parked off the approval queue ---------------- */}
+      {/*
+        ITS OWN CARD, NOT MIXED INTO THE LIST ABOVE, because they are different problems wearing
+        one word. A bank line up there needs somebody to RECOGNISE a depositor. One of these needs
+        somebody to DECIDE which debtor it belongs to -- it was already on one, and a person looked
+        at it and said no. The words they left are the whole of what the next person has to go on,
+        which is why the reason is required to park it and is the widest column here.
+      */}
+      {parked.length > 0 && (
+        <Card padded={false}>
+          <CardHeader title="Parked off the approval queue"
+            subtitle="Somebody had these in front of them and would not approve them where they sat. They are still recorded against that account until they are placed." />
+          <table className="w-full text-[13px]">
+            <thead className="text-[11px] uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-slate-100">
+                <th className="px-4 py-2 text-left font-medium">Received</th>
+                <th className="px-3 py-2 text-right font-medium">Amount</th>
+                <th className="px-3 py-2 text-left font-medium">Sitting on</th>
+                <th className="px-3 py-2 text-left font-medium">Why it was parked</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {parked.map((r) => (
+                <tr key={r.paymentId} className="border-b border-slate-50">
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(r.receivedOn)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
+                  <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                    {r.caseNumber ?? '—'}
+                    {r.debtor && <span className="block text-[11px] text-slate-400 truncate max-w-[10rem]">{r.debtor}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">
+                    <span className="wrap-anywhere">{r.reason ?? '—'}</span>
+                    {/* AND WHY IT CAME BACK, where a reversal put it in the queue in the first
+                        place. Two different people wrote those two sentences and the second one
+                        only makes sense beside the first. */}
+                    {r.cameBackReason && (
+                      <span className="block text-[11px] text-amber-700 mt-0.5">
+                        Reversed — {r.cameBackReason}
+                      </span>
+                    )}
+                    <span className="block text-[11px] text-slate-400 mt-0.5">
+                      Parked {formatDate(r.suspendedOn)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <span className="inline-flex gap-1.5">
+                      <button type="button" onClick={() => setPlacingParked(r)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+                        Place it
+                      </button>
+                      {/* BACK TO THE QUEUE, for one parked by mistake. Without it the only way out
+                          is placing it somewhere, which is how a receipt ends up on an account
+                          chosen to clear a list. */}
+                      <button type="button"
+                        onClick={async () => {
+                          await releasePaymentFromSuspense(r.paymentId)
+                          await load(); onPlaced()
+                        }}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md text-slate-400
+                          hover:text-slate-700 underline underline-offset-2">
+                        Back to the queue
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
       {/* ---------------- money out, waiting to be tied to a run ---------------- */}
       {payouts.length > 0 && (
         <Card padded={false}>
@@ -196,8 +282,30 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
       )}
 
       {placing && (
-        <PlaceModal receipt={placing} onClose={() => setPlacing(null)}
+        <PlaceModal
+          title="Place this receipt"
+          summary={{
+            amount: placing.amount, description: placing.description, receivedOn: placing.txnDate,
+          }}
+          onPlace={async (accountId) => { await placeBankLine(placing.id, accountId) }}
+          onClose={() => setPlacing(null)}
           onDone={async () => { setPlacing(null); await load(); onPlaced() }} />
+      )}
+
+      {/* AND PLACING A PARKED ONE IS set_payment_account, which clears the parking as it goes --
+          a receipt that has just been given the right account is not in suspense any more. */}
+      {placingParked && (
+        <PlaceModal
+          title="Place this parked receipt"
+          summary={{
+            amount: placingParked.amount,
+            description: placingParked.reference ?? placingParked.details ?? 'No reference',
+            receivedOn: placingParked.receivedOn,
+            note: placingParked.reason,
+          }}
+          onPlace={(accountId) => setPaymentAccount(placingParked.paymentId, accountId)}
+          onClose={() => setPlacingParked(null)}
+          onDone={async () => { setPlacingParked(null); await load(); onPlaced() }} />
       )}
 
       {splitting && (
@@ -216,8 +324,21 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
  * second, subtly different way to find a debtor is how somebody ends up placing money against a
  * similar-looking account.
  */
-function PlaceModal({ receipt, onClose, onDone }: {
-  receipt: UnallocatedReceipt
+/*
+ * TAKES WHAT TO SHOW AND WHAT TO DO, rather than a bank line.
+ *
+ * BECAUSE THERE ARE NOW TWO THINGS TO PLACE and they are placed by different functions: an
+ * unallocated bank LINE through `placeBankLine`, and a receipt somebody parked off the approval
+ * queue through `setPaymentAccount`. Copying this box for the second would have meant a second
+ * debtor search -- which is the exact thing this file's own note warns about: "introducing a
+ * second, subtly different way to find a debtor is how somebody ends up placing money against a
+ * similar-looking account."
+ */
+function PlaceModal({ title, summary, onPlace, onClose, onDone }: {
+  title: string
+  /** The grey box at the top: what this money is, in as few lines as say it. */
+  summary: { amount: number; description: string; receivedOn: string; note?: string | null }
+  onPlace: (accountId: string) => Promise<void>
   onClose: () => void
   onDone: () => Promise<void>
 }) {
@@ -247,7 +368,7 @@ function PlaceModal({ receipt, onClose, onDone }: {
     if (!chosen || busy) return
     setBusy(true); setError(null)
     try {
-      await placeBankLine(receipt.id, chosen.id)
+      await onPlace(chosen.id)
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That receipt could not be placed.')
@@ -256,12 +377,14 @@ function PlaceModal({ receipt, onClose, onDone }: {
   }
 
   return (
-    <Modal title="Place this receipt" onClose={onClose} width={520}>
+    <Modal title={title} onClose={onClose} width={520}>
       <div className="space-y-3">
         <div className="rounded-lg bg-slate-50 px-3 py-2.5">
-          <p className="text-[15px] font-semibold tabular-nums text-navy-950">{rand(receipt.amount)}</p>
-          <p className="text-[12px] text-slate-600 mt-0.5 wrap-anywhere">{receipt.description}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Received {formatDate(receipt.txnDate)}</p>
+          <p className="text-[15px] font-semibold tabular-nums text-navy-950">{rand(summary.amount)}</p>
+          <p className="text-[12px] text-slate-600 mt-0.5 wrap-anywhere">{summary.description}</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Received {formatDate(summary.receivedOn)}</p>
+          {/* WHY IT IS HERE, on a parked receipt: the words whoever parked it left. */}
+          {summary.note && <p className="text-[11px] text-amber-700 mt-1 wrap-anywhere">{summary.note}</p>}
         </div>
 
         <label className="block">
