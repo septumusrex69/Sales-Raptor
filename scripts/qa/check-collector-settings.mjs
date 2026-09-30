@@ -89,7 +89,10 @@ ok('the panel says the grade is a human decision', /NEVER COMPUTED|never compute
  * counted the corpses would refuse them work they have room for, and the screen would show a
  * warning triangle on somebody who is fine.
  */
-ok('the panel asks the database what is in play', /collector_book_load/.test(panel))
+/* ASKED WHERE THE LIST IS, not inside the panel: the panel now draws ONE person, so a fetch in
+   there would go to the database again every time somebody opened a row. */
+ok('the list asks the database what is in play', /collector_book_load/.test(settings))
+ok('...and hands each person their own figure', /inPlay=\{bookLoad\?\.get\(u\.id\)/.test(settings))
 ok('...and says when somebody is over', /over their ceiling|over<\/span>|\} over/.test(panel))
 
 /* ---------- the role that gates all of this is assignable ---------- */
@@ -129,11 +132,55 @@ ok('the collectors panel is mounted', /<CollectorsPanel/.test(settings))
  * call happens to be spelt.
  */
 ok('the panel asks the shared collections permission',
-  /canEdit=\{canLeadCollections\(/.test(settings))
+  /const canRank = canLeadCollections\(currentUser\)/.test(settings)
+  && /canEdit=\{canRank\}/.test(settings))
+/* AND NOT A HAND-WRITTEN PAIR OF ROLES BESIDE IT, which is the bug this replaced: written out,
+   the list was left behind when Call Centre Manager was added. */
+ok('...and not a role name written out again',
+  !/canEdit=\{[^}]*role === '/.test(settings))
 ok('...so a team leader may edit it, not only an administrator',
   canLeadCollections({ role: 'Pre-legal Team Leader' }) && canLeadCollections({ role: 'Administrator' }))
 ok('...and so may the person who runs the floor', canLeadCollections({ role: 'Call Centre Manager' }))
 ok('...while a collector may not', !canLeadCollections({ role: 'Pre-legal Agent' }))
+
+/* ---------- one row per person ---------- */
+
+/*
+ * THE FIRM, LOOKING AT A LIST OF TWO PEOPLE AND FOUR ROWS: "the way the users are set out here is
+ * confusing. Itumeleng is here twice. It's only necessary once."
+ *
+ * The rank, the ceiling, the capacity and the reserve were a SECOND TABLE under the users list,
+ * naming the same people again -- and drawing the same rank twice, once as a chip on the row and
+ * once as a dropdown below it. They now open under the person they are about.
+ *
+ * ASSERTED ON THE PANEL'S SHAPE, not on the page's markup: a component that takes ONE user cannot
+ * become a list again without this failing. The old one took only `canEdit` and found its own
+ * people.
+ */
+ok('the panel is about one person', /export function CollectorsPanel\(\{ user,/.test(panel))
+ok('...and never goes looking for people itself',
+  !/users\.filter|useAppStore\(\)/.test(panel))
+ok('...so the settings page draws it per user', /<CollectorsPanel user=\{u\}/.test(settings))
+/*
+ * AND IT OPENS FROM THE ROW, ONE AT A TIME, rather than every collector at once -- which would be
+ * the second table again, just without a heading.
+ *
+ * ANCHORED ON THE CONDITIONAL RENDER, not on the bare comparison. The break test is why: the chip
+ * computes `const open = bookOpen === u.id` for its own arrow, so a loose match was satisfied by
+ * the chip while the panel below rendered for every collector on the list.
+ */
+ok('...opened from the row it belongs to', /\{bookOpen === u\.id && \(/.test(settings))
+ok('...and only one is open at a time',
+  /const \[bookOpen, setBookOpen\] = useState<string \| null>\(null\)/.test(settings))
+
+/*
+ * AND THE ROLES IT APPLIES TO ARE THE SHARED LIST. Written out inside the panel, this one had
+ * already drifted: the local copy was missing Call Centre Manager, who carries a book -- "they're
+ * also pre-legal agents, they just have reduced books" -- so the person who runs the floor could
+ * never be ranked.
+ */
+ok('the collecting roles are not written out a second time',
+  !/const COLLECTING_ROLES/.test(panel))
 
 /* ---------- the mapper carries the columns ---------- */
 

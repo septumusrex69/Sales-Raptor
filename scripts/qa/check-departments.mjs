@@ -330,7 +330,15 @@ ok('the rank is drawn beside the team', /COLLECTING_ROLES\.includes\(u\.role\) &
 ok('...only for somebody who collects', /COLLECTING_ROLES/.test(settings))
 /* An unranked collector is offered NO accounts at all, so a blank is a thing to go and fix. */
 ok('...and an unranked collector says so rather than showing nothing',
-  /\{u\.collectorGrade \?\? 'no rank'\}/.test(settings))
+  /u\.collectorGrade \?\? 'no rank'/.test(settings))
+/*
+ * AND THE CHIP IS NOW THE WAY INTO THEIR BOOK, at the firm's asking: "Itumeleng is here twice.
+ * It's only necessary once." The rank, ceiling, capacity and reserve used to be a second table
+ * naming the same people; they open under the row instead. The chip stays a plain chip for
+ * anybody who may not set a rank -- a control that opens and then refuses is worse than none.
+ */
+ok('...and pressing it opens their book', /aria-expanded=\{open\}/.test(settings))
+ok('...for somebody who may set a rank', /if \(!canRank\) return <span/.test(settings))
 
 /*
  * AND IT IS CALLED A RANK WHERE IT IS SET. CLAUDE.md: user-facing words are the firm's. The
@@ -339,7 +347,9 @@ ok('...and an unranked collector says so rather than showing nothing',
  */
 const panel = read('src/components/settings/CollectorsPanel.tsx')
 ok('the collectors panel is readable at all', panel.length > 0)
-ok('the column is called Rank', /^\s*Rank$/m.test(panel))
+/* A LABEL NOW RATHER THAN A COLUMN HEADING, because the panel is one person's settings and not
+   a table of everybody. The word a person reads is what this asserts, either way. */
+ok('the field is called Rank', /label="Rank"/.test(panel))
 ok('...and the explanation underneath agrees', /Rank decides <span/.test(panel))
 ok('...with no "Grade" left for somebody to read', !/>\s*Grade\b/.test(panel) && !/\bGrade decides/.test(panel))
 /* The model is untouched: this was a wording change, not a rename of the data. */
@@ -350,7 +360,9 @@ ok('the stored field is still the grade', /collectorGrade/.test(panel))
  * left behind when Call Centre Manager was added -- they could hand accounts out and lead the
  * floor everywhere except the screen where ranks are actually set.
  */
-ok('the collectors panel asks the shared permission', /canEdit=\{canLeadCollections\(currentUser\)\}/.test(settings))
+ok('the collectors panel asks the shared permission',
+  /const canRank = canLeadCollections\(currentUser\)/.test(settings)
+  && /canEdit=\{canRank\}/.test(settings))
 ok('...so the call centre manager may set a rank', canLeadCollections({ role: 'Call Centre Manager' }))
 
 /* ------------------------------------------------ finding one person among a hundred */

@@ -341,6 +341,38 @@ function UsersTab() {
    */
   const [capabilityUser, setCapabilityUser] = useState<User | null>(null)
   const [signatureUser, setSignatureUser] = useState<User | null>(null)
+  /*
+   * WHOSE BOOK SETTINGS ARE OPEN, and never more than one.
+   *
+   * THE FIRM, LOOKING AT TWO PEOPLE AND FOUR ROWS: "the way the users are set out here is
+   * confusing. Itumeleng is here twice. It's only necessary once." The rank, the ceiling, the
+   * capacity and the reserve used to be a SECOND TABLE under this one, listing the same people
+   * again -- and drawing the same rank twice, once as a chip on the row and once as a dropdown
+   * below. So they come out of that table and open under the person they are about.
+   *
+   * NOT FOUR MORE COLUMNS, which is what the second table existed to avoid: this list is seven
+   * wide already and the Status column is over the right-hand edge of the firm's iPad.
+   */
+  const [bookOpen, setBookOpen] = useState<string | null>(null)
+  /*
+   * What each person is actually carrying, IN PLAY. Asked of the database rather than counted
+   * here because the book is six figures -- and in play rather than total, because a collector
+   * holding 500 accounts of which 372 are written off is holding 128, and a ceiling counting the
+   * corpses would refuse them work they have room for.
+   */
+  const [bookLoad, setBookLoad] = useState<Map<string, number> | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void supabase.rpc('collector_book_load').then(({ data, error }) => {
+      if (cancelled || error) return
+      const rows = (data ?? []) as { user_id: string; in_play_accounts: number }[]
+      setBookLoad(new Map(rows.map((r) => [r.user_id, Number(r.in_play_accounts ?? 0)])))
+    })
+    return () => { cancelled = true }
+  }, [])
+  /* WHO MAY SET A RANK, which is not who may edit the rest of the row: a team leader ranks their
+     collectors without being an Administrator, and an Administrator has every capability. */
+  const canRank = canLeadCollections(currentUser)
   const [showArchived, setShowArchived] = useState(false)
   /*
    * SEEDED FROM THE URL, so a result in the global search can land here already narrowed to the
@@ -370,7 +402,8 @@ function UsersTab() {
 
   /* The row exactly as it was, lifted so the groups below can each draw their own people. */
   const renderRow = (u: User) => (
-              <tr key={u.id} className="border-t border-slate-50">
+            <Fragment key={u.id}>
+              <tr className="border-t border-slate-50">
                 <td className="px-5 py-2.5">
                   <div className="flex items-center gap-2.5">
                     <UserAvatar userId={u.id} size={26} />
@@ -424,14 +457,35 @@ function UsersTab() {
                     * rather than nothing, because that is a thing to go and fix: an unranked
                     * person is offered no accounts at all.
                   */}
-                  {COLLECTING_ROLES.includes(u.role) && (
-                    <span className={`ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${u.collectorGrade ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-slate-100 text-slate-400'}`}
-                      title={u.collectorGrade
-                        ? `${u.collectorGrade} — decides which accounts they may be given, never how many`
-                        : 'No rank yet, so they can be given no accounts at all'}>
-                      {u.collectorGrade ?? 'no rank'}
-                    </span>
-                  )}
+                  {/*
+                    * AND THE CHIP IS THE WAY IN. It was already the one thing on this row about
+                    * collecting, so making it the control puts the rank and the three numbers
+                    * behind the word somebody is already looking at -- rather than in a second
+                    * table listing the same person again.
+                    *
+                    * A BUTTON ONLY FOR SOMEBODY WHO MAY SET IT. For everybody else it stays the
+                    * chip it always was: a thing that is read, not pressed. A control that opens
+                    * and then refuses is worse than no control.
+                  */}
+                  {COLLECTING_ROLES.includes(u.role) && (() => {
+                    const cls = `ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${
+                      u.collectorGrade ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-slate-100 text-slate-400'}`
+                    const label = u.collectorGrade ?? 'no rank'
+                    const why = u.collectorGrade
+                      ? `${u.collectorGrade} — decides which accounts they may be given, never how many`
+                      : 'No rank yet, so they can be given no accounts at all'
+                    if (!canRank) return <span className={cls} title={why}>{label}</span>
+                    const open = bookOpen === u.id
+                    return (
+                      <button type="button" aria-expanded={open}
+                        onClick={() => setBookOpen(open ? null : u.id)}
+                        title={`${why}. Press to set their rank and book.`}
+                        className={`${cls} inline-flex items-center gap-1 hover:ring-1 hover:ring-slate-300`}>
+                        {label}
+                        <ChevronDown size={10} className={open ? 'rotate-180' : ''} />
+                      </button>
+                    )
+                  })()}
                 </td>
                 <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
                 <td className="px-3 py-2.5">
@@ -483,6 +537,26 @@ function UsersTab() {
                   </td>
                 )}
               </tr>
+              {/*
+                THE PERSON'S BOOK, UNDER THE PERSON. One row per human being: the firm sent back a
+                screen that listed Itumeleng in a Users table and again in a Collectors table, with
+                her rank drawn in both. This is that second table, folded into the row it was always
+                about.
+
+                SPANNING EVERY COLUMN so the controls lay themselves out rather than being squeezed
+                into whichever cell they landed under -- and so the count stays right for an
+                administrator, who sees two more columns than anybody else.
+              */}
+              {bookOpen === u.id && (
+                <tr>
+                  <td colSpan={columns} className="p-0">
+                    <CollectorsPanel user={u} canEdit={canRank}
+                      inPlay={bookLoad?.get(u.id) ?? null}
+                      onChange={(patch) => updateUser(u.id, patch)} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
   )
 
   return (
@@ -631,18 +705,6 @@ function UsersTab() {
       )}
     </Card>
 
-    {/*
-      Beneath the people, not inside them. A grade and a book ceiling are not attributes of an
-      account in the CRM sense -- they are what makes somebody eligible to be handed collections
-      work at all -- and four more columns on a table that is already seven wide would put the
-      thing being changed off the right-hand edge of an iPad.
-    */}
-    {/*
-      * canLeadCollections, NOT a hand-written pair of roles. Written out, this one was left
-      * behind when Call Centre Manager was added -- the person who runs the floor could hand
-      * accounts out and lead it everywhere except here, where the ranks are actually set.
-    */}
-    <CollectorsPanel canEdit={canLeadCollections(currentUser)} />
     </div>
   )
 }
