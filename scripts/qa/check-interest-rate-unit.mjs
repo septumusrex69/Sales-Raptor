@@ -100,8 +100,13 @@ ok('...which is the rate the imported book was already charging',
 ok('the division is recorded', /set interest_rate_annual = interest_rate_annual \/ 100/.test(sql))
 ok('...and so is putting it back',
   /set interest_rate_annual = interest_rate_annual \* 100/.test(sql))
-const divided = sql.lastIndexOf('interest_rate_annual / 100')
-const restored = sql.lastIndexOf('interest_rate_annual * 100')
+/* ANCHORED ON THE `set`, not on the expression. A bare `interest_rate_annual / 100` also matches
+   the monthly rate inside accrue_interest_to -- `v_acct.interest_rate_annual / 100.0 / 12.0` --
+   which is a READ of the column in the correct unit and has nothing to do with the correction. It
+   was written into the file later than the restore, so the loose match had this assertion failing
+   on code that is right. The statements are what the order is about. */
+const divided = sql.lastIndexOf('set interest_rate_annual = interest_rate_annual / 100')
+const restored = sql.lastIndexOf('set interest_rate_annual = interest_rate_annual * 100')
 ok('...after it, so a replay ends on the right number', restored > divided && divided > 0)
 /*
  * AND A DELIBERATE RATE SURVIVED BOTH. Two accounts on one client's handover carry 12%, and "we
