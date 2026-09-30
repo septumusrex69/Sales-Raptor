@@ -18061,3 +18061,142 @@ begin
     execute format('revoke execute on function public.%s from public, anon', fn);
   end loop;
 end $$;
+
+-- ============================================================================
+-- INTEREST RUNS AT 24%, AND A RATE IS A FRACTION.
+--
+-- THE FIRM, ASKED WHAT THE RATE IS: "interest should run at 24% always. Sometimes we can possibly
+-- change the interest rate."
+--
+-- THE COLUMN HELD TWO UNITS AND THE CODE ONLY UNDERSTANDS ONE.
+--
+--   18 739 accounts held `24`  -- the imported book, meaning 24% a year. interestAccrual.ts
+--                                documented it: "24% a year charged as a flat 2% of the running
+--                                balance each month, capitalised".
+--        2 accounts held `12`  -- from a handover, one client, a deliberately different rate.
+--    5 000 accounts held `0.115` -- seeded in one batch on 2026-09-15, none from a handover, so
+--                                not the firm's own accounts and not the firm's own rate.
+--
+-- `computeBalance` takes a FRACTION. So on 18 741 accounts a rate of `24` would be read as 2400%
+-- a year. This is the identical fault CLAUDE.md records for commission -- "18 000 accounts stored
+-- 25 meaning 25%, and 5 758 stored 0.25 meaning the same thing... run against the percent rows,
+-- the engine would have taken 2 500% commission" -- which got a migration. Interest was missed.
+--
+-- IT HAS NEVER BEEN REACHABLE, and that is why it survived unnoticed: `openAccrual` needs a posted
+-- accrual to anchor from and returns zero without one, so nothing has ever computed interest off
+-- these rates. REHEARSED IN A TRANSACTION THAT ROLLED BACK BEFORE THIS RAN, and the number that
+-- matters did not move: posted interest R 5 850 284,39 before and R 5 850 284,39 after. Posted
+-- history is history; a rate only ever decides the OPEN period.
+--
+-- THE 12% IS KEPT AS 12%. "Sometimes we can possibly change the interest rate" -- two accounts on
+-- one client's handover carry a rate somebody set deliberately, and the unit being wrong is not a
+-- reason to overwrite the decision. Only the unit is corrected.
+--
+-- THE SEEDED 11.5% BECOMES 24%, because it is not a rate the firm chose -- it is what a seeding
+-- script picked. Nothing has been charged on it.
+--
+-- AND 24% BECOMES THE DEFAULT, which is the "always" half of the instruction: a new account gets
+-- the firm's rate without anybody typing it, and changing one account stays a deliberate edit.
+-- If the default itself should become a firm-wide SETTING rather than a column default, that is a
+-- firm_settings row and a decision nobody has asked for yet.
+-- ============================================================================
+update public.debtor_accounts
+   set interest_rate_annual = interest_rate_annual / 100
+ where interest_rate_annual > 1;
+
+-- The seeded 11.5% and anything missing or zero. The 12% is left exactly as it is.
+update public.debtor_accounts
+   set interest_rate_annual = 0.24
+ where coalesce(interest_rate_annual, 0) <= 0
+    or abs(interest_rate_annual - 0.115) < 0.0001;
+
+-- THE SAME GUARD commission_rate HAS, for the same reason: the unit is invisible in the data and
+-- the failure is silent and enormous. A rate above 1 is a percent somebody typed.
+alter table public.debtor_accounts
+  drop constraint if exists debtor_accounts_interest_rate_is_a_fraction;
+alter table public.debtor_accounts
+  add constraint debtor_accounts_interest_rate_is_a_fraction
+  check (interest_rate_annual is null or (interest_rate_annual >= 0 and interest_rate_annual <= 1));
+
+alter table public.debtor_accounts
+  alter column interest_rate_annual set default 0.24;
+
+comment on column public.debtor_accounts.interest_rate_annual is
+  'The annual rate as a FRACTION -- 0.24 is 24%, which is the firm''s rate and the default. The '
+  'firm: "interest should run at 24% always. Sometimes we can possibly change the interest rate." '
+  'Never a percent: debtor_accounts_interest_rate_is_a_fraction refuses anything above 1, because '
+  'the unit is invisible in the data and reading 24 as a fraction is 2400% a year.';
+
+-- ============================================================================
+-- THE RATE IS A PERCENT, AND THE MIGRATION ABOVE WAS WRONG. UNDONE.
+--
+-- I read `computeBalance`'s `interestRateAnnual` as a fraction because `commission_rate` on this
+-- same table is one, divided 18 741 correct rates by a hundred, and said so in two messages. It is
+-- not a fraction. `accrueToDate` line 132:
+--
+--     const monthlyRate = annualRate / 100 / MONTHS_PER_YEAR
+--
+-- It divides by a hundred ITSELF. So `24` means 24% a year -- 2% a month, exactly what
+-- interestAccrual.ts derived from the imported book -- and `24` was right in 18 739 rows all
+-- along. What was actually wrong was the 5 000 seeded rows holding `0.115`, which the engine reads
+-- as 0.115% a year.
+--
+-- CAUGHT BY THE CHECK WRITTEN TO GUARD THE CHANGE, one command after applying it: a full month at
+-- "0.24" came to 20 cents on a thousand rand rather than twenty rand. Asserting the ARITHMETIC
+-- rather than the column is what found it -- a check that only read the constraint back out of
+-- this file would have passed and agreed with me.
+--
+-- NOTHING WAS CHARGED IN BETWEEN. `openAccrual` needs a posted accrual to anchor from and returns
+-- zero without one, so no interest has ever been computed off any of these rates, and posted
+-- history is never recomputed: R 5 850 284,39 before, between and after.
+--
+-- MULTIPLYING EVERYTHING BY A HUNDRED IS EXACTLY RIGHT, which is worth stating rather than
+-- assuming. The wrong migration touched only rows above 1 (divided) and rows at 0.115 or nothing
+-- (set to 0.24). There were no other values. So 0.24 -> 24 restores the imported rate, 0.12 -> 12
+-- restores the one client's deliberate rate, and the seeded rows land on 24 -- the rate the firm
+-- asked for: "interest should run at 24% always."
+--
+-- THE TWO BLOCKS ARE BOTH KEPT because both ran, and because this file is append-only and the last
+-- word wins: replayed from empty it divides and then multiplies back, which is a no-op, and ends
+-- on the right constraint.
+-- ============================================================================
+alter table public.debtor_accounts
+  drop constraint if exists debtor_accounts_interest_rate_is_a_fraction;
+
+update public.debtor_accounts
+   set interest_rate_annual = interest_rate_annual * 100
+ where interest_rate_annual is not null and interest_rate_annual <= 1;
+
+alter table public.debtor_accounts
+  alter column interest_rate_annual set default 24;
+
+-- ============================================================================
+-- AND A RATE BELOW 1% IS A FRACTION SOMEBODY TYPED.
+--
+-- The first guard bounded the rate at 200 and caught a 2400 typo. Probing it showed it still
+-- accepted 0.24 -- the mistake I had just made and undone, a quarter of a percent a year, and the
+-- one shape of wrongness this column actually attracts.
+--
+-- IT ATTRACTS IT BECAUSE THE TABLE HOLDS BOTH UNITS. `commission_rate` here is a FRACTION and is
+-- constrained to <= 1; `interest_rate_annual` is a PERCENT because accrueToDate divides by 100
+-- itself. Two rate columns, two units, one table -- so "rate" alone never tells you which, and the
+-- only defence is a constraint on each that refuses the other's range.
+--
+-- ZERO STAYS LEGAL, the same choice commission_rate made: "no interest on this account" is a real
+-- answer. What is refused is the band between nothing and one percent a year, which no creditor
+-- charges and which is what a fraction looks like when it lands in a percent column.
+-- ============================================================================
+alter table public.debtor_accounts
+  drop constraint if exists debtor_accounts_interest_rate_is_a_percent;
+alter table public.debtor_accounts
+  add constraint debtor_accounts_interest_rate_is_a_percent
+  check (interest_rate_annual is null
+     or interest_rate_annual = 0
+     or (interest_rate_annual >= 1 and interest_rate_annual <= 200));
+
+comment on column public.debtor_accounts.interest_rate_annual is
+  'The annual rate as a PERCENT -- 24 is 24% a year, the firm''s rate and the default. The firm: '
+  '"interest should run at 24% always. Sometimes we can possibly change the interest rate." '
+  'NEVER a fraction: accrueToDate divides by 100 itself, so 0.24 here is a quarter of a percent a '
+  'year. commission_rate is the opposite unit on the same table, which is exactly how this was got '
+  'wrong once -- check-interest-rate-unit asserts the arithmetic rather than the column.';
