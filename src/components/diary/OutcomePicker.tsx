@@ -2,6 +2,9 @@ import { FormField, inputClass } from '../ui/Modal'
 import {
   CALL_OUTCOMES, CALL_OUTCOME_ORDER, needsPromise, needsWords, type CallOutcome,
 } from '../../lib/callOutcome.ts'
+import {
+  QUERY_CATEGORIES, classificationMissing, explanationMissing,
+} from '../../lib/disputeCategories.ts'
 
 export interface OutcomeChoice {
   outcome: CallOutcome | null
@@ -12,9 +15,17 @@ export interface OutcomeChoice {
   dueOn: string
   /** The words, where the answer needs them. */
   words: string
+  /**
+   * ONLY ON 'disputed', AND REQUIRED THERE. The firm: "you should be able to say about what is a
+   * dispute about." A dispute taken on a call is a dispute like any other, and this is the one
+   * moment anybody knows the answer -- the debtor is still on the line. Without it the diary could
+   * not finish an account at all: raiseQuery refuses an unclassified dispute, recordOutcome reports
+   * the failure, and the sub-status is deliberately not written when anything above it failed.
+   */
+  category: string
 }
 
-export const EMPTY_OUTCOME: OutcomeChoice = { outcome: null, amount: '', dueOn: '', words: '' }
+export const EMPTY_OUTCOME: OutcomeChoice = { outcome: null, amount: '', dueOn: '', words: '', category: '' }
 
 /** Is there enough here to save? Null outcome is allowed — recording nothing stays possible. */
 export function outcomeReady(c: OutcomeChoice, hasLivePromise = false): boolean {
@@ -22,7 +33,11 @@ export function outcomeReady(c: OutcomeChoice, hasLivePromise = false): boolean 
   /* A promise already on the account is the amount and the date — see OutcomePicker. */
   if (needsPromise(c.outcome) && hasLivePromise && !c.repromise) return true
   if (needsPromise(c.outcome)) return c.amount.trim() !== '' && c.dueOn !== ''
-  if (needsWords(c.outcome)) return c.words.trim().length >= 3
+  if (needsWords(c.outcome) && c.words.trim().length < 3) return false
+  /* A DISPUTE SAYS WHAT IT IS ABOUT, here as everywhere. Asked through the same two functions the
+     Escalate box asks, so the diary and the box cannot come to different answers. */
+  if (classificationMissing(c.outcome === 'disputed' ? 'dispute' : 'help', c.category)) return false
+  if (c.outcome === 'disputed' && explanationMissing(c.category, c.words)) return false
   return true
 }
 
@@ -135,6 +150,27 @@ export function OutcomePicker({ value, onChange, livePromise }: {
             </span>
           </FormField>
         </div>
+      )}
+
+      {chosen === 'disputed' && (
+        /*
+          WHAT KIND OF DISPUTE, ASKED ON THE CALL. The firm made the classification compulsory --
+          "you should be able to say about what is a dispute about" -- and the debtor is on the line,
+          which is the only moment anybody knows. It sits ABOVE the words on purpose: on "Other" the
+          words ARE the classification, so the question has to come first.
+        */
+        <FormField label="What kind of dispute">
+          <select value={value.category} onChange={(e) => set({ category: e.target.value })}
+            className={inputClass}>
+            {/* Disabled, not "None": a selectable blank is the optional field back again. */}
+            <option value="" disabled>Pick one…</option>
+            {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
+          </select>
+          <span className="block text-[11px] text-slate-400 mt-1">
+            {QUERY_CATEGORIES.find((c) => c.value === value.category)?.examples
+              ?? 'It is what every dispute report groups by.'}
+          </span>
+        </FormField>
       )}
 
       {needsWords(chosen) && (

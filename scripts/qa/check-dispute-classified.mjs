@@ -15,15 +15,24 @@
  * That is 60% of every report that groups by one. A field two people in three skip is not an
  * optional field, it is a field that does not work.
  *
- * THERE ARE FOUR DOORS INTO account_queries AND THE RULE HAS TO HOLD ON ALL OF THEM, which is what
- * this file is for:
+ * THERE ARE SIX DOORS INTO account_queries AND THE RULE HAS TO HOLD ON ALL OF THEM, which is what
+ * this file is for -- and the last two were found by making it compulsory and then reading every
+ * caller, not by the screens telling anybody:
  *
- *   - THE ESCALATE BOX, where a collector raises one on a call.
+ *   - THE ESCALATE BOX, where a collector raises one deliberately.
  *   - raiseQuery, which the box and everything else in the browser goes through.
  *   - api/_lib/email/ticket, which is the path a dispute raised off an EMAIL takes -- it inserts
  *     with the service key and never touches raiseQuery, so a rule written only in the lib is a
  *     rule with a door beside it.
- *   - AND THE DATABASE, which is the only one of the four that cannot be gone round.
+ *   - THE DIARY'S CALL BOX. "They dispute it" is one of the eight outcomes, and recordOutcome
+ *     raises the dispute from it. This one would have BROKEN THE DIARY: raiseQuery refuses an
+ *     unclassified dispute, recordOutcome collects the failure, and the sub-status is deliberately
+ *     not written when anything above it failed -- so finishing a disputed account would have
+ *     failed outright. So the picker asks on the call, which is the only moment anybody knows.
+ *   - CANCELLING AN ARRANGEMENT "because of a dispute", which raises one as a side effect. Here the
+ *     cancellation would have landed and the DISPUTE would have been lost with a line of red under
+ *     it, which is worse than failing: the account carries on collecting on a disputed debt.
+ *   - AND THE DATABASE, which is the only one of the six that cannot be gone round.
  *
  * THE ONE THING THIS DELIBERATELY DOES NOT ASSERT is a check constraint, because a CHECK is
  * enforced on UPDATE as well as INSERT -- including one added NOT VALID. The twelve unclassified
@@ -147,7 +156,63 @@ ok('the category it checks is the category it stores',
   /const category = typeof body\.category === 'string'/.test(api)
   && /category: kind === 'dispute' \? \(category \|\| null\) : null/.test(api))
 
-/* ---------------- door 4: the database, which cannot be gone round ---------------- */
+/* ---------------- door 4: the diary's call box ---------------- */
+
+/*
+ * THE DOOR THAT WOULD HAVE BROKEN THE DIARY. recordOutcome raises the dispute behind the
+ * "They dispute it" outcome and passed no category. Making the field compulsory without this would
+ * have meant raiseQuery refusing, recordOutcome collecting the failure -- and the sub-status NOT
+ * being written, because it is written only when everything above it landed. Finishing a disputed
+ * account would have failed outright, on the busiest box in the building.
+ */
+const picker = code('src/components/diary/OutcomePicker.tsx')
+const outcome = code('src/lib/recordOutcome.ts')
+const workbar = code('src/components/diary/DiaryWorkBar.tsx')
+const complete = code('src/components/diary/CompleteDiaryModal.tsx')
+
+ok('the call box asks what kind of dispute', /chosen === 'disputed' &&[\s\S]{0,400}?QUERY_CATEGORIES\.map/.test(picker))
+ok('...with a placeholder that cannot be chosen', /<option value="" disabled>/.test(picker))
+/* AND THE SAVE BUTTON WAITS FOR IT. outcomeReady is what the two boxes disable on, so a rule that
+   is drawn but not required is a rule the collector discovers as a failure after the call. */
+ok('...and the account cannot be finished without it',
+  /classificationMissing\(c\.outcome === 'disputed'/.test(picker))
+ok('...nor with "Other" and nothing behind it',
+  /c\.outcome === 'disputed' && explanationMissing\(c\.category, c\.words\)/.test(picker))
+/*
+ * AND `outcomeReady` STILL ANSWERS THE QUESTIONS IT ANSWERED BEFORE. It used to end
+ * `if (needsWords(...)) return ...` -- an early RETURN, not a guard -- so adding a rule after it
+ * would have been unreachable on every outcome that needs words, which includes 'disputed' itself.
+ * This is the assertion that catches that: the words test must fall THROUGH.
+ */
+ok('...and the words rule became a guard rather than a return',
+  /if \(needsWords\(c\.outcome\) && c\.words\.trim\(\)\.length < 3\) return false/.test(picker))
+
+ok('recordOutcome carries the classification', /category: input\.category \?\? null,/.test(outcome))
+/* NOT DEFAULTED THERE. A fallback -- 'Other', or the words -- is how a required field becomes a
+   field nobody answers, which is how 60% of the book came to be unclassified to begin with. */
+ok('...without inventing one', !/category: input\.category \?\? '/.test(outcome))
+for (const [name, src] of [['the work bar', workbar], ['the diary modal', complete]]) {
+  ok(`${name} hands it over`, /category: came\.outcome === 'disputed' \? came\.category : null,/.test(src))
+}
+
+/* ---------------- door 5: cancelling an arrangement for a dispute ---------------- */
+
+/*
+ * WORSE THAN A FAILURE IF IT IS MISSED. The cancellation lands first and the dispute is raised
+ * after it, so an unclassified one would have left the arrangement cancelled, the dispute NOT
+ * raised, and every collection sequence the promise was holding handed straight back -- on an
+ * account the debtor has just disputed.
+ */
+const cancel = code('src/pages/accounts/CancelArrangementModal.tsx')
+const account = code('src/pages/accounts/AccountDetail.tsx')
+ok('the cancel box asks when the cause is a dispute',
+  /cause === 'disputed' &&[\s\S]{0,600}?QUERY_CATEGORIES\.map/.test(cancel))
+ok('...and will not cancel until it is answered',
+  /const needsClassification = cause === 'disputed'[\s\S]{0,200}?classificationMissing\('dispute', category\)/.test(cancel))
+ok('...which the button reads', /&& !needsClassification/.test(cancel))
+ok('...and it reaches the dispute it raises', /category,/.test(account))
+
+/* ---------------- door 6: the database, which cannot be gone round ---------------- */
 
 /* schema.sql is append-only: the LAST definition is the live one, and the bare name also appears in
    the comment and the trigger that follow it. */

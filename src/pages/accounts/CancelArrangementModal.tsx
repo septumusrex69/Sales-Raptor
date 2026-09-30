@@ -3,6 +3,9 @@ import { Loader2 } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { DictateButton } from '../../components/ui/Dictate'
 import { CANCEL_CHOICES, type CancelCause } from '../../lib/promiseRules.ts'
+import {
+  QUERY_CATEGORIES, classificationMissing, explanationMissing,
+} from '../../lib/disputeCategories.ts'
 
 /**
  * CANCELLING AN ARRANGEMENT ASKS WHY, AND THE ANSWER DECIDES WHAT HAPPENS NEXT.
@@ -38,22 +41,36 @@ export function CancelArrangementModal({ amount, onClose, onConfirm }: {
    * that owns the account. Returning the error rather than throwing keeps the box open with the
    * words still in it: a reason typed once on a call is not one somebody will type again.
    */
-  onConfirm: (choice: { cause: CancelCause; reason: string }) => Promise<string | null>
+  onConfirm: (choice: {
+    cause: CancelCause
+    reason: string
+    /** Only on 'disputed', and required there: the dispute this raises must say what it is about. */
+    category: string
+  }) => Promise<string | null>
 }) {
   const [cause, setCause] = useState<CancelCause | null>(null)
   const [reason, setReason] = useState('')
+  const [category, setCategory] = useState('')
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
 
   /* BOTH, OR NEITHER. The column refuses a cancellation with no cause and the firm asked for the
      sentence as well, so the button is the place that says so rather than an error afterwards. */
-  const ready = cause !== null && reason.trim().length > 0
+  /*
+   * AND A THIRD WHERE THIS RAISES A DISPUTE. "Because of a dispute" makes one, the firm made the
+   * classification compulsory on a dispute, and raiseQuery refuses it without one -- so without this
+   * the arrangement would cancel and the dispute would be lost with a sentence in red underneath.
+   * Asked here, while the debtor is still on the telephone, rather than reported afterwards.
+   */
+  const needsClassification = cause === 'disputed'
+    && (classificationMissing('dispute', category) || explanationMissing(category, reason))
+  const ready = cause !== null && reason.trim().length > 0 && !needsClassification
 
   async function confirm() {
     if (!cause || !ready) return
     setBusy(true)
     setFailed(null)
-    const problem = await onConfirm({ cause, reason })
+    const problem = await onConfirm({ cause, reason, category })
     setBusy(false)
     if (problem) setFailed(problem)
     else onClose()
@@ -84,6 +101,26 @@ export function CancelArrangementModal({ amount, onClose, onConfirm }: {
           </button>
         ))}
       </div>
+
+      {cause === 'disputed' && (
+        /* ABOVE THE WORDS, because on "Other" the words ARE the classification and the question
+           has to come first. Same order as the diary's call box, for the same reason. */
+        <div className="mt-4">
+          <label htmlFor="cancel-category" className="text-sm font-medium text-slate-700">
+            What kind of dispute
+          </label>
+          <select id="cancel-category" value={category} onChange={(e) => setCategory(e.target.value)}
+            className="w-full text-sm rounded-lg border border-slate-200 px-3 py-2 mt-1 bg-white">
+            {/* Disabled, not "None": a selectable blank is the optional field back again. */}
+            <option value="" disabled>Pick one…</option>
+            {QUERY_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.value}</option>)}
+          </select>
+          <span className="block text-[11px] text-slate-500 mt-1">
+            {QUERY_CATEGORIES.find((c) => c.value === category)?.examples
+              ?? 'The dispute this raises is classified like any other.'}
+          </span>
+        </div>
+      )}
 
       <div className="mt-4">
         <div className="flex items-baseline justify-between gap-3">

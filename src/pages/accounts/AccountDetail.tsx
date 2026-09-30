@@ -2763,7 +2763,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
         <CancelArrangementModal
           amount={`${formatMoney(cancelling.amount)} · ${describeArrangement(cancelling)}`}
           onClose={() => setCancelling(null)}
-          onConfirm={async ({ cause, reason }) => {
+          onConfirm={async ({ cause, reason, category }) => {
             try {
               await resolvePromise(cancelling.id, 'cancelled', userId, { cause, reason })
             } catch (e) {
@@ -2776,6 +2776,10 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
                   accountId,
                   description: reason.trim(),
                   kind: 'dispute',
+                  /* THE CLASSIFICATION THE BOX ASKED FOR. Not guessed here: raiseQuery refuses a
+                     dispute without one, and the box will not let the cancellation through until it
+                     has been answered. */
+                  category,
                   raisedBy: userId,
                   raisedByName: userName,
                   /* NOT CHARGED. Item 3 is for a dispute taken up with somebody else; one written

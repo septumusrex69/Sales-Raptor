@@ -70,6 +70,8 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
             ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
             : null,
           words: came.words,
+          /* Only 'disputed' collects one; raiseQuery ignores it on everything else. */
+          category: came.outcome === 'disputed' ? came.category : null,
           actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
         })
         if (r.failed.length) throw new Error(`Could not record ${r.failed.join(' or ')}.`)

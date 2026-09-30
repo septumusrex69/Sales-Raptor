@@ -33,6 +33,8 @@ export async function recordOutcome(input: {
   promise?: { amount: number; dueOn: string } | null
   /** The agent's words, where the outcome needs them. */
   words?: string
+  /** Only for 'disputed', and required there -- raiseQuery refuses a dispute without one. */
+  category?: string | null
   actor: { id: string | null; name: string | null }
 }): Promise<OutcomeRecorded> {
   const meta = CALL_OUTCOMES[input.outcome]
@@ -59,6 +61,11 @@ export async function recordOutcome(input: {
         accountId: input.accountId,
         description: words ?? 'The debtor disputes the account.',
         kind: 'dispute',
+        /* THE CLASSIFICATION THE PICKER ASKED FOR. Not defaulted here: a dispute the collector did
+           not classify is one raiseQuery must refuse, and the picker will not let them get this far
+           without it. Guessing a category for them is how 60% of the book came to be unclassified
+           in the first place -- by nobody having to answer. */
+        category: input.category ?? null,
         raisedBy: input.actor.id,
         raisedByName: input.actor.name,
         /*
