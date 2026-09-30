@@ -27,7 +27,7 @@
  * write-off, where the account stopped and accrual stopped with it.
  */
 import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.js'
-import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay } from './interestAccrual.js'
+import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay, dayBefore } from './interestAccrual.js'
 import { feeLabel } from './feeLabel.js'
 
 export interface LedgerLines {
@@ -269,9 +269,32 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     ),
   )
 
-  // Interest between the last posted accrual and today. Computed, never written: see
-  // interestAccrual.ts for why a daily figure does not need a daily row.
-  const open = openAccrual(input, roundToCents(capital + interest + fees + receiptFees - payments))
+  /*
+   * EVERY MOVEMENT, DATED, for the open period to run over.
+   *
+   * It used to be handed one number -- capital + interest + fees + receiptFees - payments -- which
+   * is the balance TODAY, not the balance the period opened on. That was harmless while the open
+   * period was the handful of days since the last monthly posting. It is not harmless now that the
+   * period can start at the handover: see openAccrual.
+   *
+   * A payment and the receipt fee it attracts are ONE movement because they are one day: the net of
+   * them is what the balance actually did. The computed half is only for payments carrying no item 9
+   * row of their own -- the same `covered` set the totals above use, so the fee cannot be counted
+   * here and there.
+   */
+  const movements: { date: string; amount: number }[] = [
+    ...chargedFees.map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
+    ...receiptRows.filter((f) => within(f.date))
+      .map((f) => ({ date: f.date, amount: f.exclVat + f.vat })),
+    ...ledgers.payments.map((p) => ({
+      date: p.date,
+      amount: -p.amount + (p.id && covered.has(p.id) ? 0 : receiptFeeOn(p, vatRate)),
+    })),
+  ]
+
+  // Interest between the last posted accrual (or the handover) and today. Computed, never written:
+  // see interestAccrual.ts for why a daily figure does not need a daily row.
+  const open = openAccrual(input, roundToCents(capital + interest), movements)
 
   const nonCapital = interest + open.amount + fees + receiptFees
   let cappedBy: BalanceBreakdown['cappedBy']
@@ -341,17 +364,26 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
  * is already current. Each of those has to produce a real zero rather than an accidental one, so
  * they are all decided here in one place.
  *
- * AND ONE OF THEM IS NOT A RULE, IT IS AN UNBUILT HALF: `!covered` -- an account with no posted
- * accrual at all. Interest then never starts, because there is no last posting to run on from.
- * Every account the firm has actually imported or captured has a posted accrual or a zero rate, so
- * nothing in the real book is standing still; what sits in this state on staging is generated test
- * data. The firm's rule for it is settled (interestAccrual.ts: the clock starts at the HANDOVER
- * DATE, not at `interest_from`, which on 63 imported accounts predates the handover by up to 95
- * days), and what is NOT settled is the one arithmetic question the fix turns on: this function is
- * handed a single opening balance with every fee and payment already in it, so accruing a long
- * period from the handover would earn interest from day one on a fee raised in month eight. Whether
- * fees bear interest at all, and from when, is the firm's to answer -- it moves money and it pushes
- * non-capital against the in duplum ceiling -- so it is asked at import rather than assumed here.
+ * WHERE THE CLOCK STARTS WHEN NOTHING HAS BEEN POSTED: THE HANDOVER DATE. The firm: "normally,
+ * interest starts occurring from the date of handover." An imported account continues from its last
+ * posted accrual, because that history already ran; an account Raptor captured itself has no posted
+ * accrual and never will until a payment posts one, so `covered` falls back to the day BEFORE the
+ * handover and the first accruing day is the handover itself.
+ *
+ * THIS WAS LEFT UNBUILT FOR ONE REASON AND THE REASON IS NOW ANSWERED. The blocker was arithmetic,
+ * not policy: this function used to be handed a single closing balance with every fee and payment
+ * already folded into it, so accruing sixteen months from the handover would have charged interest
+ * from day one on a fee raised in month eight and never given back the months after a payment. So
+ * the balance is no longer handed over as one number. The posted base comes in, every fee and
+ * payment comes in DATED, and whatever falls on or before the anchor joins the opening balance
+ * while the rest is handed to the engine as movements on their own days. The reading is the one
+ * that cannot overcharge a debtor: money bears interest from the day it is owed and stops on the
+ * day it is paid.
+ *
+ * WHAT THIS CHANGES: 23 039 of the 23 774 live accounts on staging have no posted accrual, every
+ * one of them has a handover date and a rate, and every one of them was standing still. Only three
+ * of those are imported -- the other 23 036 are accounts Raptor captured or seeded itself, which is
+ * to say every account the firm opens from here on.
  *
  * `interest_from` IS DELIBERATELY NOT READ. See rule 2 in interestAccrual.ts: it records what the
  * client told us about their own book, and using it as a start date would have Raptor recompute
@@ -359,17 +391,35 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
  */
 function openAccrual(
   input: BalanceInput,
-  balanceAtLastPosting: number,
+  /** Capital plus every posted accrual: what the account owed before anything below moved it. */
+  postedBase: number,
+  /** Every fee as a debit and every payment as a credit, each on its own day. */
+  movements: { date: string; amount: number }[],
 ): { amount: number; days: number; from: string | null } {
   const none = { amount: 0, days: 0, from: null }
   if (!input.accrueTo || input.writtenOffAt) return none
   const covered = lastCoveredDay(input.ledgers.interest)
+    ?? (input.handoverDate ? dayBefore(input.handoverDate) : null)
+  /* Still nothing to run from: an account with neither a posted accrual nor a handover date has no
+     day the firm can point at as the one the debt became theirs, and inventing one -- today, the
+     day the row was created -- would charge a debtor for days nobody can evidence. */
   if (!covered) return none
+
+  /* The anchor splits the ledger in two. On or before it, the money is part of what the period
+     opens on; after it, the money lands during the period and the engine has to see the day. */
+  let opening = postedBase
+  const inside: typeof movements = []
+  for (const m of movements) {
+    if (m.date <= covered) opening += m.amount
+    else inside.push(m)
+  }
+
   const open = accrueToDate({
-    openingBalance: balanceAtLastPosting,
+    openingBalance: roundToCents(opening),
     annualRate: input.interestRateAnnual ?? 0,
     coveredTo: covered,
     asAt: input.accrueTo,
+    movements: inside,
   })
   return open ? { amount: open.amount, days: open.days, from: open.from } : none
 }

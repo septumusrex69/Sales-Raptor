@@ -42,6 +42,12 @@
  *      payments). It is written down here because it is a decision and not an implementation
  *      detail: a reading of "interest on the capital" is defensible, several creditors work that
  *      way, and it would be a smaller number on every account in the book.
+ *   3a. AND WHERE NOTHING HAS BEEN POSTED, THE HANDOVER IS WHERE IT STARTS. `openAccrual` falls back
+ *      to the day before the handover date, so the first accruing day is the handover itself. This
+ *      was left unbuilt for a year and the cost was quiet: 23 039 of the 23 774 live accounts on
+ *      staging had no posted accrual and were standing still -- three of them imported, the rest
+ *      accounts Raptor captured or seeded itself, which is every account the firm opens from here
+ *      on. The firm read one of them and asked "no interest?"
  *   4. AN IMPORT CONTINUES, IT DOES NOT RECOMPUTE. The firm: "the interest ... has already run. So
  *      it's exported from Swordfish. And then we will import it on the same day. So then it should
  *      just continue running." The posted accruals come across as they were posted and `coveredTo`
@@ -76,6 +82,27 @@ export interface AccrualInput {
   coveredTo: string
   /** Accrue up to and including this day. */
   asAt: string
+  /**
+   * WHAT MOVED THE BALANCE *INSIDE* THE OPEN PERIOD — a fee as a debit (+), a payment as a
+   * credit (−) — each on its own day.
+   *
+   * It was safe to leave these out while the open period was the few days between the last
+   * monthly posting and today: a fee raised inside it earns interest for five days either way and
+   * the difference is cents. It stopped being safe the moment the period could start at the
+   * HANDOVER, because an account captured last May has sixteen months of open period, and running
+   * one closing balance across all of it charges the debtor interest from day one on a fee raised
+   * in month eight and never gives back the months after a payment.
+   *
+   * Applied at the START of the day they are dated, which is the reading that cannot overcharge:
+   * a fee raised on the 10th bears interest for the 10th onward, and a payment received on the
+   * 10th stops bearing from the 10th. The firm's rule is that interest runs on the outstanding
+   * balance (interestAccrual rule 3) — this is that rule read day by day rather than once.
+   *
+   * Interest still capitalises at the MONTH boundary and nowhere else, exactly as the posted
+   * history does: a movement splits the month into segments charged at the balance in force, and
+   * the month's interest joins the balance when the month closes.
+   */
+  movements?: { date: string; amount: number }[]
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10)
@@ -88,6 +115,17 @@ const daysInMonth = (s: string) => {
 }
 const endOfMonth = (s: string) => `${s.slice(0, 7)}-${String(daysInMonth(s)).padStart(2, '0')}`
 const round = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * The day before a given day.
+ *
+ * `coveredTo` is the last day ALREADY covered, so a caller that wants interest to start ON a date
+ * passes the day before it. That is a one-day trap on the one date the firm actually named — the
+ * handover — so the arithmetic lives here rather than being written out at the call site.
+ */
+export function dayBefore(date: string): string {
+  return addDays(date, -1)
+}
 
 /**
  * The last day a posted accrual covers.
@@ -133,16 +171,44 @@ export function accrueToDate(input: AccrualInput): OpenAccrual | null {
   let balance = openingBalance
   let accrued = 0
 
+  // In date order, so one cursor can walk both the calendar and the ledger. Movements outside the
+  // open period are not this function's business: what falls before `from` is already inside the
+  // opening balance, and what falls after `asAt` has not happened yet.
+  const moves = (input.movements ?? [])
+    .filter((m) => m.date >= from && m.date <= asAt && m.amount !== 0)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  let nextMove = 0
+
   // Month by month, so interest capitalises at each boundary exactly as the posted history does.
   let cursor = from
   while (cursor <= asAt) {
     const monthEnd = endOfMonth(cursor)
     const segmentEnd = monthEnd < asAt ? monthEnd : asAt
-    const segmentDays = daysBetween(cursor, segmentEnd) + 1
-    // A whole month is segmentDays === daysInMonth, so this lands on the flat monthly rate.
-    const amount = balance * monthlyRate * (segmentDays / daysInMonth(cursor))
-    accrued += amount
-    balance += amount
+    /* The month's interest is accumulated and joined to the balance ONCE, at the close. Adding
+       each segment as it is earned would compound within the month, which the posted history
+       does not do — the book has always charged a flat 2% of the running balance per month. */
+    let monthInterest = 0
+    let day = cursor
+    while (day <= segmentEnd) {
+      // Everything dated today lands before today earns anything.
+      while (nextMove < moves.length && moves[nextMove].date <= day) {
+        balance += moves[nextMove].amount
+        nextMove += 1
+      }
+      /* The run of days the balance holds for: up to the day before the next movement, or to the
+         end of the month, whichever comes first. With no movements this is the whole segment and
+         the arithmetic below is the flat monthly rate it always was. */
+      const upcoming = nextMove < moves.length && moves[nextMove].date <= segmentEnd
+        ? addDays(moves[nextMove].date, -1)
+        : segmentEnd
+      const runDays = daysBetween(day, upcoming) + 1
+      // A whole month is runDays === daysInMonth, so this lands on the flat monthly rate.
+      // Guarded above zero because an overpaid account must not earn the debtor interest.
+      if (balance > 0) monthInterest += balance * monthlyRate * (runDays / daysInMonth(cursor))
+      day = addDays(upcoming, 1)
+    }
+    accrued += monthInterest
+    balance += monthInterest
     cursor = addDays(segmentEnd, 1)
   }
 

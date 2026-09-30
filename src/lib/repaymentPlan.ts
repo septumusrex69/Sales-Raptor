@@ -188,9 +188,10 @@ export function minimumInstalment(
  *
  * THE LOOP IS THE WHOLE ALGORITHM AND IT IS DELIBERATELY DULL: ask the balance what is owed on the
  * instalment date, decide whether the offer settles it, and if not POST that period's interest and
- * record the payment. Posting is what makes the next period compound off the right number --
- * openAccrual runs the open period on ONE opening balance, so a projection that simply moved
- * `accrueTo` further out would charge every future month's interest on the closing balance.
+ * record the payment. Posting is what makes the next period COMPOUND off the right number: the open
+ * period capitalises at month boundaries only, so a projection that simply moved `accrueTo` further
+ * out would compound monthly where the arrangement is weekly, and would never fold a projected
+ * instalment's interest into the balance the next instalment is measured against.
  */
 export function repaymentPlan(input: RepaymentInput): RepaymentPlan {
   const cap = Math.max(1, Math.min(input.maxInstalments ?? MAX_INSTALMENTS, MAX_INSTALMENTS))
@@ -217,10 +218,11 @@ export function repaymentPlan(input: RepaymentInput): RepaymentPlan {
     posted.balance, input.account.interestRateAnnual ?? 0, vatRate,
   )
   /*
-   * IS INTEREST RUNNING AT ALL? Asked of the balance rather than of the rate, because a rate is not
-   * enough: openAccrual needs a posted accrual to run from, and an account with none accrues
-   * nothing however high the rate on it is. Both are real zeros and a screen must not present
-   * either as a computed one.
+   * IS INTEREST RUNNING AT ALL? Asked of the BALANCE rather than of the rate, because a rate is not
+   * enough on its own: an account with no posted accrual and no handover date has no day to start a
+   * clock from and accrues nothing however high the rate on it is, and an account written off
+   * stopped accruing when it did. Every one of those is a real zero and a screen must not present
+   * any of them as a computed one.
    */
   const interestRunning = opening.balance > posted.balance
     || (opening.interestAccruing > 0 && (input.account.interestRateAnnual ?? 0) > 0)

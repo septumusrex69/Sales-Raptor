@@ -43,8 +43,9 @@ const near = (name, actual, expected, tol = 0.02) => {
 
 /*
  * THE FIRM'S OWN EXAMPLE, as the real book looks: capital handed over, a posted monthly accrual to
- * run the open period from, 2% a month, in duplum on. The posted accrual matters -- openAccrual
- * needs a covered day and an account with none accrues nothing however high its rate.
+ * run the open period from, 2% a month, in duplum on. The posted accrual is not decoration -- it is
+ * what the open period picks up from, and its absence sends the clock back to the HANDOVER date
+ * instead, which is a different and much longer period.
  */
 const account = (over = {}) => ({
   capitalHandedOver: 10000,
@@ -209,11 +210,18 @@ ok('an account that is accruing says so', five.interestRunning)
 const noRate = plan(500, account({ interestRateAnnual: 0 }))
 ok('an account with no rate says it is not accruing', !noRate.interestRunning)
 check('...and charges none', noRate.totalInterest, 0)
-/* NOR CAN IT ACCRUE WITH NOTHING POSTED TO RUN FROM, whatever the rate says -- openAccrual needs a
-   covered day, so this is a real zero too and must read as one. */
-const noPosting = plan(500, account({ ledgers: { payments: [], fees: [], interest: [] } }))
-ok('an account with nothing posted says it is not accruing', !noPosting.interestRunning)
-check('...and charges none either', noPosting.totalInterest, 0)
+/* NOR WITH NO DAY TO START FROM. An account with nothing posted now accrues from its HANDOVER
+   date -- so the real zero is the account that has neither: no posted accrual and no handover, so
+   nothing the firm can point at as the day the debt became theirs. That is a real zero too and
+   must read as one. */
+const noStart = plan(500, account({ handoverDate: null, ledgers: { payments: [], fees: [], interest: [] } }))
+ok('an account with no day to start from says it is not accruing', !noStart.interestRunning)
+check('...and charges none either', noStart.totalInterest, 0)
+/* AND THE OTHER HALF, or the check above passes because the fixture is broken rather than because
+   the rule holds: give that same account its handover date back and interest runs. */
+const fromHandover = plan(500, account({ ledgers: { payments: [], fees: [], interest: [] } }))
+ok('...and with a handover date it does accrue', fromHandover.interestRunning)
+ok('...charging real interest', fromHandover.totalInterest > 0)
 
 /* ---------- the periods do not drift ---------- */
 

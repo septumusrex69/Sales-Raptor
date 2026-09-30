@@ -114,18 +114,89 @@ check('nothing accrues before the clock starts',
 /*
  * "THE HANDOVER IS THE CAPITAL." Whatever interest the client rolled in before handover is inside
  * that number and nobody is asked to separate it -- which is also why in duplum's ceiling is that
- * figure and not twice it. An account with nothing on it owes exactly its handover figure: no
- * reconstructed pre-handover interest, in either direction.
+ * figure and not twice it. An account with nothing on it owes exactly its handover figure on the
+ * day it was handed over: no reconstructed PRE-handover interest, in either direction.
+ *
+ * READ AS AT THE HANDOVER ITSELF, which is the only day that tests the rule this block is about.
+ * Read four weeks later the account owes its capital plus four weeks -- that is the clock in the
+ * next block doing its job, and a check pinning the balance to the capital whatever the date would
+ * be asserting that interest never starts.
  */
 const bare = computeBalance({
   capitalHandedOver: 25000, handoverDate: '2026-09-01', ledgers: { payments: [], fees: [], interest: [] },
-  interestRateAnnual: 24, accrueTo: '2026-09-28',
+  interestRateAnnual: 24, accrueTo: '2026-09-01',
 })
-near('an account with no posted accrual owes its capital', bare.balance, 25000)
-near('...with nothing reconstructed as interest', bare.interest, 0)
+/* ONE DAY, because the handover day itself accrues: R25 000 at 2% for a 30-day September is R500
+   a month and R16.67 of it is one day. Written out because a reader expecting a round R25 000 here
+   should find the reason beside it rather than reach for the rounding. */
+near('an account owes its capital on the day it was handed over, plus that day',
+  bare.balance, 25000 + 25000 * 0.02 / 30)
+near('...with nothing reconstructed from before it', bare.interest - bare.interestAccruing, 0)
 /* AND THE CAPITAL IS UNTOUCHED BY THE RATE. A rate on the account is not a licence to restate what
    the client handed over. */
 near('...and the capital is what the client handed over', bare.capital, 25000)
+
+/* ---------------- and with nothing posted, the handover is where it starts ---------------- */
+
+/*
+ * THE HALF THAT WAS UNBUILT UNTIL NOW, and it is not a rare case: 23 039 of the 23 774 live accounts
+ * on staging have no posted accrual, every one of them has a handover date and a rate, and every one
+ * of them was standing still. Three are imported; the other 23 036 are accounts Raptor captured or
+ * seeded itself, which is to say every account the firm opens from here on. An imported account
+ * continues from its posted history, because that history already ran -- an account Raptor opened
+ * has no history and was waiting for one that never comes.
+ */
+const unposted = (over = {}) => computeBalance({
+  capitalHandedOver: 10000, handoverDate: '2026-09-01',
+  ledgers: { payments: [], fees: [], interest: [] },
+  interestRateAnnual: 24, accrueTo: '2026-09-30', ...over,
+})
+check('the first accruing day is the handover, not the day after it',
+  unposted().interestAccruingFrom, '2026-09-01')
+check('...counting the handover day itself', unposted().interestAccruingDays, 30)
+near('...so a full month is the flat 2% the book has always charged',
+  unposted().interestAccruing, 200)
+
+/*
+ * A POSTED ACCRUAL STILL WINS. The handover is the FALLBACK and never the anchor: an imported
+ * account whose posted history stopped in August picks up in September, it does not restart in 2022
+ * and bill the debtor four years the client already charged. This is the assertion that fails if
+ * somebody reaches for the handover date first.
+ */
+const continues = unposted({
+  handoverDate: '2022-08-17',
+  ledgers: { payments: [], fees: [], interest: [{ from: '2026-08-01', days: 30, amount: 0 }] },
+})
+check('an imported account picks up where its posted history stopped',
+  continues.interestAccruingFrom, '2026-09-01')
+
+/*
+ * AND WITH NEITHER, NOTHING RUNS. An account with no posted accrual and no handover date has no day
+ * the firm can point at as the day the debt became theirs. The honest answer is a real zero -- not
+ * today, and not the day the row happened to be created, which would charge a debtor for days
+ * nobody can evidence.
+ */
+check('an account with no handover date and nothing posted accrues nothing',
+  unposted({ handoverDate: null }).interestAccruing, 0)
+
+/*
+ * AND THIS IS WHAT MADE IT SAFE TO BUILD: the open period sees every fee and payment ON ITS OWN DAY.
+ * Sixteen months of open period run on one closing balance -- which is how this function was fed
+ * while the period was only ever a few days long -- would charge interest from day one on a fee
+ * raised in month eight and never give back the months after a payment.
+ */
+const feeMidway = unposted({
+  ledgers: { payments: [], fees: [{ date: '2026-09-16', exclVat: 3000, vat: 0 }], interest: [] },
+})
+/* 15 days on R10 000 and 15 on R13 000: R100 + R130. Folded in from day one it would be R260. */
+near('a fee raised on the 16th earns from the 16th, not the 1st', feeMidway.interestAccruing, 230)
+const paidMidway = unposted({
+  ledgers: { payments: [{ date: '2026-09-16', amount: 5000 }], fees: [], interest: [] },
+})
+/* R5 000 comes off on the 16th, so the back half of September runs on R5 000 -- plus the receipt
+   fee item 9 raises on that payment, which is why this is a bound and not an exact figure. */
+ok(`...and a payment on the 16th stops bearing from the 16th (${paidMidway.interestAccruing.toFixed(2)} is under 200.00)`,
+  paidMidway.interestAccruing < 200 && paidMidway.interestAccruing > 150)
 
 /* ---------------- and it runs on the outstanding balance ---------------- */
 

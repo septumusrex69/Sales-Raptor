@@ -334,9 +334,19 @@ ok('a monthly page talks in months', /every month the account stands/.test(withL
  * ---------- A ZERO IN THE INTEREST ROW IS SAID OUT LOUD ----------
  *
  * THE FIRM READ A SIMULATION AND ASKED "NO INTEREST?" The account carried 24% a year and every
- * figure on the page was capital and receipt fees, because openAccrual has nothing to run from
- * until an accrual has been posted -- and 23 009 of the 23 781 accounts on the book are in that
- * state. The arithmetic was right and the page gave nobody a way to know it.
+ * figure on the page was capital and receipt fees, because openAccrual had nothing to run from
+ * until an accrual had been posted -- and 23 039 of the 23 774 live accounts were in that state.
+ * The arithmetic was right and the page gave nobody a way to know it.
+ *
+ * THAT PARTICULAR CAUSE IS FIXED -- an account with nothing posted now accrues from its handover
+ * date -- AND THE SENTENCE IS NOT. Interest still genuinely stops for reasons the page must say out
+ * loud: a rate of nought, an account with no handover date to start a clock from, an account
+ * written off. A zero that is real reads exactly like a zero that is a bug, and only one of them is
+ * safe to leave silent.
+ *
+ * SO THE FIXTURE IS NOW A ZERO RATE rather than an empty accrual ledger. It has to be a state the
+ * engine really refuses to accrue on, or the sentence below is asserted against an account that
+ * would have printed interest anyway.
  *
  * THE COLLECTOR'S PANEL HAS SAID THIS SINCE IT WAS BUILT and the page that goes to the DEBTOR did
  * not, which is the half a debtor could hold the firm to: a quotation that silently omits interest
@@ -345,7 +355,9 @@ ok('a monthly page talks in months', /every month the account stands/.test(withL
 const NO_INTEREST = 'No interest is running on this account, so no interest is included in any '
   + 'figure in this document.'
 const bare = account({
-  /* A new account, or one imported without its accrual history: a rate, and nothing posted. */
+  /* A client that charges no interest, which is the firm's to record and not to compute: "whether
+     or not they charge the interest is up to them." */
+  interestRateAnnual: 0,
   ledgers: { payments: [], fees: [], interest: [] },
   inDuplum: false,
 })
