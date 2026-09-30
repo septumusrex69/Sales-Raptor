@@ -27,7 +27,7 @@ import { canFreezeAccounts, canHandOutAccounts, canViewClients } from '../../lib
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
-import { timeOnDesk } from '../../lib/dateLabels'
+import { timeOnDesk, firmDay, firmToday } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
@@ -466,7 +466,9 @@ export function AccountDetail() {
       // Interest runs to today, not to the last monthly posting. Without this the balance stands
       // still between postings and a collector quotes a settlement that is days out of date.
       interestRateAnnual: account.interestRateAnnual,
-      accrueTo: new Date().toISOString().slice(0, 10),
+      /* TODAY IN JOHANNESBURG. toISOString is UTC, so between midnight and two in the morning
+         local it is still yesterday -- and interest would be quoted a day short. See firmDay. */
+      accrueTo: firmToday(),
       ledgers: {
         payments: ledgers.payments
           .filter((p) => !p.reversedAt)
@@ -474,13 +476,15 @@ export function AccountDetail() {
             /* THE ID TRAVELS, so an item 9 fee row can be matched to the payment it was raised
                on and the same fee is not counted a second time. See splitFeeLedger. */
             id: p.id,
-            date: p.receivedAt.slice(0, 10),
+            /* THE FIRM'S DAY, not the first ten characters of a UTC string -- a payment dated
+               29 September is stored as 22:00 on the 28th and read back a day early. See firmDay. */
+            date: firmDay(p.receivedAt),
             amount: p.amount,
             paidToClient: p.paidToClient,
             receiptFeeExclVat: p.receiptFeeLegacy,
           })),
         fees: ledgers.fees.map((f) => ({
-          date: f.incurredAt.slice(0, 10),
+          date: firmDay(f.incurredAt),
           at: f.incurredAt,
           description: f.description,
           exclVat: f.amountExclVat,
@@ -1312,7 +1316,7 @@ export function AccountDetail() {
             handedOver={account.capitalHandedOver}
             /* The day the figures were struck, printed on the page. The same one the statement
                above was computed to, so the PDF and the table cannot disagree about "as at". */
-            asAt={dayKey(new Date())}
+            asAt={firmToday()}
             money={formatMoney}
             values={letterContext.values}
             reference={letterContext.reference}

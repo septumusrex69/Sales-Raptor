@@ -127,3 +127,34 @@ export function shortDate(date: string): string {
   if (!y || !m || !d || m < 1 || m > 12) return date
   return `${d} ${months[m - 1]} ${y}`
 }
+
+/**
+ * THE FIRM'S OWN CALENDAR DAY, out of a stored instant.
+ *
+ * THE FIRM: "this is funny, I'm recording a payment on like 29th of September and it loads it on
+ * the 28th."
+ *
+ * AND THE STORAGE WAS RIGHT. `record_manual_payment` writes midnight Johannesburg -- a payment
+ * dated 29 September is stored as `2026-09-28 22:00:00+00`, which IS 29 September here. What was
+ * wrong was every reader that took `.slice(0, 10)` of that string: the first ten characters of a
+ * UTC timestamp are the UTC day, and for the two hours SAST runs ahead that is YESTERDAY. So the
+ * statement, the balance's date arithmetic and the summary letter all dated a payment a day early
+ * -- always, because midnight local is 22:00 the previous day, every time.
+ *
+ * NOT `new Date(iso).toISOString().slice(0, 10)` EITHER, which is the same mistake spelled longer,
+ * and not the browser's own zone: an iPad in the office gets SAST and a laptop travelling does not,
+ * and a ledger that reads differently on the aeroplane is not a ledger. The firm's books are kept
+ * in Johannesburg wherever the person is sitting.
+ *
+ * `en-CA` because it formats as YYYY-MM-DD, which is what every date in this codebase is.
+ */
+export function firmDay(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso.slice(0, 10)
+  return at.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+}
+
+/** Today, on the same calendar. */
+export function firmToday(now: Date = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+}
