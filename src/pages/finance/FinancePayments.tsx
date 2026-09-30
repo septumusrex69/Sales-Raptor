@@ -37,14 +37,33 @@ interface Row {
   reversed_at: string | null
   reversal_reason: string | null
   account_id: string
+  approved_at: string | null
   debtor_accounts: { case_number: string | null; debtor_surname: string | null; debtor_first_name: string | null; company_id: string } | null
-  payment_allocations: {
-    receipt_fee_excl: number | null; receipt_fee_vat: number | null
-    to_interest: number; to_costs: number | null; to_capital: number
-    commission: number; commission_vat: number; to_client: number; due_to_bf: number
-    status: string; payover_run_id: string | null
-  }[] | null
+  /**
+   * THE SPLIT, AND IT ARRIVES AS AN OBJECT RATHER THAN A LIST.
+   *
+   * `payment_allocations.payment_id` is UNIQUE -- one split per payment, which is the rule -- and
+   * PostgREST reads that index and decides the relationship is to-ONE. So the embed comes back as
+   * a single object, not an array of one. Read with `?.[0]` it was undefined on every row, and the
+   * table drew a dash in every money column of every payment on the book: receipt fee, interest,
+   * costs, capital, commission, all of it, on payments that were approved and split hours earlier.
+   *
+   * TYPED AS BOTH because that is what can actually arrive: the shape follows an index, and an
+   * index is the kind of thing that gets dropped and re-made. See `oneOf`.
+   */
+  payment_allocations: Allocation | Allocation[] | null
 }
+
+interface Allocation {
+  receipt_fee_excl: number | null; receipt_fee_vat: number | null
+  to_interest: number; to_costs: number | null; to_capital: number
+  commission: number; commission_vat: number; to_client: number; due_to_bf: number
+  status: string; payover_run_id: string | null
+}
+
+/** Whichever shape PostgREST chose. */
+const oneOf = (a: Allocation | Allocation[] | null | undefined): Allocation | undefined =>
+  (Array.isArray(a) ? a[0] : a ?? undefined)
 
 const PAGE = 100
 
@@ -67,7 +86,7 @@ export function FinancePayments() {
     try {
       let q = supabase
         .from('account_payments')
-        .select('id, received_at, created_at, amount, paid_to_client, reversed_at, reversal_reason, account_id,'
+        .select('id, received_at, created_at, amount, paid_to_client, reversed_at, reversal_reason, account_id, approved_at,'
           + ' debtor_accounts!inner(case_number, debtor_surname, debtor_first_name, company_id),'
           + ' payment_allocations(receipt_fee_excl, receipt_fee_vat, to_interest, to_costs, to_capital,'
           + ' commission, commission_vat, to_client, due_to_bf, status, payover_run_id)')
@@ -171,7 +190,8 @@ export function FinancePayments() {
                 <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">No payments match that.</td></tr>
               )}
               {!loading && rows.map((r) => {
-                const a = r.payment_allocations?.[0]
+                const a = oneOf(r.payment_allocations)
+                const waiting = !r.approved_at && !r.reversed_at
                 const reversed = Boolean(r.reversed_at)
                 return (
                   <tr key={r.id} className={clsx('border-b border-slate-50 text-sm', reversed && 'text-slate-400 line-through')}>
@@ -195,7 +215,25 @@ export function FinancePayments() {
                       {a ? rand(r.paid_to_client ? a.due_to_bf : a.to_client) : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      {!reversed && (
+                      {/*
+                        AN UNAPPROVED PAYMENT SAYS SO, and is not offered a Reverse.
+                        THE FIRM, ON CAPTURING ONE AND SEEING IT APPEAR HERE STRAIGHT AWAY: "should
+                        it go in there already? Or should it wait to be approved before it goes
+                        there?"
+                        IT BELONGS HERE -- this list is the book, and a payment that is invisible
+                        until somebody approves it is a payment the person who captured it cannot
+                        find and captures again. What it must not do is look the same as one that
+                        has moved money. Its money columns are empty because there IS no split
+                        yet, which reads as a fault rather than a state unless the row says which.
+                        AND NOTHING TO REVERSE: no fee raised, no capital moved, no remittance. It
+                        is taken out of the queue above instead, which is the act that fits.
+                      */}
+                      {waiting && (
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-900">
+                          Waiting for approval
+                        </span>
+                      )}
+                      {!reversed && !waiting && (
                         <button type="button" onClick={() => setReverseFor(r)}
                           className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-100">
                           Reverse
@@ -239,7 +277,9 @@ function ReverseModal({ row, onClose, onDone }: { row: Row; onClose: () => void;
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const invoiced = Boolean(row.payment_allocations?.[0]?.payover_run_id)
+  /* THE SAME MISREAD SILENCED THIS. `?.[0]` on an object is undefined, so the warning that this
+     payment is already inside an issued invoice never drew -- on any payment, ever. */
+  const invoiced = Boolean(oneOf(row.payment_allocations)?.payover_run_id)
   return (
     <Modal title="Reverse this payment" onClose={onClose} width={440}>
       <div className="space-y-3">
