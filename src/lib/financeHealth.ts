@@ -53,6 +53,25 @@ export interface FinanceFinding {
   message: string
   /** What the gap is worth, where the fault is an amount. Null where it is not about an amount. */
   randsOut: number | null
+  /**
+   * DID RAPTOR DO THIS, OR DID IT ARRIVE THIS WAY?
+   *
+   * MEASURED, NOT GUESSED, AND IT IS THE DIFFERENCE BETWEEN A USABLE SCREEN AND ONE NOBODY OPENS
+   * TWICE. Run against the real book, rule 3 finds 26 028 fees with no Annexure B item — R 693
+   * 042,11 across 721 accounts — and EVERY ONE of them came across from Swordfish. Not one was
+   * raised here. Put in one list with the nine live accounts that are actually over their in
+   * duplum ceiling, those nine are invisible.
+   *
+   * NOT DROPPED, THOUGH, and that is deliberate: 26 028 unpriced fees is a true and useful fact
+   * about the imported book, and this module's whole promise is that it "counts and names; it
+   * never writes". What it must not do is present history the firm has already been remitted on
+   * as though somebody broke something this morning.
+   *
+   * THE FIRM'S OWN RULE IS THE REASON THE LINE FALLS HERE: "what we import, the data has to stay
+   * exactly like that, because we can't change the remittances that has already been passed."
+   * An inherited finding is something to KNOW; one of ours is something to FIX.
+   */
+  inherited: boolean
 }
 
 export interface FinanceReport {
@@ -96,6 +115,14 @@ export interface AccountLedgers {
     amountExclVat: number
     incurredAt: string
     countsTowardFeeCap: boolean
+    /**
+     * WHO RAISED IT. 'swordfish' is the import; anything else is ours.
+     *
+     * OPTIONAL, and absent reads as OURS rather than as inherited -- a caller that forgets to
+     * supply it gets the louder answer, which is the safe direction. The opposite default would
+     * quietly file our own faults under history.
+     */
+    source?: string | null
   }[]
   payments: {
     id: string
@@ -134,12 +161,20 @@ export function auditAccount(
   const checked: FinanceReport['checked'] = {
     reconciles: 0, 'in-duplum': 0, 'fee-tariff': 0, allocation: 0,
   }
+  /* `inherited` last and defaulting to false: a finding nobody has thought about is ours, which is
+     the answer that gets looked at. */
   const say = (
     severity: FinanceSeverity,
     rule: FinanceFinding['rule'],
     message: string,
     randsOut: number | null = null,
-  ) => findings.push({ severity, rule, accountId: a.accountId, reference: a.reference, message, randsOut })
+    inherited = false,
+  ) => findings.push({
+    severity, rule, accountId: a.accountId, reference: a.reference, message, randsOut, inherited,
+  })
+
+  /* WHAT CAME ACROSS FROM SWORDFISH. Asked once, because three rules need it. */
+  const imported = (fee: { source?: string | null }) => fee.source === 'swordfish'
 
   /* ---------- 1. the ledgers reconcile ---------- */
 
@@ -171,10 +206,17 @@ export function auditAccount(
      * ceiling is itself computed -- and a wrong ceiling is one of the things worth catching.
      */
     if (nonCapital > a.capitalOutstanding + CENT) {
+      /*
+       * THE SAME TEST AS THE CEILING ABOVE AND FOR THE SAME REASON. Run against the real book this
+       * fires on 18 of the 27 accounts marked in duplum, and the fees driving it are overwhelmingly
+       * imported -- one account carries 227 of Swordfish's and 16 of ours. A breach inherited whole
+       * is the import's; one we added a single fee to is ours, because in duplum caps a running
+       * total and we are the ones who moved it.
+       */
       say('broken', 'in-duplum',
         `In duplum is breached: interest and fees come to ${rand(nonCapital)} against capital `
         + `outstanding of ${rand(a.capitalOutstanding)}.`,
-        nonCapital - a.capitalOutstanding)
+        nonCapital - a.capitalOutstanding, a.fees.length > 0 && a.fees.every(imported))
     }
     /* And the stored ceiling should be the capital. A ceiling of zero on an account in default is
        the exact shape of a mapper dropping the column, which is how this was found worth adding. */
@@ -196,7 +238,7 @@ export function auditAccount(
     if (!fee.annexureItem) {
       say('suspect', 'fee-tariff',
         `A fee of ${rand(fee.amountExclVat)} carries no Annexure B item, so nothing prices it.`,
-        fee.amountExclVat)
+        fee.amountExclVat, imported(fee))
       continue
     }
     const schedule = scheduleAt(fee.incurredAt)
@@ -205,7 +247,7 @@ export function auditAccount(
       say('broken', 'fee-tariff',
         `A fee is charged under item ${fee.annexureItem}, which the `
         + `${schedule.effectiveFrom.slice(0, 4)} gazette does not price.`,
-        fee.amountExclVat)
+        fee.amountExclVat, imported(fee))
       continue
     }
     /* Items 1(b), 4(a) and 9 carry no flat amount -- they point at the Magistrates' Courts rules
@@ -216,7 +258,7 @@ export function auditAccount(
         `Item ${fee.annexureItem} was charged at ${rand(fee.amountExclVat)} on `
         + `${fee.incurredAt.slice(0, 10)}, where the ${schedule.effectiveFrom.slice(0, 4)} gazette `
         + `prices it at ${rand(item.amount)}.`,
-        Math.abs(fee.amountExclVat - item.amount))
+        Math.abs(fee.amountExclVat - item.amount), imported(fee))
     }
   }
 
@@ -229,10 +271,15 @@ export function auditAccount(
     const today = scheduleAt(new Date().toISOString())
     const ceiling = Math.min(a.capitalOutstanding, today.itemsOneToSevenCeiling)
     if (ceiling > 0 && cappedTotal > ceiling + CENT) {
+      /*
+       * A TOTAL IS INHERITED WHEN RAPTOR ADDED NOTHING TO IT. Any fee of our own on the account
+       * makes this ours, because the ceiling is a RUNNING total -- a single fee we raised on an
+       * account already at the cap is us going over it, whoever put the rest there.
+       */
       say('broken', 'fee-tariff',
         `Fees under items 1 to 7 come to ${rand(cappedTotal)} against a ceiling of `
         + `${rand(ceiling)}.`,
-        cappedTotal - ceiling)
+        cappedTotal - ceiling, a.fees.every(imported))
     }
   }
 
@@ -287,6 +334,24 @@ export function auditBook(
     for (const k of Object.keys(checked) as FinanceFinding['rule'][]) checked[k] += r.checked[k]
   }
   return { findings, checked }
+}
+
+/**
+ * OURS FIRST, THEIRS BEHIND IT.
+ *
+ * THE NUMBERS THAT MADE THIS NECESSARY, from the real book: 26 028 fees with no Annexure B item,
+ * every one of them imported, against NINE live accounts over their in duplum ceiling. One list
+ * and the nine are gone.
+ *
+ * A SCREEN IS NOT ALLOWED TO HIDE THE INHERITED ONES EITHER -- the count comes back beside them,
+ * because "693 thousand rand of imported fees nothing prices" is a thing the firm should know even
+ * though it is not a thing anybody is going to fix this morning.
+ */
+export function splitByOrigin(r: FinanceReport): { ours: FinanceFinding[]; inherited: FinanceFinding[] } {
+  return {
+    ours: r.findings.filter((f) => !f.inherited),
+    inherited: r.findings.filter((f) => f.inherited),
+  }
 }
 
 /** What the firm is out of pocket, or over-recovered, across everything found. */

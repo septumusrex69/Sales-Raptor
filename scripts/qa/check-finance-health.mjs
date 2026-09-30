@@ -15,6 +15,7 @@
 import {
   auditAccount, auditBook, headline, randsAtStake,
 } from '../../src/lib/financeHealth.ts'
+import { splitByOrigin } from '../../src/lib/financeHealth.ts'
 import { ANNEXURE_B_2017, ANNEXURE_B_2026, scheduleFor } from '../../src/lib/annexureB.ts'
 
 let pass = 0
@@ -281,6 +282,66 @@ check('...and rands at stake add up across it',
     sound({ accountId: 'a', breakdown: { ...sound().breakdown, balance: 9000 } }),
     sound({ accountId: 'b', breakdown: { ...sound().breakdown, balance: 9025 } }),
   ])), 1025)
+
+/* ---------------- ours, or inherited ---------------- */
+
+/*
+ * THE NUMBERS THAT MADE THIS NECESSARY, MEASURED AGAINST THE REAL BOOK RATHER THAN IMAGINED:
+ * rule 3 finds 26 028 fees carrying no Annexure B item -- R 693 042,11 across 721 accounts -- and
+ * EVERY ONE came across from Swordfish. Not one was raised here. Against that, NINE live accounts
+ * are genuinely over their in duplum ceiling by R 5 855,19 between them. One undifferentiated list
+ * and those nine cannot be found, which is the "warning that fires when nothing is wrong" CLAUDE.md
+ * says people stop reading.
+ *
+ * NOT DROPPED, SPLIT. 26 028 unpriced imported fees is a true and useful fact about the book; it is
+ * simply not a thing anybody is going to fix this morning, and the firm's own rule says so --
+ * "what we import, the data has to stay exactly like that".
+ */
+const importedFee = (over = {}) => ({
+  id: 'f1', annexureItem: null, amountExclVat: 25, incurredAt: '2026-09-01T00:00:00Z',
+  countsTowardFeeCap: true, source: 'swordfish', ...over,
+})
+const ourFee = (over = {}) => importedFee({ source: 'raptor', ...over })
+
+check('a fee we raised with no item is ours to answer for',
+  auditAccount(sound({ fees: [ourFee()] })).findings.map((f) => f.inherited), [false])
+check('...and an imported one is inherited',
+  auditAccount(sound({ fees: [importedFee()] })).findings.map((f) => f.inherited), [true])
+/*
+ * ABSENT READS AS OURS, which is the safe direction: a caller that forgets to supply the source
+ * gets the louder answer. The opposite default would file our own faults under history, where
+ * nobody looks.
+ */
+check('a fee that does not say where it came from is treated as ours',
+  auditAccount(sound({ fees: [{ ...ourFee(), source: undefined }] })).findings.map((f) => f.inherited),
+  [false])
+
+/*
+ * IN DUPLUM IS INHERITED ONLY WHEN WE ADDED NOTHING. The ceiling caps a RUNNING total, so one fee
+ * of ours on an account already over it is us going over it, whoever put the rest there. This is
+ * the assertion that stops a breach being filed as history because most of the fees are old.
+ */
+const breaching = (fees) => sound({
+  inDuplum: true, capitalOutstanding: 100,
+  breakdown: { capital: 100, interest: 500, fees: 25, receiptFees: 0, payments: 0, balance: 625, withheld: 0 },
+  fees,
+})
+check('a breach made entirely of imported fees is inherited',
+  auditAccount(breaching([importedFee(), importedFee({ id: 'f2' })]))
+    .findings.filter((f) => f.rule === 'in-duplum').map((f) => f.inherited), [true])
+check('...and one we added a single fee to is ours',
+  auditAccount(breaching([importedFee(), ourFee({ id: 'f2' })]))
+    .findings.filter((f) => f.rule === 'in-duplum').map((f) => f.inherited), [false])
+
+/* AND THE SPLIT IS A FUNCTION, so two screens cannot draw the line in two places. */
+{
+  const r = auditAccount(breaching([importedFee(), ourFee({ id: 'f2', annexureItem: '1a', amountExclVat: 999 })]))
+  const { ours, inherited } = splitByOrigin(r)
+  ok('the split returns both halves', Array.isArray(ours) && Array.isArray(inherited))
+  check('...and loses nothing between them', ours.length + inherited.length, r.findings.length)
+  ok('...with ours the ones we can act on', ours.every((f) => !f.inherited))
+  ok('...and inherited the ones we cannot', inherited.every((f) => f.inherited))
+}
 
 /* The resolver is a parameter, and the default is the real one -- or every historical fee would
    be measured against today's gazette. */

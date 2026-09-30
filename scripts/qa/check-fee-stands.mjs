@@ -160,7 +160,14 @@ ok('...and the withheld figure applies it too',
  * Here that is `legacyName` undefined on every fee, which makes every cancelled promise to pay
  * come off -- R 8 802,11 across 118 accounts, silently.
  */
-ok('the select asks for the legacy name', /payment_id,legacy_name'/.test(book))
+/*
+ * NOT ANCHORED TO THE END OF THE SELECT, and this file made the same mistake it fixed next door.
+ * It read `payment_id,legacy_name'` -- with the closing quote -- so adding `source` after it failed
+ * an assertion about legacy_name. check-receipt-fee-once had the identical fault one column
+ * earlier, and repeating it the same afternoon is the argument for never writing the quote.
+ * What matters is that the column is asked for, not where it sits.
+ */
+ok('the select asks for the legacy name', /select\('id,incurred_at[^']*legacy_name/.test(book))
 ok('...the mapper carries it', /legacyName: r\.legacy_name \?\? null,/.test(book))
 ok('...and the cancellation with it', /cancelledAt: r\.cancelled_at,/.test(book))
 /* AND THE ACCOUNT HANDS BOTH TO THE BALANCE. The ledger computeBalance reads is assembled here by

@@ -491,6 +491,15 @@ export interface LedgerFee {
    * and not the charge being withdrawn, and the firm has said those charges stand.
    */
   legacyName: string | null
+  /**
+   * WHO RAISED IT: 'swordfish' is the import, 'raptor' and 'workflow' are ours.
+   *
+   * READ BY THE FINANCE HEALTH REPORT, which has to tell a fault we caused from one we inherited.
+   * Run against the real book it finds 26 028 fees carrying no Annexure B item, every one of them
+   * imported -- so without this column every one of those reads as ours and the handful that
+   * actually are cannot be found. See `inherited` in financeHealth.
+   */
+  source: string | null
 }
 
 export interface LedgerAccrual {
@@ -534,7 +543,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,receipt_fee_legacy')
       .eq('account_id', accountId).order('received_at', { ascending: false }),
     supabase.from('account_fees')
-      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id,legacy_name')
+      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id,legacy_name,source')
       .eq('account_id', accountId).order('incurred_at', { ascending: false }),
     supabase.from('account_interest_accruals')
       .select('id,accrued_on,days,amount_accrued,amount_recoverable')
@@ -578,6 +587,9 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
          reads as undefined for ever and nothing fails: CLAUDE.md's own warning, and here it would
          silently take R 8 802,11 of promise-to-pay charges off 118 accounts. */
       legacyName: r.legacy_name ?? null,
+      /* AND WHO RAISED IT. Missing from this mapper it reads as undefined, the health report's
+         `imported()` says false for everything, and 26 028 inherited findings are filed as ours. */
+      source: r.source ?? null,
     })),
     accruals: (accruals.data ?? []).map((r: any) => ({
       id: r.id,
