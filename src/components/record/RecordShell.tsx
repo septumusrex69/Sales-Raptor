@@ -1,4 +1,6 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import {
+  Fragment, createContext, useContext, useEffect, useId, useMemo, useState, type ReactNode,
+} from 'react'
 import { ChevronDown, Columns3, MoreHorizontal, PanelRight, Rows3, type LucideIcon } from 'lucide-react'
 
 /**
@@ -154,10 +156,50 @@ export function RecordAction({ icon: Icon, label, onClick, title, primary, dange
  * else is on the line with it -- and the status lines are taken out of the flow as well (see
  * RecordActionNote), so using a button cannot change the shape of the row it is in.
  */
+/**
+ * Where a button's status line is shown: under the WHOLE row, not under the button.
+ *
+ * THE FIRM, LOOKING AT AN ACCOUNT: "look at what's going on there between the phone calls and the
+ * scripts and the stuff. It just looks crappy."
+ *
+ * THE NOTE WAS HUNG FROM ITS OWN BUTTON with `absolute top-full`, which is right on a row that
+ * fits on one line and wrong the moment it wraps -- and on an iPad this row wraps. "Voicemail or
+ * no answer · no consultation" was drawn on top of the second line of buttons, sitting across
+ * Section 129 and Trace. A confirmation that covers the next thing you were going to press.
+ *
+ * SO THE NOTES COLLECT HERE AND ARE DRAWN UNDER EVERYTHING, in flow. The original reason they
+ * were taken out of the flow still holds and is still honoured: no BUTTON moves, because the band
+ * is below every one of them. What shifts for the seconds a message lasts is the content under
+ * the bar, which is a page settling rather than a row rearranging itself under your thumb.
+ */
+const NoteBand = createContext<((id: string, note: ReactNode) => void) | null>(null)
+
 export function RecordActions({ children }: { children: ReactNode }) {
-  /* data-qa because this is a geometry rule and only a real browser can check it: e2e measures
-     every button in the row and holds them to one height. See account-templates.mjs. */
-  return <div data-qa="record-actions" className="flex flex-wrap items-start gap-2">{children}</div>
+  const [notes, setNotes] = useState<Record<string, ReactNode>>({})
+  /* Keyed by the note's own id so two buttons can each be saying something, and so a button that
+     falls silent clears only its own line. */
+  const publish = useMemo(() => (id: string, note: ReactNode) => {
+    setNotes((all) => {
+      if (note == null) {
+        if (!(id in all)) return all
+        const next = { ...all }; delete next[id]; return next
+      }
+      return { ...all, [id]: note }
+    })
+  }, [])
+  const showing = Object.entries(notes)
+  return (
+    <NoteBand.Provider value={publish}>
+      {/* data-qa because this is a geometry rule and only a real browser can check it: e2e measures
+          every button in the row and holds them to one height. See account-templates.mjs. */}
+      <div data-qa="record-actions" className="flex flex-wrap items-start gap-2">{children}</div>
+      {showing.length > 0 && (
+        <div data-qa="record-actions-notes" className="mt-1.5 flex flex-col items-start gap-0.5">
+          {showing.map(([id, note]) => <Fragment key={id}>{note}</Fragment>)}
+        </div>
+      )}
+    </NoteBand.Provider>
+  )
 }
 
 /**
@@ -179,18 +221,18 @@ export function RecordActions({ children }: { children: ReactNode }) {
  * right edge of a tablet.
  */
 export function RecordActionNote({ note, children }: { note?: ReactNode; children: ReactNode }) {
-  return (
-    /* `shrink-0`, not `min-w-0`: in a row that WRAPS, a button that does not fit belongs on the
-       next line, not squeezed narrower than its own label. */
-    <span className="relative inline-flex flex-col items-start shrink-0">
-      {children}
-      {note != null && (
-        <span className="absolute top-full left-0 z-20 mt-1 flex w-max max-w-[min(22rem,calc(100vw-3rem))] flex-col items-start gap-0.5">
-          {note}
-        </span>
-      )}
-    </span>
-  )
+  const publish = useContext(NoteBand)
+  const id = useId()
+  useEffect(() => {
+    if (!publish) return
+    publish(id, note ?? null)
+    /* And it takes its line with it when the button unmounts -- a collector who leaves the account
+       mid-message must not leave a stale "charged R32.00" behind on the next one. */
+    return () => publish(id, null)
+  }, [publish, id, note])
+  /* `shrink-0`, not `min-w-0`: in a row that WRAPS, a button that does not fit belongs on the
+     next line, not squeezed narrower than its own label. */
+  return <span className="inline-flex flex-col items-start shrink-0">{children}</span>
 }
 
 /**

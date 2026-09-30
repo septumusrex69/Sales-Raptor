@@ -375,9 +375,9 @@ function StartWorkflow({ accountId, offer, onStarted, asked, onAsked }: {
   asked?: boolean
   onAsked?: () => void
 }) {
-  const { session } = useAuth()
   const [asking, setAsking] = useState(false)
-  const [busy, setBusy] = useState(false)
+  /* Only the collapsed button reports here now; the open card keeps its own failure, because the
+     press that can fail lives inside it. See StartWorkflowAsk. */
   const [failed, setFailed] = useState<string | null>(null)
   /*
    * OPENED FROM THE ACTION ROW, and taken off the parent the moment it is.
@@ -397,22 +397,6 @@ function StartWorkflow({ accountId, offer, onStarted, asked, onAsked }: {
     onAsked?.()
   }, [asked, onAsked])
 
-  async function go() {
-    if (!session?.access_token) return
-    setBusy(true); setFailed(null)
-    try {
-      await startWorkflow(session.access_token, accountId, offer.versionId)
-      setAsking(false)
-      await onStarted()
-    } catch (e) {
-      /* The reason the server gave, verbatim -- "there is a live promise to pay on this account"
-         is a sentence that says what to do, and a generic failure is not. */
-      setFailed(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   if (!asking) {
     return (
       <div>
@@ -428,6 +412,61 @@ function StartWorkflow({ accountId, offer, onStarted, asked, onAsked }: {
 
   return (
     <div className="rounded-lg border border-[var(--c-gold-deep)]/30 bg-gold-50 px-3 py-2">
+      <StartWorkflowAsk accountId={accountId} offer={offer}
+        onStarted={onStarted} onCancel={() => setAsking(false)} />
+    </div>
+  )
+}
+
+/**
+ * THE QUESTION ITSELF, WRITTEN ONCE AND ASKED IN TWO PLACES.
+ *
+ * THE FIRM: "starting the Section 129 process should be more prominent, it should pop up in your
+ * face, like do you want to proceed yes or no -- not take you to the workflow page and then ask
+ * you, like, oh it's down there. This is too weird, people can miss that."
+ *
+ * THEY ARE RIGHT AND IT IS THE PLACEMENT, NOT THE WORDS. The row's button switched to the Workflow
+ * tab and opened this card somewhere down the pane, which on a tablet is below the fold -- a
+ * statutory demand waiting on a confirmation nobody could see. So the card now also goes in a
+ * modal, opened from the row where the press happened.
+ *
+ * EXTRACTED RATHER THAN COPIED, which this file already warned about: "asked in two places it
+ * becomes two wordings, and the day they differ is the day somebody sends a notice on the strength
+ * of the softer one." One component, two frames.
+ */
+export function StartWorkflowAsk({ accountId, offer, onStarted, onCancel, autoFocus }: {
+  accountId: string
+  offer: StartableWorkflow
+  onStarted: () => Promise<void>
+  onCancel: () => void
+  /** True in the modal, where the confirm is what somebody came for. */
+  autoFocus?: boolean
+}) {
+  const { session } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+
+  async function go() {
+    if (!session?.access_token) {
+      setFailed('Your session has expired. Sign in again.')
+      return
+    }
+    setBusy(true); setFailed(null)
+    try {
+      await startWorkflow(session.access_token, accountId, offer.versionId)
+      await onStarted()
+      onCancel()
+    } catch (e) {
+      /* The reason the server gave, verbatim -- "there is a live promise to pay on this account"
+         is a sentence that says what to do, and a generic failure is not. */
+      setFailed(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
       <p className="text-[12px] font-medium text-navy-950">Start {offer.name}?</p>
       {/*
         WHAT WILL HAPPEN, AND ON WHICH DAY. This said "the first step goes out now" on every press,
@@ -442,7 +481,7 @@ function StartWorkflow({ accountId, offer, onStarted, asked, onAsked }: {
       {offer.note && <p className="text-[11px] text-slate-500 mt-1 leading-snug">{offer.note}</p>}
       {failed && <p className="mt-1 text-[11px] text-negative-700 leading-snug">{failed}</p>}
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => { void go() }} disabled={busy}
+        <button type="button" onClick={() => { void go() }} disabled={busy} autoFocus={autoFocus}
           className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9a052]
             bg-white px-2.5 py-1 text-[11px] font-medium text-navy-950
             hover:bg-gold-100 disabled:opacity-40">
@@ -451,12 +490,12 @@ function StartWorkflow({ accountId, offer, onStarted, asked, onAsked }: {
               the other half of the lie, and it is the half somebody presses. */}
           {offer.firstStepOn <= todayIso() ? 'Yes, send it now' : 'Yes, start it'}
         </button>
-        <button type="button" onClick={() => setAsking(false)} disabled={busy}
+        <button type="button" onClick={onCancel} disabled={busy}
           className="text-[11px] font-medium text-slate-500 hover:text-slate-700 disabled:opacity-40">
           Not yet
         </button>
       </div>
-    </div>
+    </>
   )
 }
 

@@ -186,6 +186,48 @@ ok('a refusal is shown in the server’s own words', /\{failed\}/.test(panel))
 
 /* ------------------------------------------------------------------ */
 
+/* ---------------- and the question is asked where the press happened ---------------- */
+
+/*
+ * THE FIRM: "starting the Section 129 process should be more prominent, it should pop up in your
+ * face, like do you want to proceed yes or no -- not take you to the workflow page and then ask
+ * you, like, oh it's down there. This is too weird, people can miss that."
+ *
+ * The row's button used to switch to the Workflow tab and open the card inside that pane, which on
+ * a tablet is below the fold. A statutory demand waiting on a confirmation nobody can see is a
+ * demand that does not go out -- or, worse, one somebody presses without reading the sentence
+ * about which day it lands on.
+ */
+const detail = read('../../src/pages/accounts/AccountDetail.tsx')
+ok('the confirmation is a component of its own', /export function StartWorkflowAsk\(/.test(panel))
+ok('...opened in front of the person from the account', /<StartWorkflowAsk accountId=\{account\.id\}/.test(detail))
+ok('...in a modal rather than a pane they have to find',
+  /<Modal title=\{`Start \$\{startNow\.name\}\?`\}/.test(detail))
+
+/*
+ * WRITTEN ONCE, ASKED TWICE. This file's own warning, from when the row's button was added:
+ * "asked in two places it becomes two wordings, and the day they differ is the day somebody sends
+ * a notice on the strength of the softer one." The panel must use the SAME component, not a copy.
+ */
+ok('the workflow pane asks with the same component',
+  /<StartWorkflowAsk accountId=\{accountId\}/.test(panel))
+/* WHICH MEANS THE SENTENCE EXISTS ONCE. Two "Start X?" headings in that file would be the copy. */
+check('...and the question is written once', (panel.match(/Start \{offer\.name\}\?/g) ?? []).length, 1)
+/* COMMENTS STRIPPED FIRST: this file explains that wording at length, and a grep cannot tell the
+   explanation from the button. */
+const panelCode = panel.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+check('...as is the button that answers it',
+  (panelCode.match(/Yes, send it now/g) ?? []).length, 1)
+
+/*
+ * AND A CHOICE IS STILL A TRIP TO THE TAB. Two by-hand sequences on one account is a decision
+ * between them, and a decision belongs where both are written out with the firm's own note under
+ * each -- a modal that guesses which one they meant is worse than a pane they have to open.
+ */
+ok('several sequences still go to the pane that lists them',
+  /const only = versionId \? startable\.find/.test(detail)
+  && /setTab\('Workflow'\); setAskStart\(versionId \|\| null\)/.test(detail))
+
 for (const f of failures) console.error(`  ✗ ${f}`)
 console.log(`check-workflow-start: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

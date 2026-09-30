@@ -77,7 +77,8 @@ import { FIRM_UNSET, fetchFirmSettings, type FirmSettings } from '../../lib/firm
 import { dayKey } from '../../lib/collectionPace'
 import { accountMergeValues } from '../../lib/accountMergeValues.ts'
 import { OtherAccountsPanel } from '../../components/collections/OtherAccountsPanel'
-import { WorkflowRunPanel } from '../../components/collections/WorkflowRunPanel'
+import { WorkflowRunPanel, StartWorkflowAsk } from '../../components/collections/WorkflowRunPanel'
+import { Modal } from '../../components/ui/Modal'
 import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import { TestClockPanel } from '../../components/collections/TestClockPanel'
 import {
@@ -365,6 +366,19 @@ export function AccountDetail() {
    * me there" with no version named, which is what several offers on one account come to.
    */
   const [askStart, setAskStart] = useState<string | null>(null)
+  /*
+   * THE ONE THE ROW ASKED FOR, CONFIRMED WHERE THE PRESS HAPPENED.
+   *
+   * THE FIRM: "starting the Section 129 process should be more prominent, it should pop up in your
+   * face, like do you want to proceed yes or no -- not take you to the workflow page and then ask
+   * you, like, oh it's down there. This is too weird, people can miss that."
+   *
+   * Pressing it used to switch to the Workflow tab and open the question inside that pane, which
+   * on a tablet is below the fold. A statutory demand should not wait on a confirmation somebody
+   * cannot see. The QUESTION is unchanged -- the same component, the same sentence about which day
+   * it goes out on -- it is only in front of them now. See StartWorkflowAsk.
+   */
+  const [startNow, setStartNow] = useState<StartableWorkflow | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
   /*
    * WHEN A MESSAGE WENT OUT AND THE RECORDING OF IT DID NOT.
@@ -1209,7 +1223,16 @@ export function AccountDetail() {
         onTraced={reload}
         onUpload={() => setTracing(true)}
         startable={startable}
-        onStartWorkflow={(versionId) => { setTab('Workflow'); setAskStart(versionId || null) }}
+        onStartWorkflow={(versionId) => {
+          /*
+           * ONE SEQUENCE IS ASKED HERE; SEVERAL IS STILL A TRIP TO THE TAB. A choice between two
+           * statutory sequences belongs where both are written out with the firm's own note under
+           * each -- that was true before and a modal does not make it less so.
+           */
+          const only = versionId ? startable.find((w) => w.versionId === versionId) : undefined
+          if (only) { setStartNow(only); return }
+          setTab('Workflow'); setAskStart(versionId || null)
+        }}
       />
 
 
@@ -1448,6 +1471,13 @@ export function AccountDetail() {
         is the words already in the box, the attachments that come across with it, and the option
         of adding it to the dispute already open instead of raising a second one.
       */}
+      {startNow && (
+        <Modal title={`Start ${startNow.name}?`} onClose={() => setStartNow(null)} width={460}>
+          <StartWorkflowAsk accountId={account.id} offer={startNow} autoFocus
+            onStarted={reload} onCancel={() => setStartNow(null)} />
+        </Modal>
+      )}
+
       {payingIn && (
         <RecordPaymentModal
           fixedAccount={{

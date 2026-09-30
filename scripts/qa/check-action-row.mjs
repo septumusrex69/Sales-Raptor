@@ -64,15 +64,40 @@ ok('...and is findable in a real browser', /data-qa="record-actions"/.test(row))
 /* ---------- the status under a button ---------- */
 
 ok('there is one place a button reports what it just did', /export function RecordActionNote\(/.test(shell))
-const note = shell.slice(shell.indexOf('export function RecordActionNote('))
-/* OUT OF THE FLOW: absolute, hung from the bottom of its own button. Anchored, or `absolute`
-   positions it against the page. */
-ok('...and the line it prints is out of the row’s flow', /absolute/.test(note) && /top-full/.test(note))
-ok('...anchored to its own button', /relative/.test(note))
-/* AND IT CANNOT RUN OFF THE SIDE. `w-max` so a short line is not stretched to the button's width,
-   capped against the viewport so a long error stays on a tablet. */
-ok('...sized to its words and capped to the screen',
-  /w-max/.test(note) && /max-w-\[min\(/.test(note))
+/* THE FUNCTION ITSELF, not everything after it -- sliced to the end of the file, `absolute` and
+   `top-full` from some later component would satisfy assertions about this one. */
+const noteAt = shell.indexOf('export function RecordActionNote(')
+const note = shell.slice(noteAt, shell.indexOf('\n}', noteAt) + 2)
+/*
+ * AND IT IS DRAWN UNDER THE WHOLE ROW, NOT UNDER ITS OWN BUTTON.
+ *
+ * THE FIRM: "look at what's going on there between the phone calls and the scripts and the stuff.
+ * It just looks crappy."
+ *
+ * The line used to hang from its own button with `absolute top-full`, which is right while the row
+ * fits on one line and wrong the moment it wraps -- and on an iPad it wraps. "Voicemail or no
+ * answer · no consultation" was painted on top of the SECOND line of buttons, across Section 129
+ * and Trace: a confirmation covering the next thing you were going to press.
+ *
+ * THE ORIGINAL REASON IT LEFT THE FLOW STILL HOLDS AND IS STILL HONOURED. No button moves, because
+ * the band sits below every one of them. What shifts for the seconds a message lasts is the
+ * content under the bar, which is a page settling rather than a row rearranging under a thumb.
+ */
+ok('...and no button is overlaid by another button’s status',
+  !/absolute/.test(note) && !/top-full/.test(note))
+ok('...because the notes collect in one band under the row',
+  /data-qa="record-actions-notes"/.test(row))
+/* THE BAND IS IN FLOW, so it cannot land on top of whatever is under the action bar either. */
+ok('...drawn in flow rather than floated over the page',
+  /record-actions-notes"[^>]*className="mt-1\.5 flex flex-col/.test(row))
+/*
+ * KEYED PER BUTTON. Two buttons can each be saying something -- a trace and a call -- and a button
+ * that falls silent must clear only its own line.
+ */
+ok('...one line per button that is saying something', /publish\(id, note \?\? null\)/.test(note))
+/* AND IT TAKES ITS LINE WITH IT. A collector who leaves the account mid-message must not leave a
+   stale "charged R32.00" standing on the next one. */
+ok('...and the line goes when the button does', /return \(\) => publish\(id, null\)/.test(note))
 
 /* ---------- and the three that use it ---------- */
 
