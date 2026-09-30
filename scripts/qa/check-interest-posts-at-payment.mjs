@@ -77,15 +77,81 @@ function lastFn(name) {
  * enough to fail the order assertion below on correct code. It did.
  */
 const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '')
-const accrue = strip(lastFn('accrue_interest_to'))
+/*
+ * THE ARITHMETIC IS IN `open_interest` AND THE WRITING IS IN `accrue_interest_to`, and they are
+ * separate for a reason this file has to assert rather than assume: `preview_allocation` draws the
+ * open period on the approval queue and must not write, so the loop had to become something a
+ * `stable` function could call. Everything below about how interest is computed reads the first;
+ * everything about what gets written reads the second.
+ */
+const accrue = strip(lastFn('open_interest'))
+const post = strip(lastFn('accrue_interest_to'))
 const movements = strip(lastFn('account_movements'))
 const allocate = strip(lastFn('allocate_payment'))
+const preview = strip(lastFn('preview_allocation'))
 
 /* THE FLOOR, BEFORE ANYTHING IS ASSERTED ABOUT WHAT IS IN THEM. An empty string satisfies every
    `!/.../.test()` below, which is the vacuous pass this whole suite has been caught by before. */
-ok('accrue_interest_to is in the schema', accrue.length > 2000)
+ok('open_interest is in the schema', accrue.length > 2000)
+ok('accrue_interest_to is in the schema', post.length > 200)
 ok('account_movements is in the schema', movements.length > 500)
 ok('allocate_payment is in the schema', allocate.length > 2000)
+ok('preview_allocation is in the schema', preview.length > 1500)
+
+/* ---------------- one calculation, two callers ---------------- */
+
+/*
+ * THE WHOLE POINT OF THE SPLIT. The queue shows what a payment WOULD do; approving does it. Those
+ * are the same arithmetic or they are a contradiction, and a contradiction here is a screen saying
+ * R 0,00 while the engine takes R 2 936 -- worse than the silence it replaced, because the firm
+ * would act on it.
+ */
+ok('the writer asks open_interest rather than computing its own',
+  /open_interest\(p_account, p_as_at, p_exclude_payment\)/.test(post))
+ok('...and the preview asks the same function',
+  /open_interest\(p_account, v_day, p_exclude_payment\)/.test(preview))
+/* AND NEITHER KEEPS A SECOND COPY OF THE LOOP. This is the assertion that fails the day somebody
+   inlines the arithmetic back into one of them "to save a call". */
+ok('...and the writer holds no loop of its own', !/while v_cursor <= p_as_at loop/.test(post))
+ok('...nor does the preview', !/while v_cursor/.test(preview))
+
+/*
+ * THE PREVIEW ADDS THE OPEN PERIOD TO WHAT IS POSTED, and takes the RECOVERABLE half.
+ * engine_balances counts amount_recoverable on every posted row, so taking `accrued` here would
+ * let a split reach past the in duplum ceiling that the ledger itself respects.
+ */
+ok('the preview adds the open period to the posted balance',
+  /v_interest := b\.interest \+ interest_open/.test(preview))
+ok('...taking what may be recovered, not what was earned',
+  /interest_open := coalesce\(o\.recoverable, 0\)/.test(preview))
+/* AND IT IS WHAT THE SCREEN CALLS "interest on the account", so the retained figure beside it can
+   never exceed the figure it came out of. */
+ok('...and reports it as the interest before the split',
+  /interest_before := v_interest/.test(preview))
+
+/*
+ * THE PREVIEW IS TAKEN ON THE PAYMENT'S OWN DAY. Interest to the day the money arrived, and the
+ * Annexure B item 9 tariff in force THAT day -- `scheduleFor` takes the action's date, and this
+ * used to read `current_date` while allocate_payment read the payment's. A receipt banked before
+ * 7 April 2026 was previewed against the R610 cap and charged at R502.
+ */
+ok('the preview day defaults to today but can be given',
+  /v_day date := coalesce\(p_as_at, current_date\)/.test(preview))
+ok('...and the item 9 tariff is read on that day, not on today',
+  /item = '9' and v_day >= effective_from/.test(preview))
+ok('...with no current_date left in the tariff lookup',
+  !/item = '9' and current_date >= effective_from/.test(preview))
+/* AND THE QUEUE PASSES IT. The firm's day, not the first ten characters of a UTC timestamp. */
+const queue = strip(lastFn('payments_awaiting_approval'))
+ok('payments_awaiting_approval is in the schema', queue.length > 800)
+ok('the queue previews each payment on the day it arrived',
+  /preview_allocation\([\s\S]{0,200}at time zone 'Africa\/Johannesburg'\)::date, p\.id\)/.test(queue))
+/* AND THE ROW CARRIES WHAT THE INTEREST CAME OUT OF, not only what was taken. A retained figure
+   with nothing beside it is a number nobody on the floor can check. */
+ok('...and returns the interest either side of the split',
+  /pv\.interest_before, pv\.interest_after/.test(queue))
+ok('...and how much of it is not yet posted',
+  /pv\.interest_open, pv\.interest_open_from/.test(queue))
 
 /* ---------------- the split reads a row, so the row has to be there first ---------------- */
 
@@ -139,7 +205,7 @@ ok('...together with the fee raised on it',
  * interest the client already charged and already folded into the capital.
  */
 ok('the clock picks up from the last posted accrual',
-  /max\(accrued_on \+ days\) into v_covered/.test(accrue))
+  /max\(accrued_on \+ a\.days\) into v_covered/.test(accrue))
 ok('...and falls back to the day BEFORE the handover',
   /v_covered := v_acct\.handover_date - 1/.test(accrue))
 ok('...in that order, so a posted accrual wins',
@@ -159,7 +225,7 @@ near('...and a full month is the flat 2%', fromHandover?.amount ?? 0, 200)
 
 /* NEITHER ONE MEANS NOTHING RUNS, in both engines: no day the firm can point at as the day the debt
    became theirs, and inventing one would charge for days nobody can evidence. */
-ok('with neither, the SQL accrues nothing', /if v_covered is null then return null/.test(accrue))
+ok('with neither, the SQL accrues nothing', /if v_covered is null then return; end if/.test(accrue))
 check('...and neither does the browser', computeBalance({
   capitalHandedOver: 10000, handoverDate: null,
   ledgers: { payments: [], fees: [], interest: [] },
@@ -173,7 +239,7 @@ check('...and neither does the browser', computeBalance({
  * not ask Raptor to calculate this."
  */
 ok('no rate, no accrual in the SQL',
-  /if coalesce\(v_acct\.interest_rate_annual, 0\) <= 0 then return null/.test(accrue))
+  /if coalesce\(v_acct\.interest_rate_annual, 0\) <= 0 then return; end if/.test(accrue))
 check('...nor in the browser', accrueToDate({
   openingBalance: 10000, annualRate: 0, coveredTo: '2026-08-31', asAt: '2026-09-30',
 }), null)
@@ -185,7 +251,7 @@ check('...nor in the browser', accrueToDate({
  * account where the firm has already decided to stop charging.
  */
 ok('a written-off account is refused by the SQL',
-  /written\.off' then return null/.test(accrue))
+  /written\.off' then return; end if/.test(accrue))
 check('...and accrues nothing in the browser', computeBalance({
   capitalHandedOver: 10000, handoverDate: '2026-01-01',
   ledgers: { payments: [], fees: [], interest: [] },
@@ -204,7 +270,7 @@ check('...and the browser refuses an opening balance of nothing', accrueToDate({
 
 /* NOTHING RUNS BACKWARDS, in either. A statement reprinted as at a day already covered is a real
    zero and must not come back negative. */
-ok('the SQL refuses a date already covered', /if v_from > p_as_at then return null/.test(accrue))
+ok('the SQL refuses a date already covered', /if v_from > p_as_at then return; end if/.test(accrue))
 check('...and so does the browser', accrueToDate({
   openingBalance: 10000, annualRate: 24, coveredTo: '2026-09-30', asAt: '2026-09-09',
 }), null)
@@ -283,9 +349,9 @@ ok('...and hands the rest to the period as movements',
  * and one day of every payment's interest would fall through the gap for ever.
  */
 ok('the row covers exactly up to the day asked for',
-  /\(p_as_at - v_from\)/.test(accrue))
+  /days := \(p_as_at - v_from\)/.test(accrue))
 ok('...and that is how the period is read back',
-  /max\(accrued_on \+ days\)/.test(accrue))
+  /max\(accrued_on \+ a\.days\)/.test(accrue))
 
 /*
  * IN DUPLUM ON THE WAY IN. `amount_recoverable` is what may be collected, `amount_accrued` is what
@@ -297,8 +363,13 @@ ok('in duplum caps what is recoverable', /if v_acct\.in_duplum then/.test(accrue
 ok('...at the capital handed over, not at twice it',
   /v_ceiling := greatest\(coalesce\(v_acct\.capital_handed_over, 0\), 0\)/.test(accrue))
 ok('...never below nothing', /greatest\(0, least\(v_accrued, v_ceiling - v_non_capital\)\)/.test(accrue))
-ok('...while what was earned is still recorded in full',
-  /amount_accrued, amount_recoverable/.test(accrue) && /v_accrued, v_recoverable/.test(accrue))
+/* BOTH FIGURES SURVIVE THE HANDOVER BETWEEN THE TWO FUNCTIONS: open_interest returns them and
+   accrue_interest_to writes them into their own columns. Returning only the recoverable half would
+   lose what the debt actually earned, which is what the client is owed an account of. */
+ok('...while what was earned is still returned in full',
+  /accrued := v_accrued;/.test(accrue) && /recoverable := v_recoverable;/.test(accrue))
+ok('...and written into its own column',
+  /amount_accrued, amount_recoverable/.test(post) && /o\.accrued, o\.recoverable/.test(post))
 
 /*
  * daily_rate IS LEFT AT NOUGHT. The book's convention is a flat MONTHLY rate pro-rated by the days
@@ -306,12 +377,12 @@ ok('...while what was earned is still recorded in full',
  * figure into a column called daily_rate is the same unit lie that put 24% into a column read as
  * 2400%. Asserted because "fill in the empty column" is exactly the tidy-up somebody will reach for.
  */
-const insert = (accrue.match(/insert into public\.account_interest_accruals[^;]*;/) ?? [''])[0]
+const insert = (post.match(/insert into public\.account_interest_accruals[^;]*;/) ?? [''])[0]
 ok('the accrual really is inserted', insert.length > 200)
 /* READ OFF THE VALUES ROW, not off a window after the word `daily_rate`. The break test is why: the
    column list and the values are twenty-odd characters apart in the source, so a window big enough
    to be useful reaches past the value and a window small enough to be tight never reaches it. */
-ok('...with daily_rate left at nought', /v_opening, 0,/.test(insert))
+ok('...with daily_rate left at nought', /o\.opening_balance, 0,/.test(insert))
 ok('...and never a monthly figure in a column called daily', !/v_monthly/.test(insert))
 
 /* ---------------- and none of it is reachable from outside ---------------- */

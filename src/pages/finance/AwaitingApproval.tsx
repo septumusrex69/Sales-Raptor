@@ -158,7 +158,21 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 fees and not on interest, so taking interest first carries less risk if the debtor
                 stops paying.
               */}
+              {/*
+                AND WHAT IT COMES OUT OF, WHICH WAS THE HALF THAT WAS MISSING.
+
+                THE FIRM, OF SWORDFISH'S GRID: "all of these fields don't appear in your ready state
+                for the payments to be allocated... there was zero interest captured." Retained
+                interest has been on this screen since it was built and read R 0,00 on every row,
+                because the split had no interest to take. Now that it has, a real figure would have
+                appeared with nothing beside it to explain where it came from.
+
+                Three columns in a row are one sentence: what the account owes in interest on the
+                day the money arrived, what this payment takes of it, and what is left.
+              */}
+              <th className="px-2 py-2 text-right font-medium">Interest on the account</th>
               <th className="px-2 py-2 text-right font-medium">Retained interest</th>
+              <th className="px-2 py-2 text-right font-medium">Interest left</th>
               <th className="px-2 py-2 text-right font-medium">Retained legal fees</th>
               <th className="px-2 py-2 text-right font-medium">Capital</th>
               <th className="px-2 py-2 text-right font-medium">Retained col. commission</th>
@@ -214,7 +228,23 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.receiptFee)}</td>
+                {/*
+                  NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of this figure is the open
+                  period -- computed to the day the money arrived, written only when somebody
+                  approves. A collector reading it down the telephone is quoting a real amount; a
+                  collector looking for it in the ledger before approval will not find it, and the
+                  marker is what stops that being a surprise.
+                */}
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600"
+                  title={r.interestOpen > 0 && r.interestOpenFrom
+                    ? `${rand(r.interestOpen)} of this has accrued since ${
+                        formatDate(r.interestOpenFrom)} and is posted when you approve`
+                    : 'All of this is already posted'}>
+                  {rand(r.interestToDate)}
+                  {r.interestOpen > 0 && <span className="ml-1 text-[10px] text-slate-400">·</span>}
+                </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.toInterest)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.interestAfter)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.toCosts)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.toCapital)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">

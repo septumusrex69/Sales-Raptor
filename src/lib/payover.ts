@@ -186,6 +186,20 @@ export interface Preview {
   costsAfter: number
   capitalAfter: number
   hasRate: boolean
+  /*
+   * HOW MUCH OF `interestBefore` HAS NOT BEEN POSTED YET, and where that period starts.
+   *
+   * The open period is computed rather than written -- see interestAccrual.ts -- right up until a
+   * payment is taken, when `allocate_payment` posts it so the split has something to take from. So
+   * the interest a preview quotes is partly a row and partly a figure that will BECOME a row the
+   * moment somebody approves. These two say how much and since when, which is what turns "you owe
+   * R2 936 interest" into a sentence a collector can read down the telephone.
+   *
+   * MAPPED HERE OR INVISIBLE FOREVER: CLAUDE.md's own warning about a column present in the
+   * function, the type and the select but missing from the hand-written mapper.
+   */
+  interestOpen: number
+  interestOpenFrom: string | null
 }
 
 const n = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v))
@@ -383,6 +397,8 @@ export async function previewPayment(
     costsAfter: n(r.costs_after),
     capitalAfter: n(r.capital_after),
     hasRate: Boolean(r.has_rate),
+    interestOpen: n(r.interest_open),
+    interestOpenFrom: s(r.interest_open_from),
   }
 }
 
@@ -822,6 +838,24 @@ export interface AwaitingPayment {
   cameBackFrom: string | null
   cameBackReason: string | null
   cameBackOn: string | null
+  /*
+   * THE INTEREST EITHER SIDE OF WHAT THIS PAYMENT TAKES.
+   *
+   * THE FIRM, OF SWORDFISH'S OWN GRID: "all of these fields don't appear in your ready state for
+   * the payments to be allocated." Retained interest was already on the screen -- and read R 0,00
+   * on every row, because nothing anywhere had any interest for it to come out of. Now that it
+   * does, the figure it comes OUT OF was still missing, so a real retained figure would have
+   * appeared with nothing on the row to explain it.
+   *
+   * `interestToDate` is what the account owes in interest as at the day the money arrived, the
+   * unposted open period included. `interestAfter` is what is left once this payment has taken its
+   * share. `interestOpen` is how much of the first figure has not been written down yet -- it
+   * becomes a real ledger row at the moment of approval and not before.
+   */
+  interestToDate: number
+  interestAfter: number
+  interestOpen: number
+  interestOpenFrom: string | null
 }
 
 export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
@@ -861,6 +895,10 @@ export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
     cameBackFrom: s(r.came_back_from),
     cameBackReason: s(r.came_back_reason),
     cameBackOn: s(r.came_back_on),
+    interestToDate: Number(r.interest_to_date ?? 0),
+    interestAfter: Number(r.interest_after ?? 0),
+    interestOpen: Number(r.interest_open ?? 0),
+    interestOpenFrom: s(r.interest_open_from),
   }))
 }
 

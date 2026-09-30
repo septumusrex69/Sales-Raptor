@@ -18688,3 +18688,466 @@ revoke execute on function public.account_movements(uuid, uuid) from anon, authe
 revoke execute on function public.receipt_fee_incl_vat(numeric, date) from anon, authenticated;
 revoke execute on function public.allocate_payment(uuid) from anon, authenticated;
 revoke execute on function public.engine_balances(uuid, uuid) from anon, authenticated;
+
+-- ============================================================================
+-- THE ARITHMETIC AND THE WRITING ARE TWO THINGS, AND THE PREVIEW NEEDS ONLY THE FIRST.
+--
+-- `allocate_payment` posts the open period before it splits, which is what gave interest something
+-- to be taken from. But the APPROVAL QUEUE shows what a payment WOULD do, and it shows it through
+-- `preview_allocation` -> `engine_balances`, which counts POSTED accruals only. Nothing is posted
+-- until the moment of approval, so every row on that queue would have read "Retained interest
+-- R 0,00" and then retained hundreds of rands the instant somebody pressed Approve.
+--
+-- That is worse than the silence it replaced. A screen that says nothing is a screen nobody can be
+-- misled by; a screen that says nought while the engine takes R 1 500 is one the firm would act on.
+--
+-- SO THE LOOP MOVES OUT OF `accrue_interest_to` AND INTO HERE, and both callers ask the same
+-- question: the preview asks and draws, the allocation asks and writes. Written twice they drift,
+-- and the drift is precisely the contradiction this exists to remove.
+--
+-- STABLE, NOT VOLATILE: it reads and returns, it never inserts. That is what lets
+-- `preview_allocation` -- which must not write -- call it at all.
+-- ============================================================================
+create or replace function public.open_interest(
+  p_account uuid, p_as_at date, p_exclude_payment uuid default null)
+returns table (
+  from_day date, days integer, opening_balance numeric,
+  accrued numeric, recoverable numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+  v_covered date;
+  v_from date;
+  v_monthly numeric;
+  v_opening numeric;
+  v_balance numeric;
+  v_accrued numeric := 0;
+  v_month numeric;
+  v_cursor date;
+  v_seg_end date;
+  v_month_end date;
+  v_dim integer;
+  v_day date;
+  v_posted numeric;
+  v_non_capital numeric;
+  v_ceiling numeric;
+  v_recoverable numeric;
+  v_days date[];
+  v_deltas numeric[];
+  v_i integer := 1;
+  v_n integer;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then return; end if;
+
+  /* A RATE OF NOUGHT IS THE CLIENT'S DECISION AND NOT OURS TO OVERRIDE. The firm: "whether or not
+     they charge the interest is up to them. So we will not ask Raptor to calculate this." */
+  if coalesce(v_acct.interest_rate_annual, 0) <= 0 then return; end if;
+
+  /* WRITTEN OFF STOPPED ACCRUING WHEN IT WAS WRITTEN OFF. computeBalance returns no open period at
+     all for one, so reporting one here would put a figure on a screen the account page denies. */
+  if coalesce(v_acct.status, '') ~* 'written.off' then return; end if;
+
+  /* WHERE THE CLOCK PICKS UP: the last day a posted accrual covers, or -- with nothing posted --
+     the day BEFORE the handover, so that the handover day itself is the first day that accrues.
+     `days` is Swordfish's EXCLUSIVE offset, so accrued_on + days is the last covered day. */
+  select max(accrued_on + a.days) into v_covered
+    from public.account_interest_accruals a where a.account_id = p_account;
+  if v_covered is null then v_covered := v_acct.handover_date - 1; end if;
+  /* Neither a posted accrual nor a handover date: no day the firm can point at as the day the debt
+     became theirs, so nothing accrues rather than something dated from the row's creation. */
+  if v_covered is null then return; end if;
+
+  v_from := v_covered + 1;
+  if v_from > p_as_at then return; end if;
+
+  /* WHAT THE PERIOD OPENS ON. Capital, plus every accrual already posted, plus every movement
+     dated on or before the anchor. What falls AFTER the anchor is not in here -- it lands during
+     the period, on its own day, which is the whole point. */
+  select coalesce(sum(a.amount_accrued), 0) into v_posted
+    from public.account_interest_accruals a where a.account_id = p_account;
+  v_balance := greatest(coalesce(v_acct.capital_handed_over, 0), 0) + v_posted;
+  select v_balance + coalesce(sum(m.delta), 0) into v_balance
+    from public.account_movements(p_account, p_exclude_payment) m where m.on_day <= v_covered;
+  v_opening := round(v_balance, 2);
+  v_balance := v_opening;
+
+  /* The movements inside the period, one entry per day, in order. Read once into arrays: asking
+     the view again on each of five hundred days is the same answer five hundred times. */
+  select array_agg(x.on_day order by x.on_day), array_agg(x.delta order by x.on_day)
+    into v_days, v_deltas
+    from (select m.on_day, sum(m.delta) as delta
+            from public.account_movements(p_account, p_exclude_payment) m
+           where m.on_day >= v_from and m.on_day <= p_as_at
+           group by m.on_day) x;
+  v_n := coalesce(array_length(v_days, 1), 0);
+
+  v_monthly := v_acct.interest_rate_annual / 100.0 / 12.0;
+
+  v_cursor := v_from;
+  while v_cursor <= p_as_at loop
+    v_month_end := (date_trunc('month', v_cursor) + interval '1 month - 1 day')::date;
+    v_seg_end := least(v_month_end, p_as_at);
+    v_dim := extract(day from v_month_end)::integer;
+    /* The month's interest is accumulated and joined to the balance ONCE, at the close. Adding it
+       day by day would compound within the month, which the posted history does not do -- the book
+       has always charged a flat 2% of the running balance per month. */
+    v_month := 0;
+    v_day := v_cursor;
+    while v_day <= v_seg_end loop
+      -- Everything dated today lands before today earns anything.
+      while v_i <= v_n and v_days[v_i] <= v_day loop
+        v_balance := v_balance + v_deltas[v_i];
+        v_i := v_i + 1;
+      end loop;
+      -- Guarded above zero because an overpaid account must not earn the debtor interest.
+      if v_balance > 0 then
+        v_month := v_month + v_balance * v_monthly / v_dim;
+      end if;
+      v_day := v_day + 1;
+    end loop;
+    v_accrued := v_accrued + v_month;
+    v_balance := v_balance + v_month;
+    v_cursor := v_seg_end + 1;
+  end loop;
+
+  v_accrued := round(v_accrued, 2);
+  if v_accrued <= 0 then return; end if;
+
+  /* IN DUPLUM. Non-capital may not pass the capital handed over, and the ceiling is fixed there
+     rather than recalculated as the balance falls. `recoverable` is what may actually be collected
+     and `accrued` is what the debt earned: they diverge on a capped account and both are returned,
+     because the client is owed an honest account of what was written off rather than a quietly
+     smaller number. engine_balances counts the recoverable half, so that is the half a split may
+     take. */
+  v_recoverable := v_accrued;
+  if v_acct.in_duplum then
+    v_ceiling := greatest(coalesce(v_acct.capital_handed_over, 0), 0);
+    select coalesce(sum(f.amount_excl_vat + coalesce(f.vat_amount, 0)), 0) into v_non_capital
+      from public.account_fees f
+     where f.account_id = p_account
+       and public.fee_stands(f.cancelled_at, f.legacy_name);
+    v_non_capital := v_non_capital + v_posted;
+    v_recoverable := greatest(0, least(v_accrued, v_ceiling - v_non_capital));
+  end if;
+
+  /* `days` IS THE EXCLUSIVE OFFSET, so from_day + days is the last day covered -- p_as_at. The
+     convention is Swordfish's and `accrualEnd` holds the browser's half of it. */
+  from_day := v_from;
+  days := (p_as_at - v_from);
+  opening_balance := v_opening;
+  accrued := v_accrued;
+  recoverable := v_recoverable;
+  return next;
+end $$;
+
+comment on function public.open_interest(uuid, date, uuid) is
+  'What the open interest period comes to, without writing it. Mirrors accrueToDate in '
+  'src/lib/interestAccrual.ts: flat monthly rate pro-rated by the days in each calendar month, '
+  'capitalising at month boundaries only, every fee and payment applied on the day it is dated. '
+  'Returns no row where nothing accrues. accrue_interest_to posts what this returns and '
+  'preview_allocation draws it, so the queue and the engine cannot disagree.';
+
+revoke all on function public.open_interest(uuid, date, uuid) from public;
+revoke execute on function public.open_interest(uuid, date, uuid) from anon, authenticated;
+
+-- AND THE WRITER IS NOW ONLY A WRITER. Everything above the insert used to live in here.
+create or replace function public.accrue_interest_to(
+  p_account uuid, p_as_at date, p_exclude_payment uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  o record;
+  v_id uuid;
+begin
+  select * into o from public.open_interest(p_account, p_as_at, p_exclude_payment);
+  if not found then return null; end if;
+
+  /* daily_rate IS LEFT AT NOUGHT, as every imported row leaves it. The book's convention is a flat
+     monthly rate pro-rated by the days in each calendar month, so there is no single daily rate
+     this period ran at, and writing the MONTHLY figure into a column called daily_rate would be
+     the same unit lie that put 24% into a column read as 2400%. */
+  insert into public.account_interest_accruals (
+    account_id, accrued_on, days, opening_balance, daily_rate,
+    amount_accrued, amount_recoverable, capitalised
+  ) values (
+    p_account, o.from_day, o.days, o.opening_balance, 0,
+    o.accrued, o.recoverable, true
+  )
+  on conflict do nothing
+  returning id into v_id;
+
+  return v_id;
+end $$;
+
+comment on function public.accrue_interest_to(uuid, date, uuid) is
+  'Post the open interest period up to a day, so a payment has interest to be split against. The '
+  'arithmetic is open_interest, which preview_allocation also asks, so what the approval queue '
+  'shows and what approving does are one calculation. Called by allocate_payment and nowhere else.';
+
+revoke all on function public.accrue_interest_to(uuid, date, uuid) from public;
+revoke execute on function public.accrue_interest_to(uuid, date, uuid) from anon, authenticated;
+
+-- ============================================================================
+-- THE PREVIEW NOW SEES WHAT APPROVING WOULD DO.
+--
+-- THE FIRM: "when a payment comes in, it goes into this payment state, where it automatically
+-- calculates everything that is necessary... this is what we will see on a daily basis." The whole
+-- promise of that screen is that what is shown is what happens.
+--
+-- IT WAS ABOUT TO STOP BEING TRUE. allocate_payment posts the open interest period and then splits;
+-- this function reads engine_balances, which counts POSTED accruals only. Nothing is posted until
+-- approval, so the queue would have shown R 0,00 retained interest on every row and then retained
+-- the real figure the moment somebody pressed Approve.
+--
+-- TWO NEW ARGUMENTS, BOTH WITH DEFAULTS, so the collector's dry run on the account page is
+-- unchanged -- it is asking "what would a payment of this size do TODAY", and today is right there.
+--
+--   p_as_at            the day the money arrived. The approval queue knows it; a dry run does not.
+--   p_exclude_payment  the payment being previewed, kept out of the balance it is measured
+--                      against, exactly as allocate_payment and engine_balances do.
+--
+-- AND THE TARIFF MOVES WITH IT. Item 9 was read at `current_date` while allocate_payment reads it
+-- at the payment's date -- so a receipt banked before 7 April 2026 and previewed today quoted the
+-- R610 cap and would have been charged at R502. `scheduleFor` takes the ACTION's date, and now so
+-- does this.
+--
+-- DROPPED AND CREATED, not replaced: Postgres will not add parameters to an existing function.
+-- The revoke list at the foot of this block carries the new signature.
+-- ============================================================================
+drop function if exists public.preview_allocation(uuid, numeric, boolean);
+
+create function public.preview_allocation(
+  p_account uuid, p_amount numeric, p_paid_to_client boolean default false,
+  p_as_at date default null, p_exclude_payment uuid default null)
+returns table (
+  receipt_fee_excl numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric,
+  commission numeric, commission_vat numeric,
+  to_client numeric, due_to_bf numeric, bf_takes numeric,
+  interest_before numeric, costs_before numeric, capital_before numeric,
+  interest_after numeric, costs_after numeric, capital_after numeric,
+  has_rate boolean, interest_open numeric, interest_open_from date
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  b record; s record; o record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric := 0;
+  v_company uuid;
+  v_day date := coalesce(p_as_at, current_date);
+  v_interest numeric;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  -- THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. See the note above.
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and v_day >= effective_from
+     and (effective_to is null or v_day <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  select * into b from public.engine_balances(p_account, p_exclude_payment);
+
+  /*
+   * THE OPEN PERIOD, ASKED AND NOT WRITTEN. This is the same call allocate_payment makes before it
+   * posts, with the same day and the same exclusion, so the figure below is the figure that will
+   * be posted. `recoverable` rather than `accrued`, because engine_balances counts the recoverable
+   * half of every posted row and in duplum binds a split the same way it binds a ledger.
+   */
+  select * into o from public.open_interest(p_account, v_day, p_exclude_payment);
+  interest_open := coalesce(o.recoverable, 0);
+  interest_open_from := o.from_day;
+  v_interest := b.interest + interest_open;
+
+  select * into s from public.finance_split(
+    greatest(coalesce(p_amount, 0), 0), v_interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  select d.company_id, coalesce(d.commission_rate, c.commission_rate), c.commission_bands, c.mandate_signed_at
+    into v_company, v_rate, v_bands, v_mandate
+    from public.debtor_accounts d join public.companies c on c.id = d.company_id
+   where d.id = p_account;
+
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_company and a.status <> 'reversed'
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+  has_rate := commission is not null;
+  if commission is null then commission := 0; end if;
+  commission_vat := round(commission * v_vat, 2);
+
+  receipt_fee_excl := s.fee_excl;
+  receipt_fee_vat := s.fee_vat;
+  to_interest := s.to_interest;
+  to_costs := s.to_costs;
+  to_capital := s.to_capital;
+  excess_credit := s.excess;
+
+  if p_paid_to_client then
+    to_client := 0;
+    due_to_bf := s.to_interest + s.to_costs + commission;
+  else
+    to_client := s.to_capital - commission - commission_vat;
+    due_to_bf := 0;
+  end if;
+  /* WHAT BF ACTUALLY EARNS, which is not due_to_bf: interest and costs recovered plus commission,
+     however the money arrived. The VAT is SARS's and is deliberately not in this figure. */
+  bf_takes := s.to_interest + s.to_costs + commission;
+
+  /* INTEREST TO DATE INCLUDES THE OPEN PERIOD, because that is what the payment will be split
+     against once it is posted. Reporting only the posted half here would put a "before" figure on
+     the screen that the "retained" figure beside it exceeds. */
+  interest_before := v_interest; costs_before := b.costs; capital_before := b.capital;
+  /* The receipt fee this payment would raise joins costs before it is paid, so what is left after
+     is the old costs plus that fee less what the payment took. */
+  interest_after := v_interest - s.to_interest;
+  costs_after := b.costs + s.fee_excl + s.fee_vat - s.to_costs;
+  capital_after := b.capital - s.to_capital;
+  return next;
+end $$;
+
+comment on function public.preview_allocation(uuid, numeric, boolean, date, uuid) is
+  'What a payment WOULD do, without doing it. Includes the open interest period that '
+  'allocate_payment will post at approval, asked through open_interest with the same day and the '
+  'same exclusion, so the approval queue and the engine cannot disagree. p_as_at defaults to '
+  'today for a collector''s dry run; the queue passes the day the money arrived, which also '
+  'decides the Annexure B item 9 tariff.';
+
+revoke all on function public.preview_allocation(uuid, numeric, boolean, date, uuid) from public;
+
+-- THE QUEUE PREVIEWS EACH PAYMENT ON ITS OWN DAY, AND SAYS WHAT INTEREST IS THERE TO TAKE.
+--
+-- THE FIRM, OF SWORDFISH'S OWN ALLOCATION GRID: "all of these fields don't appear in your ready
+-- state for the payments to be allocated." Retained interest was on this screen and read R 0,00 on
+-- every row, because there was no interest anywhere for it to come out of. There is now -- and the
+-- figure it comes OUT OF was still missing, so the retained figure appeared without anything on the
+-- row to explain it.
+--
+-- `interest_to_date` is what the account owes in interest as at the day the money arrived, the open
+-- period included. `interest_after` is what is left once this payment has taken its share. The two
+-- of them either side of "Retained interest" turn one number into a sentence.
+--
+-- AND THE PREVIEW IS NOW TAKEN ON THE PAYMENT'S OWN DAY, not today: interest to the day the money
+-- arrived, and the Annexure B item 9 tariff in force that day. A receipt banked in March and sat on
+-- until now was previewed against today's R610 cap and would have been charged at R502.
+--
+-- THE PAYMENT IS EXCLUDED FROM ITS OWN PREVIEW, the way engine_balances and allocate_payment both
+-- exclude it. An unapproved receipt has no allocation and no item 9 row, so engine_balances never
+-- saw it -- but account_movements reads account_payments directly, so without this the open period
+-- would be accrued on a balance this very payment had already reduced, and the preview would come
+-- in under what approving actually posts.
+drop function if exists public.payments_awaiting_approval();
+
+create function public.payments_awaiting_approval()
+returns table (
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric,
+  paid_to_client boolean, method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date,
+  interest_to_date numeric, interest_after numeric,
+  interest_open numeric, interest_open_from date
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date,
+    pv.interest_before, pv.interest_after,
+    pv.interest_open, pv.interest_open_from
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  left join lateral public.preview_allocation(
+    p.account_id, p.amount, p.paid_to_client,
+    (p.received_at at time zone 'Africa/Johannesburg')::date, p.id) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and p.suspended_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+comment on function public.payments_awaiting_approval() is
+  'The day''s unapproved receipts with what each WOULD do, previewed on the day the money arrived. '
+  'Nothing here has happened: no balance has moved, no fee has been raised, and a payover run '
+  'gathers allocations, so an unapproved payment is invisible to remittance by construction.';
+
+revoke all on function public.payments_awaiting_approval() from public;
+
+-- THE WHOLE FINANCE LIST AGAIN, because two of them changed signature and a partial list would
+-- leave the pair anon can still reach. schema.sql is append-only and the last block is the live
+-- one, so this one has to carry every name rather than only the two that moved.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    /* THE ONE ENTRY THAT CHANGED. preview_allocation gained p_as_at and p_exclude_payment, and a
+       revoke naming the old three-argument signature raises undefined_function -- which the
+       handler below swallows, leaving the function reachable by anon with nothing to show for it.
+       That is why the whole list is restated rather than the one line appended. */
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;
