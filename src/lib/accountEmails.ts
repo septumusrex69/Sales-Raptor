@@ -133,6 +133,32 @@ export async function fetchAccountEmails(accountId: string): Promise<AccountEmai
 }
 
 /**
+ * THE CORRESPONDENCE ON ONE TICKET: the email that raised it, and anything sent on from it.
+ *
+ * THE FIRM: "can me, as a client liaison, for example, Stefan, or Nicole, forward that email just
+ * like that to the client?" They could not, because the ticket never showed it. The email HAS been
+ * filed against the ticket since the day the button existed -- `query_id` on account_emails, with
+ * its attachments filed beside it as documents -- and nothing ever read it back.
+ *
+ * OLDEST FIRST, which is the opposite of the account's list and is right here. An account's mail
+ * is a stream you look at the top of; a ticket's is a short conversation you read in order -- the
+ * debtor's objection, then what was passed on to the client about it.
+ *
+ * THE SAME SELECT AS THE ACCOUNT'S, not a narrower one. Every field the reading pane draws is
+ * needed for a forward as well -- who it came from, when, what was attached -- and a second
+ * hand-written column list is a second place to forget one.
+ */
+export async function fetchQueryEmails(queryId: string): Promise<AccountEmail[]> {
+  const { data, error } = await supabase
+    .from('account_emails')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id')
+    .eq('query_id', queryId)
+    .order('occurred_at', { ascending: true })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as EmailRow[]).map(toEmail)
+}
+
+/**
  * A debtor's reply that the agent it arrived for has not looked at yet.
  *
  * This is what makes a reply findable. Across 100 000 accounts nobody browses for one, so unread
@@ -279,6 +305,14 @@ export async function recordSentEmail(input: {
   messageId: string | null
   /** Set when this was a reply, naming the message it answers. */
   inReplyTo?: string | null
+  /**
+   * THE TICKET THIS WAS SENT FROM, where it was sent from one.
+   *
+   * A dispute forwarded to the client is part of that dispute's correspondence, not a loose
+   * message on the account -- and the liaison who picks the ticket up next week needs to see that
+   * it went and when. Null everywhere else, which is every ordinary email to a debtor.
+   */
+  queryId?: string | null
   actor: Actor
 }): Promise<ChargeResult> {
   const charge = await chargeItem({
@@ -308,6 +342,10 @@ export async function recordSentEmail(input: {
     sent_by: input.actor.id,
     sent_by_name: input.actor.name,
     charged_excl_vat: charge.exclVat,
+    /* FILED ON THE TICKET TOO, where it was sent from one. `ticket_belongs_to_the_same_account`
+       refuses a ticket from another account on this very column, so a mistyped id is a refusal
+       rather than one debtor's dispute carrying another debtor's mail. */
+    query_id: input.queryId ?? null,
   })
   if (error) console.error('[accountEmails] the message went but was not filed:', error.message)
 

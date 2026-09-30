@@ -342,6 +342,20 @@ export async function fetchQuery(id: string): Promise<{
   /** The batch it is about, where it is about a sheet. */
   batch: { id: string; reference: string | null; receivedAt: string; companyId: string } | null
   clientName: string | null
+  /**
+   * WHERE A FORWARD GOES, and why it is fetched here rather than looked up on the screen.
+   *
+   * THE FIRM: "can me, as a client liaison, for example, Stefan, or Nicole, forward that email
+   * just like that to the client." The address is on the CLIENT, one row away from the account or
+   * the batch this ticket is about, and the page already makes that hop for `clientName`. Making
+   * the liaison find it and type it is how a dispute gets forwarded to the wrong client.
+   *
+   * NULL IS AN ANSWER, not a failure: a client with no address on file means the Forward button
+   * opens with an empty To rather than being hidden, because the person sending it may well know
+   * the address the record does not.
+   */
+  clientEmail: string | null
+  clientContact: string | null
 } | null> {
   const { data, error } = await supabase
     .from('account_queries').select('*').eq('id', id).maybeSingle()
@@ -380,12 +394,21 @@ export async function fetchQuery(id: string): Promise<{
     }
   }
 
-  const clientName = companyId
-    ? ((await supabase.from('companies').select('name').eq('id', companyId).maybeSingle())
-      .data?.name as string | null) ?? null
+  /* ONE ROUND TRIP FOR ALL THREE. It was already fetching the name; the address and the contact
+     come off the same row, and a second query for them would be a second chance to be null. */
+  const client = companyId
+    ? (await supabase.from('companies').select('name, email, contact_person')
+      .eq('id', companyId).maybeSingle()).data
     : null
 
-  return { query: q, account: acc, batch, clientName }
+  return {
+    query: q,
+    account: acc,
+    batch,
+    clientName: (client?.name as string | null) ?? null,
+    clientEmail: (client?.email as string | null) ?? null,
+    clientContact: (client?.contact_person as string | null) ?? null,
+  }
 }
 
 export async function raiseQuery(input: {

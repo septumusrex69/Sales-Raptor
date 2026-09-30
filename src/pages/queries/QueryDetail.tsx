@@ -20,6 +20,13 @@ import { fetchClientCommissionRate } from '../../lib/accountBook'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
+import { TicketEmails } from '../../components/queries/TicketEmails'
+import { ComposeEmailModal } from '../../components/ComposeEmailModal'
+import {
+  fetchQueryEmails, recordSentEmail, type AccountEmail,
+} from '../../lib/accountEmails'
+import { forwardBody, forwardSubject } from '../../lib/emailRules.ts'
+import { canSendToClient } from '../../lib/disputeCategories.ts'
 import { fetchAccounts } from '../../lib/accountBook'
 import { rejectedSheetName, rejectedSheetRows } from '../../lib/rejectedSheet.ts'
 import { buildXlsx, downloadBytes, XLSX_MIME } from '../../lib/xlsxWrite.ts'
@@ -77,6 +84,18 @@ export function QueryDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /**
+   * THE MAIL FILED AGAINST THIS TICKET, and the one being passed on.
+   *
+   * THE FIRM: "can me, as a client liaison, for example, Stefan, or Nicole, forward that email
+   * just like that to the client?" The email has been filed here since the button existed and
+   * nothing ever read it back — see TicketEmails.
+   */
+  const [emails, setEmails] = useState<AccountEmail[]>([])
+  const [forwarding, setForwarding] = useState<AccountEmail | null>(null)
+  /* Whether the signed-in person has a mailbox at all. Mail goes out through their OWN, so the
+     button says why it is disabled rather than failing on Send. Null while we are asking. */
+  const [mailbox, setMailbox] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -84,6 +103,12 @@ export function QueryDetail() {
     try {
       const found = await fetchQuery(id)
       setData(found)
+      /*
+       * NEVER FATAL. A ticket whose correspondence cannot be read is still a ticket somebody has
+       * to work — the description, the owner and the chase date are all on the row itself. An
+       * empty list simply hides the card.
+       */
+      setEmails(await fetchQueryEmails(id).catch(() => []))
       /*
        * Only for a batch, and never fatal. A draft that has been tidied away leaves the query
        * readable rather than the page broken -- the query's own words still say what it is about.
@@ -109,6 +134,24 @@ export function QueryDetail() {
   }, [id])
 
   useEffect(() => { void load() }, [load])
+
+  /*
+   * CAN THIS PERSON SEND ANYTHING? Asked once, up front, so the Forward button can say why it is
+   * disabled instead of letting somebody write a covering note and fail on Send. The same question
+   * the account page asks, for the same reason.
+   */
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token) return
+    let cancelled = false
+    void fetch('/api/email/status', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((b: { connected?: boolean; email?: string | null }) => {
+        if (!cancelled && b.connected) setMailbox(b.email ?? null)
+      })
+      .catch(() => { /* a status we could not read just leaves the button disabled. */ })
+    return () => { cancelled = true }
+  }, [session])
 
   /*
    * THE SAME HANDLERS THE IMPORT SCREEN USES, against the same library functions. The table is
@@ -192,6 +235,26 @@ export function QueryDetail() {
   const toConfirm = rows.filter((r) => !r.excluded && !r.planned?.refused
     && (r.planned?.problems.length ?? 0) > 0)
 
+  /*
+   * WHO MAY PUT THIS IN FRONT OF A CLIENT, and it is not a new rule invented here.
+   *
+   * `canSendToClient` already decides it everywhere else on a query, and its own note says why a
+   * collections agent is not on the list: "a collections agent should not be writing to a client
+   * about a disputed account on their own initiative — that is the liaison's relationship to
+   * manage." The firm named the same people asking for this: "can me, as a client liaison, for
+   * example, Stefan, or Nicole, forward that email just like that to the client?"
+   *
+   * AND A MAILBOX, because the message goes out through the sender's OWN. Two different reasons
+   * to be unable to press it, each with its own sentence — a button disabled without saying which
+   * is a button people ask about rather than fix.
+   */
+  const mayWriteToClient = canSendToClient(currentUser?.role)
+  const forwardWhy = !mayWriteToClient
+    ? 'Only a liaison or a manager writes to the client about a dispute.'
+    : !mailbox
+      ? 'Connect your mailbox in Settings before you can forward anything.'
+      : null
+
   return (
     <div className="space-y-4">
       <Link to={data.batch ? `/companies/${data.batch.companyId}` : `/accounts/${q.accountId}`}
@@ -244,6 +307,18 @@ export function QueryDetail() {
           </div>
         )}
       </Card>
+
+      {/*
+        DIRECTLY UNDER THE TICKET, above everything about the sheet. On a dispute this is the only
+        other thing on the page, and on a batch ticket the rows below it run to hundreds — put the
+        debtor's own words under those and nobody would ever reach them.
+      */}
+      <TicketEmails
+        emails={emails}
+        canForward={forwardWhy === null}
+        why={forwardWhy}
+        onForward={setForwarding}
+      />
 
       {data.batch && !draft && (
         <Card><p className="text-sm text-slate-400">
@@ -353,6 +428,77 @@ export function QueryDetail() {
       */}
       {q.status !== 'closed' && data.batch && (
         <ReplyAnswers accountFor={(ref) => (ref ? openedFor.get(ref) ?? null : null)} />
+      )}
+
+      {/*
+        THE SAME COMPOSER EVERY OTHER SCREEN USES, which is the whole reason this was a small
+        change. It sends through the person's own mailbox, appends to their Sent folder and hands
+        the message back here to be filed and charged.
+
+        THE ORIGINAL IS QUOTED AS PLAIN TEXT, like the account's own forward and unlike the mail
+        page's. account_emails stores a SNIPPET rather than the message's markup, so there is no
+        html here to keep the shape of — and `forwardBody` says so on the message when only the
+        stored preview was available, rather than sending a truncated forward that reads complete.
+      */}
+      {forwarding && q.accountId && (
+        <ComposeEmailModal
+          to={data.clientEmail ?? ''}
+          recipients={data.clientEmail
+            ? [{ email: data.clientEmail, label: data.clientContact ?? data.clientName ?? undefined }]
+            : []}
+          initialSubject={forwardSubject(forwarding.subject)}
+          initialBody={forwardBody(
+            {
+              fromName: forwarding.direction === 'in'
+                ? forwarding.sentByName
+                : (currentUser?.name ?? null),
+              fromAddress: forwarding.direction === 'in'
+                ? forwarding.debtorAddress
+                : (forwarding.ourAddress ?? mailbox ?? ''),
+              subject: forwarding.subject,
+              occurredAt: forwarding.occurredAt,
+            },
+            forwarding.body ?? '',
+            /* The sync keeps a snippet, not the whole message. Saying so is the honest half:
+               a forward that silently ends mid-sentence reads to the client as all there was. */
+            false,
+          )}
+          contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
+            + 'item 1(a). It is filed against this dispute as well as the account.'}
+          onClose={() => setForwarding(null)}
+          onSent={(rawSubject, bodyText, messageId, from) => {
+            setForwarding(null)
+            /*
+             * CHARGED, RECORDED AND FILED ON THE TICKET. The firm's ruling: "raising the dispute
+             * charges a charge. I think it should charge the debtor for it. And also
+             * correspondence to charge." Item 3 on the dispute and item 1(a) on the message are
+             * two chargeable things; recordSentEmail raises the second exactly as it does for a
+             * demand letter to the debtor.
+             *
+             * The subject arrives with the modal's own "Email sent: " framing, which is the CRM
+             * activity convention and means nothing on an account. Stripped so what is filed is
+             * the subject that actually went out.
+             */
+            void recordSentEmail({
+              accountId: q.accountId as string,
+              to: data.clientEmail ?? '',
+              /* The modal leaves both undefined where it could not learn them; the ledger wants
+                 a null. Passing undefined through PostgREST omits the column instead of clearing
+                 it, which is a different thing on an update and a habit not worth having. */
+              from: from ?? null,
+              subject: rawSubject.replace(/^Email sent:\s*/i, ''),
+              body: bodyText,
+              messageId: messageId ?? null,
+              queryId: q.id,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+            })
+              /* The card has to show it went. Re-read rather than pushed, so what is drawn is what
+                 was actually filed -- including the charge, which is computed server-side. */
+              .then(() => fetchQueryEmails(q.id))
+              .then(setEmails)
+              .catch(() => { /* the message went; a list that did not refresh is not an error. */ })
+          }}
+        />
       )}
     </div>
   )
