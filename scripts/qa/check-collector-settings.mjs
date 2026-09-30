@@ -131,9 +131,9 @@ ok('the collectors panel is mounted', /<CollectorsPanel/.test(settings))
 ok('the panel asks the shared collections permission',
   /canEdit=\{canLeadCollections\(/.test(settings))
 ok('...so a team leader may edit it, not only an administrator',
-  canLeadCollections('Pre-legal Team Leader') && canLeadCollections('Administrator'))
-ok('...and so may the person who runs the floor', canLeadCollections('Call Centre Manager'))
-ok('...while a collector may not', !canLeadCollections('Pre-legal Agent'))
+  canLeadCollections({ role: 'Pre-legal Team Leader' }) && canLeadCollections({ role: 'Administrator' }))
+ok('...and so may the person who runs the floor', canLeadCollections({ role: 'Call Centre Manager' }))
+ok('...while a collector may not', !canLeadCollections({ role: 'Pre-legal Agent' }))
 
 /* ---------- the mapper carries the columns ---------- */
 

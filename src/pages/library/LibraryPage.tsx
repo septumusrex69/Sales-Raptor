@@ -41,8 +41,8 @@ import { defaultOf, fetchLetterheads, type Letterhead } from '../../lib/letterhe
  */
 export function LibraryPage() {
   const { currentUser } = useAuth()
-  const mayEdit = canEditLibrary(currentUser?.role)
-  const mayView = canViewLibrary(currentUser?.role)
+  const mayEdit = canEditLibrary(currentUser)
+  const mayView = canViewLibrary(currentUser)
 
   const [scope, setScope] = useState<TemplateScope>('collections')
   const [rows, setRows] = useState<LibraryTemplate[] | null>(null)

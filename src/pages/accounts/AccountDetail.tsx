@@ -749,7 +749,7 @@ export function AccountDetail() {
     ? (users.find((u) => u.id === account.assignedTo)?.name ?? 'Someone no longer here')
     : null
   /* The same authority as handing out from the accounts list, and now literally the same test. */
-  const mayHandOut = canHandOutAccounts(currentUser?.role)
+  const mayHandOut = canHandOutAccounts(currentUser)
   const name = [account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor'
   const due = workspace ? nextPromise(workspace.promises) : undefined
   const emailContact = workspace?.contacts.find((c) => c.kind === 'email' && !c.retiredAt)
@@ -964,7 +964,15 @@ export function AccountDetail() {
       accountLabel={account.accountNumber}
       queries={queries}
       users={users}
-      actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, role: currentUser?.role }}
+      actor={{
+        id: currentUser?.id ?? null,
+        name: currentUser?.name ?? null,
+        role: currentUser?.role,
+        /* The grants travel with the role or the panel answers "may you see the client?" off the
+           template alone, for the one person who was given it by hand. */
+        grants: currentUser?.grants,
+        revokes: currentUser?.revokes,
+      }}
       onChange={reload}
       /* ONE BOX FOR RAISING A DISPUTE, and it is the Escalate one. The panel used to carry a form
          of its own that asked less and said the wrong thing about the fee -- see QueryPanel's
@@ -979,7 +987,7 @@ export function AccountDetail() {
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
       clientLiaisonName={clientLiaison?.name ?? null}
-      onFreeze={canFreezeAccounts(currentUser?.role) ? () => setFreezing(true) : null} />
+      onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null} />
   )
 
   return (
@@ -1023,7 +1031,7 @@ export function AccountDetail() {
           <span className="inline-flex flex-wrap items-center gap-x-1.5">
             <span className="text-white/50">Client</span>
             {client
-              ? canViewClients(currentUser?.role)
+              ? canViewClients(currentUser)
                 ? <Link to={`/companies/${client.id}`} className="text-gold-400 hover:underline">{client.name}</Link>
                 : <span className="text-gold-400">{client.name}</span>
               : <span>Unknown</span>}
@@ -1329,7 +1337,7 @@ export function AccountDetail() {
             audience={account.debtorKind}
             /* The firm's own word for where the account stands -- derived, never stored. */
             status={DESK_POSITIONS[position]?.label ?? null}
-            onRecordPayment={canRecordPayment(currentUser?.role) ? () => setPayingIn(true) : null}
+            onRecordPayment={canRecordPayment(currentUser) ? () => setPayingIn(true) : null}
             /*
              * THE PRESS THAT EMAILS ONE. The control draws the PDF and merges the firm's covering
              * wording; this opens the one compose box on the account with both already on the

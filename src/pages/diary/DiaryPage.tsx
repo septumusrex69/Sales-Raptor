@@ -684,7 +684,7 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
   // The name is shown to everyone; only the LINK is withheld, exactly as the account page does
   // it. A pre-legal agent works debtors, and the client's mandate and rates are not their
   // business — but knowing who they are collecting for is.
-  const canOpenClient = canViewClients(currentUser?.role)
+  const canOpenClient = canViewClients(currentUser)
 
   return (
     <li className="py-2.5">

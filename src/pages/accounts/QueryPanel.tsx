@@ -55,7 +55,13 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
   queries: AccountQuery[]
   /** Who a query can be given to. */
   users: User[]
-  actor: { id: string | null; name: string | null; role: string | undefined }
+  /*
+   * WITH THE GRANTS, not the role alone. What somebody may do is the role's template plus what
+   * they were given minus what was taken away -- see capabilities.ts -- so a shape carrying only
+   * `role` can answer the question wrongly for exactly the person the firm went out of their way
+   * to give something to.
+   */
+  actor: Pick<User, 'grants' | 'revokes'> & { id: string | null; name: string | null; role: string | undefined }
   onChange: () => Promise<void>
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
@@ -165,7 +171,13 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
   accountId: string
   accountLabel: string | null
   users: User[]
-  actor: { id: string | null; name: string | null; role: string | undefined }
+  /*
+   * WITH THE GRANTS, not the role alone. What somebody may do is the role's template plus what
+   * they were given minus what was taken away -- see capabilities.ts -- so a shape carrying only
+   * `role` can answer the question wrongly for exactly the person the firm went out of their way
+   * to give something to.
+   */
+  actor: Pick<User, 'grants' | 'revokes'> & { id: string | null; name: string | null; role: string | undefined }
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   onChange: () => Promise<void>
@@ -322,7 +334,7 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
       */}
       {!closing && (
         <div className="flex gap-1.5 mt-2">
-          {clientId && canViewClients(actor.role as User['role'] | undefined) && (
+          {clientId && canViewClients({ ...actor, role: actor.role as User['role'] }) && (
             <Link to={`/companies/${clientId}`}
               className="flex-1 text-[11px] font-medium py-1 rounded border border-brand-100 text-brand-500 hover:bg-white inline-flex items-center justify-center gap-1">
               View client

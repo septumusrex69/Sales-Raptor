@@ -127,11 +127,23 @@ const may = liveFn('may_record_payment')
 ok('the database decides who may record a payment', may !== null)
 ok('...the function checks it', /if not public\.may_record_payment\(\) then/.test(fn ?? ''))
 
-/* AN ALLOW LIST, so a role added to the firm later is refused until somebody decides. */
+/*
+ * AN ALLOW LIST, so a role added to the firm later is refused until somebody decides.
+ *
+ * THE DATABASE'S HALF MOVED AND IS STILL HELD. `may_record_payment` used to spell the five roles
+ * out; the firm asked for Swordfish's model -- "you can add them more functionality" -- and a
+ * hand-written role name is the one thing a grant cannot reach, so it asks for a capability now.
+ * The list itself lives in `role_capabilities`, and it is checked there rather than not at all:
+ * greppping the guard for a role name would pass vacuously against a one-line function.
+ */
+const templates = liveFn('role_capabilities')
+ok('the database has the role templates', templates !== null)
+ok('...and the guard asks for a capability', /has_capability\('payment\.record'\)/.test(may ?? ''))
 for (const role of ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader',
   'Liaison Manager', 'Liaison']) {
-  ok(`${role} may record a payment`, canRecordPayment(role))
-  ok(`...and the database agrees`, new RegExp(`'${role}'`).test(may ?? ''))
+  ok(`${role} may record a payment`, canRecordPayment({ role: role }))
+  ok(`...and the database agrees`,
+    new RegExp(`when '${role}' then array\\[[^\\]]*'payment\\.record'`).test(templates ?? ''))
 }
 /*
  * THE SALES SIDE MAY NOT. CLAUDE.md: fees are charged on ACCOUNTS ONLY and the sales side raises
@@ -147,7 +159,7 @@ for (const role of ['Administrator', 'Call Centre Manager', 'Pre-legal Team Lead
  * against the statement rather than a receipt to record.
  */
 for (const role of ['Pre-legal Agent', 'Sales Representative', 'Sales Manager', 'Read Only']) {
-  check(`${role} may not`, canRecordPayment(role), false)
+  check(`${role} may not`, canRecordPayment({ role: role }), false)
   ok(`...and the database does not list them`, !new RegExp(`'${role}'`).test(may ?? ''))
 }
 check('nor may somebody with no role at all', canRecordPayment(undefined), false)
@@ -170,7 +182,7 @@ ok('...and so can the account', /RecordPaymentModal/.test(detail))
 /* GATED ON CAPTURE, NOT ON canViewFinance -- a collector may record a receipt and still never
    see the split. */
 ok('...gated on who may record, not on who may see the split',
-  /canRecordPayment\(currentUser\?\.role\)/.test(detail))
+  /canRecordPayment\(currentUser\)/.test(detail))
 /* ON THE ACCOUNT THERE IS NOTHING TO SEARCH FOR: offering a search invites recording a payment
    against the account somebody meant to look at rather than the one they are on. */
 ok('...with the account fixed where it was opened on one', /fixedAccount/.test(modal))

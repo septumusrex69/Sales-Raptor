@@ -24,6 +24,8 @@ interface ProfileRow {
   collector_grade: CollectorGrade | null
   book_ceiling: number | null
   diary_reserve: number | null
+  grants: string[] | null
+  revokes: string[] | null
 }
 
 function mapProfileRow(row: ProfileRow): User {
@@ -58,6 +60,15 @@ function mapProfileRow(row: ProfileRow): User {
     collectorGrade: row.collector_grade ?? undefined,
     bookCeiling: row.book_ceiling ?? undefined,
     diaryReserve: row.diary_reserve ?? undefined,
+    /*
+     * AND THE TWO THAT DECIDE WHAT THIS PERSON MAY DO. Exactly the failure the note above
+     * describes, with the worst possible consequence: missing from this mapper they read as
+     * undefined for ever, `capabilitiesOf` falls back to the role alone, and every grant the firm
+     * has given anybody silently does nothing -- on a screen that goes on showing the tick.
+     * check-capabilities fails if either is dropped.
+     */
+    grants: row.grants ?? undefined,
+    revokes: row.revokes ?? undefined,
   }
 }
 

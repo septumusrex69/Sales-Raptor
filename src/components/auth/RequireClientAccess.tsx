@@ -16,6 +16,6 @@ import { canViewClients } from '../../lib/permissions'
 export function RequireClientAccess({ children }: { children: ReactNode }) {
   const { currentUser, loading } = useAuth()
   if (loading || !currentUser) return null
-  if (!canViewClients(currentUser.role)) return <Navigate to="/accounts" replace />
+  if (!canViewClients(currentUser)) return <Navigate to="/accounts" replace />
   return <>{children}</>
 }

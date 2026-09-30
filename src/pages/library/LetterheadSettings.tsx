@@ -26,7 +26,7 @@ import { LetterPage } from '../../components/letters/LetterPage'
  */
 export function LetterheadSettings() {
   const { currentUser } = useAuth()
-  const mayEdit = canEditLibrary(currentUser?.role)
+  const mayEdit = canEditLibrary(currentUser)
   const [rows, setRows] = useState<Letterhead[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

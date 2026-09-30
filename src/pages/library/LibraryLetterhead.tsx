@@ -8,13 +8,13 @@ import { LetterheadSettings } from './LetterheadSettings'
  *  administrator writes. A collector previewing a notice has to see the paper it prints on. */
 export function LibraryLetterhead() {
   const { currentUser } = useAuth()
-  const mayView = canViewLibrary(currentUser?.role)
+  const mayView = canViewLibrary(currentUser)
   if (!mayView) {
     return <Card><p className="text-sm text-slate-600">The library is not open to you.</p></Card>
   }
   return (
     <div className="space-y-4">
-      <LibraryHeader mayEdit={canEditLibrary(currentUser?.role)} />
+      <LibraryHeader mayEdit={canEditLibrary(currentUser)} />
       <LetterheadSettings />
     </div>
   )

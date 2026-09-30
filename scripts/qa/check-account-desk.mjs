@@ -58,22 +58,22 @@ ok('the accounts list is readable at all', list.length > 0)
 
 /* ------------------------------------------------ one permission, run rather than read */
 
-check('an administrator may hand out', canHandOutAccounts('Administrator'), true)
+check('an administrator may hand out', canHandOutAccounts({ role: 'Administrator' }), true)
 /*
  * THE ONE canReassign LEAVES OUT, and the reason this function had to exist. Asserted against
  * canReassign directly so the two cannot quietly converge and make this test vacuous.
  */
-check('a pre-legal team leader may hand out', canHandOutAccounts('Pre-legal Team Leader'), true)
+check('a pre-legal team leader may hand out', canHandOutAccounts({ role: 'Pre-legal Team Leader' }), true)
 check('...which is exactly what canReassign refuses', canReassign({ role: 'Pre-legal Team Leader' }), false)
-check('a collector may not hand out', canHandOutAccounts('Pre-legal Agent'), false)
+check('a collector may not hand out', canHandOutAccounts({ role: 'Pre-legal Agent' }), false)
 check('nobody signed in may not hand out', canHandOutAccounts(undefined), false)
 
 /* Written once. The array this replaced lived in AccountsList and the account screen could not
    see it, which is how the list would offer a team leader the action and the account screen
    would not -- for the same action on the same account. */
-ok('the accounts list asks the shared test', /canHandOutAccounts\(currentUser\?\.role\)/.test(list))
+ok('the accounts list asks the shared test', /canHandOutAccounts\(currentUser\)/.test(list))
 ok('...and no longer keeps its own list of roles', !/CAN_SEE_OTHER_DESKS/.test(list))
-ok('the account screen asks the same one', /canHandOutAccounts\(currentUser\?\.role\)/.test(detail))
+ok('the account screen asks the same one', /canHandOutAccounts\(currentUser\)/.test(detail))
 
 /* ------------------------------------------------ the band names the right person */
 

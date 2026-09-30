@@ -23,6 +23,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-reversal-returns.mjs
  */
 import { readFileSync } from 'node:fs'
+import { ROLE_CAPABILITIES } from '../../src/lib/capabilities.ts'
 
 let pass = 0
 const failures = []
@@ -58,8 +59,27 @@ ok('a receipt can say which one it replaces',
 
 const rev = liveFn('reverse_payment')
 ok('the reversal is defined', rev !== null)
-ok('...Administrator only, failing closed on a null role',
-  /current_user_role\(\) is distinct from 'Administrator'/.test(rev ?? ''))
+/*
+ * A CAPABILITY NOW, NOT A ROLE NAME -- and the assertion moved rather than being dropped.
+ *
+ * It read `current_user_role() is distinct from 'Administrator'`, whose whole point was failing
+ * CLOSED: current_user_role() is NULL for an unauthenticated caller and `null <> x` is NULL, which
+ * is not true but is also not a refusal. Swordfish has "Reverse Payments" as its own line in the
+ * Data panel -- one of the five ticked out of eleven -- and the firm agreed it belongs in Raptor's
+ * list, so this asks for it.
+ *
+ * BOTH HALVES OF THE OLD GUARANTEE ARE STILL ASSERTED: narrow (no template but an Administrator's
+ * carries it, which also catches somebody adding it to a Liaison) and closed (has_capability is an
+ * `exists` over profiles keyed on auth.uid(), so no session is no row is false).
+ */
+ok('...asking for a capability rather than naming a role',
+  /has_capability\('payment\.reverse'\)/.test(rev ?? ''))
+check('...that no template but an Administrator\u2019s carries',
+  Object.entries(ROLE_CAPABILITIES)
+    .filter(([, caps]) => caps.includes('payment.reverse')).map(([r]) => r),
+  ['Administrator'])
+ok('...and failing closed when nobody is signed in',
+  /exists \(\s*select 1 from public\.profiles p[\s\S]{0,200}?p\.id = auth\.uid\(\)/.test(liveFn('has_capability') ?? ''))
 ok('...and it hands back the copy rather than nothing',
   /create function public\.reverse_payment\(p_payment uuid, p_reason text\)\s*\nreturns uuid/.test(sql))
 

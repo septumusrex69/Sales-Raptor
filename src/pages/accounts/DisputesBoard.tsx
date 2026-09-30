@@ -108,7 +108,7 @@ export function DisputesBoard() {
     () => visibleDisputeOwners(currentUser, users),
     [currentUser, users],
   )
-  const mayPool = mayPoolDisputes(currentUser?.role)
+  const mayPool = mayPoolDisputes(currentUser)
 
   /*
    * AND THE FILTER IS HELD TO THAT LIST. Without this the scope would be a dropdown rather than a

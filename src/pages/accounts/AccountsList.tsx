@@ -74,7 +74,7 @@ export function AccountsList() {
 
   const companyId = params.get('client') ?? undefined
   const companyName = companies.find((c) => c.id === companyId)?.name
-  const canSeeOthers = canHandOutAccounts(currentUser?.role)
+  const canSeeOthers = canHandOutAccounts(currentUser)
 
   const setParam = useCallback((key: string, value: string | null) => {
     const next = new URLSearchParams(params)

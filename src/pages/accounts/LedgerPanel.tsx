@@ -28,7 +28,7 @@ export function LedgerPanel({ accountId }: { accountId: string }) {
   const { currentUser } = useAuth()
   const [lines, setLines] = useState<LedgerLine[]>([])
   const [loading, setLoading] = useState(true)
-  const maySee = canViewFinance(currentUser?.role)
+  const maySee = canViewFinance(currentUser)
 
   const load = useCallback(async () => {
     if (!maySee) { setLoading(false); return }

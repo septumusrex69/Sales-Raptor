@@ -42,9 +42,24 @@ const ROLES = [
  * it, whose commission rates and mandate are commercially sensitive and are the liaison's
  * business.
  */
-check('a pre-legal agent may not see the client register', canViewClients('Pre-legal Agent'), false)
+check('a pre-legal agent may not see the client register', canViewClients({ role: 'Pre-legal Agent' }), false)
+/*
+ * AND EVERYBODY ELSE MAY, EXCEPT READ ONLY -- WHICH IS A REAL CHANGE AND IS NAMED HERE RATHER THAN
+ * ABSORBED.
+ *
+ * This used to be "any role but Pre-legal Agent", written as `role !== 'Pre-legal Agent'`, and
+ * Read Only fell through it and saw the client register: commission rates, mandates, open deals.
+ * Not a decision anybody made -- a consequence of the test being a single exclusion.
+ *
+ * Building the capability templates meant writing out what each role actually gets, and Read Only
+ * got the library and nothing else, which is what the name has always promised. Say so if it is
+ * wrong; it is one entry in ROLE_CAPABILITIES.
+ */
 check('...and everybody else may',
-  ROLES.filter((r) => r !== 'Pre-legal Agent').filter((r) => !canViewClients(r)), [])
+  ROLES.filter((r) => r !== 'Pre-legal Agent' && r !== 'Read Only')
+    .filter((r) => !canViewClients({ role: r })), [])
+check('read only sees the library and nothing else',
+  canViewClients({ role: 'Read Only' }), false)
 /* Nobody at all, before a profile has loaded. A permission that defaults open is a permission
    that is open for the second between sign-in and the profile arriving. */
 check('...and nobody before a profile has loaded', canViewClients(undefined), false)
@@ -61,24 +76,24 @@ ok('...and so is the one client page', /<Route path="\/companies\/:id"[^>]*eleme
 /* ---------- the library ---------- */
 
 /* "Perhaps everyone can view everything in the library. Only [an administrator] can edit." */
-check('everyone reads the library', ROLES.filter((r) => !canViewLibrary(r)), [])
+check('everyone reads the library', ROLES.filter((r) => !canViewLibrary({ role: r })), [])
 check('...and nobody before a profile has loaded', canViewLibrary(undefined), false)
-check('only an administrator writes it', ROLES.filter((r) => canEditLibrary(r)), ['Administrator'])
+check('only an administrator writes it', ROLES.filter((r) => canEditLibrary({ role: r })), ['Administrator'])
 
 /* ---------- the money and record actions ---------- */
 
 /* Re-filing moves a debtor's correspondence between accounts and raises a second item 6 fee on
    the destination, which makes it a money action. */
 check('only an administrator re-files already-filed mail',
-  ROLES.filter((r) => canRefileMail(r)), ['Administrator'])
+  ROLES.filter((r) => canRefileMail({ role: r })), ['Administrator'])
 
 /* A freeze takes an account out of circulation. A liaison is included because a freeze is most
    often something a CLIENT asked for, and the liaison is who the client asks. */
 check('freezing is management, plus the liaison the client speaks to',
-  ROLES.filter((r) => canFreezeAccounts(r)),
+  ROLES.filter((r) => canFreezeAccounts({ role: r })),
   ['Administrator', 'Liaison Manager', 'Liaison', 'Pre-legal Team Leader'].filter((r) => ROLES.includes(r))
     .sort((a, b) => ROLES.indexOf(a) - ROLES.indexOf(b)))
-check('a collector does not freeze accounts', canFreezeAccounts('Pre-legal Agent'), false)
+check('a collector does not freeze accounts', canFreezeAccounts({ role: 'Pre-legal Agent' }), false)
 
 check('reassigning is managerial',
   ROLES.filter((r) => canReassign({ role: r })),

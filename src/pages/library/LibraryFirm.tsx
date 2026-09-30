@@ -8,12 +8,12 @@ import { FirmSettingsPage } from './FirmSettings'
  *  writes. A collector previewing a notice has to see what the debtor will be told to pay into. */
 export function LibraryFirm() {
   const { currentUser } = useAuth()
-  if (!canViewLibrary(currentUser?.role)) {
+  if (!canViewLibrary(currentUser)) {
     return <Card><p className="text-sm text-slate-600">The library is not open to you.</p></Card>
   }
   return (
     <div className="space-y-4">
-      <LibraryHeader mayEdit={canEditLibrary(currentUser?.role)} />
+      <LibraryHeader mayEdit={canEditLibrary(currentUser)} />
       <FirmSettingsPage />
     </div>
   )

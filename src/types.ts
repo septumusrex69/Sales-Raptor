@@ -470,6 +470,19 @@ export interface User {
   name: string
   email: string
   role: UserRole
+  /**
+   * WHAT THIS PERSON WAS GIVEN ON TOP OF THEIR ROLE, and what was taken away from it.
+   *
+   * THE FIRM, SHOWING ME SWORDFISH: "you can choose, for example, for a user to have a management
+   * template, but you can add them more functionality."
+   *
+   * EMPTY MEANS "WHATEVER YOUR ROLE GIVES", which is the same shape `bookCeiling`, `diaryCapacity`
+   * and `diaryReserve` already use -- the firm reads a blank as the standard everywhere else, so
+   * it reads as the standard here. See capabilities.ts; the names are `Capability` values and an
+   * unrecognised one is ignored rather than fatal.
+   */
+  grants?: string[]
+  revokes?: string[]
   teamId?: ID
   status: 'Active' | 'Inactive'
   phone?: string

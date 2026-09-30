@@ -107,12 +107,12 @@ export function Sidebar() {
 
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
         {NAV
-          .filter((n) => n.to !== '/companies' || canViewClients(currentUser?.role))
+          .filter((n) => n.to !== '/companies' || canViewClients(currentUser))
           /* A menu item that always refuses is worse than no menu item: it advertises a room
              nobody may enter and teaches people that the sidebar lies. The page keeps its own
              guard for anyone who types the address. */
-          .filter((n) => n.to !== '/library' || canViewLibrary(currentUser?.role))
-          .filter((n) => n.to !== '/finance' || canViewFinance(currentUser?.role))
+          .filter((n) => n.to !== '/library' || canViewLibrary(currentUser))
+          .filter((n) => n.to !== '/finance' || canViewFinance(currentUser))
           .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0
           return (

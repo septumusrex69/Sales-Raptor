@@ -26,6 +26,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-finance-is-administrator-only.mjs
  */
 import { readFileSync } from 'node:fs'
+import { ROLE_CAPABILITIES } from '../../src/lib/capabilities.ts'
 
 let pass = 0
 const failures = []
@@ -105,7 +106,23 @@ for (const fn of called) {
      inline guards above. */
   const delegates = /if not public\.may_approve_payment\(\) then/.test(body)
     || /where public\.may_approve_payment\(\)/.test(body)
-  ok(`...and refuses anybody who is not an Administrator`, raises || filters || delegates)
+  /*
+   * A FOURTH SHAPE, AND IT IS WHY THIS FILE CHANGED AT ALL: asking for a CAPABILITY. The firm
+   * wanted Swordfish's model -- "you can choose, for example, for a user to have a management
+   * template, but you can add them more functionality" -- and a hand-written role name is exactly
+   * what a grant can never reach, so `reverse_payment` now asks `has_capability('payment.reverse')`
+   * instead of comparing to 'Administrator'.
+   *
+   * VERIFIED THE SAME WAY THE DELEGATE IS, AND FOR THE SAME REASON. Accepting any has_capability()
+   * call would let a function guard itself with a capability every role has. So the capability it
+   * names must be one NO template but an Administrator's carries -- which is the same promise the
+   * old grep made, checked where it is now actually decided.
+   */
+  const asked = /public\.has_capability\('([a-z_]+\.[a-z_]+)'\)/.exec(body)?.[1] ?? null
+  const asksForAnAdministratorsCapability = !!asked && Object.entries(ROLE_CAPABILITIES)
+    .filter(([, caps]) => caps.includes(asked)).map(([r]) => r).join() === 'Administrator'
+  ok(`...and refuses anybody who is not an Administrator`,
+    raises || filters || delegates || asksForAnAdministratorsCapability)
 
   /*
    * `is distinct from`, NEVER a bare `<>`. current_user_role() reads a row from profiles by
@@ -133,10 +150,33 @@ for (const fn of called) {
  */
 const approveGuard = liveBody('may_approve_payment')
 ok('the approval guard exists', approveGuard !== null)
-ok('...and it is Administrator, nothing wider',
-  /current_user_role\(\) = 'Administrator'/.test(approveGuard ?? ''))
-ok('...with no second role beside it',
-  !/current_user_role\(\) in \(/.test(approveGuard ?? ''))
+/*
+ * THE END OF THE CHAIN MOVED, AND THE ASSERTION MOVED WITH IT RATHER THAN BEING DROPPED.
+ *
+ * This read `current_user_role() = 'Administrator'` literally. It now asks for a capability --
+ * the firm wanted Swordfish's shape, "you can add them more functionality", and a hand-written
+ * role name is the one thing a grant can never reach.
+ *
+ * WHAT THE OLD LINE WAS PROTECTING IS UNCHANGED and is now asserted in the place that actually
+ * decides it: approving a payment must be in NO role's template except an Administrator's. That
+ * is a stronger test than the old one, because it also catches somebody quietly adding
+ * payment.approve to the Liaison template -- which the old grep could never have seen.
+ */
+ok('...and it asks for a capability', /has_capability\('payment\.approve'\)/.test(approveGuard ?? ''))
+ok('...with no role name left beside it', !/current_user_role\(\)/.test(approveGuard ?? ''))
+check('...and no template but an Administrator\u2019s carries it',
+  Object.entries(ROLE_CAPABILITIES)
+    .filter(([, caps]) => caps.includes('payment.approve')).map(([r]) => r),
+  ['Administrator'])
+/*
+ * AND IT STILL FAILS CLOSED ON NOBODY. The old note here was about `is distinct from` rather than
+ * a bare `<>`, because current_user_role() is NULL for an unauthenticated caller and `null <> x`
+ * is NULL, which is not true but is also not a refusal. has_capability answers through an
+ * `exists` over profiles keyed on auth.uid(), so no session means no row means false.
+ */
+ok('...answering false when nobody is signed in',
+  /exists \(\s*select 1 from public\.profiles p/.test(liveBody('has_capability') ?? ''))
+ok('...keyed on the caller', /p\.id = auth\.uid\(\)/.test(liveBody('has_capability') ?? ''))
 
 /* ---------------- the revoke really is applied over the whole list ---------------- */
 

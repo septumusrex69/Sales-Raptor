@@ -36,7 +36,7 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const maySee = canViewFinance(currentUser?.role)
+  const maySee = canViewFinance(currentUser)
 
   const load = useCallback(async () => {
     if (!maySee) { setLoading(false); return }

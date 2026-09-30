@@ -1,6 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
 import { departmentOf } from './departments.ts'
+import { can } from './capabilities.ts'
 import type { User } from '../types'
+
+/**
+ * THESE ARE NOW NAMES FOR A CAPABILITY, NOT LISTS OF ROLES.
+ *
+ * Every predicate below used to spell out the roles that passed it. The firm asked for
+ * Swordfish's shape -- "you can choose, for example, for a user to have a management template, but
+ * you can add them more functionality" -- and a hand-written role list cannot express that at all.
+ * So each one now asks `can(user, ...)`, which reads the role's template, adds what this person
+ * was granted and removes what was taken away. See capabilities.ts.
+ *
+ * THREE THINGS IN THIS FILE STILL READ THE ROLE AND ARE NOT CAPABILITIES, which is a distinction
+ * worth writing down because they look like the others:
+ *
+ *   canEditOwned       MIRRORS AN RLS POLICY, WORD FOR WORD. Its whole value is that it says what
+ *                      the database will allow; making it grantable would mean the app offering an
+ *                      edit that Postgres then refuses, which is the "button works, then silently
+ *                      fails" it exists to prevent. It becomes a capability the day the policy does.
+ *   visibleDisputeOwners  WHICH ROWS, not whether. A capability answers "may you"; this answers
+ *                      "whose". Pooling them IS a capability -- `dispute.pool` -- and that one is
+ *                      in the list.
+ *   isAssignableOwner  WHO MAY BE GIVEN a lead or a deal. A fact about other people, asked to fill
+ *                      a picker, not a permission the person themselves holds.
+ *   useDefaultOwnerFilter  WHERE A LIST STARTS, which anybody can then change. A default is not a
+ *                      permission, and making it one would mean a manager needing a grant to have
+ *                      their own list open the way it always has.
+ *
+ * THEY KEPT THEIR NAMES ON PURPOSE. Fifty-one call sites read far better as `canFreezeAccounts`
+ * than as a string, and the reasoning each one carries is the record of a decision the firm made.
+ * What changed is the ARGUMENT: a role string could never answer a per-person question, so they
+ * take the person.
+ */
 
 /**
  * Whether `user` may edit, close, or delete a record owned by `ownerId` —
@@ -17,8 +49,8 @@ export function canEditOwned(user: Pick<User, 'id' | 'role'> | null | undefined,
 }
 
 /** Reassigning a record to a different owner is a managerial action, independent of who currently owns it. */
-export function canReassign(user: Pick<User, 'role'> | null | undefined): boolean {
-  return user?.role === 'Administrator' || user?.role === 'Sales Manager' || user?.role === 'Liaison Manager'
+export function canReassign(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'book.reassign')
 }
 
 /**
@@ -30,10 +62,8 @@ export function canReassign(user: Pick<User, 'role'> | null | undefined): boolea
  * written twice and enforced once: the list would offer it to a team leader and the account
  * screen would not, for the same action on the same account.
  */
-export function canHandOutAccounts(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator' || role === 'Sales Manager'
-    || role === 'Liaison Manager' || role === 'Call Centre Manager'
-    || role === 'Pre-legal Team Leader'
+export function canHandOutAccounts(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'book.hand_out')
 }
 
 /**
@@ -49,8 +79,8 @@ export function canHandOutAccounts(role: Pick<User, 'role'>['role'] | undefined)
  * themselves. RLS remains the real boundary — this stops the app offering what the database
  * should refuse.
  */
-export function canViewClients(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role !== undefined && role !== 'Pre-legal Agent'
+export function canViewClients(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'client.view')
 }
 
 /**
@@ -64,8 +94,8 @@ export function canViewClients(role: Pick<User, 'role'>['role'] | undefined): bo
  * silently reverts the change for anyone else. This only stops the app offering a button that
  * would appear to work and quietly do nothing.
  */
-export function canRefileMail(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator'
+export function canRefileMail(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'mail.refile')
 }
 
 /**
@@ -78,11 +108,8 @@ export function canRefileMail(role: Pick<User, 'role'>['role'] | undefined): boo
  * A freeze changes no balance and raises no fee, so it is reversible and needs no approval —
  * what it needs is a name against it, which is what the reason and the status history give it.
  */
-export function canFreezeAccounts(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator'
-    || role === 'Pre-legal Team Leader'
-    || role === 'Liaison Manager'
-    || role === 'Liaison'
+export function canFreezeAccounts(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'book.freeze')
 }
 
 /**
@@ -96,9 +123,8 @@ export function canFreezeAccounts(role: Pick<User, 'role'>['role'] | undefined):
  * team leader — who is precisely the person this is for. Borrowing that one would have shown a
  * collections team leader nothing and a sales manager the collections floor.
  */
-export function canLeadCollections(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator' || role === 'Call Centre Manager'
-    || role === 'Pre-legal Team Leader'
+export function canLeadCollections(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'floor.lead')
 }
 
 /**
@@ -168,8 +194,8 @@ export function visibleDisputeOwners<T extends Pick<User, 'id' | 'role' | 'teamI
  * bird's-eye view they said they had no use for, sitting at the top of the list as the easiest
  * thing to click.
  */
-export function mayPoolDisputes(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator'
+export function mayPoolDisputes(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'dispute.pool')
 }
 
 /** Roles eligible to own a Lead/Deal/Task/Contact/Company — i.e. show up in "assign to" / "Client Liaison" pickers. */
@@ -219,8 +245,8 @@ export function useDefaultOwnerFilter(
  * this stays findable the day it narrows again. It mirrors message_templates_select, which has
  * always been open to every authenticated user.
  */
-export function canViewLibrary(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role !== undefined
+export function canViewLibrary(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'library.view')
 }
 
 /**
@@ -235,8 +261,8 @@ export function canViewLibrary(role: Pick<User, 'role'>['role'] | undefined): bo
  * supabase/schema.sql. RLS is the real boundary; this stops the app offering a button the
  * database would refuse.
  */
-export function canEditLibrary(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator'
+export function canEditLibrary(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'library.edit')
 }
 
 /**
@@ -253,8 +279,8 @@ export function canEditLibrary(role: Pick<User, 'role'>['role'] | undefined): bo
  * back on inside one. A menu item that always refuses is worse than no menu item; a menu item
  * that is the ONLY thing refusing is worse still.
  */
-export function canViewFinance(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator'
+export function canViewFinance(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view')
 }
 
 /**
@@ -287,10 +313,6 @@ export function canViewFinance(role: Pick<User, 'role'>['role'] | undefined): bo
  * for deciding whether to draw a button; the two lists are held against each other by
  * check-record-payment.
  */
-export function canRecordPayment(role: Pick<User, 'role'>['role'] | undefined): boolean {
-  return role === 'Administrator'
-    || role === 'Call Centre Manager'
-    || role === 'Pre-legal Team Leader'
-    || role === 'Liaison Manager'
-    || role === 'Liaison'
+export function canRecordPayment(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'payment.record')
 }

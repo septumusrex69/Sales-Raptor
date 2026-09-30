@@ -121,10 +121,10 @@ check('...so a firm with only agents shows one department',
  * person simply cannot do the thing, and nobody can see why. It has happened twice this week.
  */
 ok('the call centre manager collects', COLLECTING_ROLES.includes('Call Centre Manager'))
-ok('...leads the floor', canLeadCollections('Call Centre Manager'))
-ok('...may hand accounts out', canHandOutAccounts('Call Centre Manager'))
+ok('...leads the floor', canLeadCollections({ role: 'Call Centre Manager' }))
+ok('...may hand accounts out', canHandOutAccounts({ role: 'Call Centre Manager' }))
 /* A leader still cannot look at the whole board at once — the firm ruled that out. */
-check('...but still not a bird’s-eye view of disputes', mayPoolDisputes('Call Centre Manager'), false)
+check('...but still not a bird’s-eye view of disputes', mayPoolDisputes({ role: 'Call Centre Manager' }), false)
 
 const FLOOR = [
   { id: 'ccm', role: 'Call Centre Manager', teamId: 'a' },
@@ -205,9 +205,9 @@ const release = read('api/_lib/workflow/who.ts')
 const namedInApi = [...release.matchAll(/profile\.role === '([^']+)'/g)].map((m) => m[1])
 ok('the api names some roles for this', namedInApi.length > 0)
 check('...and exactly the ones canLeadCollections allows',
-  namedInApi.filter((r) => !canLeadCollections(r)), [])
+  namedInApi.filter((r) => !canLeadCollections({ role: r })), [])
 check('...with none of them missing',
-  ROLES.filter((r) => canLeadCollections(r) && !namedInApi.includes(r)), [])
+  ROLES.filter((r) => canLeadCollections({ role: r }) && !namedInApi.includes(r)), [])
 
 /* ------------------------------------------------ a team belongs to a department */
 
@@ -350,8 +350,8 @@ ok('the stored field is still the grade', /collectorGrade/.test(panel))
  * left behind when Call Centre Manager was added -- they could hand accounts out and lead the
  * floor everywhere except the screen where ranks are actually set.
  */
-ok('the collectors panel asks the shared permission', /canEdit=\{canLeadCollections\(currentUser\?\.role\)\}/.test(settings))
-ok('...so the call centre manager may set a rank', canLeadCollections('Call Centre Manager'))
+ok('the collectors panel asks the shared permission', /canEdit=\{canLeadCollections\(currentUser\)\}/.test(settings))
+ok('...so the call centre manager may set a rank', canLeadCollections({ role: 'Call Centre Manager' }))
 
 /* ------------------------------------------------ finding one person among a hundred */
 

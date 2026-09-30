@@ -704,7 +704,7 @@ export function MailPage() {
 
   /** Moving a message that was filed on the wrong account. Administrators only. */
   const [moving, setMoving] = useState<MailItem | null>(null)
-  const mayRefile = canRefileMail(currentUser?.role)
+  const mayRefile = canRefileMail(currentUser)
 
   /**
    * Move mail onto the junk shelf, or take it back off.

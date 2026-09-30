@@ -100,10 +100,10 @@ check('nobody signed in sees nothing', visibleDisputeOwners(null, EVERYONE), [])
 
 /* ------------------------------------------------ no bird's-eye view for a leader */
 
-check('only an administrator may pool the board', mayPoolDisputes('Administrator'), true)
-check('a team leader may not', mayPoolDisputes('Pre-legal Team Leader'), false)
-check('a liaison manager may not', mayPoolDisputes('Liaison Manager'), false)
-check('a collector may not', mayPoolDisputes('Pre-legal Agent'), false)
+check('only an administrator may pool the board', mayPoolDisputes({ role: 'Administrator' }), true)
+check('a team leader may not', mayPoolDisputes({ role: 'Pre-legal Team Leader' }), false)
+check('a liaison manager may not', mayPoolDisputes({ role: 'Liaison Manager' }), false)
+check('a collector may not', mayPoolDisputes({ role: 'Pre-legal Agent' }), false)
 
 /* ------------------------------------------------ and the screen applies it */
 

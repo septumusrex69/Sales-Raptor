@@ -38,7 +38,7 @@ type TextKey = {
  */
 export function FirmSettingsPage() {
   const { currentUser } = useAuth()
-  const mayEdit = canEditLibrary(currentUser?.role)
+  const mayEdit = canEditLibrary(currentUser)
   const [row, setRow] = useState<FirmSettings | null>(null)
   const [draft, setDraft] = useState<FirmSettings | null>(null)
   const [busy, setBusy] = useState(false)

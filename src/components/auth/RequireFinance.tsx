@@ -18,6 +18,6 @@ import { canViewFinance } from '../../lib/permissions'
 export function RequireFinance({ children }: { children: ReactNode }) {
   const { currentUser, loading } = useAuth()
   if (loading || !currentUser) return null
-  if (!canViewFinance(currentUser.role)) return <Navigate to="/" replace />
+  if (!canViewFinance(currentUser)) return <Navigate to="/" replace />
   return <>{children}</>
 }

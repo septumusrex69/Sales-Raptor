@@ -36,8 +36,8 @@ import { dayKey } from '../../lib/collectionPace.ts'
  */
 export function LibraryWorkflows() {
   const { currentUser } = useAuth()
-  const mayEdit = canEditLibrary(currentUser?.role)
-  const mayView = canViewLibrary(currentUser?.role)
+  const mayEdit = canEditLibrary(currentUser)
+  const mayView = canViewLibrary(currentUser)
   /* The open workflow is in the ADDRESS, not in state. That is the whole reason this is a page
      and no longer a settings tab: a workflow being argued about can be sent to somebody. */
   const { key: openKey } = useParams<{ key: string }>()

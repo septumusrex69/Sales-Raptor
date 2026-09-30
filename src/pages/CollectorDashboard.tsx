@@ -80,7 +80,7 @@ export function CollectorDashboard() {
     [shownRows, currentUser],
   )
 
-  const mayLeadHere = canLeadCollections(currentUser?.role)
+  const mayLeadHere = canLeadCollections(currentUser)
 
   /*
    * NEW ACCOUNTS NOBODY HAS TOUCHED, for the person carrying them and for whoever leads them.

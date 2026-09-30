@@ -614,7 +614,7 @@ function UsersTab() {
       * behind when Call Centre Manager was added -- the person who runs the floor could hand
       * accounts out and lead it everywhere except here, where the ranks are actually set.
     */}
-    <CollectorsPanel canEdit={canLeadCollections(currentUser?.role)} />
+    <CollectorsPanel canEdit={canLeadCollections(currentUser)} />
     </div>
   )
 }

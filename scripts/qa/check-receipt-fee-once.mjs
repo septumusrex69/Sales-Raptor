@@ -229,7 +229,7 @@ const page = read('src/pages/accounts/AccountDetail.tsx')
 ok('Record a payment is on the transactions pane',
   /onRecordPayment && \([\s\S]{0,400}?Record a payment/.test(page))
 ok('...offered only to whoever may capture one',
-  /onRecordPayment=\{canRecordPayment\(currentUser\?\.role\) \? \(\) => setPayingIn\(true\) : null\}/.test(page))
+  /onRecordPayment=\{canRecordPayment\(currentUser\) \? \(\) => setPayingIn\(true\) : null\}/.test(page))
 /* AND NOT IN TWO PLACES. Two buttons doing one thing is how the firm ends up asking which is
    which; it was moved, not copied. */
 check('...and it is not still on the overview as well',

@@ -17484,3 +17484,218 @@ comment on function public.engine_balances(uuid, uuid) is
 revoke all on function public.engine_balances(uuid, uuid) from public;
 revoke all on function public.fee_stands(date, text) from public;
 grant execute on function public.fee_stands(date, text) to authenticated;
+
+-- ============================================================================
+-- A PERMISSION IS A THING YOU CAN GIVE SOMEBODY.
+--
+-- THE FIRM, SHOWING ME SWORDFISH'S OWN PERMISSION SCREENS: "every user has their own unique set
+-- of permissions. So you can choose, for example, for a user to have a management template, but
+-- you can add them more functionality. Perhaps we should do something similar."
+--
+-- RAPTOR HAD THE ROLE AND NOTHING ELSE. `may_record_payment` is five role names written out;
+-- `may_approve_payment` is one. Giving a liaison the ability to approve a payment meant making
+-- them an Administrator -- which is the Finance section, the user list and the firm's settings
+-- as well -- or inventing a tenth role for one person.
+--
+-- NULL MEANS "WHATEVER YOUR ROLE GIVES", the same shape book_ceiling, diary_capacity and
+-- diary_reserve already use. The firm reads a blank as the standard everywhere else in this
+-- table, so it reads as the standard here, and nothing behaves differently on the day this runs.
+--
+-- REVOKE IS APPLIED LAST AND BEATS EVERYTHING. A person who was given something and then had it
+-- taken away has had it taken away. Any other order means the two columns can disagree and the
+-- answer depends on which was edited most recently.
+--
+-- ------------------------------------------------------------------------------------------
+-- THE SAME LIST TWICE, AND WHY THAT IS THE LESSER EVIL
+-- ------------------------------------------------------------------------------------------
+--
+-- The role templates live here AND in src/lib/capabilities.ts, because the browser decides which
+-- buttons to draw and the database decides what may actually happen. A round trip for every
+-- button would be the alternative. `check-capabilities` holds the two against each other in BOTH
+-- directions, the way check-workflow-send holds EXIT_EVENTS against workflow_exit_account -- a
+-- capability added on one side and forgotten on the other is a failure there rather than a button
+-- that draws and then refuses.
+--
+-- ------------------------------------------------------------------------------------------
+-- AND WHAT IS DELIBERATELY NOT HERE
+-- ------------------------------------------------------------------------------------------
+--
+-- "Apply In Duplum" is a checkbox in Swordfish. In duplum is NCA s103(5) -- whether it applies is
+-- a fact about the DEBT, and making it a property of whoever is signed in means two people can
+-- open one account and be told two different things about what is legally recoverable. Same for
+-- the Annexure B prices, imported history, the four ledgers' immutability, and commission on the
+-- company dashboard ("not even for an administrator"). None of those is a capability and none can
+-- be added to the list: the checks hold it closed.
+-- ============================================================================
+alter table public.profiles
+  add column if not exists grants text[],
+  add column if not exists revokes text[];
+
+comment on column public.profiles.grants is
+  'Capabilities this person has on TOP of their role''s template. Null or empty means the standard '
+  'for the role, exactly as with book_ceiling. Names are Capability values from '
+  'src/lib/capabilities.ts; an unrecognised one is ignored rather than fatal.';
+comment on column public.profiles.revokes is
+  'Capabilities taken away from this person''s role template. Applied last, so it beats a grant.';
+
+-- ---------- the templates, mirrored from ROLE_CAPABILITIES ----------
+--
+-- TRANSCRIBED FROM THE PREDICATES THIS REPLACES, deliberately without improving any of them. A
+-- refactor that also quietly re-decides who may approve a payment is a refactor nobody can review.
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile',
+      'library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+comment on function public.role_capabilities(text) is
+  'What a role gives before anybody changes anything -- Swordfish''s "template". Mirrored in '
+  'src/lib/capabilities.ts as ROLE_CAPABILITIES and held against it by check-capabilities.';
+
+-- ---------- an unknown capability is not a capability ----------
+--
+-- FOUND BY PROBING THE THING THAT WAS JUST BUILT: granting somebody 'not.a.real.capability' and
+-- asking for it came back TRUE. It could not have granted anything real -- every caller passes a
+-- literal the code already has -- but `capabilitiesOf` in the browser filters grants down to names
+-- it knows and this did not, and two expressions meant to be one rule answering differently is how
+-- the next thing built on them goes wrong.
+--
+-- THE CLOSED LIST IS NOT WRITTEN AGAIN: an Administrator's template IS every capability there is,
+-- by definition. check-capabilities asserts exactly that, so a capability added without giving it
+-- to an Administrator fails there rather than quietly becoming ungrantable.
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator')
+$$;
+
+comment on function public.all_capabilities() is
+  'Every capability there is. The Administrator template, which is the whole list by definition -- '
+  'asserted by check-capabilities so it cannot quietly stop being the whole list.';
+
+-- ---------- what one person may actually do ----------
+--
+-- SECURITY DEFINER AND READING auth.uid() ITSELF, never taking a user id as an argument. A
+-- function that answers "may THIS person do X" for any id is one call away from being a way to
+-- enumerate what everybody may do; this one can only ever answer about the caller.
+create or replace function public.has_capability(p_capability text)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select p_capability = any(public.all_capabilities())
+     and exists (
+       select 1 from public.profiles p
+        where p.id = auth.uid()
+          and (
+            p_capability = any(public.role_capabilities(p.role))
+            or p_capability = any(coalesce(p.grants, array[]::text[]))
+          )
+          -- LAST, so it beats the template and the grant alike.
+          and not (p_capability = any(coalesce(p.revokes, array[]::text[])))
+     )
+$$;
+
+comment on function public.has_capability(text) is
+  'May the SIGNED-IN person do this? A known capability, then role template plus grants minus '
+  'revokes. Answers only about auth.uid() -- never about a user id handed in.';
+
+-- ---------- and the predicates that already existed now ask it ----------
+--
+-- THE ROLE LISTS ARE GONE FROM ALL THREE, which is the whole point: while they spelled out role
+-- names a grant could not reach them, and the firm's "add them more functionality" would have
+-- worked on the button and not on the database underneath it.
+create or replace function public.may_record_payment() returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select public.has_capability('payment.record')
+$$;
+
+create or replace function public.may_approve_payment() returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select public.has_capability('payment.approve')
+$$;
+
+-- Reversing a receipt read `current_user_role() is distinct from 'Administrator'`. Swordfish has
+-- "Reverse Payments" as its own line in the Data panel -- one of the five ticked out of eleven --
+-- and the firm agreed it belongs in the list, so it is a capability here too.
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') then
+    raise exception 'You are not allowed to reverse a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id
+    ) values (
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo, v_pay.bank_line_id, auth.uid(), v_pay.id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+-- NOT TO anon. Supabase grants EXECUTE on a public function to anon by default, and these answer
+-- questions about who may move money.
+revoke all on function public.has_capability(text) from public;
+revoke all on function public.role_capabilities(text) from public;
+revoke all on function public.all_capabilities() from public;
+grant execute on function public.has_capability(text) to authenticated;
+grant execute on function public.role_capabilities(text) to authenticated;
+grant execute on function public.all_capabilities() to authenticated;

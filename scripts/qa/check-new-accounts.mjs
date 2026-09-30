@@ -21,6 +21,7 @@ import {
   carriedLine, dayWeight, daysCarried, isCarried, lateForLeaders, splitCarried, stillInTime,
 } from '../../src/lib/newAccounts.ts'
 import { DEFAULT_DIARY_CAPACITY } from '../../src/lib/diaryPriority.ts'
+import { canLeadCollections } from '../../src/lib/permissions.ts'
 
 let pass = 0
 const failures = []
@@ -247,8 +248,15 @@ const permissions = readFileSync('src/lib/permissions.ts', 'utf8')
  * leader -- who is the person this whole panel is for.
  */
 ok('leading collections is its own test', /export function canLeadCollections/.test(permissions))
-const leadFn = /export function canLeadCollections[\s\S]*?\n}/.exec(permissions)?.[0] ?? ''
-ok('...and the pre-legal team leader is in it', /Pre-legal Team Leader/.test(leadFn))
+/*
+ * ASKED OF THE FUNCTION RATHER THAN GREPPED OUT OF IT. This used to read the role name out of
+ * canLeadCollections' own body, which stopped meaning anything the day that body became one line
+ * asking for a capability -- the roles live in ROLE_CAPABILITIES now, and a grep against the old
+ * shape passes vacuously either way. Running it is the assertion that cannot go stale.
+ */
+ok('...and the pre-legal team leader may', canLeadCollections({ role: 'Pre-legal Team Leader' }))
+ok('...as may the person who runs the floor', canLeadCollections({ role: 'Call Centre Manager' }))
+ok('...and a collector may not', !canLeadCollections({ role: 'Pre-legal Agent' }))
 
 /*
  * AND COLLECTIONS PEOPLE CAN GET TO THE COLLECTIONS DASHBOARD IN ONE CLICK.
