@@ -230,6 +230,29 @@ ok('...offered only to whoever may capture one',
 check('...and it is not still on the overview as well',
   (page.match(/Record a payment/g) ?? []).length, 1)
 
+/* ---------------- a message that went out and was not recorded says so ---------------- */
+
+/*
+ * THE FIRM: "I sent an email to this account and the charges didn't immediately add."
+ *
+ * ON THE ACCOUNT THEY WERE LOOKING AT, NOTHING WAS LOST. The R 28,75 under item 1(a) was raised a
+ * second BEFORE the email row itself, and every one of the last week's messages carries its
+ * charge. But the chain that does it -- charge, file the message, write the note, refetch -- was
+ * fired with `void` and no catch. The one case where it DOES fail is therefore silent: the debtor
+ * has been emailed, no fee is raised, nothing is filed, the page never refreshes, and the screen
+ * says nothing -- which from the outside is exactly what they described.
+ *
+ * THE SEND IS NOT RETRIED AND MUST NOT LOOK FAILED. The message has gone. What failed is the
+ * RECORD, and the two need different things done about them: a failed send is sent again, an
+ * unrecorded one is entered by hand before the client is invoiced. So it says which.
+ */
+ok('a failed recording is caught rather than dropped',
+  /\.then\(reload\)[\s\S]{0,600}?\.catch\(\(e: unknown\) => \{[\s\S]{0,120}?setSendProblem/.test(page))
+ok('...and says the message did go', /The email went out, but it was not recorded/.test(page))
+ok('...and what to do about it', /Add it by hand before the client is invoiced/.test(page))
+/* AND THE HAPPY PATH STILL REFETCHES, or the charge really would not appear until a reload. */
+ok('a sent message still refreshes the account', /\}\)\s*\n\s*\.then\(reload\)/.test(page))
+
 console.log(`\ncheck-receipt-fee-once: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

@@ -366,6 +366,18 @@ export function AccountDetail() {
    */
   const [askStart, setAskStart] = useState<string | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
+  /*
+   * WHEN A MESSAGE WENT OUT AND THE RECORDING OF IT DID NOT.
+   *
+   * THE FIRM: "I sent an email to this account and the charges didn't immediately add." On the
+   * account they were looking at nothing was lost -- the R 28,75 was raised a second before the
+   * email itself, and every one of the last week's messages carries its charge. But the chain that
+   * does it was fired with `void` and no catch, so the one case where it DOES go wrong is silent:
+   * the debtor has been emailed, no fee is raised, nothing is filed, the page never refreshes, and
+   * the screen says nothing at all. That is indistinguishable, from the outside, from exactly what
+   * they described.
+   */
+  const [sendProblem, setSendProblem] = useState<string | null>(null)
 
   const loadRuns = useCallback(async () => {
     if (!id) return
@@ -1161,6 +1173,19 @@ export function AccountDetail() {
         />
       </RecordFigures>
 
+      {/* Said where the action bar is, because that is where the press was. */}
+      {sendProblem && (
+        <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-3 py-2.5 text-[13px] text-negative-700">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            The email went out, but it was not recorded on this account and no fee was raised:{' '}
+            {sendProblem}. Add it by hand before the client is invoiced.
+            <button type="button" onClick={() => setSendProblem(null)}
+              className="ml-2 underline underline-offset-2">Dismiss</button>
+          </span>
+        </div>
+      )}
+
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(
           // The name goes with it so the timeline note says who changed it.
@@ -1641,7 +1666,17 @@ export function AccountDetail() {
               messageId: messageId ?? null,
               inReplyTo: answering?.messageId ?? null,
               actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
-            }).then(reload)
+            })
+              .then(reload)
+              /*
+               * THE MESSAGE HAS ALREADY GONE, so this is never a reason to look like the send
+               * failed -- it is a reason to say the RECORD did. Named separately because the two
+               * need different things done about them: a failed send is re-sent, and this is
+               * re-entered by hand before anybody invoices the client.
+               */
+              .catch((e: unknown) => {
+                setSendProblem(e instanceof Error ? e.message : String(e))
+              })
           }}
         />
       )}
