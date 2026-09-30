@@ -251,11 +251,17 @@ try {
     const row = page.getByRole('button', { name: /^Section 129$/ })
     t.ok('the action row offers the section 129', await row.isVisible())
     /* GROUPED WITH THE OTHER TWO. Asserted as the order of the row's own text rather than as
-       pixels: Promise to Pay, Escalate, then this. */
+       pixels: Promise to Pay, Raise a ticket, then this.
+
+       "Raise a ticket" was "Escalate" until the firm caught the contradiction -- the box behind it
+       asks "Escalate it / Keep it, I will deal with it myself", so escalating is one of the
+       ANSWERS and the door was named after it. What this check cares about is the ORDER, so the
+       label is named once here and the name is what changed. */
     const labels = await page.locator('button').allInnerTexts()
     const at = (re) => labels.findIndex((l) => re.test(l.trim()))
     t.ok('...after Promise to Pay', at(/^Promise to Pay$/) >= 0 && at(/^Section 129$/) > at(/^Promise to Pay$/))
-    t.ok('...and after Escalate', at(/^Escalate$/) >= 0 && at(/^Section 129$/) > at(/^Escalate$/))
+    t.ok('...and after Raise a ticket',
+      at(/^Raise a ticket$/) >= 0 && at(/^Section 129$/) > at(/^Raise a ticket$/))
     /*
      * AND IT DOES NOT CONFIRM IT ITSELF. The second press and its wording are legal wording; asked
      * in two places it becomes two wordings. The row opens the tab's card.

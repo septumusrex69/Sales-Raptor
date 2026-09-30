@@ -404,7 +404,23 @@ export function EscalateModal({
 
   return (
     <Modal
-      title={fromEmail ? 'What is this email?' : 'Escalate this account'}
+      /*
+       * THE TITLE SAYS WHAT IS BEING RAISED, and off an email it echoes the button that was
+       * pressed.
+       *
+       * THE FIRM, LOOKING AT THE TWO BUTTONS ON A MESSAGE: "this thing, these two buttons take you
+       * to the same page." They did. Both opened a box headed "What is this email?" which then
+       * asked, as a radio pair, the very question the button had just answered -- so pressing
+       * either produced an identical screen and the press appeared to have done nothing.
+       *
+       * AND "ESCALATE THIS ACCOUNT" WAS THE WRONG WORD ANYWAY. See the note on the legend below:
+       * escalating is one of the ANSWERS inside this box, not the box.
+       */
+      title={linkedTo
+        ? 'Add this email to the dispute'
+        : fromEmail
+          ? ESCALATION_KINDS[kind].submitLabel
+          : 'Raise a ticket'}
       onClose={onClose}
       width={520}
     >
@@ -475,13 +491,73 @@ export function EscalateModal({
           HIDDEN WHERE THE EMAIL IS BEING LINKED: the ticket already exists and already knows what
           kind it is. Offering the ladder there would be offering to change it.
         */}
-        <fieldset className={`space-y-1.5 ${linkedTo ? 'hidden' : ''}`}>
-          <legend className="text-sm font-medium text-slate-700 mb-1.5">Why are you escalating it?</legend>
+        {/*
+          OFF AN EMAIL, WHAT YOU PRESSED IS THE ANSWER -- SAID BACK, NOT ASKED AGAIN.
+          
+          THE FIRM: "this thing, these two buttons take you to the same page." They did: pressing
+          "This is a dispute" opened a box whose first question was a radio pair reading "dispute /
+          request", so the press appeared to have done nothing and the two buttons were
+          indistinguishable once you were through the door.
+          
+          SO IT IS A SENTENCE WITH A WAY OUT, not a choice. Changing your mind is one quiet link
+          rather than two radios given equal weight -- because one of them is already right, and a
+          screen that re-asks a question somebody just answered teaches them their answer did not
+          count.
+        */}
+        {fromEmail && !linkedTo && (
+          <div className="rounded-lg border border-brand-500 bg-brand-50/50 p-2.5">
+            <p className="text-sm text-slate-800">{ESCALATION_KINDS[kind].label}</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {/* THE BARRED CASE STILL HAS TO SPEAK. A second dispute cannot be opened while one
+                  is, and silence here would read as a screen that simply refused on Save. */}
+              {kind === 'dispute' && alreadyDisputed
+                ? 'There is already an open dispute on this account. A debtor may dispute several things, but in one dispute — add it to that one above.'
+                : ESCALATION_KINDS[kind].blurb}
+            </p>
+            {/* THE OTHER ONE, NAMED. "Not a dispute?" alone leaves somebody guessing what the
+                alternative is; saying which it becomes is the whole of what they need. */}
+            <button
+              type="button"
+              onClick={() => {
+                const other = kind === 'dispute' ? 'request' : 'dispute'
+                setKind(other)
+                /* A classification only means something on a dispute, so it is dropped rather than
+                   carried across -- the database refuses one on the other kinds anyway. */
+                if (other !== 'dispute') setCategory('')
+                const meta = ESCALATION_KINDS[other]
+                setToId((meta.goesTo === 'team_leader' ? teamLeaders[0]?.id : clientLiaison?.id) ?? '')
+              }}
+              className="text-[11px] font-medium text-brand-600 hover:underline mt-1.5"
+            >
+              {kind === 'dispute'
+                ? 'Not a dispute — they are asking us for something'
+                : 'Not a request — the debtor is disputing the account'}
+            </button>
+          </div>
+        )}
+
+        {/* AND FROM THE ACCOUNT, WHERE NOTHING HAS BEEN PRESSED YET, ALL FOUR ARE A REAL
+            QUESTION -- so the ladder stays exactly as it was. */}
+        <fieldset className={`space-y-1.5 ${linkedTo || fromEmail ? 'hidden' : ''}`}>
+          {/*
+            "WHAT IS IT?", NOT "WHY ARE YOU ESCALATING IT?".
+            
+            THE FIRM: "if you create this as a dispute and you're handling it yourself, I mean what
+            are we doing for the wording?" They are right, and the contradiction was in this box
+            already: further down it asks "What happens to it now? -- Escalate it / Keep it, I will
+            deal with it myself". So ESCALATING was always one of the answers here, and the screen
+            called the whole act by the name of one of its outcomes.
+            
+            THE RULE THIS SETTLES, and everything else follows it: you RAISE a ticket, always; you
+            ESCALATE it when you hand it to somebody else. A dispute you record and keep is raised
+            and not escalated, which is the exact case they named.
+          */}
+          <legend className="text-sm font-medium text-slate-700 mb-1.5">What is it?</legend>
           {/* OFF AN EMAIL, ONLY THE TWO THINGS THAT CAN ARRIVE IN ONE. A decision and a
               litigation recommendation are things somebody DECIDES, not things that come in the
               post -- /api/email/ticket refuses them for the same reason, so offering them here
               would be a button that is refused after the words have been typed. */}
-          {(fromEmail ? ESCALATION_KIND_ORDER.filter((k) => k === 'dispute' || k === 'request') : ESCALATION_KIND_ORDER).map((k) => {
+          {ESCALATION_KIND_ORDER.map((k) => {
             /* SHOWN AND UNSELECTABLE RATHER THAN REMOVED. A missing option reads as a screen that
                is broken or a permission somebody lacks; a greyed one with the reason under it
                reads as the rule it is. */

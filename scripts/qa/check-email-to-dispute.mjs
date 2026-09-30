@@ -126,11 +126,30 @@ ok('...falling back to the subject on a message with no text',
 ok('a dispute off an email defaults to the one already open',
   /initialKind === 'dispute' && openDispute \? `link:\$\{openDispute\.id\}` : 'new'/.test(modal))
 
-/* ONLY THE TWO THINGS THAT CAN ARRIVE IN AN EMAIL. A decision and a litigation recommendation are
-   things somebody DECIDES -- the endpoint refuses them, so offering them would be a button that
-   fails after the words have been typed. */
-ok('only a dispute or a request is offered on an email',
-  /fromEmail \? ESCALATION_KIND_ORDER\.filter\(\(k\) => k === 'dispute' \|\| k === 'request'\)/.test(modal))
+/*
+ * ONLY THE TWO THINGS THAT CAN ARRIVE IN AN EMAIL. A decision and a litigation recommendation are
+ * things somebody DECIDES -- the endpoint refuses them, so offering them would be a button that
+ * fails after the words have been typed.
+ *
+ * THE RULE IS UNCHANGED AND THE MECHANISM IS NOT. It used to be a filter on the ladder, which
+ * meant the box re-asked, as a radio pair, the question the button on the message had just
+ * answered -- the firm: "these two buttons take you to the same page." Off an email the ladder is
+ * now HIDDEN and the kind is stated, with one link to the other of the two. So the guarantee comes
+ * from two facts instead of one filter, and both are held here.
+ */
+ok('the ladder is not offered on an email at all',
+  /\$\{linkedTo \|\| fromEmail \? 'hidden' : ''\}/.test(modal))
+ok('...so what it opens on is whichever button was pressed',
+  /fromEmail && initialKind \? initialKind :/.test(modal))
+/* AND THE ONE WAY TO CHANGE IT GOES BETWEEN EXACTLY THOSE TWO. Anything else here would be a
+   third kind reachable off an email, which is the thing the endpoint refuses. */
+ok('...and the only way to change it is between those two',
+  /const other = kind === 'dispute' \? 'request' : 'dispute'/.test(modal))
+/* THE MESSAGE ITSELF STILL OFFERS ONLY THOSE TWO, which is where the kind comes from. */
+ok('...as are the buttons on the message',
+  /onClassify\(email, 'dispute'\)/.test(read('src/pages/accounts/EmailsPanel.tsx'))
+  && /onClassify\(email, 'request'\)/.test(read('src/pages/accounts/EmailsPanel.tsx'))
+  && !/onClassify\(email, '(help|litigation|import)'\)/.test(read('src/pages/accounts/EmailsPanel.tsx')))
 
 /* AN EMAIL IS THE WRITING. Asking "how did it reach us?" there is asking somebody to confirm what
    they are looking at. */

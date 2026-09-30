@@ -1820,18 +1820,28 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       <Action icon={StickyNote} label="Add Note" onClick={onNote} title="Write on the timeline" />
       <Action icon={Check} label="Promise to Pay" onClick={onPromise} title="Record what they agreed to" primary />
       {/*
-        The front door to the escalation system, and it has been called both things.
+        The front door to the ticket system, and it has been called three things.
 
-        It was "Escalate", then "Dispute" — because a collector who has just been told "I don't
-        owe this" looks for the debtor's word, not a workflow verb. It is "Escalate" again now
-        that the box behind it does three jobs rather than one: the debtor disputes the account,
-        an agent wants a team leader's decision, or the debtor will not pay and the account should
-        go to the attorneys. Only one of those is a dispute, so the door cannot be named after it.
-        The dispute is the first and default option inside, which keeps the common case one glance
-        away rather than a hunt.
+        It was "Escalate", then "Dispute" — because a collector who has just been told "I don't owe
+        this" looks for the debtor's word, not a workflow verb — then "Escalate" again, once the
+        box behind it did four jobs rather than one and could not be named after any of them.
+
+        AND "ESCALATE" WAS STILL WRONG, WHICH THE FIRM CAUGHT: "if you create this as a dispute and
+        you're handling it yourself, I mean what are we doing for the wording?" The contradiction
+        was inside the box all along — it asks "What happens to it now? Escalate it / Keep it, I
+        will deal with it myself" — so escalating was one of the ANSWERS and the door was named
+        after it.
+
+        THE RULE, AND EVERYTHING ELSE FOLLOWS IT: you RAISE a ticket, always; you ESCALATE it when
+        you hand it to somebody else. A dispute recorded and kept is raised and not escalated.
+
+        "TICKET" IS THE FIRM'S OWN WORD, not one invented here — "we could create the ticket like
+        it already exists for the dispute", "the ticket can be, the information request can be
+        deleted". The dispute is still the first and default option inside, which keeps the common
+        case one glance away rather than a hunt.
       */}
-      <Action icon={ShieldAlert} label="Escalate" onClick={onDispute}
-        title="Raise a dispute, ask a team leader, or recommend it for litigation" />
+      <Action icon={ShieldAlert} label="Raise a ticket" onClick={onDispute}
+        title="A dispute, a request for information, a question for a team leader, or a recommendation to sue" />
       {/*
         AND THE THIRD OF THE THREE, BESIDE THE OTHER TWO.
         
