@@ -494,6 +494,12 @@ export function AccountDetail() {
           /* Item 9 is the receipt fee and is counted as one, not as a cost. See splitFeeLedger. */
           annexureItem: f.annexureItem,
           paymentId: f.paymentId,
+          /* WHETHER IT IS STILL OWED. A cancelled fee comes off the balance -- the firm, on a
+             reversal: "I agree when you reverse a payment that the receipt fee is removed" -- and
+             an imported promise to pay is the one exception. `feeStands` decides; these two are
+             what it reads, and without them every cancelled fee reads as live. */
+          cancelledAt: f.cancelledAt,
+          legacyName: f.legacyName,
         })),
         interest: ledgers.accruals.map((i) => ({ from: i.accruedOn, days: i.days, amount: i.amountAccrued })),
       },

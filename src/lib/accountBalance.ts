@@ -81,6 +81,12 @@ export interface LedgerLines {
     annexureItem?: string | null
     /** The payment an item 9 fee was raised on, where it was raised on one. */
     paymentId?: string | null
+    /** When the fee was cancelled, where it was. See `feeStands` -- a cancelled fee is usually
+        not owed, and there is exactly one exception. */
+    cancelledAt?: string | null
+    /** What Swordfish called the action. Null on anything Raptor raised. Read only by
+        `feeStands`, which is the one place it means anything. */
+    legacyName?: string | null
   }[]
   /** Every interest accrual period. */
   interest: { from: string; days: number; amount: number }[]
@@ -171,11 +177,69 @@ export interface BalanceBreakdown {
  * statement's lines stop adding up to the figure at its foot -- which is the one thing a statement
  * may never do.
  */
+/**
+ * DOES A CANCELLED FEE STILL COUNT?
+ *
+ * THE FIRM, ON THE REVERSAL: "I agree when you reverse a payment that the receipt fee is removed."
+ * So a cancelled fee comes off the balance. `reverse_payment_allocation` cancels the item 9 fee
+ * on a reversed receipt, and until now `computeBalance` kept charging for it -- the debtor would
+ * have gone on owing the receipt fee for a payment that had been taken back off their account.
+ *
+ * AND THERE IS EXACTLY ONE EXCEPTION, WHICH IS ALSO THE FIRM'S. "For the PTPs, there should be a
+ * charge. You should charge that, keep that. If the guy breaks the promise to pay, he breaks it.
+ * If he makes it again, he makes it again. But it's still an action and a consultation and
+ * something that needs to be captured, and we're allowed and permissible to charge this."
+ *
+ * THEY ARE RIGHT AND THE DATA SHOWS WHY. 647 of the 846 cancelled fees on the book are Promise to
+ * Pay rows -- 82% of every PTP row there is -- and the reasons on them are "Replaced by New PTP"
+ * (433), "Failed PTP cancelled to activate Follow Up PTP", "Cancelled due to RTP", "Account
+ * written off". Not one of those says the charge was withdrawn. They say the ARRANGEMENT ended,
+ * which is the ordinary life of a promise to pay and exactly the case the firm describes. The
+ * import wrote Swordfish's whole action log into account_fees, so the arrangement's cancellation
+ * landed in the fee's cancelled_at column, and reading it as a fee cancellation would take
+ * R 8 802,11 off 118 accounts for work that was genuinely done.
+ *
+ * SO IT IS NARROW ON PURPOSE: an imported Promise to Pay, and nothing else. The other 199 -- calls,
+ * SMSs, letters, consultations, cancelled with "cancel", "wrong", "." -- are a collector undoing an
+ * action they logged by mistake, and those come off, as does every cancellation Raptor makes
+ * itself. That is R 51,75 across 67 accounts.
+ *
+ * TWO CASINGS ON THE BOOK, 'Promise to Pay' and 'Promise To Pay', so the comparison is folded --
+ * matching one of them and not the other is a quiet R 13 difference nobody would ever find.
+ *
+ * THE TIDIER FIX IS THE FIRM'S TO AUTHORISE AND IS NOT THIS. Clearing cancelled_at on those 647
+ * imported rows would make the rule "cancelled means cancelled" with no exception -- but it is a
+ * correction to imported history, which CLAUDE.md says is decided case by case and never swept by
+ * a migration. This reads the data differently; it does not change it.
+ */
+export function feeStands(fee: { cancelledAt?: string | null; legacyName?: string | null }): boolean {
+  if (!fee.cancelledAt) return true
+  return (fee.legacyName ?? '').trim().toLowerCase() === 'promise to pay'
+}
+
 function splitFeeLedger(ledgers: LedgerLines) {
-  const receiptRows = ledgers.fees.filter((f) => f.annexureItem === '9')
-  const costRows = ledgers.fees.filter((f) => f.annexureItem !== '9')
-  /* Which payments already have their fee as a row, so it is not computed for them as well. */
-  const covered = new Set(receiptRows.map((f) => f.paymentId).filter((id): id is string => !!id))
+  /*
+   * FILTERED HERE AND NOWHERE ELSE, because computeBalance and buildStatement both read this and
+   * they have to agree -- a statement whose lines do not add up to the figure at its foot is the
+   * one thing a statement may never do.
+   */
+  const live = ledgers.fees.filter(feeStands)
+  const receiptRows = live.filter((f) => f.annexureItem === '9')
+  const costRows = live.filter((f) => f.annexureItem !== '9')
+  /*
+   * Which payments already have their fee as a row, so it is not computed for them as well.
+   *
+   * FROM EVERY ITEM 9 ROW, CANCELLED ONES INCLUDED, and that is the half that is easy to get
+   * wrong. A cancelled receipt fee is not owed -- so it is out of `receiptRows` above -- but it
+   * still MEANS this payment's fee was raised as a row. Built from the live rows only, a cancelled
+   * receipt fee would drop out of the total and `receiptFeeOn` would immediately compute the same
+   * fee back off the payment: the reversal would take a fee off and put it straight back on, and
+   * the two halves would look correct read separately.
+   */
+  const covered = new Set(
+    ledgers.fees.filter((f) => f.annexureItem === '9')
+      .map((f) => f.paymentId).filter((id): id is string => !!id),
+  )
   return { receiptRows, costRows, covered }
 }
 
@@ -224,7 +288,10 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     cappedBy = 'written off'
     withheld = roundToCents(
       ledgers.interest.filter((i) => !within(i.from)).reduce((t, i) => t + i.amount, 0)
-      + ledgers.fees.filter((f) => !within(f.date)).reduce((t, f) => t + f.exclVat + f.vat, 0),
+      /* THE SAME FILTER, or "withheld" counts fees the balance above it has already dropped and
+         the account explains itself with a figure that is not in it. */
+      + ledgers.fees.filter((f) => feeStands(f) && !within(f.date))
+        .reduce((t, f) => t + f.exclVat + f.vat, 0),
     )
   }
 

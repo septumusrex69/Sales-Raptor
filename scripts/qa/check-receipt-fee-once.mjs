@@ -157,7 +157,12 @@ check('what was actually charged beats what would be computed',
  */
 const book = read('src/lib/accountBook.ts')
 const detail = read('src/pages/accounts/AccountDetail.tsx')
-ok('the fee ledger is fetched with its annexure item', /select\('id,incurred_at[^']*annexure_item,payment_id'\)/.test(book))
+/* NOT ANCHORED TO THE END OF THE SELECT. This used to require payment_id to be the LAST column --
+   `annexure_item,payment_id'` with the closing quote -- so adding legacy_name after it failed a
+   check about something else entirely. What matters is that both columns are asked for. */
+ok('the fee ledger is fetched with its annexure item',
+  /select\('id,incurred_at[^']*annexure_item[^']*'\)/.test(book)
+  && /select\('id,incurred_at[^']*payment_id[^']*'\)/.test(book))
 ok('...and mapped rather than dropped on the floor',
   /annexureItem: r\.annexure_item \?\? null/.test(book) && /paymentId: r\.payment_id \?\? null/.test(book))
 ok('the account page passes the item through', /annexureItem: f\.annexureItem/.test(detail))

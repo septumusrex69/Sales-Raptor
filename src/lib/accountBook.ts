@@ -482,6 +482,15 @@ export interface LedgerFee {
   annexureItem: string | null
   /** The payment an item 9 fee was raised on. Null on every other item. */
   paymentId: string | null
+  /**
+   * WHAT SWORDFISH CALLED THE ACTION -- 'Phone Call', 'SMS', 'Promise to Pay'. Null on anything
+   * Raptor raised itself.
+   *
+   * IT IS HERE BECAUSE IT DECIDES WHETHER A CANCELLED FEE COMES OFF THE BALANCE. See `feeStands`
+   * in accountBalance: on a Promise to Pay row, Swordfish's cancellation is the ARRANGEMENT ending
+   * and not the charge being withdrawn, and the firm has said those charges stand.
+   */
+  legacyName: string | null
 }
 
 export interface LedgerAccrual {
@@ -525,7 +534,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,receipt_fee_legacy')
       .eq('account_id', accountId).order('received_at', { ascending: false }),
     supabase.from('account_fees')
-      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id')
+      .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id,legacy_name')
       .eq('account_id', accountId).order('incurred_at', { ascending: false }),
     supabase.from('account_interest_accruals')
       .select('id,accrued_on,days,amount_accrued,amount_recoverable')
@@ -564,6 +573,11 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
          See splitFeeLedger in accountBalance. */
       annexureItem: r.annexure_item ?? null,
       paymentId: r.payment_id ?? null,
+      /* AND WHAT THE OLD SYSTEM CALLED IT, which decides whether a CANCELLED fee is still owed --
+         see feeStands. A column in the table, the select and the type but missing from this mapper
+         reads as undefined for ever and nothing fails: CLAUDE.md's own warning, and here it would
+         silently take R 8 802,11 of promise-to-pay charges off 118 accounts. */
+      legacyName: r.legacy_name ?? null,
     })),
     accruals: (accruals.data ?? []).map((r: any) => ({
       id: r.id,

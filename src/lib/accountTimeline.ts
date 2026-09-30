@@ -10,6 +10,7 @@
  * monthly drumbeat nobody needs to read. Interest belongs on the Statement, which is the record
  * of money; this is the record of contact.
  */
+import { feeStands } from './accountBalance.ts'
 import type { AccountLedgers } from './accountBook'
 import type { AccountContact, AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
@@ -234,7 +235,22 @@ export function buildTimeline(
       date: dayOf(f.incurredAt),
       at: f.incurredAt,
       title: feeLabel(f.description, f.segments),
-      detail: f.cancelledAt ? 'Cancelled. The fee stands — it attaches to the action being issued.' : null,
+      /*
+       * CANCELLED SAYS WHICH KIND, because there are two and they are opposite.
+       *
+       * This line used to say "the fee stands" of every cancelled fee. That is true of an imported
+       * promise to pay -- the firm: "if he breaks the promise to pay, he breaks it. If he makes it
+       * again, he makes it again. But it's still an action and a consultation" -- and it is FALSE
+       * of a receipt fee on a reversed payment, which is exactly the one the firm agreed comes off.
+       * One sentence for both would have told a collector the debtor still owed a fee that had
+       * just been taken off their balance. `feeStands` decides, so the words and the arithmetic
+       * cannot come apart.
+       */
+      detail: f.cancelledAt
+        ? (feeStands(f)
+          ? 'Cancelled. The charge stands — the arrangement ended, the work was still done.'
+          : 'Cancelled. It has come off the balance.')
+        : null,
       by: f.performedBy,
       amount: f.billed ? f.amountExclVat + f.vatAmount : null,
       free: !f.billed,

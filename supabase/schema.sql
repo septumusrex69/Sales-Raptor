@@ -17370,3 +17370,117 @@ comment on function public.reverse_payment(uuid, text) is
   'receipt reverses like any other, at the firm''s instruction -- the imported row itself is never '
   'edited, and the copy is priced on the date the money arrived, not today. Returns the copy''s id, '
   'or null.';
+
+-- ============================================================================
+-- A CANCELLED FEE COMES OFF THE BALANCE, AND A PROMISE TO PAY IS THE ONE THAT DOES NOT.
+--
+-- TWO RULINGS FROM THE FIRM, IN ONE BREATH, AND THEY PULL IN OPPOSITE DIRECTIONS UNTIL YOU LOOK
+-- AT THE DATA.
+--
+--   "I agree when you reverse a payment that the receipt fee is removed."
+--
+--   "For the PTPs, there should be a charge. You should charge that, keep that. If the guy breaks
+--    the promise to pay, he breaks it. If he makes it again, he makes it again. But it's still an
+--    action and a consultation and something that needs to be captured. And we're allowed and
+--    permissible to charge this."
+--
+-- WHAT MADE THEM LOOK LIKE A CONTRADICTION. This function already dropped every fee with a
+-- cancelled_at, and 647 of the 846 cancelled fees on the book are Promise to Pay rows -- 82% of
+-- every PTP row there is. So it was already taking R 8 802,11 off 118 accounts for the exact
+-- charges the firm has just said stand.
+--
+-- THE REASONS ON THOSE ROWS SAY WHY THEY ARE NOT FEE CANCELLATIONS AT ALL: "Replaced by New PTP"
+-- (433), "Failed PTP cancelled to activate Follow Up PTP", "Cancelled due to RTP", "Account
+-- written off". Not one says the charge was withdrawn; every one says the ARRANGEMENT ended, which
+-- is the ordinary life of a promise to pay. The import wrote Swordfish's whole action log into
+-- account_fees -- Account File Uploaded, Debtor Details Changed, Account frozen, all at R 0,00 --
+-- so the arrangement's cancellation landed in the fee's cancelled_at column and has been read as
+-- a fee cancellation ever since.
+--
+-- SO THE EXCEPTION IS NARROW AND IT IS THE ONLY ONE: an imported Promise to Pay. The other 199
+-- cancelled rows are calls, SMSs, letters and consultations undone with "cancel", "wrong", "." --
+-- a collector unlogging an action they entered by mistake -- and those still come off, as does
+-- every cancellation Raptor makes itself, which today means precisely the item 9 fee on a reversed
+-- receipt. That is R 51,75 across 67 accounts.
+--
+-- TWO CASINGS ON THE BOOK, 'Promise to Pay' (785) and 'Promise To Pay' (1), so the comparison is
+-- folded. Matching one and not the other is a quiet R 13 difference nobody would ever find.
+--
+-- AND THE SAME RULE IS WRITTEN IN TYPESCRIPT as `feeStands` in src/lib/accountBalance.ts, because
+-- computeBalance gathers its own ledger in the browser. Two places that decide what a debtor owes
+-- is how one of them ends up charging for something the firm said was free -- check-fee-stands
+-- holds the two against each other, in both directions.
+--
+-- THE TIDIER FIX IS THE FIRM'S TO AUTHORISE AND IS DELIBERATELY NOT THIS. Clearing cancelled_at on
+-- those 647 imported rows would leave "cancelled means cancelled" with no exception at all. It is
+-- a correction to imported history, which CLAUDE.md says is decided case by case and never swept
+-- by a migration. This reads the data differently; it does not touch a row.
+-- ============================================================================
+create or replace function public.fee_stands(p_cancelled_at date, p_legacy_name text)
+returns boolean
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select p_cancelled_at is null
+      or lower(btrim(coalesce(p_legacy_name, ''))) = 'promise to pay'
+$$;
+
+comment on function public.fee_stands(date, text) is
+  'Is a cancelled fee still owed? No -- except an imported Promise to Pay, where the cancellation '
+  'is the arrangement ending rather than the charge being withdrawn. The firm: "if he makes it '
+  'again, he makes it again. But it''s still an action and a consultation." Mirrored in '
+  'src/lib/accountBalance.ts as feeStands.';
+
+create or replace function public.engine_balances(p_account uuid, p_exclude_payment uuid)
+returns table (interest numeric, costs numeric, capital numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then
+    interest := 0; costs := 0; capital := 0; return next; return;
+  end if;
+
+  /* Interest is `amount_recoverable`, not `amount_accrued`: interest the in duplum ceiling put out
+     of reach was never ours to take, and half A must not pretend otherwise. */
+  select coalesce(sum(amount_recoverable), 0) into interest
+    from public.account_interest_accruals where account_id = p_account;
+  select interest - coalesce(sum(a.to_interest), 0) into interest
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment)
+     and a.status <> 'reversed';
+
+  /* Costs INCLUDING VAT -- the firm's decision 1 -- with fees raised above the items 1-7 ceiling
+     (billed = false) left out, because those may not be recovered, and cancelled fees left out
+     through fee_stands, which keeps the one exception the firm named. */
+  select coalesce(sum(f.amount_excl_vat + coalesce(f.vat_amount, 0)), 0) into costs
+    from public.account_fees f
+   where f.account_id = p_account
+     and public.fee_stands(f.cancelled_at, f.legacy_name)
+     and f.billed is not false
+     and (p_exclude_payment is null or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid) <> p_exclude_payment);
+  select costs - coalesce(sum(a.to_costs), 0) into costs
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment)
+     and a.status <> 'reversed';
+
+  capital := greatest(coalesce(v_acct.capital_outstanding, v_acct.capital_handed_over, 0), 0);
+  return next;
+end $$;
+
+comment on function public.engine_balances(uuid, uuid) is
+  'What an account still owes in interest, costs (incl VAT) and capital, net of what earlier '
+  'payments took. Shared by allocate_payment and preview_allocation so a collector''s dry run '
+  'cannot promise something the engine would not do.';
+
+revoke all on function public.engine_balances(uuid, uuid) from public;
+revoke all on function public.fee_stands(date, text) from public;
+grant execute on function public.fee_stands(date, text) to authenticated;
