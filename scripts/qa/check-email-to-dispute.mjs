@@ -105,9 +105,18 @@ ok('the account hands the message to the Escalate box',
 ok('...with the ticket it could be added to', /openQueries=\{queries\}/.test(detail))
 ok('...and which button was pressed', /initialKind=\{classifying\.kind\}/.test(detail))
 
-/* PREFILLED, BECAUSE THE RETYPE IS WHERE DISPUTES GET MIS-RECORDED. */
-ok('the box opens on the email’s own words', /const written = \(fromEmail\.body \?\? ''\)/.test(modal))
-ok('...capped the same way the endpoint caps', /written\.length > 4000/.test(modal))
+/*
+ * AND THE EMAIL'S OWN WORDS ARE ON THE SCREEN, beside the box rather than in it.
+ *
+ * IT USED TO PREFILL THE BOX, on the argument that "the retype is where disputes get
+ * mis-recorded". That argument was right about the risk and wrong about the cure: what it
+ * produced was not a careful record but the quoted thread as a summary, with the agent's own
+ * reading of it written nowhere. The firm sent it back. See the description assertions below.
+ */
+ok('what the email said is shown while the note is written',
+  /const emailWords = fromEmail/.test(modal))
+ok('...falling back to the subject on a message with no text',
+  /\(fromEmail\.subject \?\? ''\)\.trim\(\)/.test(modal))
 
 /*
  * ON A DISPUTE IT DEFAULTS TO THE OPEN ONE. `one_open_dispute_per_account` refuses a second, so
@@ -219,6 +228,51 @@ ok('...saying why, and what to do instead',
 ok('a linked ticket is a dispute by construction', /ticketKind = 'dispute'/.test(api))
 ok('...not whatever the row happened to say',
   !/ticketKind = open\.kind === 'request'/.test(api))
+
+/* ---------------- the ticket's description is the agent's note, not the email ------------- */
+
+/*
+ * THE FIRM: "it asks you about the nature of the dispute, but there's no way and no place to make
+ * a note. So the email now goes into the description, whereas the email should come to the ticket
+ * in another form. The note should be something mandatory made by the clerk raising the dispute,
+ * to give more of a description of what is actually happening."
+ *
+ * THE BOX WAS DECORATIVE ON THIS PATH. It opened pre-filled with the email body, and whatever was
+ * typed over it was thrown away -- raiseTicketFromEmail never sent a description and the endpoint
+ * built its own out of `mail.body`. So every dispute raised from an email carried forty lines of
+ * quoted thread as its summary, clamped to two lines on the liaison's board, and the one person
+ * who had actually read the email wrote nothing down.
+ *
+ * WHAT THE DEBTOR WROTE IS NOT WHAT IT MEANS. "I want to dispute the account" is the email; "says
+ * the vehicle went back in March and he has the collection note" is what a liaison has to answer.
+ */
+ok('the box no longer opens full of the email', /const \[description, setDescription\] = useState\(''\)/.test(modal))
+ok('...and the email is shown beside it instead', /What they wrote/.test(modal))
+ok('...read-only, so the summary cannot become the thread again',
+  /emailWords[\s\S]{0,400}?whitespace-pre-wrap/.test(modal))
+ok('...asking for the agent\u2019s own words', /What is the issue, in your words\?/.test(modal))
+
+/* IT TRAVELS NOW. The assertion that the box is empty is worth nothing if what is typed in it
+   still goes nowhere. */
+ok('the note is sent with the ticket', /description: description\.trim\(\)/.test(modal))
+ok('...carried by the client', /description: input\.description/.test(mailLib))
+ok('...and stored by the endpoint', /const description = written\.length > 4000/.test(api))
+
+/*
+ * AND THE EMAIL BODY IS NOT A FALLBACK. That is how the old behaviour comes back one quiet
+ * afternoon -- a caller that forgets the field, and the description silently becomes the thread.
+ */
+ok('the email body is no longer a description', !/mail\.body \?\? ''\)\.replace/.test(api))
+ok('...and an empty note is refused rather than defaulted',
+  /!queryId && !description/.test(api))
+/* ON THE RAISE PATH ONLY: linking an email to an open dispute needs no new summary, because that
+   ticket already has one. */
+ok('...except when adding to a ticket that already has one', /Only where a ticket is being RAISED/.test(read('api/_lib/email/ticket.ts')))
+
+/* AND THE SCREEN REFUSES OUT LOUD. A bare `return` on the one field the liaison works from is the
+   dead-button silence the compose box had. */
+ok('the box says why it will not submit',
+  /setError\('Say what this is about in your own words/.test(modal))
 
 console.log(`\ncheck-email-to-dispute: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

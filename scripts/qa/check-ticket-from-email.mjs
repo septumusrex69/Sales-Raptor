@@ -99,11 +99,25 @@ ok('...dated the same day it is alleged',
   /alleged_on: kind === 'dispute' \? today : null,\s*\n\s*received_on: kind === 'dispute' \? today : null/.test(api))
 ok('...in one insert, because the trigger reads NEW',
   (api.match(/\.from\('account_queries'\)\s*\n\s*\.insert\(/g) ?? []).length === 1)
-/* THE DEBTOR'S OWN WORDS, not a retype -- which is the whole point. */
-ok('the description is what the debtor wrote', /const written = \(mail\.body \?\? ''\)/.test(api))
-/* CAPPED, because some mail carries a whole quoted thread and the card is 19rem wide. The full
-   text is one press away on the email, which is now linked to this ticket. */
+/*
+ * THE DESCRIPTION IS THE AGENT'S NOTE, AND THIS ASSERTED THE OPPOSITE.
+ *
+ * It used to hold that the description was `mail.body` -- "the debtor's own words, not a retype".
+ * The firm sent that back: "the email now goes into the description, whereas the email should come
+ * to the ticket in another form. The note should be something mandatory made by the clerk raising
+ * the dispute, to give more of a description of what is actually happening."
+ *
+ * They are right about what it produced. The quoted thread became the summary, clamped to two
+ * lines on the liaison's board, and the one person who had read the email wrote nothing down. The
+ * email is not lost -- it is filed against the ticket with its attachments, which is the "another
+ * form", and the box now shows it read-only beside the note.
+ */
+ok('the description is the note that was sent', /typeof body\.description === 'string'/.test(api))
+ok('...and not the email body', !/const written = \(mail\.body \?\? ''\)/.test(api))
+/* CAPPED, because a dictated note can run long and the card is 19rem wide. */
 ok('...capped rather than unbounded', /written\.length > 4000/.test(api))
+/* AND REQUIRED. A fallback to the body is how the old behaviour returns one quiet afternoon. */
+ok('...and refused when it is empty', /!queryId && !description/.test(api))
 
 /* ---------------- once, and only once ---------------- */
 

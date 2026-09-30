@@ -84,6 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = (req.body ?? {}) as {
     accountEmailId?: string
     kind?: 'dispute' | 'request'
+    description?: string
     requestFor?: string
     category?: string | null
     ownerId?: string | null
@@ -157,6 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const accountId = mail.account_id
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 
+
   /*
    * WHAT THE DEBTOR WROTE, AS THEY WROTE IT.
    *
@@ -165,11 +167,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * actually writes, and the full text is one press away on the email itself -- which is now
    * linked to this ticket, so nothing is lost by shortening what is shown.
    */
-  const written = (mail.body ?? '').replace(/\r\n/g, '\n').trim()
-  const subject = (mail.subject ?? '').trim()
-  const description = (written.length > 4000 ? `${written.slice(0, 4000)}…` : written)
-    || subject
-    || 'An email with no text in it.'
+  /*
+   * THE TICKET'S DESCRIPTION IS THE AGENT'S NOTE, NOT THE EMAIL.
+   *
+   * THE FIRM: "the email now goes into the description, whereas the email should come to the
+   * ticket in another form. The note should be something mandatory made by the clerk raising the
+   * dispute, to give more of a description of what is actually happening."
+   *
+   * THIS USED TO BUILD ITS OWN OUT OF `mail.body` AND IGNORE WHAT WAS SENT -- the box on the
+   * screen carried nothing, so every dispute raised from an email wore forty lines of quoted
+   * thread as its summary, clamped to two lines on the liaison's board. What the debtor wrote is
+   * already on the account: the email is filed against this ticket, with its attachments, which
+   * is the "another form" the firm is asking for and has existed all along.
+   *
+   * REQUIRED, NOT DEFAULTED. A fallback to the email body is how the old behaviour would come
+   * back one quiet afternoon, and an empty description on a dispute is a ticket the liaison
+   * cannot work. It is refused on the LINK path too -- adding an email to an open dispute needs
+   * no new summary, because that ticket already has one.
+   */
+  const written = (typeof body.description === 'string' ? body.description : '').trim()
+  const description = written.length > 4000 ? `${written.slice(0, 4000)}…` : written
+  /* Only where a ticket is being RAISED: a link adds the email to one that already has a note. */
+  if (!queryId && !description) {
+    res.status(400).json({
+      error: 'Say what this is about in your own words — that is what the ticket is worked from.',
+    })
+    return
+  }
 
   /*
    * THE TICKET: either the one already open on this account, or a new one.

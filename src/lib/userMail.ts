@@ -728,6 +728,18 @@ export async function raiseTicketFromEmail(input: {
   accessToken: string
   accountEmailId: string
   kind: 'dispute' | 'request'
+  /**
+   * THE AGENT'S OWN NOTE, and it is the ticket's description.
+   *
+   * THE FIRM: "the note should be something mandatory made by the clerk raising the dispute, to
+   * give more of a description of what is actually happening."
+   *
+   * IT NEVER USED TO TRAVEL. The box existed on the screen and nothing carried what was typed in
+   * it, so the endpoint built a description out of the EMAIL BODY -- and every dispute raised
+   * from an email wore forty lines of quoted thread as its summary. The email is filed against
+   * the ticket either way; this is what it means.
+   */
+  description: string
   /** On a request: what is being asked for, from REQUEST_KINDS. Defaults to Other on the server. */
   requestFor?: string
   category?: string | null
@@ -764,6 +776,7 @@ export async function raiseTicketFromEmail(input: {
     body: JSON.stringify({
       accountEmailId: input.accountEmailId,
       kind: input.kind,
+      description: input.description,
       requestFor: input.requestFor,
       category: input.category ?? null,
       ownerId: input.ownerId ?? null,

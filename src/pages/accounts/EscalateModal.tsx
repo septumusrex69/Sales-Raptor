@@ -156,19 +156,31 @@ export function EscalateModal({
   )
   const [toId, setToId] = useState(clientLiaison?.id ?? '')
   /*
-   * THE EMAIL'S OWN WORDS, ALREADY IN THE BOX.
+   * EMPTY ON AN EMAIL TOO, AND THAT IS THE FIX.
    *
-   * THE RETYPING IS WHERE DISPUTES GET MIS-RECORDED -- it is the step most likely to be shortened
-   * at half past four, and what the debtor actually wrote is the thing a finding has to answer.
-   * Capped at the same 4 000 the endpoint caps at, so what is shown is what would be stored;
-   * anything longer is a quoted thread and the full text is one press away on the email itself.
+   * THE FIRM: "it asks you about the nature of the dispute, but there's no way and no place to
+   * make a note. So the email now goes into the description, whereas the email should come to the
+   * ticket in another form. The note should be something mandatory made by the clerk raising the
+   * dispute, to give more of a description of what is actually happening."
+   *
+   * THE BOX USED TO OPEN FULL OF THE EMAIL and -- worse -- whatever was typed over it was thrown
+   * away: `raiseTicketFromEmail` never sent a description, and the endpoint built its own from the
+   * body. So the box was decorative on this path, and every dispute raised from an email carried
+   * forty lines of quoted thread as its description, clamped to two lines on the board.
+   *
+   * WHAT THE EMAIL SAID IS NOT WHAT THE AGENT UNDERSTOOD. "I want to dispute the account" is what
+   * the debtor wrote; "says the vehicle went back in March and he has the collection note" is what
+   * a liaison has to answer, and only the person who read it can write that.
+   *
+   * THE EMAIL ITSELF IS NOT LOST -- it is filed against the ticket with its attachments, which is
+   * what the note above this box has said all along. It is shown beside the box, read-only, so
+   * this is a summary of something visible rather than something remembered.
    */
-  const [description, setDescription] = useState(() => {
-    if (!fromEmail) return ''
-    const written = (fromEmail.body ?? '').replace(/\r\n/g, '\n').trim()
-    const capped = written.length > 4000 ? `${written.slice(0, 4000)}…` : written
-    return capped || (fromEmail.subject ?? '').trim()
-  })
+  const [description, setDescription] = useState('')
+  /* Capped where the endpoint caps, so what is shown is what is stored. */
+  const emailWords = fromEmail
+    ? ((fromEmail.body ?? '').replace(/\r\n/g, '\n').trim() || (fromEmail.subject ?? '').trim())
+    : ''
   const [category, setCategory] = useState('')
   const [chaseOn, setChaseOn] = useState('')
   /*
@@ -297,7 +309,16 @@ export function EscalateModal({
 
 
   async function submit() {
-    if (!linkedTo && !description.trim()) return
+    /*
+     * THE NOTE IS THE TICKET, so this refuses -- and says so. It used to be a bare `return`: the
+     * same dead-button silence the compose box had, on the one field the liaison actually works
+     * from. The Escalate button is disabled without it too; this is the second lock, for the paths
+     * that reach here another way.
+     */
+    if (!linkedTo && !description.trim()) {
+      setError('Say what this is about in your own words — that is what the ticket is worked from.')
+      return
+    }
     setBusy(true); setError(null)
 
     /*
@@ -315,6 +336,9 @@ export function EscalateModal({
         queryId: linkedTo?.id ?? null,
         kind: kind === 'request' ? 'request' : 'dispute',
         requestFor: kind === 'request' ? requestFor : undefined,
+        /* THE AGENT'S OWN NOTE, which never left this box before -- the endpoint built its own
+           description out of the email body and this was thrown away. */
+        description: description.trim(),
         category: kind === 'dispute' ? (category || null) : null,
         /* On a link, only where the ticket has nobody on it -- see the picker's own note. */
         ownerId: linkedTo && linkedTo.ownerId ? null : ownerId,
@@ -672,12 +696,34 @@ export function EscalateModal({
           quietly do nothing. What arrived is the EMAIL, and the email is what gets filed against
           the ticket -- with its attachments -- where anybody answering it can read it whole.
         */}
+        {/*
+          WHAT ARRIVED, READ-ONLY. It is the thing being summarised, so it has to be on the screen
+          while somebody writes the summary -- and it must not be IN the box, or the summary
+          becomes the quoted thread again. Scrolled in its own frame: a debtor's mail carries their
+          client's whole chain underneath it and a long one must not push the button off the page.
+        */}
+        {fromEmail && emailWords && !linkedTo && (
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+              What they wrote
+            </p>
+            <div className="max-h-32 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500 whitespace-pre-wrap break-words">{emailWords}</p>
+            </div>
+            {/* SAID ONCE, so nobody wonders whether retyping it is expected of them. */}
+            <p className="text-[11px] text-slate-400 mt-1">
+              This email is filed against the ticket with its attachments. Write what it means
+              below &mdash; that is what the liaison answers.
+            </p>
+          </div>
+        )}
+
         <label className={`block ${linkedTo ? 'hidden' : ''}`}>
           <span className="flex items-baseline justify-between gap-3">
             <span className="text-sm font-medium text-slate-700">
               {/* The third copy of the fallback chain, found by the check that guards the other
                   two -- a request was asking "why has collecting run out of road?". */}
-              {fromEmail ? 'What is the issue?' : ESCALATION_KINDS[kind].prompt}
+              {fromEmail ? 'What is the issue, in your words?' : ESCALATION_KINDS[kind].prompt}
             </span>
             {/*
               DICTATED, AT THE FIRM'S REQUEST: "if we raise a dispute, first of all, there should
@@ -696,7 +742,9 @@ export function EscalateModal({
             autoFocus
             placeholder={category === CATEGORY_NEEDING_EXPLANATION
               ? 'Required for "Other" — say what the debtor is actually disputing.'
-              : ESCALATION_KINDS[kind].placeholder}
+              : fromEmail
+                ? 'What this email actually means for the account — what they are disputing and what would settle it.'
+                : ESCALATION_KINDS[kind].placeholder}
             className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 resize-none"
           />
         </label>
