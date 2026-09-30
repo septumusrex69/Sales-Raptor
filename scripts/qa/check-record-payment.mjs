@@ -129,15 +129,24 @@ ok('...the function checks it', /if not public\.may_record_payment\(\) then/.tes
 
 /* AN ALLOW LIST, so a role added to the firm later is refused until somebody decides. */
 for (const role of ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader',
-  'Pre-legal Agent', 'Liaison Manager', 'Liaison']) {
+  'Liaison Manager', 'Liaison']) {
   ok(`${role} may record a payment`, canRecordPayment(role))
   ok(`...and the database agrees`, new RegExp(`'${role}'`).test(may ?? ''))
 }
 /*
  * THE SALES SIDE MAY NOT. CLAUDE.md: fees are charged on ACCOUNTS ONLY and the sales side raises
  * nothing -- a representative has no business writing a ledger entry.
+ *
+ * AND NEITHER MAY A PRE-LEGAL AGENT, which used to be allowed. The firm, seeing the button on a
+ * collector's screen: "she's a normal pre-legal agent, she can't be allocating payments."
+ *
+ * THE PRINCIPLE IS WHO THE MONEY IS LEARNED FROM. A trust receipt comes in on the firm's own bank
+ * statement and is imported; the only thing typed in by hand is a PTC, and a PTC is what the
+ * CLIENT tells you. An agent deals with the DEBTOR, so they are never the one told "he paid us
+ * direct" -- and what they ARE told, that the debtor says they paid, is a claim to be checked
+ * against the statement rather than a receipt to record.
  */
-for (const role of ['Sales Representative', 'Sales Manager', 'Read Only']) {
+for (const role of ['Pre-legal Agent', 'Sales Representative', 'Sales Manager', 'Read Only']) {
   check(`${role} may not`, canRecordPayment(role), false)
   ok(`...and the database does not list them`, !new RegExp(`'${role}'`).test(may ?? ''))
 }

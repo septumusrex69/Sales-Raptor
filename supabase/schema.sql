@@ -17161,3 +17161,24 @@ begin
 
   return v_id;
 end $$;
+
+-- ============================================================================
+-- A PRE-LEGAL AGENT DOES NOT CAPTURE PAYMENTS.
+--
+-- THE FIRM, SEEING THE BUTTON ON A COLLECTOR'S SCREEN: "she's a normal pre-legal agent, she can't
+-- be allocating payments."
+--
+-- THE PRINCIPLE IS WHO THE MONEY IS LEARNED FROM. A trust receipt arrives on the firm's own bank
+-- statement and is imported; the only thing typed in by hand is a PTC, and a PTC is what the
+-- CLIENT tells you. A pre-legal agent deals with the DEBTOR, so they are never the person told
+-- "he paid us direct" -- and what they ARE told, that the debtor says they paid, is a claim to be
+-- checked against the statement rather than a receipt to record.
+-- ============================================================================
+create or replace function public.may_record_payment() returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select public.current_user_role() in (
+    'Administrator', 'Call Centre Manager', 'Pre-legal Team Leader',
+    'Liaison Manager', 'Liaison'
+  )
+$$;

@@ -262,10 +262,20 @@ export function canViewFinance(role: Pick<User, 'role'>['role'] | undefined): bo
  *
  * NOT THE SAME QUESTION AS canViewFinance, and keeping them apart is the point. The firm's rule
  * is about the SPLIT -- "The Finance section is Administrator only. Sales representatives never
- * see the payment split" -- and capturing a receipt shows none of it. What capture needs is
- * somebody who works the book or talks to the client, because that is who learns that a debtor
- * paid the client direct. The firm: "let's do it in the finance section and you will be able to
- * do it on the account as well."
+ * see the payment split" -- and capturing a receipt shows none of it. The firm: "let's do it in
+ * the finance section and you will be able to do it on the account as well."
+ *
+ * A PRE-LEGAL AGENT IS NOT ON THIS LIST, and used to be. The firm, seeing the button on a
+ * collector's screen: "she's a normal pre-legal agent, she can't be allocating payments."
+ *
+ * THE PRINCIPLE UNDERNEATH IT IS WHO THE MONEY IS LEARNED FROM. A trust receipt arrives on the
+ * firm's own bank statement and is imported; the only thing anybody types in by hand is a PTC,
+ * and a PTC is what the CLIENT tells you. A pre-legal agent deals with the DEBTOR, so they are
+ * never the person told "he paid us direct" -- and the thing they are told, that the debtor says
+ * they paid, is a claim to be checked against the statement rather than a receipt to record.
+ *
+ * SO: the liaisons, who talk to clients; their manager; the two supervisors on the collections
+ * floor, who are where anything unusual on the floor ends up; and finance.
  *
  * AN ALLOW LIST, NOT A DENY LIST. A role added to the firm later is refused until somebody
  * decides it belongs, which is the safe direction for something that creates money.
@@ -281,7 +291,6 @@ export function canRecordPayment(role: Pick<User, 'role'>['role'] | undefined): 
   return role === 'Administrator'
     || role === 'Call Centre Manager'
     || role === 'Pre-legal Team Leader'
-    || role === 'Pre-legal Agent'
     || role === 'Liaison Manager'
     || role === 'Liaison'
 }
