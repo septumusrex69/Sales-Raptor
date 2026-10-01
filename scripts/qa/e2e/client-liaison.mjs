@@ -44,10 +44,17 @@ const COMPANY = {
   created_at: '2026-10-01T07:27:05Z', commission_rate: 0.3, industry: 'Kangaroo',
 }
 
-async function openDetail(browser, company) {
+async function openDetail(browser, company, saves = []) {
   const { context, page } = await signedInPage(browser, ADMIN, [
     [(u) => /\/rest\/v1\/profiles.*id=eq\./.test(u), () => ({ body: [ADMIN] })],
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN, SAMUEL, NICOLE, VUSI] })],
+    /* WHAT THE SAVE ACTUALLY SENDS. The firm: "then I try to change it back and it doesn't do
+       it." The save path was sound all along -- what was broken was the box it was reading from --
+       so the proof that matters now is the body of the PATCH, not the state of a dropdown. */
+    [(u, req) => /\/rest\/v1\/companies/.test(u) && req.method() === 'PATCH', (u, req) => {
+      try { saves.push(JSON.parse(req.postData() ?? '{}')) } catch { saves.push({ unparsed: true }) }
+      return { body: [] }
+    }],
     [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [company] })],
   ], [])
   await page.setViewportSize({ width: 1180, height: 900 })
@@ -140,6 +147,50 @@ try {
        worse than no warning: people stop reading it. */
     t.ok('...with nothing flagged', !/not a liaison/i.test(sel.options.map((o) => o.text).join(' ')))
     t.check('...and only liaisons offered', sel.options.map((o) => o.text).join('|'), 'Nicole Loder')
+    await context.close()
+  }
+
+  /* ---------- and reassigning actually persists ---------- */
+
+  /*
+   * THE OTHER HALF OF WHAT THE FIRM REPORTED: "then I try to change it back and it doesn't do it."
+   *
+   * The save was never broken -- updateCompany writes optimistically, persists, and rolls back
+   * with an error on failure. What was broken was the box it read FROM: it held the old value
+   * while showing a different name, so pressing Save wrote back what was already there and
+   * nothing appeared to happen. Held here as the body of the request, which is the only place
+   * that cannot be misread.
+   */
+  {
+    const saves = []
+    const { context, page } = await openDetail(browser, COMPANY, saves)
+    await page.locator('dd button').first().click()
+    await page.waitForTimeout(400)
+    await page.locator('form select').first().selectOption({ label: 'Nicole Loder' })
+    await page.getByRole('button', { name: 'Save' }).click()
+    await page.waitForTimeout(600)
+    t.check('choosing somebody sends exactly one save', saves.length, 1)
+    t.check('...carrying the person who was chosen', saves[0]?.account_owner_id, 'u-nicole')
+    /* AND NOT THE ONE IT OPENED ON, which is the shape of the original complaint. */
+    t.ok('...and not the owner it opened on', saves[0]?.account_owner_id !== 'u-samuel')
+    await context.close()
+  }
+
+  /*
+   * AND PRESSING SAVE WITHOUT CHOOSING LEAVES IT ALONE. That is not a bug -- it is the correct
+   * answer to "I changed nothing" -- but it is what the firm SAW when the box was showing a name
+   * it did not hold, so it is worth pinning: no change means the owner on record, not whoever the
+   * dropdown happened to be displaying.
+   */
+  {
+    const saves = []
+    const { context, page } = await openDetail(browser, COMPANY, saves)
+    await page.locator('dd button').first().click()
+    await page.waitForTimeout(400)
+    await page.getByRole('button', { name: 'Save' }).click()
+    await page.waitForTimeout(600)
+    t.check('saving without choosing keeps the owner on record',
+      saves[0]?.account_owner_id, 'u-samuel')
     await context.close()
   }
 } finally {
