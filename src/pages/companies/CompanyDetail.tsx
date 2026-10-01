@@ -48,7 +48,7 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
-import { isAssignableOwner } from '../../lib/permissions'
+import { canBeClientLiaison } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
 
@@ -88,7 +88,16 @@ export function CompanyDetail() {
   } = useAppStore()
   const company = companies.find((c) => c.id === id)
   const isAdmin = currentUser?.role === 'Administrator'
-  const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
+  /*
+   * THE SAME RULE AS THE ADD FORM, which it was not.
+   *
+   * This read `isAssignableOwner` -- Administrator, Sales, Liaison -- which is "who may be given a
+   * LEAD or a DEAL", a different question with a different answer. So the two doors onto one field
+   * offered two different lists, and the firm's instruction ("there should only be liaisons or
+   * liaison manager") reached only one of them.
+   */
+  const reps = useMemo(
+    () => users.filter((u) => u.status === 'Active' && canBeClientLiaison(u)), [users])
   const [noteOpen, setNoteOpen] = useState(false)
   const [courtesyCallOpen, setCourtesyCallOpen] = useState(false)
   // Adding a debtor by hand. The references are fetched when the modal opens rather than on every
@@ -488,6 +497,26 @@ export function CompanyDetail() {
           <dt className="text-slate-400">Account Owner</dt>
           <dd className="flex items-center gap-1.5">
             <span className="text-slate-700 font-medium">{users.find((u) => u.id === company.accountOwnerId)?.name ?? '—'}</span>
+            {/*
+              SAID ON THE PANEL, NOT ONLY INSIDE THE BOX THAT CHANGES IT.
+              
+              Three routes create a client WITHOUT asking who the liaison is -- Quick Add's company
+              form, the Swordfish import and converting a lead -- and all three fall back to
+              whoever is signed in. So a client can arrive owned by an administrator or a sales rep
+              and look entirely ordinary here; the warning inside "Reassign" only reaches somebody
+              who already suspected something. One word, where the name is.
+            */}
+            {(() => {
+              const owner = users.find((u) => u.id === company.accountOwnerId)
+              if (!owner || canBeClientLiaison(owner)) return null
+              return (
+                <span className="text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5
+                  rounded-md bg-amber-100 text-amber-900"
+                  title={`A client’s liaison should be a Liaison or a Liaison Manager. ${owner.name} is a ${owner.role}.`}>
+                  not a liaison
+                </span>
+              )
+            })()}
             <button onClick={() => setOwnerOpen(true)} className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
               <Pencil size={12} />
             </button>
@@ -1070,6 +1099,7 @@ export function CompanyDetail() {
         <EditOwnerModal
           currentOwnerId={company.accountOwnerId}
           reps={reps}
+          all={users}
           onClose={() => setOwnerOpen(false)}
           onSave={(accountOwnerId) => updateCompany(company.id, { accountOwnerId })}
         />
@@ -1236,15 +1266,36 @@ function EditCompanyDetailsModal({ company, onClose, onSave }: { company: Compan
 function EditOwnerModal({
   currentOwnerId,
   reps,
+  all,
   onClose,
   onSave,
 }: {
   currentOwnerId: string
   reps: ReturnType<typeof useAppStore>['users']
+  /** Everybody, so the person ON RECORD can be named even where their role is not eligible. */
+  all: ReturnType<typeof useAppStore>['users']
   onClose: () => void
   onSave: (ownerId: string) => void
 }) {
   const [ownerId, setOwnerId] = useState(currentOwnerId)
+  /*
+   * THE OWNER ON RECORD, EVEN WHERE THEY MAY NOT BE ONE ANY MORE.
+   *
+   * THE BUG THIS EXISTS FOR, measured in a browser on the firm's own client: a company owned by a
+   * Pre-legal Agent opened this box, and because that role is not in the list the `select` had no
+   * option matching its value. The DOM then falls back to the FIRST option -- so the state held
+   * Samuel Ndaba, the screen said "Stephan", and Samuel was not offered anywhere. A box that
+   * displays one name while holding another is the worst thing a reassignment screen can do: press
+   * Save on what looks like a confirmation and you have given the client to somebody you never
+   * chose.
+   *
+   * So whoever is on record is always an option, whatever their role. It is marked rather than
+   * hidden, because the honest statement is "this is who it is, and they should not be" -- hiding
+   * them would leave the same lie with a tidier list.
+   */
+  const onRecord = reps.some((r) => r.id === currentOwnerId)
+    ? null
+    : all.find((u) => u.id === currentOwnerId) ?? null
   return (
     <Modal title="Reassign Account Owner" onClose={onClose} width={380}>
       <form
@@ -1256,12 +1307,27 @@ function EditOwnerModal({
       >
         <FormField label="Account Owner" required>
           <select className={inputClass} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+            {onRecord && (
+              <option value={onRecord.id}>{onRecord.name} — {onRecord.role}, not a liaison</option>
+            )}
+            {reps.length === 0 && !onRecord && <option value="">Nobody holds that role yet</option>}
             {reps.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>
             ))}
           </select>
+          {onRecord && (
+            <span className="block text-[11px] text-amber-700 mt-1">
+              A client’s liaison should be a Liaison or a Liaison Manager. Choose one, or change
+              {' '}{onRecord.name.split(' ')[0]}’s role in Settings → Users.
+            </span>
+          )}
+          {reps.length === 0 && !onRecord && (
+            <span className="block text-[11px] text-slate-400 mt-1">
+              A Liaison or Liaison Manager. Set somebody’s role in Settings → Users.
+            </span>
+          )}
         </FormField>
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
