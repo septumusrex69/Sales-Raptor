@@ -19309,3 +19309,67 @@ create policy "client_documents_remove" on storage.objects
     bucket_id = 'client-documents'
     and public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
   );
+
+-- ============================================================================
+-- UNDOING A HANDOVER THAT SHOULD NEVER HAVE COME IN.
+--
+-- THE FIRM, after a test import went in twice: "make sure that everything is being deleted." And
+-- the general case behind it: a client sends the wrong file, or the same file twice, and two
+-- hundred accounts open that nobody should be collecting on. The only way back was a database
+-- console, which on the iPad the firm works on is no way back at all.
+--
+-- THE ROW IS KEPT AND MARKED, NOT REMOVED. The accounts it opened go; the batch stays, carrying
+-- who undid it and when. A reversal nobody can see afterwards is indistinguishable from data
+-- loss, and "this arrived on the 1st and was discarded on the 2nd" is exactly the question asked
+-- six months later by somebody holding a client's query.
+--
+-- WHAT MAY BE UNDONE is decided in src/lib/handoverDiscard.ts, which refuses a batch where a
+-- payment has been received, a remittance has gone to the client, a debtor has made an
+-- arrangement or a document has been filed -- the four things that make an account a record the
+-- firm may be asked about rather than a mistake. Notices already sent and fees already raised do
+-- NOT refuse it: a wrongly imported batch is exactly the case where the handover email has
+-- already gone, and a fee is only billable once money is recovered.
+-- ============================================================================
+alter table public.handovers
+  add column if not exists discarded_at timestamptz,
+  add column if not exists discarded_by uuid references public.profiles (id) on delete set null,
+  add column if not exists discarded_reason text;
+
+comment on column public.handovers.discarded_at is
+  'When this batch was undone: the accounts it opened were removed. The row is kept and marked '
+  'rather than removed, so that a batch which arrived and was reversed is still answerable '
+  'afterwards -- a reversal nobody can see is indistinguishable from data loss.';
+
+-- ONE MORE CAPABILITY: undoing a handover that should never have come in. Administrator only,
+-- and the role templates are held against the TypeScript list in both directions by
+-- check-capabilities -- so a capability added to one and not the other is a button that draws
+-- for somebody the database will refuse, or a rule a grant cannot reach.
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile',
+      'library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;

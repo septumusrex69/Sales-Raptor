@@ -8,6 +8,9 @@ import { ClientPicker } from '../ui/ClientPicker'
 import { DictateButton } from '../ui/Dictate'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import {
+  discardHandover, fetchDiscardableBatches, type DiscardableBatch,
+} from '../../lib/handoverDiscard.ts'
 import { parseCsv } from '../../lib/csv'
 import { readXlsxRows } from '../../lib/xlsx'
 import { readSingleCsvFromZip } from '../../lib/zip'
@@ -22,6 +25,7 @@ import {
   type HandoverDraft, type JudgedDraft,
 } from '../../lib/handoverDraft'
 import { canAccept, type Decision } from '../../lib/handoverDecision.ts'
+import { canDiscardHandover } from '../../lib/permissions.ts'
 import { columnWidthCh, foldableColumns } from '../../lib/handoverColumnWidth.ts'
 import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
@@ -35,7 +39,7 @@ import { formatCurrency } from '../../data/mockData'
 const today = () => new Date().toISOString().slice(0, 10)
 
 /** Which of this screen's actions is running. See the note on `busy`. */
-type BusyJob = 'load' | 'read' | 'hold' | 'approve' | 'discard'
+type BusyJob = 'load' | 'read' | 'hold' | 'approve' | 'discard' | 'undo'
 
 /**
  * EVERY COLUMN OF THE SHEET, IN THE SHEET'S OWN ORDER.
@@ -127,7 +131,10 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const { companies, deals } = useAppStore()
   const navigate = useNavigate()
   /* The approver's own session, so the corrections email goes out on their mailbox. */
-  const { session } = useAuth()
+  const { session, currentUser } = useAuth()
+  /* Administrator only -- see canDiscardHandover. Everyone else sees the batch and its counts and
+     no button, which is the honest shape: the information is not the privilege. */
+  const canDiscard = canDiscardHandover(currentUser)
   /* A CLIENT IS ONE WITH A CODE OR A WON DEAL, which is how CompanyDetail decides it too. A list
      of every company would offer the prospects a handover cannot come from. */
   const clients = useMemo(() => {
@@ -207,6 +214,18 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
    * approval as well as on load, so the warning appears the moment it becomes true.
    */
   const [unallocated, setUnallocated] = useState<UnallocatedBatch[]>([])
+  /**
+   * BATCHES OF THIS CLIENT'S THAT COULD STILL BE UNDONE.
+   *
+   * THE FIRM: "make sure that everything is being deleted" -- after a test import went in twice,
+   * with no way back inside the app. The general case is the one worth building for: a client
+   * sends the wrong file, or the same file twice, and two hundred accounts open that nobody
+   * should be collecting on.
+   */
+  const [batches, setBatches] = useState<DiscardableBatch[]>([])
+  /** The batch whose Discard has been pressed, and the word typed into it. */
+  const [discarding, setDiscarding] = useState<DiscardableBatch | null>(null)
+  const [typed, setTyped] = useState('')
   const refreshDrafts = useCallback(async () => {
     setOpenDrafts(await fetchOpenDrafts().catch(() => []))
     /* Never fatal: a screen that will not render because a warning could not be counted is worse
@@ -214,6 +233,13 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     setUnallocated(await fetchUnallocatedBatches().catch(() => []))
   }, [])
   useEffect(() => { void refreshDrafts() }, [refreshDrafts])
+
+  /* Re-read whenever the client changes AND after an import or a discard, so the list is never
+     offering to undo a batch that is already gone. */
+  const refreshBatches = useCallback(async () => {
+    setBatches(companyId ? await fetchDiscardableBatches(companyId).catch(() => []) : [])
+  }, [companyId])
+  useEffect(() => { void refreshBatches() }, [refreshBatches])
 
   /*
    * THE NEWEST READ WINS, and an older one that lands after it is thrown away.
@@ -449,6 +475,105 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
         and always will be; a warning that counted it would be on the screen for ever and read by
         nobody, which CLAUDE.md names as worse than no warning.
       */}
+      {/*
+        AND WHAT CAME IN THAT SHOULD NOT HAVE.
+        
+        THE FIRM: "make sure that everything is being deleted." A client sends the wrong file, or
+        the same file twice, and two hundred accounts open that nobody should be collecting on --
+        and until now the only way back was a database console, which on an iPad is no way back.
+        
+        ONLY WHERE THERE IS SOMETHING TO UNDO. A client whose batches have all been worked shows
+        nothing here, because a Discard button beside nothing is a button somebody presses to find
+        out what it does.
+      */}
+      {batches.length > 0 && (
+        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+          <p className="text-xs font-medium text-slate-500">Handovers already in</p>
+          <ul className="mt-1.5 space-y-1.5">
+            {batches.map((b) => (
+              <li key={b.handoverId} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px]">
+                <span className="text-slate-700">
+                  {b.reference ?? 'A handover'} · {b.accounts.toLocaleString('en-ZA')}
+                  {b.accounts === 1 ? ' account' : ' accounts'} · {formatCurrency(b.capital)}
+                </span>
+                {/*
+                  SAID BEFORE IT IS PRESSED, not after. Debtors having already been written to is
+                  the thing somebody most needs to know and the thing this does NOT refuse over --
+                  a wrongly imported batch is exactly the case where the handover email has gone.
+                */}
+                {b.noticesSent > 0 && (
+                  <span className="text-[11px] text-amber-700">
+                    {b.noticesSent} notice{b.noticesSent === 1 ? '' : 's'} already sent to debtors
+                  </span>
+                )}
+                {b.blockers.length > 0 ? (
+                  <span className="text-[11px] text-slate-400" title={b.blockers.join(' ')}>
+                    Cannot be undone — {b.blockers[0]}
+                  </span>
+                ) : canDiscard ? (
+                  <button type="button" onClick={() => { setDiscarding(b); setTyped('') }}
+                    className="text-[12px] font-medium text-negative-700 hover:underline">
+                    Discard
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+
+          {/*
+            TYPED, NOT TAPPED. The same shape deleting a document uses, for a bigger reason: this
+            removes every account a batch opened, with their contacts, diary entries and workflow
+            runs. A misplaced tap cannot spell DISCARD, and somebody who types it has read the
+            number above it.
+          */}
+          {discarding && (
+            <div className="mt-3 rounded-lg border border-negative-100 bg-negative-50 p-3">
+              <p className="text-sm font-medium text-negative-700">
+                Undo this handover?
+              </p>
+              <p className="text-xs text-slate-600 mt-1">
+                {discarding.accounts.toLocaleString('en-ZA')}
+                {discarding.accounts === 1 ? ' account' : ' accounts'} worth{' '}
+                {formatCurrency(discarding.capital)} will be removed, with their contacts, diary
+                entries and workflow runs. The handover itself stays on record, marked as
+                discarded.
+                {discarding.noticesSent > 0 && ` ${discarding.noticesSent} notice${
+                  discarding.noticesSent === 1 ? ' has' : 's have'} already gone to debtors; that cannot be undone.`}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="DISCARD"
+                  aria-label="Type DISCARD to confirm"
+                  className="text-sm rounded-lg border border-slate-200 px-2.5 py-1.5 font-mono w-32 bg-white" />
+                <button type="button"
+                  disabled={typed.trim().toUpperCase() !== 'DISCARD' || busy?.job === 'undo'}
+                  onClick={async () => {
+                    /* `undo`, not `discard`: discarding a DRAFT already owns that job name, and
+                       sharing it would grey this button out while an unrelated draft is going. */
+                    setBusy({ job: 'undo', message: 'Undoing the handover' }); setError(null)
+                    try {
+                      const { accounts } = await discardHandover({
+                        handoverId: discarding.handoverId,
+                        by: currentUser?.id ?? null,
+                        reason: null,
+                      })
+                      setDiscarding(null); setTyped('')
+                      setDone(`${accounts.toLocaleString('en-ZA')} ${accounts === 1 ? 'account was' : 'accounts were'} removed.`)
+                      await refreshBatches(); await refreshDrafts()
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e))
+                    } finally { setBusy(null) }
+                  }}
+                  className="text-sm font-medium px-3 py-1.5 rounded-lg bg-negative text-white disabled:opacity-40">
+                  {busy?.job === 'undo' ? 'Undoing…' : 'Undo the handover'}
+                </button>
+                <button type="button" onClick={() => { setDiscarding(null); setTyped('') }}
+                  className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {unallocated.length > 0 && (
         <div className="mb-4 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
           <p className="text-sm font-medium text-navy-950 flex items-center gap-1.5">

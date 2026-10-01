@@ -340,3 +340,31 @@ export function canViewFinance(user: Pick<User, 'role' | 'grants' | 'revokes'> |
 export function canRecordPayment(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
   return can(user, 'payment.record')
 }
+
+/**
+ * WHO MAY UNDO A HANDOVER THAT SHOULD NEVER HAVE COME IN.
+ *
+ * THE FIRM, after a test import went in twice: "make sure that everything is being deleted." The
+ * general case is a client sending the wrong file, or the same file twice, and two hundred
+ * accounts opening that nobody should be collecting on.
+ *
+ * ADMINISTRATOR ONLY, AND NARROWER THAN ANYTHING ELSE IN THIS FILE — narrower than approving the
+ * import that created them. Approving is a judgement about a sheet; this removes accounts, their
+ * contacts, their diary entries and the record of every notice sent on them. The person who can
+ * do that should be the person who answers for the database, not the person who happened to run
+ * the import.
+ *
+ * A CAPABILITY, NOT A ROLE READ, AND A CHECK MADE ME WRITE IT TWICE. I had it as
+ * `role === 'Administrator'`, which check-capabilities refused: the file excuses exactly four
+ * role reads and each answers something other than "may you". This answers precisely that, so it
+ * belongs in the capability list — where an administrator holds it by default and, the day the
+ * firm wants one liaison manager able to undo an import, it can be given to that one person
+ * without making them an administrator. Which is the whole reason the capability tier exists.
+ *
+ * `handoverDiscard` REFUSES FAR MORE THAN THIS ALLOWS. A payment received, a remittance already
+ * gone to the client, an arrangement, a filed document — any of those and nobody can undo it,
+ * because by then it is a record the firm may be asked about rather than a mistake.
+ */
+export function canDiscardHandover(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'handover.discard')
+}

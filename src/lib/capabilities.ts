@@ -76,6 +76,7 @@ export type Capability =
   | 'book.reassign'
   | 'book.freeze'
   | 'floor.lead'
+  | 'handover.discard'
   /* ---- clients and disputes ---- */
   | 'client.view'
   | 'dispute.write_to_client'
@@ -156,6 +157,16 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     blurb: 'Stop or restart work on one. Usually something a CLIENT asked for, which is why the '
       + 'liaisons have it and a collector does not.',
     group: 'The book',
+  },
+  'handover.discard': {
+    label: 'Undo a handover',
+    blurb: 'Remove every account a batch opened, when a client sent the wrong file or sent the '
+      + 'same one twice. Refused outright the moment a payment, a remittance, an arrangement or a '
+      + 'filed document makes one of those accounts a record rather than a mistake.',
+    group: 'The book',
+    /* The browser's rule only. The database lets any signed-in person delete an account, which is
+       its own hole and a wider one than this -- see handoverDiscard.ts. */
+    inDatabase: false,
   },
   'floor.lead': {
     label: 'See the whole collections floor',
