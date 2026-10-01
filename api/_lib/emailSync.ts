@@ -1,6 +1,7 @@
 import { ImapFlow, type ListResponse } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { referencesIn, normaliseReference, isColleague } from '../../src/lib/mailReference.js'
 import { decrypt } from './crypto.js'
 import {
   assembleBody, describeParts, flattenParts, inlineImagesFromParsed, listedAttachments,
@@ -297,8 +298,19 @@ async function markUserEmailLinked(
   rowId: string,
   accountId: string,
 ): Promise<void> {
+  /*
+   * AND IT CLEARS `no_record_at`, WHICH IS NOT TIDYING -- IT IS THE CONSTRAINT.
+   *
+   * schema.sql: "A message cannot be both on a record and on nobody's file", enforced by
+   * user_emails_no_record_unmatched. A colleague's mail now lands in Open mail by default, so a
+   * row that then matches by its subject reference would violate that check and the UPDATE would
+   * be REFUSED -- the message would stay in Open mail with nothing anywhere saying why.
+   *
+   * The schema's own note already says this is the rule: "Matching CLEARS no_record_at -- matching
+   * is the strongest statement anybody can make about a message." This is that sentence, done.
+   */
   await admin.from('user_emails')
-    .update({ linked_account_id: accountId, linked_at: new Date().toISOString() })
+    .update({ linked_account_id: accountId, linked_at: new Date().toISOString(), no_record_at: null })
     .eq('id', rowId)
     .is('linked_account_id', null)
 }
@@ -423,11 +435,55 @@ function headerFields(parsed: {
  * are not a debtor contact) and somebody files it by hand. There is no way to guess a ticket from
  * a message that points at nothing.
  */
+/**
+ * THE ACCOUNT A SUBJECT LINE NAMES, AND ONLY WHERE IT NAMES EXACTLY ONE.
+ *
+ * THE FIRM: "somebody from inside Bredell Ferreira should obviously be in open mail." Mostly yes --
+ * and 42 of the 105 colleague emails waiting to be matched carried a reference, a balance or a
+ * discount. "RE: Viva Elukwatini (Pty) Ltd // African Ziyebeja (VE0001)" is a colleague writing
+ * about a debtor, and Open mail means on nobody's file and nothing charged.
+ *
+ * ONE ACCOUNT OR NONE, WHICH IS THE WHOLE GUARD. CLAUDE.md: `client_reference` is the client's own
+ * filing and is NOT unique -- 5 013 of them sit on more than one account, 21% of the book. So the
+ * query asks for TWO and accepts the answer only when one comes back. Filing a colleague's note
+ * about a discount onto the wrong debtor, and charging that debtor R13 under item 6 for receiving
+ * it, is worse than leaving it in Open mail where somebody can see it.
+ *
+ * THE TOKENS ARE QUOTED into the filter. They are letters, digits and at most one `-` or `/` by
+ * construction, but a bare `/` in a PostgREST `or` is a syntax character and a reference is
+ * attacker-adjacent data: it arrives in a subject line from outside.
+ */
+async function accountFromReference(
+  admin: SupabaseClient,
+  subject: string | null | undefined,
+): Promise<string | null> {
+  for (const token of referencesIn(subject)) {
+    /* Both spellings: as typed, and with the separator taken out, because a person writes
+       RAP-123829 where the column holds one of the two. */
+    const variants = [...new Set([token, normaliseReference(token)])]
+    const or = variants
+      .flatMap((v) => [`case_number.ilike."${v}"`, `account_number.ilike."${v}"`, `client_reference.ilike."${v}"`])
+      .join(',')
+    const { data, error } = await admin.from('debtor_accounts').select('id').or(or).limit(2)
+    if (error) {
+      /* A lookup that failed must not stop the sync. The message simply stays unmatched, which is
+         where it would have been anyway. */
+      console.error(`[emailSync] reference lookup failed for ${token}: ${error.message}`)
+      continue
+    }
+    if (data && data.length === 1) return String(data[0].id)
+    if (data && data.length > 1) {
+      console.log(`[emailSync] reference ${token} is on more than one account -- left unmatched`)
+    }
+  }
+  return null
+}
+
 async function findAccount(
   admin: SupabaseClient,
   fromAddress: string,
-  parsed: { inReplyTo?: string; references?: string | string[] },
-): Promise<{ accountId: string; queryId: string | null; via: 'thread' | 'address' } | null> {
+  parsed: { inReplyTo?: string; references?: string | string[]; subject?: string },
+): Promise<{ accountId: string; queryId: string | null; via: 'thread' | 'address' | 'reference' } | null> {
   for (const id of threadIds(parsed.inReplyTo, parsed.references)) {
     const { data } = await admin
       .from('account_emails')
@@ -457,6 +513,15 @@ async function findAccount(
      and nothing about which of its tickets, and guessing one would be worse than leaving it on the
      account where somebody can see it. */
   if (contact) return { accountId: contact.account_id as string, queryId: null, via: 'address' }
+
+  /*
+   * LAST, AND DELIBERATELY SO. Thread and sender are facts about the message; a reference is what
+   * somebody typed, and a typo in a subject line should not outrank the debtor's own address. In
+   * practice they rarely compete -- a colleague writing about a debtor is not in that debtor's
+   * contacts, which is exactly why this route exists.
+   */
+  const byReference = await accountFromReference(admin, parsed.subject)
+  if (byReference) return { accountId: byReference, queryId: null, via: 'reference' }
   return null
 }
 
@@ -1138,7 +1203,27 @@ async function syncMailbox(
         ccRecipients,
         at: (parsed.date ?? new Date()).toISOString(),
         // isBlocked's twin — the same matching, the opposite intent. See loadSenderRules.
-        noRecordNeeded: isBlocked(normaliseAddress(fromAddress), senderRules),
+        /*
+         * OPEN MAIL BEFORE THE WORK QUEUE, FOR THREE REASONS RATHER THAN ONE.
+         *
+         *   A STANDING RULE, as before: a supplier this person has already settled.
+         *
+         *   HISTORY. The firm, watching four new mailboxes fill up: "should we just start their
+         *   mailboxes from scratch so that they can start matching from this point on forward?
+         *   Otherwise it could be overwhelming." Camille's inbox had 127 waiting. It is also
+         *   money: matching old post onto accounts raises item 6 at R13 a message against debtors
+         *   for correspondence dealt with months ago. The rows are still synced, still in All,
+         *   still searchable and still matchable by hand -- they just are not WORK.
+         *
+         *   A COLLEAGUE. Mail from the firm's own domain is not a debtor's and should not ask to
+         *   be matched to one. This is LAST of the three and it is the order that matters: a
+         *   colleague writing "// African Ziyebeja (VE0001)" is matched by that reference further
+         *   down, and matching clears this. 42 of the 105 colleague emails in the queue were
+         *   exactly that, so a blanket rule here would have buried them.
+         */
+        noRecordNeeded: isBlocked(normaliseAddress(fromAddress), senderRules)
+          || firstRead
+          || isColleague(normaliseAddress(fromAddress), conn.email),
       })
 
       /*
@@ -1411,7 +1496,17 @@ export async function syncConnection(
 
   await client.connect()
   try {
-    const inboxResult = await syncMailbox(client, admin, conn, 'INBOX', conn.last_seen_uid, 'inbox')
+    /*
+     * THE INBOX'S FIRST READ IS HISTORY, like every other folder's.
+     *
+     * `firstRead` has been honoured for Archive and every custom folder since it was written --
+     * "a folder being read for the first time is history, not post" -- and the INBOX, the one
+     * folder that matters, was never given it. So a new mailbox poured its whole recent inbox into
+     * Needs matching: 127 for Camille, 60 for Vusi, and climbing as the sync worked through the
+     * rest. The firm asked for exactly this rule by hand, not knowing it was already written down.
+     */
+    const inboxResult = await syncMailbox(
+      client, admin, conn, 'INBOX', conn.last_seen_uid, 'inbox', conn.last_seen_uid == null)
 
     const mailboxes = await client.list()
     const junkPath = findFolder(mailboxes, '\\Junk', ['junk', 'spam', 'junk email', 'bulk mail', 'inbox.junk', 'inbox.spam', 'inbox/junk', 'inbox/spam'])
