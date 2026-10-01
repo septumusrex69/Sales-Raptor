@@ -84,6 +84,30 @@ export function canViewClients(user: Pick<User, 'role' | 'grants' | 'revokes'> |
 }
 
 /**
+ * WHO MAY BE PUT DOWN AS A CLIENT'S LIAISON.
+ *
+ * THE FIRM, LOOKING AT THE PICKER ON "ADD A CLIENT": "There should only be liaisons or liaison
+ * manager, not anybody else, any other user when adding a client."
+ *
+ * It was offering every active person in the firm -- a pre-legal agent, a sales rep, whoever had
+ * just been invited. The prop was even called `liaisons`; nothing had ever filtered it.
+ *
+ * A ROLE AND NOT A CAPABILITY, which is the opposite of how most of this file works and is
+ * deliberate. `client.view` is held by seven of the nine roles -- a pre-legal TEAM LEADER has it,
+ * so does a sales rep -- because seeing a client and BEING the firm's named contact for one are
+ * different questions. This is the second question: whose name goes on the mandate, who the
+ * client telephones, and who `{{liaison_name}}` resolves to on a letter.
+ *
+ * A GRANT CANNOT WIDEN IT, and that follows. Giving somebody `client.view` so they can read a
+ * commission rate must not quietly make them answerable for the relationship.
+ */
+export const CLIENT_LIAISON_ROLES = ['Liaison', 'Liaison Manager'] as const
+
+export function canBeClientLiaison(user: Pick<User, 'role'> | null | undefined): boolean {
+  return !!user && (CLIENT_LIAISON_ROLES as readonly string[]).includes(user.role)
+}
+
+/**
  * Whether this person may move a message that is ALREADY filed onto a different record.
  *
  * Administrator only, at the firm's instruction. Filing unfiled mail is everyday work and stays

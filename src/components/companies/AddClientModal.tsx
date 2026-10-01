@@ -104,7 +104,19 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
     if (!name.trim()) out.push('A client needs a name.')
     const bad = codeProblem(code, takenCodes)
     if (bad) out.push(bad)
-    if (!form.accountOwnerId) out.push('Somebody has to look after this client.')
+    /*
+     * AND THE REASON, WHERE THERE IS ONE. Since only a Liaison or a Liaison Manager may be a
+     * client's liaison -- the firm: "there should only be liaisons or liaison manager" -- a firm
+     * with neither gets an empty picker, and "somebody has to look after this client" is then a
+     * demand nobody can meet. It has to say what to go and do.
+     */
+    if (!form.accountOwnerId) {
+      out.push(liaisons.length === 0
+        ? 'There is nobody to look after this client yet. A client\u2019s liaison must be a Liaison '
+          + 'or a Liaison Manager, and nobody here holds either role. Set somebody\u2019s role in '
+          + 'Settings \u2192 Users first.'
+        : 'Somebody has to look after this client.')
+    }
     if (services.length === 0) out.push('Choose at least one service they have signed for.')
     if (kind === 'fixed') {
       const n = asFraction(rate)
@@ -306,9 +318,24 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
               </span>
             </FormField>
             <FormField label="Client liaison">
-              <select className={inputClass} value={form.accountOwnerId} onChange={set('accountOwnerId')}>
-                {liaisons.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              {/*
+                ONLY A LIAISON OR A LIAISON MANAGER, at the firm's instruction. The list used to be
+                every active person in the firm -- a pre-legal agent, a sales rep, whoever had just
+                been invited -- while the prop was already called `liaisons`.
+              */}
+              <select className={inputClass} value={form.accountOwnerId} onChange={set('accountOwnerId')}
+                disabled={liaisons.length === 0}>
+                {liaisons.length === 0
+                  ? <option value="">Nobody holds that role yet</option>
+                  : liaisons.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
+              {/* SAID WHERE IT IS CHOSEN, not only in the list of problems after pressing Save:
+                  an empty picker with no explanation reads as a screen that failed to load. */}
+              <span className="block text-[11px] text-slate-400 mt-1">
+                {liaisons.length === 0
+                  ? 'A Liaison or Liaison Manager. Set somebody\u2019s role in Settings \u2192 Users.'
+                  : 'The firm\u2019s named contact for this client.'}
+              </span>
             </FormField>
           </div>
           <FormField label="What they have signed for">

@@ -9,6 +9,7 @@ import { topLevelClients, rollupClient } from '../../lib/companyRollup'
 import { AddClientModal } from '../../components/companies/AddClientModal'
 import { useAuth } from '../../store/AuthContext'
 import type { ID } from '../../types'
+import { canBeClientLiaison } from '../../lib/permissions'
 
 export function CompaniesList() {
   const { companies, deals, users, addCompany } = useAppStore()
@@ -172,7 +173,10 @@ export function CompaniesList() {
              clients -- Adowa and its Ellis Park property share APM, which is Swordfish's doing and
              is frozen -- but proposing a code a child already holds would still read as a clash. */
           takenCodes={companies.map((c) => c.code ?? '').filter(Boolean)}
-          liaisons={users.filter((u) => u.status === 'Active')}
+          /* THE PROP WAS ALWAYS CALLED `liaisons` AND NOTHING HAD EVER FILTERED IT. The firm:
+             "there should only be liaisons or liaison manager, not anybody else, any other user
+             when adding a client." See canBeClientLiaison. */
+          liaisons={users.filter((u) => u.status === 'Active' && canBeClientLiaison(u))}
           busy={false}
           error={addError}
           onClose={() => setAdding(false)}
