@@ -352,6 +352,79 @@ ok('several attempts are counted',
 check('nothing done reads as nothing done', clientLine({}).happened, 'No contact attempt has been made yet.')
 ok('...and is not hidden by a follow-up date being booked',
   /No contact attempt has been made/.test(accountNarrative({ next: { kind: 'review', dueOn: '2026-09-20' } })))
+
+/*
+ * BUT A FRESH HANDOVER HAS SOMETHING BETTER TO SAY, AND IT IS STILL TRUE.
+ *
+ * THE FIRM, on an account handed over that morning: "this new account says no contact attempt has
+ * been made... it's a very bad thing to say to the client. I think we should rather say the
+ * account has been handed over, the notifications of handover have gone out."
+ *
+ * The silence clause above is kept for the case it was written for -- an account with no handover
+ * date and nothing sent genuinely has had nothing done to it. What these add is that the firm's
+ * own records usually HAVE something dated to report, and reaching for the absence first was the
+ * mistake.
+ */
+check('an account that has only arrived says so',
+  clientLine({ handedOverOn: '2026-09-17' }).happened,
+  'The account was handed over to us on 17 September 2026.')
+check('...and the notices going out outranks it',
+  clientLine({ handedOverOn: '2026-09-17', noticesSentOn: '2026-10-01' }).happened,
+  'We wrote to the debtor on 1 October 2026, introducing the matter and asking them to settle the account.')
+/* AND IT OUTRANKS A BARE ATTEMPT TOO. "We emailed the debtor" is the weaker sentence: it says an
+   email went, not what the email was -- which on a debtor's first contact is the information. */
+ok('...and outranks a bare logged action',
+  /introducing the matter/.test(clientLine({
+    noticesSentOn: '2026-10-01', lastAttemptOn: '2026-10-01', lastAttemptChannel: 'email',
+  }).happened))
+/*
+ * AND IT NEVER CLAIMS A NEGOTIATION. The firm's own suggestion included "we have initiated the
+ * negotiations" and this deliberately does not say it: nobody has spoken to the debtor, and a
+ * claim about work that has not happened is the one dishonest line this whole file guards.
+ */
+for (const line of [
+  clientLine({ handedOverOn: '2026-09-17' }).happened,
+  clientLine({ handedOverOn: '2026-09-17', noticesSentOn: '2026-10-01' }).happened,
+]) {
+  ok('a handover sentence claims no contact with the debtor', !/negotiat|spoke|contacted the debtor/i.test(line))
+}
+/* ANYTHING THE DEBTOR DID STILL OUTRANKS BOTH. A payment, a promise or a dispute is a fact about
+   the DEBTOR, and the handover is a fact about the file. */
+ok('a payment still outranks the handover',
+  /received a payment/.test(clientLine({
+    handedOverOn: '2026-09-17', noticesSentOn: '2026-10-01',
+    paidInPeriod: { amount: 2000, on: '2026-10-02' },
+  }).happened))
+
+/*
+ * A DATE THAT HAS PASSED IS NOT A COMMITMENT.
+ *
+ * THE FIRM: "not 'we will make the first contact today', because the reports go out on the 11th
+ * to the client." A monthly report reaches a client a fortnight after the facts in it, so a
+ * follow-up booked for the 5th reads in November as the firm quoting a plan it can be seen to
+ * have missed.
+ */
+check('a follow-up still to come is promised',
+  clientLine({ next: { kind: 'review', dueOn: '2026-10-05' }, asAt: '2026-10-01' }).next,
+  'We will follow the account up on 5 October 2026.')
+check('...and one whose date has gone is not',
+  clientLine({ next: { kind: 'review', dueOn: '2026-10-05' }, asAt: '2026-11-11' }).next, '')
+/* ON THE DAY ITSELF IT STILL STANDS: a report dated the 5th about work booked for the 5th is a
+   promise about today, not about yesterday. */
+check('...with the day itself still counting as to come',
+  clientLine({ next: { kind: 'review', dueOn: '2026-10-05' }, asAt: '2026-10-05' }).next,
+  'We will follow the account up on 5 October 2026.')
+/* AND WITHOUT asAt NOTHING IS SUPPRESSED, which is what every existing caller relies on. */
+ok('a line with no as-at date behaves as it always did',
+  clientLine({ next: { kind: 'review', dueOn: '2020-01-01' } }).next.length > 0)
+/*
+ * AND `happened` CARRIES ON REGARDLESS. Suppressing the commitment must not empty the whole line
+ * -- what took place is still true however long ago the diary date was.
+ */
+ok('...and what happened is still reported',
+  clientLine({
+    handedOverOn: '2026-09-17', next: { kind: 'review', dueOn: '2026-10-05' }, asAt: '2026-11-11',
+  }).happened.length > 0)
 /*
  * AN ACTIVE ACCOUNT WITH NOTHING BOOKED IS ADRIFT — the firm has stopped working it without
  * deciding to — and the client is entitled to see that rather than a blank space.

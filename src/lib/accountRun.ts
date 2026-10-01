@@ -44,6 +44,15 @@ export interface AccountRun {
   leftReason: string | null
   startedOn: string
   dayUnit: DayUnit
+  /**
+   * What started this run — `allocated`, `by_hand`, `dispute`, and so on.
+   *
+   * CARRIED SO THE HANDOVER CAN BE RECOGNISED WITHOUT READING ITS NAME. The client line wants to
+   * say "we sent the debtor the handover notices on the 1st", and the only run that can answer
+   * that is the one that starts when an account lands on somebody's desk. Matching on the word
+   * "Handover" would be a rule the firm could break by renaming a workflow in the library.
+   */
+  triggerKind: string | null
   steps: RunStep[]
   /**
    * Every hold this run has had, oldest first.
@@ -67,7 +76,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
     .from('workflow_runs')
     .select(`
       id, state, left_reason, started_on,
-      workflow_versions!inner(day_unit, workflows!inner(name)),
+      workflow_versions!inner(day_unit, trigger_kind, workflows!inner(name)),
       workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
       workflow_run_steps(id, due_on, state, note, sent_at, instalment_no,
         workflow_nodes!inner(label, channel, day, ordinal, needs_release, after_minutes))
@@ -84,6 +93,10 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
     leftReason: r.left_reason ?? null,
     startedOn: r.started_on,
     dayUnit: (r.workflow_versions?.day_unit ?? 'calendar') as DayUnit,
+    /* Named by hand like every field here -- see CLAUDE.md on mappers that drop a column
+       silently. Present in the select above and in the interface, or it reads undefined for ever
+       and the handover sentence never appears. */
+    triggerKind: r.workflow_versions?.trigger_kind ?? null,
     /*
      * ORDERED BY THE DATE IT LANDS ON, THEN BY THE DAY NUMBER, THEN BY THE NODE'S OWN ORDINAL.
      *
@@ -265,6 +278,34 @@ export async function nudgeWorkflowsForAccount(accountId: string): Promise<void>
   /* No session is not an error here. Signed out, there is nothing to nudge WITH and nothing the
      caller could do about it; the sweep picks the run up either way. */
   if (token) nudgeWorkflows(token, accountId)
+}
+
+/**
+ * WHEN THE HANDOVER NOTICES ACTUALLY REACHED THE DEBTOR, or null.
+ *
+ * THE FIRM, on what a client should be told about a fresh handover: "the account has been handed
+ * over, the notifications of handover have gone out... not 'we will make the first contact'
+ * today, because the reports go out on the 11th to the client." A commitment about a date that
+ * has passed by the time it is read is worse than no commitment; what has already happened keeps.
+ *
+ * THE RUN THAT STARTED ITSELF ON ALLOCATION, not the one called "Handover". `trigger_kind` is the
+ * fact; the name is a label somebody can edit in the library, and a client sentence that stops
+ * appearing because a workflow was renamed is the kind of break nobody traces back.
+ *
+ * THE EARLIEST SEND, not the latest: the handover is an email and an SMS behind it, and what the
+ * sentence means is the day the firm first wrote to this debtor.
+ *
+ * Null where nothing has gone — which is the state the firm found their eight accounts in, and
+ * the sentence must not claim otherwise.
+ */
+export function handoverNoticesSentOn(runs: AccountRun[]): string | null {
+  const sent = runs
+    .filter((r) => r.triggerKind === 'allocated')
+    .flatMap((r) => r.steps)
+    .map((s) => s.sentAt)
+    .filter((at): at is string => !!at)
+    .sort()
+  return sent[0]?.slice(0, 10) ?? null
 }
 
 /**

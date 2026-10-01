@@ -94,6 +94,42 @@ export interface NarrativeInput {
   /** Why work is stopped, where it is. */
   frozenReason?: string | null
   frozenOn?: string | null
+  /**
+   * THE DAY THE CLIENT HANDED THIS ACCOUNT TO THE FIRM.
+   *
+   * The first true thing there is to say about an account nobody has worked yet, and better than
+   * the absence it replaces: "No contact attempt has been made yet" is the firm reporting its own
+   * silence, and on an account that arrived this morning it is both unflattering and the least
+   * informative sentence available.
+   */
+  handedOverOn?: string | null
+  /**
+   * THE DAY THE HANDOVER NOTICES WENT OUT, where they have.
+   *
+   * THE FIRM, rejecting what this said on a fresh handover: "the account has been handed over,
+   * the notifications of handover have gone out, we have initiated the negotiations, something
+   * like that."
+   *
+   * NOT "WE HAVE INITIATED NEGOTIATIONS", which is the one part of that this does not do. Nobody
+   * has spoken to the debtor; claiming a negotiation that has not happened is the single
+   * dishonest thing this file exists to avoid, and it is the sentence that becomes a problem the
+   * day a client asks for the call log behind it. What the notices going out buys is that there
+   * IS something true and recent to say instead.
+   */
+  noticesSentOn?: string | null
+  /**
+   * THE DAY THIS LINE IS BEING READ AS AT. Today on a screen; the report's own date in a report.
+   *
+   * THE FIRM: "not 'we will make the first contact today', because the reports go out on the
+   * 11th to the client." A monthly report is read a fortnight after the facts in it, and a
+   * commitment to do something on a date that has already passed is not a commitment -- it is
+   * the firm quoting a plan the client can see it missed.
+   *
+   * PASSED IN, NEVER READ OFF A CLOCK, like every other input here: a report re-run in June must
+   * read exactly as it did in March, and a function that asked `new Date()` could not promise
+   * that. Optional, and left out nothing is suppressed -- which is the old behaviour.
+   */
+  asAt?: string | null
 }
 
 export interface ClientLine {
@@ -201,6 +237,16 @@ function whatHappened(input: NarrativeInput): string {
     return `We lodged a trace with the credit and information bureaus on ${onDate(input.traceLodgedOn)}.`
   }
 
+  /*
+   * THE HANDOVER NOTICES, ABOVE THE ATTEMPT CLAUSES, because they say more. The attempt sentence
+   * below can manage "We emailed the debtor on 1 October"; this says WHAT the email was, which on
+   * the first contact a debtor has ever had from this firm is the whole of the information.
+   */
+  if (input.noticesSentOn) {
+    return `We wrote to the debtor on ${onDate(input.noticesSentOn)}, introducing the matter and `
+      + 'asking them to settle the account.'
+  }
+
   if (input.lastAttemptOn) {
     const channel = input.lastAttemptChannel ? ` ${CHANNEL_WORD[input.lastAttemptChannel]}` : ''
     if (input.reached === true) {
@@ -242,6 +288,25 @@ function whatHappened(input: NarrativeInput): string {
       : `We logged an action on this account on ${onDate(input.lastAttemptOn)}.`
   }
 
+  /*
+   * NOTHING DONE YET, SO SAY WHAT DID HAPPEN. The account arriving IS an event, it is dated, and
+   * it is the client's own act -- so a client reading it learns where the file stands rather than
+   * being told the firm has been quiet.
+   *
+   * IT STILL DOES NOT CLAIM CONTACT. "Handed over to us on the 17th" is the one fact available
+   * and the sentence stops there; the moment a notice goes out, the clause above takes over and
+   * says so.
+   */
+  if (input.handedOverOn) {
+    return `The account was handed over to us on ${onDate(input.handedOverOn)}.`
+  }
+
+  /*
+   * AND WHERE THERE IS NOT EVEN THAT, the silence is reported. This is the sentence the firm
+   * objected to and it is kept for the case it was written for: an account with no handover date,
+   * no notice sent and nothing recorded has genuinely had nothing done to it, and dressing that
+   * up would be the one dishonest line in the document.
+   */
   return 'No contact attempt has been made yet.'
 }
 
@@ -292,6 +357,23 @@ function whatNext(input: NarrativeInput): string {
    * to see that rather than a blank space.
    */
   if (!input.next) return 'No further action has been scheduled.'
+  /*
+   * A DATE THAT HAS PASSED IS NOT A COMMITMENT.
+   *
+   * THE FIRM: "not 'we will make the first contact today', because the reports go out on the 11th
+   * to the client." A monthly report is read a fortnight after the month it covers, so "We will
+   * follow the account up on 5 October" reaches a client in November as the firm quoting a plan
+   * the client can see it missed -- and on a live screen it is simply wrong.
+   *
+   * EMPTY RATHER THAN REWORDED. `ClientLine.next` is already allowed to be empty and every reader
+   * of it already guards on that, so the half that has nothing true to say says nothing -- while
+   * `happened` carries on reporting what actually took place. Inventing a replacement commitment
+   * here would be inventing a plan nobody made.
+   *
+   * ON the day itself still counts: a report dated the 5th about a follow-up booked for the 5th
+   * is a promise about today, not about yesterday.
+   */
+  if (input.asAt && input.next.dueOn < input.asAt.slice(0, 10)) return ''
   const on = onDate(input.next.dueOn)
   /*
    * The rung only speaks where the diary has nothing more specific to say. A dispute chase or a

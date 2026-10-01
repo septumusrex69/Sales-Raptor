@@ -82,7 +82,8 @@ import { Modal } from '../../components/ui/Modal'
 import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import { TestClockPanel } from '../../components/collections/TestClockPanel'
 import {
-  fetchAccountRuns, fetchStartableWorkflows, type AccountRun, type StartableWorkflow,
+  fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn,
+  type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
 import { startSentence, startShortLabel } from '../../lib/workflowStart.ts'
 import { liveArrangement, nextUnpaid } from '../../lib/ptpSchedule.ts'
@@ -905,6 +906,26 @@ export function AccountDetail() {
         next: account.diaryDate ? { kind: 'review', dueOn: account.diaryDate } : null,
         frozenReason: account.frozenReason,
         frozenOn: account.frozenAt?.slice(0, 10) ?? null,
+        /*
+         * WHAT A FRESH HANDOVER HAS TO SAY FOR ITSELF.
+         *
+         * THE FIRM, looking at an account handed over that morning: "this new account says no
+         * contact attempt has been made... it's a very bad thing to say to the client. I think we
+         * should rather say the account has been handed over, the notifications of handover have
+         * gone out."
+         *
+         * Both facts, in the order they happen. The notices win where they have gone; the
+         * handover date is what there is before that, and it is still an event with a date rather
+         * than a report of the firm's own silence.
+         */
+        handedOverOn: account.handoverDate,
+        noticesSentOn: handoverNoticesSentOn(runs),
+        /*
+         * AND TODAY, SO A DATE THAT HAS PASSED STOPS BEING A PROMISE. The firm's point about the
+         * monthly report -- "the reports go out on the 11th" -- is true of this panel too: a
+         * follow-up booked for last Tuesday is not something the firm "will" do.
+         */
+        asAt: new Date().toISOString().slice(0, 10),
       })}
       /*
         CLIENT_POSITIONS here, deliberately, where every other position on this screen reads from
