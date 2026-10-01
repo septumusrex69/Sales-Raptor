@@ -13,7 +13,7 @@
  */
 import {
   checkPhone, dateFault, detectDateOrder, displayDate, looksLikeEmail, parseMoney, parseSheetDate,
-  planHandover, spellDate,
+  planHandover, repairPhone, spellDate,
 } from '../../src/lib/handoverImport.ts'
 import { validateNewDebtor } from '../../src/lib/newDebtor.ts'
 import { suggestedDesk } from '../../src/lib/linkedAccount.ts'
@@ -509,11 +509,49 @@ check('a good number is a good number', checkPhone('082 123 4567'), 'ok')
 check('...in international form too', checkPhone('+27821234567'), 'ok')
 check('...and with the brackets and dashes people type', checkPhone('(012) 348-2156'), 'ok')
 check('nine digits is the leading zero Excel ate', checkPhone('821234567'), 'lost-leading-zero')
-check('...and is reported as that, not as invalid',
-  /missing its leading zero/.test(firstMessage(
-    rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '821234567', 'x']).ready[0])), true)
 check('a word is not a telephone number', checkPhone('no number'), 'wrong')
 check('...nor is a number too short to be one', checkPhone('0821234'), 'wrong')
+
+/*
+ * AND IT IS PUT RIGHT RATHER THAN HANDED BACK.
+ *
+ * THE FIRM, looking at a screen of these: "if there is a thing and says there's no zero in the
+ * number, just have an option to click and say add it. Or should we automatically add zeros?"
+ *
+ * AUTOMATICALLY, AND THE ASYMMETRY IS WHY. A nine-digit number cannot be dialled at all, so
+ * leaving it alone and guessing wrong have the SAME cost -- which is the condition under which
+ * repairing imported data is safe, and it is not usually met. On the firm's own file it was 40
+ * cells in 42: hundreds of Accept presses on a repair nobody can evaluate by looking, since the
+ * original is unrecoverable from the nine digits.
+ */
+check('the zero goes back on', repairPhone('821234567'), '0821234567')
+check('...and the separators people type do not stop it', repairPhone('82 123 4567'), '0821234567')
+/* THE OTHER SHAPE EXCEL MAKES: +27 82 123 4567 read as text with the plus dropped. */
+check('eleven digits beginning 27 is the country code without its plus',
+  checkPhone('27821234567'), 'lost-country-code')
+check('...and comes back as a national number', repairPhone('27821234567'), '0821234567')
+/* AND NOTHING ELSE IS TOUCHED. A number already right is left exactly alone, and one nobody can
+   reconstruct is NOT guessed at -- which is the line between this and inventing data. */
+check('a good number is not meddled with', repairPhone('0821234567'), null)
+check('...nor is an international one', repairPhone('+27821234567'), null)
+check('...and a number too short to be one is not invented', repairPhone('0821234'), null)
+check('...nor is a word', repairPhone('no number'), null)
+
+/*
+ * REPORTED AS A NOTE, WHICH BLOCKS NOTHING. The level is the whole point: a warning that fires on
+ * most rows and whose answer is always the same press is a warning people stop reading -- and
+ * they stop reading the ones beside it, which are the ones that need somebody.
+ */
+const zeroRow = rows(['A1', '100', '2026-01-01', 'Person', 'Dube', '', '821234567', 'x']).ready[0]
+check('the repair is recorded', /lost its leading zero/.test(firstMessage(zeroRow)), true)
+check('...and shows what it was put back as', /0821234567/.test(firstMessage(zeroRow)), true)
+check('...as a note rather than something to answer',
+  (problemsOf(zeroRow).find((p) => /leading zero/.test(p.message)) ?? {}).level, 'note')
+/* AND THE SHEET KEEPS WHAT THE CLIENT SENT. The draft is the record of exactly that, and the
+   correction going back to them has to quote their own cell -- so the repair happens on the way
+   into the account, never in `values`. The same rule a substituted date of default follows. */
+check('...while the row still holds the number as it arrived',
+  zeroRow.values.cell_1, '821234567')
 
 /*
  * AN EMAIL ADDRESS, checked for what stops it being deliverable rather than against the RFC. A

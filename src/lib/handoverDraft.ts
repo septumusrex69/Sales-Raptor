@@ -702,21 +702,38 @@ export async function approveDraft(input: {
    * not worth losing 194 opened accounts over, so everything below collects its failures rather
    * than throwing.
    */
+  /*
+   * A NOTE IS NOT A CORRECTION, and this filter is the whole reason the level exists.
+   *
+   * A repaired telephone number is something the firm ALREADY PUT RIGHT on the way in -- the
+   * leading zero Excel ate, put back. Sending it to the client as a thing for them to fix would
+   * be asking them to correct something that is no longer wrong, on the one email of the import
+   * that is supposed to be a short list of real work.
+   *
+   * THE CLIENT STILL WANTS TELLING ONCE, at sheet level, that their export drops these -- that is
+   * a line in the covering email rather than a row per account, and it is not built yet.
+   */
   const asCorrection = (r: JudgedDraft['rows'][number]) => ({
     reference: r.values.client_reference,
     name: r.values.name,
-    problems: (r.planned?.problems ?? []).map((p) => ({
-      key: p.key, message: p.message, level: p.level,
-    })),
+    problems: (r.planned?.problems ?? [])
+      .filter((p): p is typeof p & { level: 'refuse' | 'warn' } => p.level !== 'note')
+      .map((p) => ({ key: p.key, message: p.message, level: p.level })),
     values: r.values,
     note: r.note,
   })
 
-  /* OPENED, BUT SOMETHING ON THEM NEEDS CONFIRMING. These get a query, because there is an
-     account to hang one on. */
+  /*
+   * OPENED, BUT SOMETHING ON THEM NEEDS CONFIRMING. These get a query, because there is an
+   * account to hang one on.
+   *
+   * COUNTED ON WHAT SURVIVES THE FILTER ABOVE, not on `problems.length`: a row whose only entry
+   * is a repaired telephone number has nothing to confirm, and a query raised on it would be a
+   * ticket somebody has to read and close for a thing already done.
+   */
   const corrections = accepted
-    .filter((r) => (r.planned?.problems.length ?? 0) > 0)
     .map(asCorrection)
+    .filter((c) => c.problems.length > 0)
 
   /*
    * AND THE ONES THAT DID NOT COME IN AT ALL, which were missing from this entirely.
@@ -731,8 +748,11 @@ export async function approveDraft(input: {
    * only thing wrong with a handover is the rows that were thrown out of it.
    */
   const notBroughtIn = judged.rows
-    .filter((r) => (r.excluded || r.planned?.refused) && (r.planned?.problems.length ?? 0) > 0)
+    .filter((r) => r.excluded || r.planned?.refused)
     .map(asCorrection)
+    /* Same reasoning as above: a row kept out of the import for a reason that is only a repaired
+       number is not a row, and the client is told about rows. */
+    .filter((c) => c.problems.length > 0)
 
   const problems: string[] = []
   /*

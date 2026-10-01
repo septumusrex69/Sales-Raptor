@@ -190,6 +190,38 @@ check('and it opens at the date of default', input.handoverDate, '2026-03-18')
 check('the address arrives on its own lines',
   input.address, '14 Protea Street\nWonderboom\nPretoria\n0182')
 check('next of kin comes across', [input.kin1Name, input.kin1Phone], ['Maria', '083 234 5678'])
+
+/*
+ * AND A NUMBER EXCEL BROKE ARRIVES MENDED.
+ *
+ * THE ASSERTION THE REPAIR ACTUALLY NEEDS, and the one that was missing: `repairPhone` being
+ * right is held in check-handover-import, and the note being a note is held in
+ * check-handover-decision -- neither of them notices if `toDebtorInput` stops calling it and the
+ * account opens with a number nobody can dial. Found by breaking exactly that and watching all
+ * three checks pass.
+ *
+ * EVERY PHONE FIELD THIS FUNCTION READS, not the one that happened to be on the fixture: five
+ * columns go to the account and a repair applied to four of them is the kind of gap that shows up
+ * as one collector's dead number a month later.
+ */
+const mended = toDebtorInput({
+  name: 'Dube', capital: '100',
+  cell_1: '821234567', cell_2: '27831234567', work_phone: '129403445',
+  next_of_kin_phone: '845551234', next_of_kin_2_phone: '27615559876',
+}, '2026-03-18')
+check('the mobile opens with its leading zero back', mended.mobile, '0821234567')
+check('...and the alternative number loses the country code', mended.altNumber, '0831234567')
+check('...and the work number', mended.workPhone, '0129403445')
+check('...and next of kin', mended.kin1Phone, '0845551234')
+check('...and the second next of kin', mended.kin2Phone, '0615559876')
+/* AND A NUMBER THAT WAS ALREADY RIGHT IS UNTOUCHED -- the repair must not be something that runs
+   over every number on its way past. */
+check('a number that arrived correctly is passed through', input.mobile, '082 123 4567')
+/* NOR IS ONE NOBODY CAN RECONSTRUCT INVENTED. It reaches the account exactly as the client wrote
+   it, with a warning on the row, which is the honest answer. */
+check('and a number that is not one is left alone',
+  toDebtorInput({ name: 'Dube', capital: '100', cell_1: 'no number' }, '2026-03-18').mobile,
+  'no number')
 /*
  * INTEREST IS NOUGHT, NOT A GUESSED 24%. The sheet stopped asking for a rate at the firm's
  * instruction -- it is in the agreement the firm already holds. An account opened at nought is
@@ -273,14 +305,21 @@ const NOT_CARRIED = new Set([
   ...GOES_NOWHERE,
 ])
 const carried = code(read('../../src/lib/handoverImport.ts'))
+/*
+ * `v('x')` OR `phone('x')`, because a telephone column goes through the repair on its way to the
+ * account -- the leading zero Excel ate, put back. Matching only `v(` reported five columns as
+ * dropped on the day that landed, which is a check describing its own pattern rather than the
+ * code: they reach the account by a different reader, not by none.
+ */
+const reaches = (k) => carried.includes(`v('${k}')`) || carried.includes(`phone('${k}')`)
 const dropped = HANDOVER_COLUMNS
   .map((c) => c.key)
-  .filter((k) => !NOT_CARRIED.has(k) && !carried.includes(`v('${k}')`))
+  .filter((k) => !NOT_CARRIED.has(k) && !reaches(k))
 check(`every sheet column either reaches the account or is on the known list${
   dropped.length ? ` (new: ${dropped.join(', ')})` : ''}`, dropped, [])
 /* The other direction: a column that has started arriving must come OFF the list, or the list
    quietly becomes a record of what used to be broken. */
-const fixed = GOES_NOWHERE.filter((k) => carried.includes(`v('${k}')`))
+const fixed = GOES_NOWHERE.filter(reaches)
 check(`nothing on the known list is silently already fixed${
   fixed.length ? ` (take off: ${fixed.join(', ')})` : ''}`, fixed, [])
 

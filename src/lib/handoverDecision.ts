@@ -31,8 +31,25 @@ export interface DecidableRow {
   decision: Decision
   note: string | null
   /** From planHandover: null while the draft is still being read. */
-  planned: { problems: { level: 'refuse' | 'warn' }[]; refused: boolean } | null
+  planned: { problems: { level: 'refuse' | 'warn' | 'note' }[]; refused: boolean } | null
 }
+
+/**
+ * WHAT ON A ROW ACTUALLY NEEDS A PERSON.
+ *
+ * NOT EVERYTHING IN `problems`, WHICH IS THE CHANGE. A `note` is something the import PUT RIGHT
+ * on the way in -- a telephone number whose leading zero Excel ate, put back -- and it is
+ * recorded so somebody can audit it, not handed back as work.
+ *
+ * THE FIRM'S OWN FILE IS THE ARGUMENT: 40 of 42 "Cell Phone 2" values were nine digits, so
+ * counting those as decisions would have put an Accept button under nearly every row of a
+ * two-hundred-row handover -- on a repair nobody can evaluate by looking, since the original is
+ * unrecoverable from the nine digits. A confirmation nobody can meaningfully give teaches people
+ * to press Accept without reading, and the warnings that DO need somebody are the ones sitting
+ * next to it.
+ */
+const actionable = (row: DecidableRow): number =>
+  (row.planned?.problems ?? []).filter((p) => p.level !== 'note').length
 
 /**
  * Is this row still waiting on a person?
@@ -43,7 +60,7 @@ export interface DecidableRow {
  */
 export function needsDecision(row: DecidableRow): boolean {
   if (row.decision !== null) return false
-  return (row.planned?.problems.length ?? 0) > 0
+  return actionable(row) > 0
 }
 
 /** Rows still waiting on a person, in the order they appear in the file. */
@@ -59,7 +76,7 @@ export function undecided(rows: DecidableRow[]): DecidableRow[] {
  * reading them.
  */
 export function canAccept(row: DecidableRow): boolean {
-  return (row.planned?.problems.length ?? 0) > 0 && !row.planned?.refused
+  return actionable(row) > 0 && !row.planned?.refused
 }
 
 export interface Readiness {

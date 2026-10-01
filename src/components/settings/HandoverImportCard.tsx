@@ -701,8 +701,14 @@ function DecisionRow({ row, busy, onAccept, onReject, onReopen }: {
 
       <div className="space-y-0.5 mb-2">
         {problems.map((p, i) => (
-          <p key={i} className={`text-xs ${p.level === 'refuse' ? 'text-negative-700' : 'text-slate-500'}`}>
+          <p key={i} className={`text-xs ${
+            p.level === 'refuse' ? 'text-negative-700'
+              : p.level === 'note' ? 'text-slate-400' : 'text-slate-500'}`}>
             {p.level === 'refuse' && <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />}
+            {/* SAID, AND SAID AS DONE. A note is something the import put right on the way in --
+                it is here to be audited, not acted on, so it carries no warning mark and the word
+                in front of it says which kind of line it is. */}
+            {p.level === 'note' && <span className="text-slate-400">Fixed: </span>}
             {/* The column, so a sentence can be traced to one of forty boxes without reading it
                 twice. The cell is marked in the table as well; this is for somebody working down
                 the list rather than across the row. */}
@@ -1047,7 +1053,10 @@ export function DraftTable({
                     const isDate = DATE_KEYS.has(k)
                     const worst = (row.planned?.problems ?? []).filter((pr) => pr.key === k)
                     const bad = worst.some((pr) => pr.level === 'refuse')
-                    const iffy = !bad && worst.length > 0
+                    /* A NOTE LEAVES THE BOX ALONE. The number in it was put right on the way into
+                       the account; marking the cell gold would send somebody to look at a cell
+                       there is nothing to do to, which on the firm's own file was 40 cells in 42. */
+                    const iffy = !bad && worst.some((pr) => pr.level === 'warn')
                     /* What the box draws, which is also what a blur is judged against. */
                     const shown = isDate
                       ? displayDate(row.values[k], order)
@@ -1130,7 +1139,13 @@ export function DraftTable({
         than sending somebody back up a forty-column table to find the × on the right line.
       */}
       <div className="mt-4 space-y-3">
-        {judged.rows.filter((r) => (r.planned?.problems.length ?? 0) > 0).map((row) => (
+        {/*
+          AND A REPAIRED NUMBER IS NOT A ROW THAT NEEDS DECIDING. `canAccept` is the same rule the
+          gate uses, so the list here and the thing that blocks approval cannot come to different
+          answers -- a row appearing here with no buttons under it, or an approval blocked by a
+          row nobody was shown, are the two ways that goes wrong.
+        */}
+        {judged.rows.filter((r) => canAccept(r) || r.planned?.refused).map((row) => (
           <DecisionRow key={row.id} row={row} busy={busy}
             onAccept={(note, allocateTo) => onDecide(row.id, 'accepted', note, allocateTo)}
             onReject={(note) => onDecide(row.id, 'rejected', note)}

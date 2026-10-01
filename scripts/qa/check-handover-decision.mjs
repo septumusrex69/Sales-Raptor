@@ -45,6 +45,25 @@ const warned = (over = {}) => row({
 const refusedRow = (over = {}) => row({
   ...over, planned: { problems: [{ level: 'refuse', message: 'No handover amount.' }], refused: true },
 })
+/** A row whose only entry is something the import PUT RIGHT on the way in. */
+const noted = (over = {}) => row({
+  ...over,
+  planned: {
+    problems: [{ level: 'note', message: 'Cell number 3 "696352282" lost its leading zero to Excel — put back as "0696352282".' }],
+    refused: false,
+  },
+})
+/** Both at once, which is the case that tells the two levels apart. */
+const notedAndWarned = (over = {}) => row({
+  ...over,
+  planned: {
+    problems: [
+      { level: 'note', message: 'Cell number 3 lost its leading zero to Excel.' },
+      { level: 'warn', message: 'The ID number is not an ID number.' },
+    ],
+    refused: false,
+  },
+})
 
 /* ---------- 1. what needs deciding ---------- */
 
@@ -55,6 +74,49 @@ check('a refused row needs one too', needsDecision(refusedRow()), true)
    refused row would leave it still blocking the approval, which is a screen you cannot get out of. */
 check('a rejected row is decided', needsDecision(refusedRow({ decision: 'rejected' })), false)
 check('an accepted row is decided', needsDecision(warned({ decision: 'accepted' })), false)
+
+/*
+ * AND A NOTE IS NOT A DECISION. THE ASSERTION THIS WHOLE LEVEL EXISTS FOR.
+ *
+ * A `note` is something the import already put right -- a telephone number whose leading zero
+ * Excel ate, put back on the way into the account. THE FIRM'S OWN FILE: 40 of 42 "Cell Phone 2"
+ * values were nine digits, so counting these as decisions would put an Accept button under nearly
+ * every row of a two-hundred-row handover, on a repair nobody can evaluate by looking -- the
+ * original is unrecoverable from the nine digits. A confirmation nobody can meaningfully give
+ * teaches people to press Accept without reading, and the warnings that DO need somebody are the
+ * ones sitting next to it.
+ */
+check('a repaired number needs no decision', needsDecision(noted()), false)
+check('...and is not offered one', canAccept(noted()), false)
+/* AND IT DOES NOT HIDE A REAL ONE. A row carrying both still waits for a person -- the easy way
+   to get this wrong is to count the problems rather than the actionable ones. */
+check('a row with a note AND a warning still waits', needsDecision(notedAndWarned()), true)
+check('...and is offered the decision', canAccept(notedAndWarned()), true)
+/* A CLEAN ROW IS STILL NOT OFFERED ONE. Asserted beside these so "nothing to decide" and "only
+   notes to decide" cannot quietly become different answers. */
+check('a clean row is not offered a decision', canAccept(row()), false)
+
+/*
+ * AND THE GATE AGREES. needsDecision is read by `readiness`, so a note counted as a decision
+ * anywhere would block an approval the firm never has to make -- asserted end to end rather than
+ * on the predicate alone.
+ */
+check('a handover of repaired rows is ready to approve',
+  readiness([noted({ id: 'a' }), noted({ id: 'b', line: 3 })]).ready, true)
+check('...and one with a real warning in it is not',
+  readiness([noted({ id: 'a' }), notedAndWarned({ id: 'b', line: 3 })]).ready, false)
+
+/*
+ * AND THE SCREEN ASKS THE SAME QUESTION. The decision list used to filter on `problems.length`,
+ * which is the same bug in a second place: a row with only a note would appear in the list with
+ * no buttons under it while the gate let the import through.
+ */
+const card = readFileSync(new URL('../../src/components/settings/HandoverImportCard.tsx', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+ok('the decision list is built from the gate s own rule',
+  /judged\.rows\.filter\(\(r\) => canAccept\(r\) \|\| r\.planned\?\.refused\)/.test(card))
+ok('...and not from a raw count of problems',
+  !/judged\.rows\.filter\(\(r\) => \(r\.planned\?\.problems\.length \?\? 0\) > 0\)/.test(card))
 
 /* ---------- 2. the gate ---------- */
 

@@ -52,7 +52,7 @@ export const looksLikeEmail = (v: string): boolean =>
  * number is reported as exactly that rather than as "invalid", because the fix is to put the zero
  * back and the person needs to be told which zero.
  */
-export type PhoneVerdict = 'ok' | 'lost-leading-zero' | 'wrong'
+export type PhoneVerdict = 'ok' | 'lost-leading-zero' | 'lost-country-code' | 'wrong'
 
 export function checkPhone(raw: string): PhoneVerdict {
   const s = raw.replace(/[\s()\-.]/g, '')
@@ -61,7 +61,45 @@ export function checkPhone(raw: string): PhoneVerdict {
   /* Nine digits and no leading zero: Excel ate it. The first digit of a South African number
      after the zero is 1-8, which is what separates this from a short number typed wrong. */
   if (/^[1-8]\d{8}$/.test(s)) return 'lost-leading-zero'
+  /* THE SAME NUMBER WRITTEN INTERNATIONALLY WITH THE PLUS LOST, which is the other shape Excel
+     produces -- it reads +27 82 123 4567 as text, drops the plus, and 27821234567 comes out.
+     Eleven digits beginning 27 and then the same 1-8, so it cannot collide with the case above. */
+  if (/^27[1-8]\d{8}$/.test(s)) return 'lost-country-code'
   return 'wrong'
+}
+
+/**
+ * THE NUMBER AS IT SHOULD HAVE ARRIVED, or null where there is nothing to put right.
+ *
+ * THE FIRM, looking at a screen of these: "if there is a thing and says there's no zero in the
+ * number, just have an option to click and say add it. Or should we automatically add zeros if
+ * there's no zero in front of the number?"
+ *
+ * AUTOMATICALLY, AND THE ASYMMETRY IS WHY. The usual argument against repairing imported data is
+ * that a wrong guess is worse than the original -- and here there is no original to be worse
+ * than: a nine-digit number cannot be dialled at all. Both outcomes of leaving it alone and of
+ * guessing wrong are a number that does not connect, so the guess costs nothing and is right
+ * essentially always. `checkPhone` only reaches these two shapes for exactly the digits a South
+ * African number loses to a spreadsheet.
+ *
+ * AND THE PRESS WAS THE WRONG TRADE. 40 of 42 "Cell Phone 2" values on the firm's own file were
+ * nine digits; on a real handover that is hundreds of Accept presses on a repair nobody can
+ * evaluate by looking -- the original is unrecoverable from the nine digits. A confirmation
+ * nobody can meaningfully give is one that teaches people to press Accept without reading, which
+ * is where the warnings that DO need a person get waved through.
+ *
+ * IT NEVER REWRITES THE SHEET. The draft is the record of exactly what the client sent -- the
+ * same rule `defaultDateUsed` follows -- so the repair happens here, on the way into the account,
+ * and `values` keeps the broken number for the correction that goes back to the client.
+ */
+export function repairPhone(raw: string): string | null {
+  const s = raw.replace(/[\s()\-.]/g, '')
+  switch (checkPhone(s)) {
+    case 'lost-leading-zero': return `0${s}`
+    /* The country code goes and the national zero comes back: 27 82 ... is 082 ... */
+    case 'lost-country-code': return `0${s.slice(2)}`
+    default: return null
+  }
 }
 
 /** Case, spacing and punctuation removed, so "van der Westhuizen" and "Van Der Westhuizen" meet. */
@@ -203,7 +241,19 @@ export interface ColumnMatch {
 }
 
 export interface RowProblem {
-  level: 'refuse' | 'warn'
+  /**
+   * THREE LEVELS, AND THE THIRD IS NEW.
+   *
+   * `refuse` stops the row. `warn` needs a person to accept or reject it. `note` is something
+   * that was PUT RIGHT on the way in and is recorded so somebody can audit it -- it blocks
+   * nothing and asks for nothing.
+   *
+   * THE FIRM'S OWN SCREEN IS THE ARGUMENT. 40 of 42 "Cell Phone 2" values on their file were
+   * nine digits because Excel ate the leading zero, and every one of them was a warning with an
+   * Accept button under it. A warning that fires on most rows and whose answer is always the same
+   * press is a warning people stop reading -- and they stop reading the ones beside it too.
+   */
+  level: 'refuse' | 'warn' | 'note'
   message: string
   /**
    * The column it is about, where it is about one.
@@ -657,6 +707,10 @@ function readRow(
     problems.push({ level: 'refuse', message, key })
   const warn = (key: string | null, message: string) =>
     problems.push({ level: 'warn', message, key })
+  /* SOMETHING THAT WAS PUT RIGHT, recorded rather than handed back. Blocks nothing and asks for
+     nothing -- see RowProblem.level. */
+  const note = (key: string | null, message: string) =>
+    problems.push({ level: 'note', message, key })
 
   if (!values.name) refuse('name', 'No surname or business name — every letter is addressed from it.')
 
@@ -786,11 +840,19 @@ function readRow(
     ['other_phone', 'Another number'], ['other_phone_2', 'Another number']] as const) {
     const v = values[key]
     if (!v) continue
-    const verdict = checkPhone(v)
-    if (verdict === 'lost-leading-zero') {
-      warn(key, `${label} "${v}" is missing its leading zero — Excel read it as a number. It `
-        + 'cannot be dialled as it stands.')
-    } else if (verdict === 'wrong') {
+    const fixed = repairPhone(v)
+    if (fixed) {
+      /*
+       * PUT RIGHT AND WRITTEN DOWN, rather than handed back as work. Both shapes say what they
+       * did and show both numbers, so the repair is auditable at a glance -- and the client is
+       * told once, at sheet level, that their export is dropping these.
+       */
+      note(key, checkPhone(v) === 'lost-leading-zero'
+        ? `${label} "${v}" lost its leading zero to Excel — put back as "${fixed}".`
+        : `${label} "${v}" carried the country code without its plus — read as "${fixed}".`)
+    } else if (checkPhone(v) === 'wrong') {
+      /* NOT REPAIRABLE, SO STILL A WARNING. Nothing here knows what this was meant to be, and
+         guessing at a number nobody can reconstruct is the thing the repair above is not. */
       warn(key, `${label} "${v}" is not a telephone number.`)
     }
   }
@@ -880,6 +942,14 @@ export function toDebtorInput(
   defaultDate: string | null,
 ): NewDebtorInput {
   const v = (k: string) => (values[k] ?? '').trim()
+  /*
+   * THE ONE PLACE THE REPAIR LANDS, and it is here because this is the one place a sheet's cells
+   * become an account. `values` is left exactly as the client sent it -- the draft is the record
+   * of that, and the correction going back to the client has to quote what they actually wrote --
+   * so the number is mended on the way through rather than in the row. The same shape
+   * `defaultDateUsed` already uses for a substituted date of default.
+   */
+  const phone = (k: string) => { const raw = v(k); return raw ? repairPhone(raw) ?? raw : raw }
   return {
     accountNumber: v('account_number'),
     clientReference: v('client_reference'),
@@ -910,16 +980,16 @@ export function toDebtorInput(
        agreement the firm already holds. toAccountRow needs a number, and an account opened at
        nought is one somebody notices; opened at a guessed 24% it is one nobody does. */
     interestRateAnnual: '0',
-    mobile: v('cell_1'),
-    workPhone: v('work_phone'),
-    altNumber: v('cell_2'),
+    mobile: phone('cell_1'),
+    workPhone: phone('work_phone'),
+    altNumber: phone('cell_2'),
     email: v('email_1'),
     address: [v('street_1'), v('street_2'), v('suburb'), v('city'), v('street_code')]
       .filter(Boolean).join('\n'),
     employer: v('employer'),
     kin1Name: v('next_of_kin'),
-    kin1Phone: v('next_of_kin_phone'),
+    kin1Phone: phone('next_of_kin_phone'),
     kin2Name: v('next_of_kin_2'),
-    kin2Phone: v('next_of_kin_2_phone'),
+    kin2Phone: phone('next_of_kin_2_phone'),
   }
 }
