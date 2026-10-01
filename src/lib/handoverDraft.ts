@@ -26,7 +26,8 @@ import {
 import {
   noteForAccount, readiness, type Decision, type Readiness,
 } from './handoverDecision.ts'
-import { batchQueryDescription, correctionEmail } from './importCorrections.ts'
+import { batchQueryDescription, correctionEmail, importedCleanlyEmail,
+} from './importCorrections.ts'
 import { communicationsNotices } from './communicationsNotice.ts'
 import { raiseQuery } from './accountQueries'
 import { createDebtorAccount, fetchAccountReferences, fetchExistingAccounts } from './accountBook'
@@ -861,6 +862,55 @@ export async function approveDraft(input: {
     } else {
       problems.push('Not signed in to a mailbox, so the corrections were not emailed.')
     }
+  } else if (created > 0) {
+    /*
+     * ---- AND WHEN NOTHING WAS WRONG, THE LIAISON IS TOLD THAT ----
+     *
+     * THE FIRM: "a handover import that was perfectly imported can go to the client liaison and
+     * send to them that everything was imported fine and it was good. So that they know that all
+     * was good."
+     *
+     * THE LIAISON ONLY EVER HEARD FROM AN IMPORT WHEN SOMETHING WAS WRONG. A clean sheet went in
+     * silently, so their experience of every import was either a list of corrections or nothing
+     * at all -- and nothing at all is indistinguishable from an import that never ran. The client
+     * rings to ask whether their file arrived and the person who should answer has no record of
+     * it either way.
+     *
+     * THE `else` IS THE WHOLE GUARD. This branch is only reached where the one above did not fire,
+     * which is exactly "nothing to confirm and nothing left behind" -- so the two can never both
+     * go out and the clean one cannot be sent on a sheet with problems on it. `created > 0`
+     * because a draft where every row was rejected opened nothing and is not good news.
+     *
+     * A REPAIRED TELEPHONE NUMBER DOES NOT DISQUALIFY IT. Those are `note` problems -- things the
+     * import put right on the way in -- and they are filtered out of `corrections` above. A sheet
+     * whose only blemish was a leading zero Excel ate is exactly what the firm means by good.
+     */
+    const liaisonId = (company?.account_owner_id as string | null) ?? null
+    const liaisonEmail = liaisonId
+      ? (await supabase.from('profiles').select('email')
+        .eq('id', liaisonId).maybeSingle()).data?.email as string | undefined
+      : undefined
+
+    if (!liaisonEmail) {
+      /* The same gap the corrections branch reports, and worth reporting here for the same
+         reason: a client with no liaison is something the person who just imported can fix. */
+      problems.push('No client liaison on this client, so nobody was told the import went in.')
+    } else if (input.accessToken) {
+      const sent = await sendCorrectionEmail(input.accessToken, liaisonEmail, importedCleanlyEmail({
+        clientName: (company?.name as string | null) ?? 'this client',
+        filename: judged.draft.filename,
+        today: input.today,
+        accounts: created,
+        capital: openedCapital,
+        /* Counted off the rows that opened, so it is what actually went into the accounts rather
+           than what the planner noticed. Notes are the only `note`-level problem there is. */
+        repaired: accepted.reduce((n, r) => n
+          + (r.planned?.problems ?? []).filter((pr) => pr.level === 'note').length, 0),
+      }), null)
+      if (sent) problems.push(sent)
+    }
+    /* NOT REPORTED WHERE THERE IS NO MAILBOX. The corrections branch says so because somebody has
+       to be chased about real problems; nobody needs chasing about good news that did not send. */
   }
 
   /*

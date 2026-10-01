@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  ANSWER_COLUMN, batchQueryDescription, correctionDescription, correctionEmail, givenFor,
+  ANSWER_COLUMN, batchQueryDescription, correctionDescription, correctionEmail, givenFor, importedCleanlyEmail,
 } from '../../src/lib/importCorrections.ts'
 import {
   ESCALATION_KINDS, ESCALATION_KIND_ORDER, clientSection, escalationChargeable,
@@ -399,8 +399,92 @@ ok('...and takes its heading from the section rather than hard-coding one',
 ok('...so neither list is headed "Disputes" unconditionally',
   !/title="Disputes on this client's book"/.test(panel))
 
+/* ============================================================================================
+ * AND WHEN NOTHING WAS WRONG, THE LIAISON IS TOLD THAT TOO.
+ *
+ * THE FIRM: "a handover import that was perfectly imported can go to the client liaison and send
+ * to them that everything was imported fine and it was good. So that they know that all was
+ * good."
+ *
+ * THE LIAISON ONLY EVER HEARD FROM AN IMPORT WHEN SOMETHING WAS WRONG, so a clean sheet was
+ * indistinguishable from an import that never ran -- and the client rings to ask whether their
+ * file arrived.
+ * ============================================================================================ */
+
+const good = importedCleanlyEmail({
+  clientName: 'Rinda Roo Company',
+  filename: 'Debtor Details.xlsx',
+  today: '2026-10-01',
+  accounts: 8,
+  capital: 7510.85,
+  repaired: 24,
+})
+
+ok('the subject names the client', /Rinda Roo Company/.test(good.subject))
+ok('...and says there is nothing outstanding', /nothing outstanding/i.test(good.subject))
+ok('the body names the sheet', /Debtor Details\.xlsx/.test(good.bodyHtml))
+ok('...says how many accounts opened', /8 accounts are open/.test(good.bodyHtml))
+/* THE FIGURE, so the liaison can check it against what the client said they were sending --
+   which is the whole reason this is worth an email rather than a dashboard tick. */
+ok('...and what they are worth', /R 7 510\.85/.test(good.bodyHtml))
+ok('...in the firm s money format, spaced', /R 7 510/.test(good.bodyHtml))
+/*
+ * A NON-BREAKING SPACE IS WHAT en-ZA WOULD HAVE USED, and it is invisible in an email and has
+ * already cost this codebase a bug in an SMS. The grouping is written out for that reason.
+ */
+ok('...with an ordinary space, not a non-breaking one', !/\u00a0/.test(good.bodyHtml))
+
+/* IT ASKS FOR NOTHING. The corrections email is written to be forwarded and asks the client to
+   fill a column in; this is an internal note about news that needs no action. */
+ok('it asks for no reply', /No reply needed/.test(good.bodyHtml))
+ok('...and does not ask for the answer column', !new RegExp(ANSWER_COLUMN).test(good.bodyHtml))
+ok('...and greets nobody, because it is not for forwarding', !/Good day/.test(good.bodyHtml))
+
+/*
+ * THE REPAIRED NUMBERS ARE MENTIONED, AND ONLY WHERE THERE WERE ANY. A leading zero Excel ate is
+ * something the import put right on the way in -- it does not stop a sheet being good, and the
+ * liaison should still know it happened.
+ */
+ok('repaired numbers are mentioned', /24 telephone numbers had a leading zero put back/.test(good.bodyHtml))
+ok('...and said to need nothing', /Nothing to do/.test(good.bodyHtml))
+const noRepairs = importedCleanlyEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-10-01', accounts: 2, capital: 100,
+})
+ok('...and not mentioned where there were none', !/leading zero/.test(noRepairs.bodyHtml))
+/* ONE ACCOUNT READS AS ONE ACCOUNT. "1 accounts" went out to a client once already. */
+const justOne = importedCleanlyEmail({
+  clientName: 'X', filename: 'f.xlsx', today: '2026-10-01', accounts: 1, capital: 100, repaired: 1,
+})
+ok('one account is singular', /1 account is open/.test(justOne.bodyHtml))
+ok('...and one number too', /1 telephone number had/.test(justOne.bodyHtml))
+
+/* ---------------- and it cannot go out on a sheet with problems ---------------- */
+
+/*
+ * THE GUARD IS AN `else`, WHICH IS THE POINT. The clean email lives in the branch the corrections
+ * email did NOT take, so the two can never both go and the clean one cannot be sent on a sheet
+ * that had something to confirm. Asserted on the source, because it is a control-flow fact that
+ * no call to either function can show.
+ */
+const draftSrc = readFileSync(new URL('../../src/lib/handoverDraft.ts', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+ok('the clean email is the other branch of the corrections one',
+  /if \(corrections\.length > 0 \|\| notBroughtIn\.length > 0\)[\s\S]*?\} else if \(created > 0\) \{/.test(draftSrc))
+ok('...and needs an account to have opened', /else if \(created > 0\)/.test(draftSrc))
+ok('...and goes to the client s liaison', /importedCleanlyEmail\(\{/.test(draftSrc))
+/* NOT A SECOND SEND PATH. The same function the corrections email goes out on -- the approver's
+   own mailbox -- so the two cannot drift about who the firm appears to be writing as. */
+ok('...through the same mailbox the corrections use',
+  /sendCorrectionEmail\(input\.accessToken, liaisonEmail, importedCleanlyEmail/.test(draftSrc))
+
 /* ---------------------------------------------------------------- report */
 
+/*
+ * LAST IN THE FILE, AND IT HAS TO STAY LAST. This sat above the final block for a while and
+ * anything written below it ran with nowhere to report to: the assertions executed, a failure
+ * went into `failures`, and the process had already decided it was green. Four break tests
+ * against correct-looking code all came back passing, which is how it was found.
+ */
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

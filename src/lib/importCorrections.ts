@@ -329,3 +329,77 @@ ${table(
     accounts: toConfirm.length + notBroughtIn.length,
   }
 }
+
+/**
+ * AND WHEN NOTHING WAS WRONG, SAY THAT TOO.
+ *
+ * THE FIRM: "a handover import that was perfectly imported can go to the client liaison and send
+ * to them that everything was imported fine and it was good. So that they know that all was
+ * good."
+ *
+ * THE LIAISON ONLY EVER HEARD FROM THIS FILE WHEN SOMETHING WAS WRONG. A clean sheet went in
+ * silently, so the liaison's experience of every import was either a list of corrections or
+ * nothing at all — and nothing at all is indistinguishable from an import that never ran. The
+ * client asks "did you get our file?" and the person who should be able to answer has no record
+ * of it either way.
+ *
+ * IT IS FOR THE LIAISON, NOT FOR THE CLIENT. The corrections email is written to be forwarded —
+ * it greets the client's own contact and asks them to fill a column in. This one is an internal
+ * note: it says what landed, it asks for nothing, and it does not pretend to be a letter. A
+ * liaison who wants to pass the good news on can write two lines themselves, which is the right
+ * amount of effort for news that needs no action.
+ *
+ * WHAT COUNTS AS CLEAN IS NARROW, and the caller decides it: every row opened, none refused, none
+ * excluded and nothing left to confirm. A repaired telephone number does NOT disqualify it —
+ * those are `note` problems, things the import put right on the way in, and a sheet whose only
+ * blemish was a leading zero Excel ate is exactly the sheet the firm means by "it was good".
+ */
+export function importedCleanlyEmail(input: {
+  clientName: string
+  filename: string
+  /** Today, as an ISO day. Formatted here so the caller cannot pass a different shape. */
+  today: string
+  /** Accounts opened. Always the whole sheet, or this email is not the right one. */
+  accounts: number
+  /** What they are worth, so the liaison can check it against what the client said they sent. */
+  capital: number
+  /** How many numbers the import put right on the way in. Said only where there were any. */
+  repaired?: number
+}): CorrectionEmail {
+  const when = new Date(`${input.today}T00:00:00Z`).toLocaleDateString('en-ZA', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+  })
+  /*
+   * THE FIRM'S OWN MONEY FORMAT -- a space between the thousands and two decimals. Written out
+   * rather than taken from en-ZA's own grouping, which uses a NON-BREAKING space: invisible in an
+   * email, and the one character that has already cost this codebase a bug in an SMS.
+   */
+  const money = `R ${input.capital.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`
+
+  /*
+   * SAID AS A FACT, NOT CONGRATULATED. "Nothing needs your attention" is the whole message; a
+   * sentence celebrating it would make the next one, which is about a sheet with forty problems
+   * on it, read as a reproach.
+   */
+  const repaired = (input.repaired ?? 0) > 0
+    ? `<p style="margin:12px 0 0;color:#555">${count(input.repaired ?? 0,
+      'telephone number had', 'telephone numbers had')} a leading zero put back — Excel had read `
+      + `${(input.repaired ?? 0) === 1 ? 'it' : 'them'} as a number. Nothing to do; the accounts `
+      + 'opened with the corrected numbers.</p>'
+    : ''
+
+  return {
+    subject: `${input.clientName} — handover imported, nothing outstanding`,
+    bodyHtml: `
+<p>The handover sheet <strong>${esc(input.filename)}</strong> for ${esc(input.clientName)} was
+brought in on ${esc(when)}.</p>
+<ul>
+<li>${count(input.accounts, 'account is', 'accounts are')} open and being worked.</li>
+<li>${esc(money)} handed over.</li>
+<li>Nothing needs the client to confirm anything, and nothing was left behind.</li>
+</ul>
+${repaired}
+<p style="margin:14px 0 0;color:#555">No reply needed. This is for your records.</p>`,
+    accounts: input.accounts,
+  }
+}
