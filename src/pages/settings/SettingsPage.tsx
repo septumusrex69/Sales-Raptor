@@ -471,9 +471,16 @@ function UsersTab() {
                     const cls = `ml-2 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${
                       u.collectorGrade ? 'bg-[var(--tint-steel)] text-[var(--c-navy)]' : 'bg-slate-100 text-slate-400'}`
                     const label = u.collectorGrade ?? 'no rank'
+                    /*
+                      BOTH HALVES WERE OUT OF DATE. A rank limits nothing at the moment -- "don't
+                      limit anybody for any amount as of yet" -- and an UNRANKED collector has not
+                      been offered "no accounts at all" since ungraded started meaning Junior.
+                      Telling somebody their colleague can be given nothing, when they can be given
+                      anything, sends them to fix something that is not broken.
+                    */
                     const why = u.collectorGrade
-                      ? `${u.collectorGrade} — decides which accounts they may be given, never how many`
-                      : 'No rank yet, so they can be given no accounts at all'
+                      ? `${u.collectorGrade} — recorded, but nothing is held back by rank at the moment`
+                      : 'No rank set. Nothing is held back by rank at the moment, so they can still be given work'
                     if (!canRank) return <span className={cls} title={why}>{label}</span>
                     const open = bookOpen === u.id
                     return (

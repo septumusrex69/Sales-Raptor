@@ -133,12 +133,21 @@ export function CollectorsPanel({ user, canEdit, inPlay, onChange }: {
         </Field>
       </div>
 
+      {/*
+        THE COPY HAD ALREADY GONE STALE ONCE. It said "high value from R25 000 needs Skilled or
+        better" for as long as high value had been open to everybody -- a screen teaching a rule
+        the engine had stopped applying, which is worse than saying nothing. So this now states
+        what is actually true and names it as temporary.
+      */}
       <p className="mt-3.5 text-xs text-slate-400">
         Rank decides <span className="font-medium text-slate-500">which</span> accounts somebody
         may be given, never how many — a junior and an elite carry the same book and differ only
-        in what is on it. Generic work goes to anyone; high value from R25&nbsp;000 needs Skilled
-        or better; major accounts from R50&nbsp;000 need Senior or Elite. Anything disputed, in
-        legal or under administration counts as high value whatever it is worth.
+        in what is on it. <span className="font-medium text-slate-500">Nothing is held back by
+        rank at the moment</span>: any collector may be given any account, whatever it is worth.
+        The bands are still worked out and named on the account — Generic, High value from
+        R25&nbsp;000, Major from R50&nbsp;000, and anything disputed, in legal or under
+        administration counts as high value however small — so the limits can be put back when
+        the firm decides where they belong.
       </p>
     </div>
   )

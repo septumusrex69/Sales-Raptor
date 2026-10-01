@@ -89,8 +89,23 @@ export const ACCOUNT_BANDS: AccountBand[] = [
     id: 'major',
     label: 'Major',
     from: 50000,
-    minGrade: 'Senior',
-    hint: 'Needs judgement and experience. The firm’s commission and the client’s reputation both ride on these.',
+    /*
+     * OPEN TO EVERYBODY TOO, AND NOW NOTHING IS HELD BACK BY RANK AT ALL.
+     *
+     * THE FIRM: "Don't limit anybody for any amount as of yet. So even a junior can have an
+     * account up to, you know, more than 25 000. We will later look at these limitations."
+     *
+     * It was Senior. High value went to Junior one change earlier for the same reason -- "you want
+     * to take that risk to help them grow" -- and this is the firm finishing the thought while they
+     * set the floor up: a simulation where half the book cannot be handed out teaches nobody
+     * anything, and they would rather find the real limits by watching the work.
+     *
+     * AS OF YET, WHICH IS THE WHOLE POINT OF DOING IT THIS WAY. The band still exists, is still
+     * worked out from the balance, and is still what the screen CALLS the account. Putting a limit
+     * back is this one word. Deleting the bands would have made it a rebuild.
+     */
+    minGrade: 'Junior',
+    hint: 'Needs judgement and experience. The firm’s commission and the client’s reputation both ride on these — but open to any collector for now.',
   },
 ]
 
@@ -142,7 +157,17 @@ export function accountBand(input: BandInput): AccountBand {
   return band
 }
 
-/** May this collector be given this account? */
+/**
+ * May this collector be given this account?
+ *
+ * TRUE FOR EVERY PAIR AT THE MOMENT, and that is a setting rather than a simplification. Every
+ * band's `minGrade` is Junior while the firm finds its feet -- "don't limit anybody for any amount
+ * as of yet" -- so this returns true for everybody.
+ *
+ * IT IS STILL ASKED, EVERYWHERE, which is the reason not to shortcut it to `return true`. The
+ * hand-out planner filters on it, the checks exercise it, and the day a band's minGrade moves back
+ * up, every one of those call sites starts honouring it again without being found and changed.
+ */
 export function mayTake(grade: CollectorGrade, band: AccountBand): boolean {
   return gradeRank(grade) >= gradeRank(band.minGrade)
 }

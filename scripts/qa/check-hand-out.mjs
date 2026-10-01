@@ -70,6 +70,19 @@ const takenBy = (p, name) => p.placements.filter((x) => x.userId === `u-${name}`
  * -- the run still fails, but the message names the wrong thing and hides the real one.
  */
 const reasonOf = (p, i = 0) => p.unplaced[i]?.reason ?? '(nothing unplaced)'
+
+/*
+ * A BAND THAT ACTUALLY RESTRICTS, FOR THE CHECKS THAT ARE ABOUT RESTRICTION.
+ *
+ * Every real band is open to every grade at the moment -- "don't limit anybody for any amount as
+ * of yet" -- so a R400 000 account no longer proves anything about the GATE. The planner's gate is
+ * still there and still has to be held, and the honest way to hold it is to hand it a band that
+ * names a grade, rather than to rely on a setting the firm has just changed and will change again.
+ *
+ * This is the difference between asserting the firm's current policy and asserting the mechanism.
+ * Both matter; they are not the same assertion and they must not share a fixture.
+ */
+const seniorsOnly = { ...band('major'), minGrade: 'Senior' }
 const labelOf = (p, i = 0) => p.unplaced[i]?.label ?? '(nothing unplaced)'
 const dayOf = (p, accountId) => p.placements.find((x) => x.accountId === accountId)?.dueOn ?? '(not placed)'
 
@@ -114,19 +127,41 @@ ok('every band names a real grade', ACCOUNT_BANDS.every((b) => COLLECTOR_GRADES.
 
 /* ================= who may take what ================= */
 
-ok('a junior may take generic', mayTake('Junior', band('generic')))
 /*
- * A JUNIOR MAY TAKE HIGH VALUE, and this check asserted the opposite until the firm changed it.
- * Their reasoning, against the obvious objection, and it is theirs to make: "yes, it is a risk to
- * allocate bigger accounts to smaller people, but you want to take that risk to help them grow,
- * give them confidence and give some fairness." One line now, at R50 000.
+ * NOBODY IS HELD BACK BY RANK AT THE MOMENT, and this block has now moved twice.
+ *
+ * It first asserted that a junior may not take high value. The firm opened that line: "yes, it is
+ * a risk to allocate bigger accounts to smaller people, but you want to take that risk to help
+ * them grow, give them confidence and give some fairness." Then they opened the last one while
+ * setting the floor up: "Don't limit anybody for any amount as of yet. So even a junior can have
+ * an account up to, you know, more than 25 000. We will later look at these limitations."
+ *
+ * ASSERTED AS THE WHOLE GRID rather than rung by rung, because the statement is now about every
+ * pair and a list of individual lines would say it six times and still miss one.
  */
-ok('a junior may take high value', mayTake('Junior', band('high_value')))
-ok('a junior may NOT take a major account', !mayTake('Junior', band('major')))
-ok('a skilled collector may take high value', mayTake('Skilled', band('high_value')))
-ok('a skilled collector may NOT take a major account', !mayTake('Skilled', band('major')))
-ok('a senior may take anything', ACCOUNT_BANDS.every((b) => mayTake('Senior', b)))
-ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b)))
+for (const g of COLLECTOR_GRADES) {
+  ok(`a ${g.toLowerCase()} may be given any account`, ACCOUNT_BANDS.every((b) => mayTake(g, b)))
+}
+/* AND AN UNRANKED COLLECTOR TOO, which is the case the floor is actually full of -- nobody on
+   staging has a rank except Itumeleng. */
+ok('...and so may somebody with no rank at all',
+  ACCOUNT_BANDS.every((b) => mayTake(UNGRADED_EQUIVALENT, b)))
+
+/*
+ * "AS OF YET" IS THE PART THAT HAS TO SURVIVE. The firm will look at these limits again, so the
+ * machinery must still be there to turn back on: three bands, each naming a grade, and a function
+ * that compares them. A `mayTake` shortcut to `return true` would pass every line above and leave
+ * nothing to restore.
+ */
+ok('the bands still exist to be limited again', ACCOUNT_BANDS.length === 3)
+ok('...each still naming the grade it needs',
+  ACCOUNT_BANDS.every((b) => COLLECTOR_GRADES.includes(b.minGrade)))
+ok('...and the test is still a comparison, not a yes',
+  /gradeRank\(grade\) >= gradeRank\(band\.minGrade\)/.test(
+    readFileSync(new URL('../../src/lib/collectorGrade.ts', import.meta.url), 'utf8')))
+/* THE PROOF THAT IT STILL BITES: raise a band's floor by hand and the comparison refuses. */
+ok('...which refuses the moment a band asks for more',
+  !mayTake('Junior', { ...band('major'), minGrade: 'Senior' }))
 
 /* ================= the even split, when the firm asks for one ================= */
 
@@ -200,7 +235,7 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
  */
 {
   const p = plan(
-    [acc('big', 400000), acc('small1', 1000), acc('small2', 1000), acc('small3', 1000)],
+    [acc('big', 400000, { band: seniorsOnly }), acc('small1', 1000), acc('small2', 1000), acc('small3', 1000)],
     [col('Junior', 'Junior'), col('Senior', 'Senior')],
     { windowDays: 5, evenSplit: true },
   )
@@ -231,12 +266,13 @@ ok('an elite may take anything', ACCOUNT_BANDS.every((b) => mayTake('Elite', b))
  * is the most convenient desk in the building, and must still not be given a major account.
  */
 {
-  const p = plan([acc('big', 400000)], [col('Junior', 'Junior'), col('Senior', 'Senior', { inPlay: 300 })])
+  const p = plan([acc('big', 400000, { band: seniorsOnly })],
+    [col('Junior', 'Junior'), col('Senior', 'Senior', { inPlay: 300 })])
   check('a major account goes to the senior, not the empty junior', takenBy(p, 'Senior'), 1)
   check('...and the junior gets none', takenBy(p, 'Junior'), 0)
 }
 {
-  const p = plan([acc('big', 400000)], [col('Junior', 'Junior')])
+  const p = plan([acc('big', 400000, { band: seniorsOnly })], [col('Junior', 'Junior')])
   check('with nobody graded for it, it is not placed', p.placements.length, 0)
   check('...and the reason says so', reasonOf(p), 'no_one_graded')
 }
@@ -868,7 +904,7 @@ const stack100 = () => Array.from({ length: 100 }, (_, i) => acc(`a${i}`, 1000 +
  */
 {
   const p = plan(
-    [acc('big', 400000), acc('s1', 1000), acc('s2', 1000)],
+    [acc('big', 400000, { band: seniorsOnly }), acc('s1', 1000), acc('s2', 1000)],
     [col('Junior', 'Junior'), col('Senior', 'Senior')],
     { windowDays: 5, pinned: { 'u-Junior': 3 } },
   )
@@ -993,9 +1029,17 @@ ok('...including the team leader', COLLECTING_ROLES.includes('Pre-legal Team Lea
 ok('...and a liaison, who also carries a book', COLLECTING_ROLES.includes('Liaison'))
 ok('...but not a sales rep', !COLLECTING_ROLES.includes('Sales Representative'))
 check('ungraded means the lowest rung, never nothing', UNGRADED_EQUIVALENT, 'Junior')
-ok('...which can take generic work', mayTake(UNGRADED_EQUIVALENT, band('generic')))
-ok('...and high value too, since the firm opened it', mayTake(UNGRADED_EQUIVALENT, band('high_value')))
-ok('...but not a major account', !mayTake(UNGRADED_EQUIVALENT, band('major')))
+/* AND THE LOWEST RUNG REACHES EVERYTHING AT THE MOMENT -- "don't limit anybody for any amount as
+   of yet". Asserted over all three bands above; what is held here is that an ungraded person is
+   treated as that rung rather than as nobody, which is the mistake this block is about. */
+ok('...which is a real rung and not an absence',
+  COLLECTOR_GRADES.includes(UNGRADED_EQUIVALENT))
+ok('...so ungraded work is offered, not refused',
+  ACCOUNT_BANDS.every((b) => mayTake(UNGRADED_EQUIVALENT, b)))
+/* AND IT IS STILL THE LOWEST, which is what makes it the right default when the limits return:
+   raise a band and the ungraded are the first to be refused, not the last. */
+ok('...and it is still the bottom of the ladder',
+  COLLECTOR_GRADES.every((g) => gradeRank(UNGRADED_EQUIVALENT) <= gradeRank(g)))
 
 const data = readFileSync(new URL('../../src/lib/handOutData.ts', import.meta.url), 'utf8')
 ok('the role admits somebody to the list',
