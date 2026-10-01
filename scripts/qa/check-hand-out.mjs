@@ -18,6 +18,8 @@ import {
   selfBookingLimit,
 } from '../../src/lib/collectorGrade.ts'
 import { planHandOut, planSummary } from '../../src/lib/handOut.ts'
+/* The map COLLECTING_ROLES is now derived from — held against it below in both directions. */
+import { ROLE_DEPARTMENTS } from '../../src/lib/departments.ts'
 import { DIARY_PRIORITY } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -1026,8 +1028,45 @@ check('no reserve means the whole day', selfBookingLimit(40, 0), 40)
  */
 ok('the collecting roles are named in one place', COLLECTING_ROLES.includes('Pre-legal Agent'))
 ok('...including the team leader', COLLECTING_ROLES.includes('Pre-legal Team Leader'))
-ok('...and a liaison, who also carries a book', COLLECTING_ROLES.includes('Liaison'))
+ok('...and the call centre manager, who carries a reduced book',
+  COLLECTING_ROLES.includes('Call Centre Manager'))
 ok('...but not a sales rep', !COLLECTING_ROLES.includes('Sales Representative'))
+
+/*
+ * AND NOT A LIAISON. THE FIRM, looking at the hand-out box: "Nicole was given as an option to
+ * hand out accounts to, but she's not a debt collector. She's not in the pre-legal space. She's
+ * a liaison, so she shouldn't have an option here."
+ *
+ * This assertion used to say the opposite -- "and a liaison, who also carries a book" -- and it
+ * was wrong the whole time, which is why it is worth saying how it got that way rather than just
+ * flipping it. departments.ts has filed a Liaison under COMMUNICATIONS since it was written, and
+ * draws "Everybody here carries accounts and a diary" under the CALL CENTRE. The role list in
+ * collectorGrade.ts was written separately and said something else. Two lists, one of them
+ * wrong, and a check asserting the wrong one.
+ */
+ok('...and not a liaison', !COLLECTING_ROLES.includes('Liaison'))
+ok('...nor a liaison manager', !COLLECTING_ROLES.includes('Liaison Manager'))
+
+/*
+ * SO IT IS NOT A LIST ANY MORE. COLLECTING_ROLES is derived from the department map, which is
+ * the only way the two cannot disagree again: working the book is what the call centre IS, and a
+ * role moved between departments moves here with it on the same edit.
+ */
+/* Joined rather than compared as arrays: this file's `check` is Object.is, which is never true
+   for two arrays however equal their contents -- it reported a failure printing two identical
+   lists, which is its own small lesson about assertions. */
+check('working the book is exactly the call centre',
+  [...COLLECTING_ROLES].sort().join('|'),
+  Object.keys(ROLE_DEPARTMENTS).filter((r) => ROLE_DEPARTMENTS[r] === 'Call centre').sort().join('|'))
+ok('...and every collecting role really is in it',
+  COLLECTING_ROLES.every((r) => ROLE_DEPARTMENTS[r] === 'Call centre'))
+/* NOT EMPTY, or every assertion above passes vacuously on a map this failed to read. */
+ok('...and there are some', COLLECTING_ROLES.length >= 3)
+/* READ BACK OUT OF THE SOURCE TOO, because the two assertions above would both survive somebody
+   pasting the three names back in as a literal -- which is the drift, not the symptom. */
+const grade = readFileSync(new URL('../../src/lib/collectorGrade.ts', import.meta.url), 'utf8')
+ok('...derived rather than typed out again',
+  /COLLECTING_ROLES[\s\S]{0,200}ROLE_DEPARTMENTS\[role\] === 'Call centre'/.test(grade))
 check('ungraded means the lowest rung, never nothing', UNGRADED_EQUIVALENT, 'Junior')
 /* AND THE LOWEST RUNG REACHES EVERYTHING AT THE MOMENT -- "don't limit anybody for any amount as
    of yet". Asserted over all three bands above; what is held here is that an ungraded person is

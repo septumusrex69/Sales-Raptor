@@ -54,7 +54,14 @@ export const DEPARTMENTS: DepartmentMeta[] = [
  * `undefined` and falls to 'Other' visibly, rather than silently landing in whichever branch
  * happened to be last. check-departments holds the map against the union in both directions.
  */
-const OF_ROLE: Record<UserRole, Department> = {
+/*
+ * EXPORTED, because collectorGrade.ts derives COLLECTING_ROLES from it rather than writing the
+ * call centre out a second time. That second list had already drifted: it carried Liaison and
+ * Liaison Manager as people who work a book, while this map has filed them under Communications
+ * since it was written -- so the hand-out box offered the firm's client liaison a stack of
+ * debtors. One map, read two ways.
+ */
+export const ROLE_DEPARTMENTS: Record<UserRole, Department> = {
   Administrator: 'Administration',
   'Sales Manager': 'Sales',
   'Sales Representative': 'Sales',
@@ -67,7 +74,7 @@ const OF_ROLE: Record<UserRole, Department> = {
 }
 
 export function departmentOf(role: UserRole | undefined): Department {
-  return (role && OF_ROLE[role]) || 'Other'
+  return (role && ROLE_DEPARTMENTS[role]) || 'Other'
 }
 
 /**
@@ -201,7 +208,7 @@ export function matchesPerson(
  * the company dashboard as the first thing that you see. And then you should go to your own
  * stuff." This is the second half of that sentence: which screen "your own stuff" is.
  *
- * A MAP, NOT A CHAIN OF IFS, for the same reason OF_ROLE is one — a department added to the union
+ * A MAP, NOT A CHAIN OF IFS, for the same reason ROLE_DEPARTMENTS is one — a department added to the union
  * and forgotten here is a type error rather than a button that quietly goes to the wrong floor.
  * check-departments holds it against the union and against App.tsx's routes.
  *

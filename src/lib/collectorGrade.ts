@@ -26,6 +26,9 @@
  * promotion, and it is an employment matter besides.
  */
 
+import { ROLE_DEPARTMENTS } from './departments.ts'
+import type { UserRole } from '../types'
+
 export const COLLECTOR_GRADES = ['Junior', 'Skilled', 'Senior', 'Elite'] as const
 export type CollectorGrade = (typeof COLLECTOR_GRADES)[number]
 
@@ -183,14 +186,33 @@ export function mayTake(grade: CollectorGrade, band: AccountBand): boolean {
  * Ungraded therefore means Junior: generic accounts, which is the bulk of any book and where a
  * new collector proves themselves anyway. A team leader raises it when they have seen the work.
  */
-export const COLLECTING_ROLES = [
-  /* The firm on the call centre manager and the team leaders: "they're also pre-legal agents,
-     they just have reduced books" -- so they collect, and the reduction is a per-person
-     book_ceiling rather than anything about the role. The company standard stays 500 for
-     everybody; see CLAUDE.md on why a role must not decide how many. */
-  'Call Centre Manager',
-  'Pre-legal Agent', 'Pre-legal Team Leader', 'Liaison', 'Liaison Manager',
-]
+/*
+ * DERIVED FROM THE DEPARTMENT, NOT WRITTEN OUT AGAIN -- and this list is the reason that matters.
+ *
+ * THE FIRM, looking at the hand-out box: "Nicole was given as an option to hand out accounts to,
+ * but she's not a debt collector. She's not in the pre-legal space. She's a liaison, so she
+ * shouldn't have an option here."
+ *
+ * The two lists had already disagreed and nothing noticed. `departments.ts` has put a Liaison in
+ * COMMUNICATIONS since it was written, and the blurb it draws under the call centre reads
+ * "Everybody here carries accounts and a diary" -- while this array, written separately, listed
+ * Liaison and Liaison Manager as people who work a book. So the firm's own org chart said one
+ * thing on the people screen and another in the hand-out box, which is exactly the drift
+ * departments.ts was created to end ("a role list written twice in this codebase has drifted
+ * twice").
+ *
+ * WORKING THE BOOK IS WHAT THE CALL CENTRE IS. The firm on the manager and the team leaders:
+ * "they're also pre-legal agents, they just have reduced books" -- so all three call-centre roles
+ * collect, and the reduction is a per-person book_ceiling rather than anything about the role.
+ * The company standard stays 500 for everybody; see CLAUDE.md on why a role must not decide how
+ * many.
+ *
+ * A LIAISON IS THE CLIENT'S PERSON, NOT THE DEBTOR'S. They are whose name goes on the mandate and
+ * who the client telephones -- see canBeClientLiaison, which is the other half of the same
+ * distinction and was the firm's instruction a few days earlier.
+ */
+export const COLLECTING_ROLES: string[] = (Object.keys(ROLE_DEPARTMENTS) as UserRole[])
+  .filter((role) => ROLE_DEPARTMENTS[role] === 'Call centre')
 
 /** What an ungraded collector may be given. The lowest rung, never nothing. */
 export const UNGRADED_EQUIVALENT: CollectorGrade = 'Junior'

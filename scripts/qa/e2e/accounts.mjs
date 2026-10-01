@@ -14,7 +14,8 @@ import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
 import {
-  BENCH, BOOK_SUMMARY, COMPANY, FACETS, PROFILE, COLLEAGUE, TEAM, UNGRADED, USER_ID, VIEW_COUNTS,
+  BENCH, BOOK_SUMMARY, COMPANY, FACETS, LIAISON, PROFILE, COLLEAGUE, TEAM, UNGRADED, USER_ID,
+  VIEW_COUNTS,
   accountsPage,
 } from './fixtures.mjs'
 
@@ -63,7 +64,9 @@ const handlers = [
        * three screens later, nowhere near the cause. So an id-scoped request gets exactly one row.
        */
       const one = /id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
-      const all = [PROFILE, COLLEAGUE, UNGRADED, ...BENCH]
+      /* The liaison is served like everybody else -- she is a colleague, she appears in pickers
+         and on mail. What she must not be is a person accounts are handed to. */
+      const all = [PROFILE, COLLEAGUE, UNGRADED, LIAISON, ...BENCH]
       if (one) return { body: all.filter((p) => p.id === one) }
       return { body: all }
     },
@@ -382,6 +385,27 @@ try {
    */
   t.ok('an ungraded clerk is still offered', modal.includes('Itumeleng Agent'))
   t.ok('...marked as ungraded', /Not graded/.test(modal))
+
+  /*
+   * AND A LIAISON IS NOT OFFERED AT ALL. THE FIRM: "Nicole was given as an option to hand out
+   * accounts to, but she's not a debt collector. She's not in the pre-legal space. She's a
+   * liaison, so she shouldn't have an option here."
+   *
+   * READ OUT OF THE LIST, NOT THE PAGE. She is served as an ordinary colleague and appears in
+   * other pickers on this screen, so `!modal.includes(...)` would be asserting something else --
+   * and would start failing the day somebody adds an owner filter.
+   */
+  const collectorList = await page.locator('[data-qa="collector-list"]').innerText()
+  t.ok('the collector list really loaded', /Itumeleng Agent/.test(collectorList))
+  t.ok('...and a liaison is not in it', !/Nicole Loder/.test(collectorList))
+  /*
+   * AND THE COUNT DID NOT MOVE. Thirty-eight people work the book in these fixtures; the liaison
+   * is a thirty-ninth profile. If adding her changed this number she was admitted, whatever the
+   * list happens to be showing in the first few rows.
+   */
+  t.ok('...and she is not counted as one',
+    /Search 38 collectors by name/.test(
+      await page.getByPlaceholder(/Search \d+ collectors/).getAttribute('placeholder') ?? ''))
 
   /*
    * A LIST THAT SURVIVES A REAL FLOOR. Eight collectors fitted in cards; thirty-eight do not, and

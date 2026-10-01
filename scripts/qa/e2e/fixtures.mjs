@@ -50,6 +50,31 @@ export const UNGRADED = {
   diary_reserve: null,
 }
 
+/**
+ * A CLIENT LIAISON, WHO IS NOT A COLLECTOR.
+ *
+ * THE FIRM, looking at the hand-out box: "Nicole was given as an option to hand out accounts to,
+ * but she's not a debt collector. She's not in the pre-legal space. She's a liaison, so she
+ * shouldn't have an option here."
+ *
+ * Here so the hand-out list can be asserted NOT to offer her. Every other person in these
+ * fixtures works the book, so before this one the list had nobody it was supposed to leave out
+ * and "everybody is offered" passed for the wrong reason.
+ */
+export const LIAISON = {
+  ...PROFILE,
+  id: '66666666-6666-4666-8666-666666666666',
+  name: 'Nicole Loder',
+  email: 'nicole@raptor.test',
+  role: 'Liaison',
+  /* Ungraded, which is how the firm's own liaison stood. A grade is the documented override and
+     would make her a collector on purpose -- the point here is that her ROLE does not. */
+  collector_grade: null,
+  book_ceiling: null,
+  diary_capacity: null,
+  diary_reserve: null,
+}
+
 export const COLLEAGUE = {
   ...PROFILE,
   id: '44444444-4444-4444-8444-444444444444',
