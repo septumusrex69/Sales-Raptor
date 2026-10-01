@@ -633,6 +633,22 @@ try {
   t.ok('the window box says the rate it implies', /About [\d\s\u00a0,]+ a day across \d+ working days?/.test(modal))
 
   /*
+   * AND IT OPENS ON ONE DAY, which is a different assertion from the dropdown's value further
+   * down: this is the SENTENCE the person reads on the box as it opens, and it is computed from
+   * the same state. THE FIRM: "start with one day ... it goes on the same day that it's imported
+   * and automatically goes to their diaries."
+   */
+  t.ok('the box opens spread over a single day', /across 1 working day\b/.test(modal))
+  /*
+   * WITHOUT SCOLDING THEM FOR IT. The one-day line used to read "which leaves no room for
+   * tomorrow's hand-out" -- fair when one day was the unusual choice, and a warning that fires
+   * on the shipped default the moment it became the default.
+   */
+  t.ok('...and does not argue with its own default', !/leaves no room for tomorrow/.test(modal))
+  t.ok('...while still saying where the other half of the trade-off is',
+    /Spread it wider/.test(modal))
+
+  /*
    * ARGUING WITH THE PLAN. A leader knows about the training course and the resignation on Friday;
    * the distributor does not. Minus and plus set one person's number and everybody else re-shares
    * around them — and this layer is the only one that can prove the buttons are reachable at all,
@@ -713,7 +729,13 @@ try {
   const windowBox = page.locator('select').filter({ hasText: 'working days' }).first()
   t.ok('the window is picked from a list', await windowBox.isVisible())
   t.ok('...offering one day', (await windowBox.innerText()).includes('1 working day'))
-  t.check('...with the firm\'s default on it', await windowBox.inputValue(), '5')
+  /*
+   * ONE DAY, at the firm's instruction: "start with one day. It means it goes on the same day
+   * that it's imported and automatically goes to their diaries. And then the importer person can
+   * choose more." It was five, which deferred four fifths of a fresh handover to later in the
+   * week -- and a new account nobody worked is the top of the diary ladder.
+   */
+  t.check('...with the firm\'s default on it', await windowBox.inputValue(), '1')
   await windowBox.selectOption('2')
   await page.waitForTimeout(400)
   t.ok('choosing fewer days repaces the work',

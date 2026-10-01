@@ -14,7 +14,24 @@ import { ACCOUNT_BANDS, COLLECTOR_GRADES, bookCeilingOf } from '../../lib/collec
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import type { Team, User } from '../../types'
 
-const DEFAULT_WINDOW = 5
+/**
+ * ONE DAY, SO THE WORK IS IN A DIARY THE DAY IT ARRIVES.
+ *
+ * THE FIRM: "start with one day. It means it goes on the same day that it's imported and
+ * automatically goes to their diaries. And then the importer person can choose more. So
+ * automatically by default choose one day."
+ *
+ * It was five, which quietly deferred four fifths of a fresh handover to later in the week --
+ * and a new account nobody worked is the top of the diary ladder for a reason. Five was a guess
+ * at a kind trade-off; one is the firm's own instruction, and the trade-off it makes is still
+ * on the screen under the box.
+ *
+ * ONE DAY IS NOT "EVERYTHING ON TODAY REGARDLESS". The window is where the planner STARTS, not a
+ * ceiling it ignores: a diary that fills runs on to the next working day and planSummary says so
+ * ("past the N you asked for"). So the honest reading of the default is "as soon as the diaries
+ * allow", which is what the firm asked for.
+ */
+const DEFAULT_WINDOW = 1
 
 /*
  * The windows anybody actually asks for. A free number box let somebody type 37, which is not a
@@ -653,8 +670,17 @@ export function HandOutModal({
                   <p className="text-[11px] text-slate-500">
                     About <span className="font-medium text-slate-700">{perDay.toLocaleString('en-ZA')} a day</span>{' '}
                     across {windowDays} working {windowDays === 1 ? 'day' : 'days'}.{' '}
+                    {/*
+                      NEUTRAL ON ONE DAY, BECAUSE ONE DAY IS NOW THE DEFAULT. This read
+                      "Everything lands on one day, which leaves no room for tomorrow's
+                      hand-out" -- true, and written when one day was the unusual choice. A
+                      warning that fires on the setting the firm asked to ship with is a warning
+                      people stop reading. So it says what happens and where the other half of
+                      the trade-off is, rather than arguing with the default.
+                    */}
                     {windowDays === 1
-                      ? 'Everything lands on one day, which leaves no room for tomorrow\u2019s hand-out.'
+                      ? 'Everything starts on the first day, so the work is in a diary straight '
+                        + 'away. Spread it wider to leave room for tomorrow\u2019s hand-out.'
                       : 'Fewer days fills diaries faster; more days leaves room for the next hand-out.'}
                   </p>
 
