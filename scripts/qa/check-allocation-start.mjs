@@ -34,11 +34,22 @@ function check(name, actual, expected) {
 }
 const ok = (name, actual) => check(name, actual, true)
 const read = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '')
+/*
+ * COMMENTS STRIPPED, for the assertions below that are about what is ABSENT.
+ *
+ * handOutWrite.ts now EXPLAINS the `placements.length === 1` it used to carry -- the firm handed
+ * over eight accounts and got nothing, and the comment says so -- which means a check asserting
+ * the line is gone was reading the story of its removal and reporting the bug as still present.
+ * The same trap this codebase has met in check-field-widths and check-client-mandate.
+ */
+const code = (p) => read(p)
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/^[ \t]*\/\/.*$/gm, ' ')
 
 const schema = read('supabase/schema.sql')
 const planner = read('api/_lib/workflow/plan.ts')
 const runner = read('api/_lib/workflow/run.ts')
-const handOut = read('src/lib/handOutWrite.ts')
+const handOut = code('src/lib/handOutWrite.ts')
 const store = read('src/lib/accountRun.ts')
 
 /** One function's text, bounded at its own `end $$;` — a lazy match runs on into the next one. */
@@ -154,7 +165,7 @@ check('the handover is dated the day it starts, then the day after',
 
 /* ------------------------------------------------ and it does not wait for the morning */
 
-ok('the runner dates what is unplanned before it sends', /planUnplannedRuns\(admin, accountId\)/.test(runner))
+ok('the runner dates what is unplanned before it sends', /planUnplannedRuns\(admin, accountIds\)/.test(runner))
 /*
  * SO PLANNING AND SENDING ARE ONE PASS on a handover: the run is created, dated and sent in the
  * same call, which is what makes "email then SMS minutes later" possible at all.
@@ -172,18 +183,32 @@ ok('...and it plans before it sends', planAt < sendAt)
 ok('the timer still sweeps with its secret', /CRON_SECRET/.test(runner))
 ok('a person must prove a session instead', /requireCaller\(req, admin\)/.test(runner))
 ok('...and must name an account', /Only the timer sweeps the whole book/.test(runner))
-ok('...which narrows the work to that account',
-  /query\.eq\('workflow_runs\.account_id', accountId\)/.test(runner))
+/* `in`, NOT `eq`, SINCE THE HAND-OUT NAMES ALL OF THEM. The narrowing is the same rule -- the
+   caller says which accounts it is talking about and only the timer may say "all of them" -- and
+   what changed is that a hand-out of eight is eight names rather than a reason to nudge nothing.
+   See check-workflow-batch. */
+ok('...which narrows the work to those accounts',
+  /query\.in\('workflow_runs\.account_id', accountIds\)/.test(runner))
 
 /* ------------------------------------------------ the nudge */
 
 ok('the app can ask for its own account now', /export function nudgeWorkflows/.test(store))
-ok('...and it is the hand-out that asks', /nudgeWorkflows\(input\.accessToken, placements\[0\]\.accountId\)/.test(handOut))
+ok('...and it is the hand-out that asks',
+  /nudgeWorkflows\(input\.accessToken, placements\.map\(\(p\) => p\.accountId\)\)/.test(handOut))
 /*
- * ONE ACCOUNT, NOT A BATCH. A hand-out of five hundred would be five hundred calls out of a
- * browser, each sending real email. A batch waits for the sweep, which is what the sweep is for.
+ * EVERY ACCOUNT IT PLACED, AND THIS ASSERTION USED TO SAY THE OPPOSITE.
+ *
+ * It read `placements.length === 1` and called that correct: "a hand-out of five hundred would be
+ * five hundred calls out of a browser, each sending real email." The worry was real; the answer
+ * was not. THE FIRM handed over EIGHT and got eight runs with no steps in any of them -- "I
+ * handed people over as new handovers, but they didn't go the handover."
+ *
+ * The cap moved to where it belongs: one REQUEST is bounded by a clock, no number of accounts is
+ * bounded at all, and the browser comes back while work is left. check-workflow-batch holds that
+ * whole bargain; what is held here is that the hand-out hands over all of them.
  */
-ok('...only for a single account', /placements\.length === 1/.test(handOut))
+ok('...for every account it placed, not one of them', /placements\.length > 0/.test(handOut))
+ok('...and no longer only for a single one', !/placements\.length === 1/.test(handOut))
 /*
  * AND IT NEVER FAILS THE HAND-OUT. The accounts ARE allocated and the run IS created by the
  * trigger; a slow send must not make the hand-out look like it went wrong.

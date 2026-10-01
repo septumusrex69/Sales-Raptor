@@ -163,7 +163,7 @@ ok('...and not on default', !/new\.status = 'defaulted'/.test(resume ?? ''))
  * needs a thing that wakes up. The morning sweep already does.
  */
 ok('the sweep ends the windows that have run out',
-  /const expired = await expireDefaultedPromises\(admin, accountId\)/.test(sweep))
+  /const expired = await expireDefaultedPromises\(admin, accountIds\)/.test(sweep))
 /*
  * BEFORE THE RE-DATING, AND THAT IS THE LOAD-BEARING HALF. Breaking a promise resumes the paused
  * section 129; redateResumedRuns then moves whatever had not gone by the working days the hold

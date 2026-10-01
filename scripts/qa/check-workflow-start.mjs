@@ -125,7 +125,9 @@ ok('the run starts on the firm’s day, not the server’s', /todayInJohannesbur
 ok('...and the run records who started it', /started_by: caller\.id/.test(start))
 /* Dated by the app, because the working-day calendar is workingDays.ts and a second copy in SQL
    would be the one that is wrong about Heritage Day in the year nobody checks. */
-ok('the steps are dated by the planner', /planUnplannedRuns\(admin, accountId\)/.test(start))
+/* `[accountId]`: the planner takes a LIST now, because a hand-out names every account it placed
+   -- see check-workflow-batch. This caller genuinely has one, and wraps it. */
+ok('the steps are dated by the planner', /planUnplannedRuns\(admin, \[accountId\]\)/.test(start))
 
 /*
  * AND THE FIRST STEP GOES IN THE SAME PRESS, which is the firm's whole sentence: the moment the

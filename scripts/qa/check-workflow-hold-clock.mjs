@@ -95,8 +95,8 @@ check('a step on a run never paused stays where it was',
  * ASSERTED ON THE RUNNER BECAUSE THE ORDER IS THE WHOLE POINT. Re-dating after the due steps are
  * picked is re-dating nothing: the four notices have already gone.
  */
-ok('the runner re-dates what a pause pushed back', /redateResumedRuns\(admin, accountId\)/.test(runner))
-const redateAt = runner.indexOf('redateResumedRuns(admin, accountId)')
+ok('the runner re-dates what a pause pushed back', /redateResumedRuns\(admin, accountIds\)/.test(runner))
+const redateAt = runner.indexOf('redateResumedRuns(admin, accountIds)')
 const dueAt = runner.indexOf("lte('due_on'")
 ok('...and the due steps are read at all', dueAt > 0)
 ok('...after the re-dating, never before', redateAt > 0 && redateAt < dueAt)

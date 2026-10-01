@@ -33,6 +33,22 @@ import { runOneStep, type DueStep } from './step.js'
  * attempted again tomorrow as though nothing happened. The one exception is a send the PROVIDER
  * refused, which is `failed`: that is not something a collector can fix by filling in a field.
  */
+/**
+ * How long one pass may spend SENDING before it stops and says what is left.
+ *
+ * `maxDuration` in vercel.json asks for 60 seconds rather than the platform's old ten, and the
+ * reason lives here because vercel.json is schema-validated JSON with nowhere to say it: a pass
+ * opens an SMTP connection to the collector's own mailbox for EVERY email it sends, so
+ * twenty-five accounts is about a minute's work and ten seconds would be a 504 with nothing
+ * reported.
+ *
+ * This leaves a quarter of that spare, because the planning and
+ * the re-dating above have already spent some of the function's life and a single SMTP send can
+ * take several seconds on its own. Overshooting the function's own limit costs the pass its
+ * report -- see the note at the loop.
+ */
+const BUDGET_MS = 45_000
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const admin = adminClient()
   if (!admin) {
@@ -49,9 +65,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * cannot set the floor's sends going. Everything either of them touches is a step that was
    * already due; this hurries the work, it never invents any.
    */
-  const accountId = typeof (req.body ?? {}).accountId === 'string'
-    ? ((req.body as { accountId: string }).accountId)
-    : undefined
+  /*
+   * ONE ACCOUNT OR A LIST OF THEM, AND THE LIST IS THE ORDINARY CASE.
+   *
+   * THE FIRM: "I handed people over as new handovers, but they didn't go the handover." They had
+   * handed out EIGHT. This took a single id, so the hand-out only nudged when exactly one account
+   * was allocated -- a limit written to stop a five-hundred-account hand-out becoming five
+   * hundred calls out of somebody's browser, which it did by making eight of them zero.
+   *
+   * NO CAP ON HOW MANY, A CAP ON HOW LONG. The firm, asked: "there shouldn't be a cap... we could
+   * hand over like 1,000 accounts." They are right that the total must not be limited -- a
+   * handover notice that never goes is worse than one that goes late. What has to be bounded is
+   * one INVOCATION, because a function has a wall clock; so this does as much as it can in the
+   * time it has and reports what is left, and the caller comes back for the rest.
+   */
+  const body = (req.body ?? {}) as { accountId?: unknown; accountIds?: unknown }
+  const accounts = [
+    ...(typeof body.accountId === 'string' ? [body.accountId] : []),
+    ...(Array.isArray(body.accountIds) ? body.accountIds.filter((v): v is string => typeof v === 'string') : []),
+  ]
+  /* De-duplicated, so a caller passing the same account twice does not make it two of the budget
+     below -- and `.in()` would ask the database the same question twice for nothing. */
+  const accountIds = [...new Set(accounts)]
   /*
    * AND A MISSING SECRET IS NOT A PASS.
    *
@@ -74,11 +109,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
-    if (!accountId) {
+    if (accountIds.length === 0) {
       res.status(400).json({
         error: cronSecret
-          ? 'Say which account. Only the timer sweeps the whole book.'
-          : 'Say which account. The timer cannot sweep the book until CRON_SECRET is set.',
+          ? 'Say which accounts. Only the timer sweeps the whole book.'
+          : 'Say which accounts. The timer cannot sweep the book until CRON_SECRET is set.',
       })
       return
     }
@@ -101,14 +136,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * next morning's sweep would find four notices overdue and send them at once -- which is the
    * failure the pause exists to prevent.
    */
-  const expired = await expireDefaultedPromises(admin, accountId)
+  const expired = await expireDefaultedPromises(admin, accountIds)
 
   /*
    * DATE WHATEVER HAS NOT BEEN DATED, NEXT. A run created by the allocation trigger has no steps
    * at all until this happens -- so on a handover, planning and sending are the same pass and the
    * debtor hears from the firm within minutes rather than the next morning.
    */
-  const planned = await planUnplannedRuns(admin, accountId)
+  const planned = await planUnplannedRuns(admin, accountIds)
 
   /*
    * AND MOVE WHAT A PAUSE PUSHED BACK, BEFORE ANYTHING IS PICKED AS DUE.
@@ -123,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * nothing moved. That is what lets it live here at all: the resume happens in a database
    * trigger the app never sees, so there is no moment to hook other than the next pass.
    */
-  const redated = await redateResumedRuns(admin, accountId)
+  const redated = await redateResumedRuns(admin, accountIds)
 
   /*
    * EVERY STEP DUE, AND OVERDUE ONES WITH IT. `due_on <= today` rather than `= today`: a day the
@@ -152,7 +187,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('workflow_runs.state', 'running')
     .order('due_on', { ascending: true })
     .limit(200)
-  if (accountId) query = query.eq('workflow_runs.account_id', accountId)
+  if (accountIds.length) query = query.in('workflow_runs.account_id', accountIds)
   const { data: due, error } = await query
   if (error) {
     res.status(500).json({ error: error.message })
@@ -194,7 +229,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     told: 0, notes: [] as string[],
   }
 
+  /*
+   * THE WALL CLOCK, WHICH IS THE ONLY CAP THERE IS.
+   *
+   * A function is killed at `maxDuration` with a 504 and nothing to show for the work it had
+   * already done -- the steps it sent are sent, the ones it was mid-way through are neither sent
+   * nor marked, and the caller is told nothing at all. So this stops ITSELF with time to spare
+   * and says how many it did not reach, which is the difference between "come back for the rest"
+   * and a timeout somebody has to guess the meaning of.
+   *
+   * MEASURED BEFORE EACH STEP, NOT AFTER. A send is seconds, not milliseconds -- SMTP opens a
+   * connection to the collector's own mailbox -- so checking afterwards is checking one whole
+   * send too late. The margin is one generous send's worth.
+   */
+  const startedAt = Date.now()
+  let left = 0
   for (const step of steps) {
+    if (Date.now() - startedAt > BUDGET_MS) { left += 1; continue }
     try {
       const what = await runOneStep(admin, step, today)
       outcome[what.result] += 1
@@ -215,6 +266,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.status(200).json({
     ok: true, today,
+    /*
+     * WHAT THIS PASS DID NOT REACH. Zero means finished; anything else is the caller's cue to
+     * call again. The browser loops on it after a hand-out, and the timer simply picks the rest
+     * up tomorrow -- neither needs to know how long a send takes.
+     */
+    remaining: left,
     /* Runs dated on this pass, so a handover nudge can say "it started" rather than only
        "nothing was due" -- which is what an unplanned run looks like from the outside. */
     planned: planned.filter((p) => p.problem === null).length,

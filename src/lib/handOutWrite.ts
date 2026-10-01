@@ -70,7 +70,7 @@ export async function commitHandOut(input: {
   /** Called after each account so a long hand-out can show progress rather than appear hung. */
   onProgress?: (done: number, total: number) => void
   /**
-   * The caller's session, used for one thing only: hurrying a SINGLE account's workflow along.
+   * The caller's session, used for one thing only: hurrying this hand-out's workflows along.
    *
    * The database trigger starts the run whoever writes `assigned_to`, so the workflow happens
    * with or without this. What it buys is promptness -- the handover is an email and then an SMS
@@ -122,19 +122,26 @@ export async function commitHandOut(input: {
   }
 
   /*
-   * AND A SINGLE ALLOCATION IS HURRIED ALONG.
+   * AND THE WHOLE HAND-OUT IS HURRIED ALONG.
    *
-   * ONE, NOT A BATCH, and the line is drawn here rather than at some size that looks safe: a
-   * hand-out of five hundred accounts would be five hundred calls out of somebody's browser,
-   * each one sending real email. A batch waits for the sweep, which is what the sweep is for.
-   * One account is the interactive case -- somebody is standing there having just given an
-   * account to a collector, and expecting the debtor to hear from the firm.
+   * THIS SAID `placements.length === 1`, AND EIGHT ACCOUNTS GOT NOTHING. The firm handed over
+   * eight and came back with "I handed people over as new handovers, but they didn't go the
+   * handover" -- eight runs created by the allocation trigger, nought steps under any of them,
+   * and the daily sweep three hours past. The limit was written against a real worry (a
+   * five-hundred-account hand-out becoming five hundred calls out of somebody's browser) and it
+   * answered it by making the ordinary case zero.
    *
-   * NOT AWAITED. The accounts ARE allocated and the run IS created; a slow send must not make
+   * THE CAP WAS IN THE WRONG PLACE. The firm, asked directly: "there shouldn't be a cap... we
+   * could hand over like 1,000 accounts." What must be bounded is not how many accounts get a
+   * workflow -- all of them must -- but how long one request may spend. So the ids go in one
+   * body, the server does as much as its wall clock allows and says what is left, and
+   * nudgeWorkflows comes back for the rest.
+   *
+   * NOT AWAITED. The accounts ARE allocated and the runs ARE created; a slow send must not make
    * the hand-out look like it failed, and the sweep is the backstop either way.
    */
-  if (input.mode === 'allocate_and_refer' && placements.length === 1 && input.accessToken) {
-    nudgeWorkflows(input.accessToken, placements[0].accountId)
+  if (input.mode === 'allocate_and_refer' && input.accessToken && placements.length > 0) {
+    nudgeWorkflows(input.accessToken, placements.map((p) => p.accountId))
   }
 
   /*

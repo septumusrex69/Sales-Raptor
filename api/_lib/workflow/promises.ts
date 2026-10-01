@@ -38,7 +38,7 @@ export interface Expired {
 const WINDOW_HOURS = 48
 
 export async function expireDefaultedPromises(
-  admin: SupabaseClient, accountId?: string, now: Date = new Date(),
+  admin: SupabaseClient, accounts?: string[], now: Date = new Date(),
 ): Promise<Expired[]> {
   const cutoff = new Date(now.getTime() - WINDOW_HOURS * 3600_000).toISOString()
 
@@ -54,7 +54,7 @@ export async function expireDefaultedPromises(
      */
     .lt('defaulted_at', cutoff)
     .limit(200)
-  if (accountId) query = query.eq('account_id', accountId)
+  if (accounts?.length) query = query.in('account_id', accounts)
 
   const { data, error } = await query
   if (error) throw new Error(error.message)

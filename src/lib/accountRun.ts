@@ -185,14 +185,60 @@ export async function releaseStep(accessToken: string, stepId: string): Promise<
  * book -- so a bulk allocation of five thousand is left to the sweep rather than setting off five
  * thousand calls from somebody's browser.
  */
-export function nudgeWorkflows(accessToken: string, accountId: string): void {
-  void fetch('/api/workflow/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ accountId }),
-  }).catch(() => {
+export function nudgeWorkflows(accessToken: string, accountIds: string | string[]): void {
+  const ids = Array.isArray(accountIds) ? accountIds : [accountIds]
+  if (ids.length === 0) return
+  void runUntilDone(accessToken, ids).catch(() => {
     /* Ignored on purpose -- see above. The sweep is the backstop. */
   })
+}
+
+/**
+ * ASK, AND KEEP ASKING UNTIL THERE IS NOTHING LEFT.
+ *
+ * THE SERVER BOUNDS A PASS BY TIME, NOT BY COUNT -- a send opens an SMTP connection to the
+ * collector's own mailbox and takes seconds, so a function with a wall clock can only promise to
+ * do as much as it can and say what it did not reach. `remaining` is that number, and this is the
+ * other half of the bargain: come back for the rest.
+ *
+ * THE FIRM ASKED FOR NO CAP -- "we could hand over like 1,000 accounts" -- and this is what that
+ * means in practice. Nothing limits the total; what is limited is one request, and the loop
+ * carries on where it stopped.
+ *
+ * IT STOPS ON NO PROGRESS, which is the guard that matters. A pass that reports work left and
+ * then does none of it would spin for ever against a server that cannot send at all -- a mailbox
+ * that will not authenticate, a provider refusing everything. Two passes that move nothing is
+ * enough to say so and leave the rest to the sweep.
+ *
+ * WHILE THE TAB IS OPEN, and no longer. Whoever closes their iPad mid-hand-out leaves the rest to
+ * the overnight sweep, which is the correct backstop and the reason this can be fire and forget
+ * at all. When the sweep runs every minute rather than every morning, this loop stops being the
+ * thing that carries a big hand-out and goes back to being what it was built for: promptness.
+ */
+async function runUntilDone(accessToken: string, accountIds: string[]): Promise<void> {
+  /* A ceiling on PASSES, not on accounts. Twenty-five passes of up to 45 seconds of sending is
+     far more than any hand-out somebody is standing and watching, and it is what stops a bug in
+     `remaining` turning into an endless loop in a browser. */
+  const MAX_PASSES = 25
+  let quiet = 0
+  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+    const res = await fetch('/api/workflow/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ accountIds }),
+    })
+    if (!res.ok) return
+    const body = (await res.json().catch(() => ({}))) as {
+      remaining?: number; sent?: number; held?: number; failed?: number; planned?: number
+    }
+    if (!body.remaining) return
+    /* DID THIS PASS ACTUALLY MOVE ANYTHING? A held step is movement -- it was looked at and a
+       reason was written on it -- so only a pass that neither sent, held, failed nor planned
+       counts as quiet. */
+    const moved = (body.sent ?? 0) + (body.held ?? 0) + (body.failed ?? 0) + (body.planned ?? 0)
+    quiet = moved > 0 ? 0 : quiet + 1
+    if (quiet >= 2) return
+  }
 }
 
 /**

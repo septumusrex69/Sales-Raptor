@@ -32,12 +32,18 @@ export interface PlannedRun {
 /**
  * Plan every running run that has no steps yet.
  *
- * `accountId` narrows it to one account, which is what the app asks for the moment somebody is
- * allocated -- so the handover goes out in minutes rather than waiting for the morning. Left out,
- * it sweeps, which is the cron's job and the backstop for anything the app missed.
+ * `accounts` narrows it to the accounts the app has just touched, which is what it asks for the
+ * moment somebody is allocated -- so the handover goes out in minutes rather than waiting for the
+ * morning. Left out, it sweeps, which is the cron's job and the backstop for anything the app
+ * missed.
+ *
+ * A LIST, NOT ONE. It took a single id, and the hand-out therefore nudged only when exactly ONE
+ * account was handed out -- so the firm handed over eight and got eight runs with no steps in
+ * them at all. The narrowing is the same idea either way: the caller says which accounts it is
+ * talking about, and only the timer may say "all of them".
  */
 export async function planUnplannedRuns(
-  admin: SupabaseClient, accountId?: string,
+  admin: SupabaseClient, accounts?: string[],
 ): Promise<PlannedRun[]> {
   let query = admin
     .from('workflow_runs')
@@ -62,7 +68,7 @@ export async function planUnplannedRuns(
     .in('state', ['running', 'held'])
     .order('created_at', { ascending: true })
     .limit(200)
-  if (accountId) query = query.eq('account_id', accountId)
+  if (accounts?.length) query = query.in('account_id', accounts)
 
   const { data, error } = await query
   if (error) throw new Error(error.message)
@@ -108,7 +114,7 @@ export async function planUnplannedRuns(
  * the resume happens in a database trigger the app never sees.
  */
 export async function redateResumedRuns(
-  admin: SupabaseClient, accountId?: string,
+  admin: SupabaseClient, accounts?: string[],
 ): Promise<{ runId: string; moved: number }[]> {
   let query = admin
     .from('workflow_runs')
@@ -118,7 +124,7 @@ export async function redateResumedRuns(
       workflow_run_steps(id, due_on, state, workflow_nodes!inner(day, ordinal, anchor))`)
     .eq('state', 'running')
     .limit(200)
-  if (accountId) query = query.eq('account_id', accountId)
+  if (accounts?.length) query = query.in('account_id', accounts)
 
   const { data, error } = await query
   if (error) throw new Error(error.message)

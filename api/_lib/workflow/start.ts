@@ -176,7 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   /* Dated here, like every other run: the working-day calendar lives in the app, so the run is
      created with no steps and planUnplannedRuns gives them their dates. */
-  const planned = await planUnplannedRuns(admin, accountId)
+  const planned = await planUnplannedRuns(admin, [accountId])
   const problem = planned.find((p) => p.runId === created.id && p.problem !== null)?.problem ?? null
 
   /*

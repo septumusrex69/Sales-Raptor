@@ -139,7 +139,10 @@ ok('the timer is only the timer when the secret is actually set',
 ok('...never true merely because nothing is configured', !/const isCron = !cronSecret/.test(runner))
 /* Without it the app's own nudge still works, because it carries a session and names one account:
    the sweep stops, which is visible and mendable, and the handover and the arrangement do not. */
-ok('a session still nudges one account', /if \(!accountId\) \{/.test(runner))
+/* THE SAME RULE, WIDENED: a session must still NAME what it is acting on -- only the timer may
+   sweep the book -- and what changed is that naming eight accounts is now allowed where it used
+   to mean naming none. See check-workflow-batch. */
+ok('a session still names what it is acting on', /if \(accountIds\.length === 0\) \{/.test(runner))
 ok('...and is told what is missing when the sweep cannot run',
   /The timer cannot sweep the book until CRON_SECRET is set/.test(runner))
 
