@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 /**
  * Reading a handover sheet back, from either sheet, without anybody declaring which.
  *
@@ -57,6 +58,74 @@ check('...and with the non-breaking space en-ZA actually uses',
 check('a comma between thousands is grouping', parseMoney('48,250.00'), 48250)
 check('...and a comma as the decimal is still the same money', parseMoney('48 250,00'), 48250)
 check('words are not money', parseMoney('to be advised'), null)
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * THE WORST BUG THIS FILE HAS HAD, AND THE FIRM FOUND IT ON THEIR OWN SHEET.
+ * ---------------------------------------------------------------------------------------------
+ *
+ * THE FIRM: "look at this handover sheet, and the amounts." The draft read
+ * R 35 582 000 000 003 956 of capital over eight accounts worth R 7 510,85 between them, and
+ * said "8 ready, 0 not accepted" -- so every one of them would have opened a ledger at that
+ * figure.
+ *
+ * EXCEL STORES WHAT A FORMULA PRODUCED, NOT WHAT THE CELL DISPLAYS. The sheet shows 1 134,40 and
+ * the file holds `1134.4000000000001`: IEEE 754, not corruption, and the reader is right to pass
+ * it through as what the file says.
+ *
+ * THE DECIMAL WAS MATCHED AS ONE OR TWO DIGITS, so a thirteen-digit tail did not look like a
+ * decimal at all, the separator was stripped as thousands grouping, and R1 134,40 became eleven
+ * quadrillion rand. Four of these assertions are the firm's own eight cells.
+ */
+check('float noise is read as the money it is', parseMoney('1134.4000000000001'), 1134.4)
+check('...and the other one on their sheet', parseMoney('2423.8000000000002'), 2423.8)
+/* ROUNDED TO CENTS, not carried: money has two decimals and the extra digits are an artefact. */
+check('...rounded to cents', parseMoney('1.005999999999'), 1.01)
+check('...including where the noise rounds down', parseMoney('99.99499999999'), 99.99)
+/* THE WHOLE SHEET, BECAUSE THE TOTAL IS WHAT THE FIRM SAW. */
+const THEIR_SHEET = ['770.45', '1134.4000000000001', '811.7', '380', '380',
+  '2423.8000000000002', '1230.5', '380']
+check('their eight accounts add up to what the client handed over',
+  Number(THEIR_SHEET.reduce((n, c) => n + (parseMoney(c) ?? 0), 0).toFixed(2)), 7510.85)
+
+/*
+ * AND THREE DIGITS IS STILL GROUPING, which is the line this fix must not cross. "1.234" is one
+ * thousand two hundred and thirty-four in the South African and European convention, it is what
+ * this has always read, and it is what the sheets in the building are written in. Nothing groups
+ * thousands in FOURS, which is why four is the safe place to draw it.
+ */
+check('three digits after a separator is still thousands', parseMoney('1.234'), 1234)
+check('...and so is a grouped figure with a decimal', parseMoney('1,234,567.89'), 1234567.89)
+check('...and a negative keeps its sign', parseMoney('-1134.4000000000001'), -1134.4)
+/* NOTHING ELSE MOVED. The four cases above this block are re-asserted as a group, because a
+   "fix" to the long-fraction branch that also caught these would be the same bug mirrored. */
+check('a plain grouped figure is unchanged', parseMoney('R 48 250,00'), 48250)
+check('...and a two-decimal one', parseMoney('48250.55'), 48250.55)
+
+/*
+ * AND THE SCREEN DRAWS IT AS MONEY. The total was parseMoney's fault; the CELL showing
+ * `1134.4000000000001` is the other half, and a handover amount column full of that reads as a
+ * broken screen whatever the arithmetic underneath it says.
+ *
+ * THE SAME RULE THE DATES FOLLOW, including the half that matters: what cannot be read comes
+ * back UNTOUCHED, because that is the one somebody has to look at and correct. A figure quietly
+ * tidied into something plausible is a figure nobody checks.
+ */
+const card = readFileSync(new URL('../../src/components/settings/HandoverImportCard.tsx', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+ok('money columns are drawn through the parser', /const displayMoney = /.test(card))
+ok('...keyed off the column kind rather than a hand-kept list',
+  /HANDOVER_COLUMNS\.filter\(\(c\) => c\.kind === 'money'\)/.test(card))
+ok('...and used in the cell', /isMoney[\s\S]{0,80}displayMoney\(row\.values\[k\]\)/.test(card))
+/* UNREADABLE COMES BACK AS IT WAS. Asserted on the source rather than by calling it, because the
+   function lives in a .tsx the rule checks cannot import. */
+ok('...leaving what it cannot read alone', /n === null \? text : n\.toFixed\(2\)/.test(card))
+/*
+ * AND THE INPUT RE-MOUNTS WHEN THE STORED VALUE CHANGES. These boxes are uncontrolled, so an
+ * edit elsewhere that re-judges the draft would otherwise leave the old text in the box -- the
+ * same trap the date cells already carry a `key` for.
+ */
+ok('...without leaving stale text in the box', /key=\{isDate \|\| isMoney \?/.test(card))
 check('an empty cell is not nought', parseMoney(''), null)
 
 /* ---------- 2. dates, and the one that means two days ---------- */

@@ -15,7 +15,7 @@ import { parseCsv } from '../../lib/csv'
 import { readXlsxRows } from '../../lib/xlsx'
 import { readSingleCsvFromZip } from '../../lib/zip'
 import {
-  displayDate, planHandover, type DateOrder, type HandoverPlan,
+  displayDate, planHandover, type DateOrder, type HandoverPlan, parseMoney,
 } from '../../lib/handoverImport.ts'
 import { matchDocuments, type MatchPlan } from '../../lib/documentMatch.ts'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
@@ -57,6 +57,29 @@ const SHOWN = HANDOVER_COLUMNS.map((c) => c.key)
 
 /** The columns holding a date, so the table can show one the way the firm writes it. */
 const DATE_KEYS = new Set(HANDOVER_COLUMNS.filter((c) => c.kind === 'date').map((c) => c.key))
+const MONEY_KEYS = new Set(HANDOVER_COLUMNS.filter((c) => c.kind === 'money').map((c) => c.key))
+
+/**
+ * A MONEY CELL, DRAWN AS MONEY.
+ *
+ * THE FIRM, looking at their own draft: "look at this handover sheet, and the amounts." The
+ * column read `1134.4000000000001`, and the total above it read R 35 582 000 000 003 956.
+ *
+ * THE TOTAL WAS parseMoney's FAULT and is fixed there. THIS IS THE OTHER HALF: Excel stores what
+ * a formula produced rather than what the cell displays, so a sheet showing 1 134,40 genuinely
+ * holds thirteen digits of IEEE 754 noise. The reader is right to pass it through -- it is what
+ * the file says -- but a handover amount column full of that reads as a broken screen.
+ *
+ * THE SAME RULE THE DATES FOLLOW, including the half that matters: anything that cannot be read
+ * comes back UNTOUCHED, because that is the one somebody has to look at and correct. A figure
+ * this quietly tidied into something plausible would be a figure nobody checks.
+ */
+const displayMoney = (raw: string | null | undefined): string => {
+  const text = (raw ?? '').trim()
+  if (!text) return ''
+  const n = parseMoney(text)
+  return n === null ? text : n.toFixed(2)
+}
 
 /** A column's heading, by its key. Module level: the table and the decision list both need it. */
 const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.label ?? key
@@ -1189,9 +1212,12 @@ export function DraftTable({
                        there is nothing to do to, which on the firm's own file was 40 cells in 42. */
                     const iffy = !bad && worst.some((pr) => pr.level === 'warn')
                     /* What the box draws, which is also what a blur is judged against. */
+                    const isMoney = MONEY_KEYS.has(k)
                     const shown = isDate
                       ? displayDate(row.values[k], order)
-                      : row.values[k] ?? ''
+                      : isMoney
+                        ? displayMoney(row.values[k])
+                        : row.values[k] ?? ''
                     return (
                       <td key={k} className="py-1.5 pr-2">
                         {/*
@@ -1213,7 +1239,7 @@ export function DraftTable({
                             elsewhere that re-judges the draft would otherwise leave the old text
                             sitting in the box.
                           */
-                          key={isDate ? `${k}:${row.values[k] ?? ''}` : undefined}
+                          key={isDate || isMoney ? `${k}:${row.values[k] ?? ''}` : undefined}
                           defaultValue={shown}
                           disabled={!!busy || row.excluded}
                           title={worst.map((pr) => pr.message).join(' ') || undefined}

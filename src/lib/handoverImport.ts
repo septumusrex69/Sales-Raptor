@@ -362,10 +362,42 @@ export interface HandoverPlan {
  * A comma is stripped as a separator, not read as a decimal point: a South African sheet that
  * writes 48,250.00 and one that writes 48 250,00 must not disagree by a factor of a hundred, so
  * the LAST separator with two digits after it wins.
+ *
+ * ------------------------------------------------------------------------------------------
+ * AND A LONG FRACTION IS A FRACTION, WHICH IS THE WORST BUG THIS FILE HAS HAD
+ * ------------------------------------------------------------------------------------------
+ *
+ * THE FIRM, looking at the total above their own handover: "look at this handover sheet, and the
+ * amounts." It read R 35 582 000 000 003 956 on eight accounts worth R 7 510,85 between them.
+ *
+ * EXCEL STORES WHAT A FORMULA PRODUCED, NOT WHAT IT DISPLAYS. The cell shows 1 134,40 and the
+ * file holds `1134.4000000000001` -- the double that came out of the arithmetic. That is not
+ * corruption, it is IEEE 754, and the reader is right to pass it through as what the sheet says.
+ *
+ * WHAT WAS WRONG WAS HERE. The decimal was matched as `[.,](\d{1,2})` -- one or two digits -- so
+ * a thirteen-digit tail did not look like a decimal at all, the separator was stripped as
+ * grouping, and R1 134,40 became ELEVEN QUADRILLION RAND. Both rows carrying float noise did it,
+ * the draft said "8 ready, 0 not accepted", and the ledgers would have opened at that figure.
+ *
+ * SO A TAIL OF FOUR OR MORE DIGITS IS A DECIMAL FRACTION and is rounded to cents. Nothing groups
+ * thousands in fours; a separator followed by that many digits can only be a decimal point with
+ * more precision than money has. THREE is deliberately left alone -- "1.234" is one thousand two
+ * hundred and thirty-four in the South African and European convention, which is what this has
+ * always read it as and what the sheets in the building are written in.
  */
 export function parseMoney(raw: string | null | undefined): number | null {
   const s = (raw ?? '').replace(/[R\s]/g, '').trim()
   if (!s) return null
+  /*
+   * A FRACTION LONGER THAN MONEY HAS, taken first, because the general pattern below would read
+   * its separator as grouping and multiply the figure by a power of ten. Rounded rather than
+   * refused: 1134.4000000000001 is R1 134,40 and there is nothing for anybody to correct.
+   */
+  const long = /^(-?)(\d+)[.,](\d{4,})$/.exec(s)
+  if (long) {
+    const n = Number(`${long[1]}${long[2]}.${long[3]}`)
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : null
+  }
   /* A trailing ",00" or ".00" is the decimal; every other separator is grouping. */
   const m = /^(-?)([\d.,]*?)([.,](\d{1,2}))?$/.exec(s)
   if (!m) return null
