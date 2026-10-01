@@ -218,7 +218,20 @@ ok('the stored fraction is turned back into a percentage', /fraction \* 100/.tes
 /* A warning that fires when nothing is wrong is worse than no warning -- so both of these sit
    behind an absence. */
 ok('a client with nothing signed is told so', /Nothing signed/.test(card))
-ok('...and a missing mandate is named on the card too', /No mandate on record/.test(card))
+/*
+ * THE MISSING MANDATE MOVED OFF THIS CARD, and this assertion moved with it rather than being
+ * deleted. The commission card could only ever REPORT the absence; MandateCard, directly beneath
+ * it, reports it AND fixes it -- the date and the signed mandate itself. Two cards an inch apart
+ * both saying "no mandate on record" is a warning people stop reading. Still asserted, because
+ * the thing worth holding was never which card said it: it was that somebody looking at the
+ * client is told.
+ */
+const mandateCard = src('../../src/components/companies/MandateCard.tsx')
+ok('a missing mandate is still named on the client page',
+  /no handover can be imported/i.test(mandateCard))
+ok('...on the card that can also do something about it', /type="date"/.test(mandateCard))
+ok('...and the commission card no longer repeats it', !/No mandate on record/.test(card))
+ok('...with the mandate card actually on the page', /<MandateCard/.test(page))
 ok('the source of the scale is shown where there is one', /commissionBandsSource/.test(card))
 
 /* ---------------------------------------------------------------- report */

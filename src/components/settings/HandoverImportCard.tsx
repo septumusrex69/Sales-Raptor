@@ -546,8 +546,17 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
           has to go and find a mandate should not first spend ten minutes on the file. */}
       {noMandate && (
         <p className="text-sm text-negative-700 mt-3">
-          {client?.name} has no signed mandate on record, so no handover can be imported for them.
-          Add the date it was signed on the client first.
+          {client?.name} has no signed mandate on record, so no handover can be imported for them.{' '}
+          {/*
+            AND A WAY TO GO AND DO IT. THE FIRM, on this exact refusal: "there was no option where
+            I can upload a contract." There genuinely was not -- the mandate date could only ever
+            be set on the form that creates the client -- so this sentence named a thing that
+            could not be done. The link lands on the client's mandate card, which sets the date
+            and takes the signed mandate itself.
+          */}
+          <Link to={`/companies/${client?.id}`} className="font-medium underline">
+            Open {client?.name} and record the mandate
+          </Link>, then come back.
         </p>
       )}
 

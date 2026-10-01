@@ -19223,3 +19223,89 @@ comment on function public.protect_profile_privileged_fields() is
   'server acting on the service key -- which api/invite-user.ts uses only after checking the '
   'caller is an Administrator itself. Reverts silently rather than raising, so a caller that is '
   'refused still gets a success: anything relying on this must not report the write as applied.';
+
+-- ============================================================================
+-- THE CLIENT'S OWN PAPERWORK, STARTING WITH THE MANDATE.
+--
+-- THE FIRM, blocked on the import screen: "it tells me I can't upload this handover sheet
+-- because there's no contract signed. However, there was no option where I can upload a contract
+-- ... there should be a function inside the client section where it says upload a mandate."
+--
+-- `companies.mandate_signed_at` has gated every handover import since it was written, and the
+-- only place it could ever be SET was the Add-a-client form. A client loaded while the mandate
+-- was still in the post -- which is the ordinary case, and the reason that form does not insist
+-- on it -- could never be unblocked afterwards. This table is the other half: the signed mandate
+-- itself, filed against the client.
+--
+-- IT MIRRORS account_documents DELIBERATELY: private bucket, signed URLs, open insert, deletion
+-- restricted to managers. Two things are different, and both are the same rule.
+--
+--   NO FEE IS EVER RAISED HERE. Annexure B item 3 recovers time the DEBTOR caused somebody to
+--   spend, and this is the CLIENT's paperwork on the firm's own file. CLAUDE.md states it as
+--   law: fees are charged on accounts only, never on leads or deals. Uploading a mandate must
+--   not touch a debtor's bill, which is why this gets its own library rather than a `companyId`
+--   branch inside accountWorkspace.uploadDocument.
+--
+--   AND IT IS NOT A DEBTOR'S DOCUMENT, so it does not belong in the account bucket: a client's
+--   signed mandate carries the firm's commercial terms, and the account bucket is read by every
+--   collector on the floor.
+-- ============================================================================
+create table if not exists public.client_documents (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  name text not null,
+  storage_path text not null unique,
+  mime_type text,
+  size_bytes bigint,
+  -- What kind of paper it is, from the app's own list. Free text in the database so a new kind
+  -- does not need a migration -- the same decision account_documents.kind made.
+  kind text,
+  notes text,
+  uploaded_by uuid references public.profiles (id) on delete set null,
+  uploaded_by_name text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists client_documents_company_idx
+  on public.client_documents (company_id, created_at desc);
+
+alter table public.client_documents enable row level security;
+
+drop policy if exists "client_documents_select" on public.client_documents;
+create policy "client_documents_select" on public.client_documents
+  for select using (auth.uid() is not null);
+
+drop policy if exists "client_documents_insert" on public.client_documents;
+create policy "client_documents_insert" on public.client_documents
+  for insert with check (auth.uid() is not null);
+
+-- NOBODY QUIETLY REMOVES THE MANDATE. It is the authority the firm collects on; the same reason
+-- account_documents restricts deletion so a collector cannot remove the letter of demand that
+-- proves it was sent.
+drop policy if exists "client_documents_delete" on public.client_documents;
+create policy "client_documents_delete" on public.client_documents for delete
+  using (public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager'));
+
+comment on table public.client_documents is
+  'The paperwork a CLIENT accumulates -- the signed mandate above all. Private bucket, signed '
+  'URLs, deletion restricted to managers. No Annexure B fee is ever raised on it: item 3 '
+  'recovers time the debtor caused, and this is the client''s own file.';
+
+insert into storage.buckets (id, name, public)
+values ('client-documents', 'client-documents', false)
+on conflict (id) do nothing;
+
+drop policy if exists "client_documents_read" on storage.objects;
+create policy "client_documents_read" on storage.objects
+  for select using (bucket_id = 'client-documents' and auth.uid() is not null);
+
+drop policy if exists "client_documents_write" on storage.objects;
+create policy "client_documents_write" on storage.objects
+  for insert with check (bucket_id = 'client-documents' and auth.uid() is not null);
+
+drop policy if exists "client_documents_remove" on storage.objects;
+create policy "client_documents_remove" on storage.objects
+  for delete using (
+    bucket_id = 'client-documents'
+    and public.current_user_role() in ('Administrator', 'Sales Manager', 'Liaison Manager')
+  );

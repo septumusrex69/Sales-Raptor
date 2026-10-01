@@ -154,8 +154,18 @@ export async function stubSupabase(page, handlers, seen) {
  * setFixedTime, NOT clock.install: it pins Date.now() and new Date() and leaves setTimeout alone.
  * React's own timers are how the page loads at all, and a frozen timer queue is a blank screen.
  */
-export async function signedInPage(browser, profile, handlers, seen, { now = null } = {}) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+/*
+ * `timezone` emulates the BROWSER's clock offset, which is a different thing from `now` and is
+ * needed for one class of bug the container's own UTC can never show: a date typed into an
+ * `<input type="date">` comes back as 'YYYY-MM-DD', and parsing that as a Date is midnight UTC --
+ * the day before, for every reader west of Greenwich. Running the container under TZ=... does
+ * not reach the page; this does.
+ */
+export async function signedInPage(browser, profile, handlers, seen, { now = null, timezone = null } = {}) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    ...(timezone ? { timezoneId: timezone } : {}),
+  })
   const page = await context.newPage()
   await stubSupabase(page, handlers, seen)
   const nowMs = now === null ? Date.now() : new Date(now).getTime()

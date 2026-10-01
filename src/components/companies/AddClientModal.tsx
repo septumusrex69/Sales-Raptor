@@ -208,7 +208,8 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
             : (
               <p className="text-xs text-negative-700">
                 No mandate date yet — the client will be added, but no handover can be imported
-                for them until it is filled in.
+                for them until it is filled in. Its own card on the client page takes the date
+                and the signed mandate whenever it comes back.
               </p>
             )}
 
@@ -313,8 +314,15 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
             <FormField label="Mandate signed on">
               <input type="date" className={inputClass} value={form.mandateSignedAt}
                 onChange={set('mandateSignedAt')} />
+              {/*
+                AND WHERE TO DO IT LATER, because "later" was impossible until now. THE FIRM:
+                "maybe tell you can upload a contract for a client when you sign up the client
+                ... Or you can say, for example, like upload later." The client page's mandate
+                card is where both the date and the signed mandate itself live.
+              */}
               <span className="block text-[11px] text-slate-400 mt-1">
-                A handover cannot be imported until this is filled in.
+                A handover cannot be imported until this is filled in. It can be added on the
+                client afterwards, with the signed mandate.
               </span>
             </FormField>
             <FormField label="Client liaison">

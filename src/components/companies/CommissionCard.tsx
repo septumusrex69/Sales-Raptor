@@ -69,21 +69,20 @@ export function CommissionCard({ company }: { company: Company }) {
         </p>
       ) : null}
 
+      {/* GUARDED, or the rule and its padding draw under every rate with nothing beneath them --
+          which is what moving the mandate line out of here would otherwise have left behind. */}
+      {company.commissionBandsSource && (
       <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-[11px] text-slate-400">
-        {company.commissionBandsSource && <p>{company.commissionBandsSource}</p>}
+        <p>{company.commissionBandsSource}</p>
         {/*
-          THE MANDATE DATE IS HERE because it is the same question: on whose authority, and on what
-          terms. Its absence stops a handover being imported at all, so it is worth seeing beside
-          the rate rather than only when an import refuses.
+          THE MANDATE DATE USED TO BE HERE, because it is the same question asked twice: on whose
+          authority, and on what terms. It is MandateCard now, directly below this one -- which
+          also sets the date and takes the signed mandate itself, neither of which this card could
+          do. Two cards an inch apart both saying "no mandate on record" is a warning people stop
+          reading, so this one says nothing and the one that can fix it says it.
         */}
-        {company.mandateSignedAt ? (
-          <p>Mandate signed {new Date(company.mandateSignedAt).toLocaleDateString('en-ZA')}.</p>
-        ) : (
-          <p className="text-negative-700">
-            No mandate on record — no handover can be imported for this client.
-          </p>
-        )}
       </div>
+      )}
     </Card>
   )
 }

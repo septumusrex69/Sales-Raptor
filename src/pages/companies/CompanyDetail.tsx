@@ -41,6 +41,7 @@ import { NoteActivityList } from '../../components/NoteActivityRow'
 import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
 import { ClientPicker } from '../../components/ui/ClientPicker'
 import { CommissionCard } from '../../components/companies/CommissionCard'
+import { MandateCard } from '../../components/companies/MandateCard'
 import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
 import { uploadDocument } from '../../lib/accountWorkspace'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
@@ -48,7 +49,7 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
-import { canBeClientLiaison } from '../../lib/permissions'
+import { canBeClientLiaison, canEditOwned } from '../../lib/permissions'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
 
@@ -522,7 +523,14 @@ export function CompanyDetail() {
             </button>
           </dd>
         </div>
-        {company.mandateSignedAt && <Field label="Mandate Signed" value={formatDate(company.mandateSignedAt)} />}
+        {/*
+          THE MANDATE IS NOT A FIELD HERE ANY MORE. It was `{company.mandateSignedAt && <Field
+          .../>}` -- rendered only once it was already set, so the one screen that could have
+          fixed a missing mandate showed nothing at all where it was missing. THE FIRM: "there
+          was no option where I can upload a contract ... there should be a function inside the
+          client section where it says upload a mandate." It is MandateCard now, which shows the
+          absence, sets the date and takes the signed mandate itself.
+        */}
         <Field label="Created" value={formatDate(company.createdAt)} />
       </dl>
     </Card>
@@ -840,6 +848,17 @@ export function CompanyDetail() {
                They're signing what they're signed on." It was stored and never shown — the one
                number every account on this book inherits. */
             <CommissionCard key="commission" company={company} />,
+            /*
+              THE MANDATE, directly under what it entitles the firm to charge -- they are the same
+              question asked twice: on whose authority, and on what terms.
+            */
+            <MandateCard key="mandate" company={company}
+              canEdit={canEditOwned(currentUser, company.accountOwnerId)}
+              canDelete={currentUser?.role === 'Administrator' || currentUser?.role === 'Sales Manager'
+                || currentUser?.role === 'Liaison Manager'}
+              userId={currentUser?.id ?? null}
+              userName={currentUser?.name ?? null}
+              onSetSignedAt={(iso) => updateCompany(company.id, { mandateSignedAt: iso })} />,
             <ClientBookCard key="book" companyId={company.id} />,
             /* Beside the handover book, because these are the two things a liaison opens this
                page for: what came in, and what is stuck. */
