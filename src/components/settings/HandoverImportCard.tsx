@@ -475,8 +475,48 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
         and always will be; a warning that counted it would be on the screen for ever and read by
         nobody, which CLAUDE.md names as worse than no warning.
       */}
+      {unallocated.length > 0 && (
+        <div className="mb-4 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
+          <p className="text-sm font-medium text-navy-950 flex items-center gap-1.5">
+            <AlertTriangle size={14} className="text-gold-600 shrink-0" />
+            {unallocated.length === 1
+              ? 'A recent handover has accounts on nobody\u2019s desk.'
+              : `${unallocated.length} recent handovers have accounts on nobody\u2019s desk.`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {unallocated.map((b) => (
+              <li key={b.handoverId} className="text-[13px] text-slate-600">
+                <Link to={`/accounts?handover=${b.handoverId}&handout=1`}
+                  className="font-medium text-brand-700 hover:underline">
+                  Allocate {b.unallocated.toLocaleString('en-ZA')} of {b.total.toLocaleString('en-ZA')}
+                </Link>
+                {' \u00b7 '}{b.reference ?? 'a handover'}
+                {b.companyName ? ` \u00b7 ${b.companyName}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/*
+        THE CLIENT IS PICKED, NOT READ. A handover sheet says what each debtor owes and never
+        whose book it is -- "Client Division" on the old sheet was a person's name in the client's
+        office. This is the control the firm asked for: "you can choose which client does the
+        handover batch fall on."
+      */}
+      <label className="block mb-4">
+        <span className="block text-xs font-medium text-slate-500 mb-1">Whose handover is this</span>
+        <ClientPicker clients={clients} value={companyId} onChange={setCompanyId}
+          placeholder="Search for a client by name or code…" />
+      </label>
+
       {/*
         AND WHAT CAME IN THAT SHOULD NOT HAVE.
+        
+        DIRECTLY UNDER THE CLIENT PICKER, because it is empty until a client is chosen and the
+        picker is what chooses one. It sat ABOVE the picker and the firm could not find it:
+        "I still see the 12 accounts. There's no option to delete it or to reverse the handover."
+        A panel that fills in above the control that fills it is a panel nobody looks at twice.
         
         THE FIRM: "make sure that everything is being deleted." A client sends the wrong file, or
         the same file twice, and two hundred accounts open that nobody should be collecting on --
@@ -574,40 +614,6 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
         </div>
       )}
 
-      {unallocated.length > 0 && (
-        <div className="mb-4 rounded-lg border border-gold-300 bg-gold-50 px-3 py-2.5">
-          <p className="text-sm font-medium text-navy-950 flex items-center gap-1.5">
-            <AlertTriangle size={14} className="text-gold-600 shrink-0" />
-            {unallocated.length === 1
-              ? 'A recent handover has accounts on nobody\u2019s desk.'
-              : `${unallocated.length} recent handovers have accounts on nobody\u2019s desk.`}
-          </p>
-          <ul className="mt-1.5 space-y-1">
-            {unallocated.map((b) => (
-              <li key={b.handoverId} className="text-[13px] text-slate-600">
-                <Link to={`/accounts?handover=${b.handoverId}&handout=1`}
-                  className="font-medium text-brand-700 hover:underline">
-                  Allocate {b.unallocated.toLocaleString('en-ZA')} of {b.total.toLocaleString('en-ZA')}
-                </Link>
-                {' \u00b7 '}{b.reference ?? 'a handover'}
-                {b.companyName ? ` \u00b7 ${b.companyName}` : ''}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/*
-        THE CLIENT IS PICKED, NOT READ. A handover sheet says what each debtor owes and never
-        whose book it is -- "Client Division" on the old sheet was a person's name in the client's
-        office. This is the control the firm asked for: "you can choose which client does the
-        handover batch fall on."
-      */}
-      <label className="block mb-4">
-        <span className="block text-xs font-medium text-slate-500 mb-1">Whose handover is this</span>
-        <ClientPicker clients={clients} value={companyId} onChange={setCompanyId}
-          placeholder="Search for a client by name or code…" />
-      </label>
 
       <div className="space-y-3">
         <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-brand-300 cursor-pointer">
