@@ -500,6 +500,10 @@ export async function runOneStep(
       body: plan.body, segments: plan.charge?.segments ?? 1,
       /* The same reference the provider was given, so its delivery report finds this row. */
       reference: step.id, sent_at: sentAt,
+      /* AND AS A REAL KEY BESIDE IT. `reference` is text the provider echoes back and could be
+         anything; this is the foreign key, which is what a query joins on and what survives the
+         day the provider changes what it echoes. */
+      workflow_step_id: step.id,
     })
   } else {
     /*
@@ -575,6 +579,16 @@ export async function runOneStep(
       subject: plan.subject ?? '',
       body: plan.body,
       message_id: sent.messageId,
+      /*
+       * WHICH NOTICE THIS WAS, so a bounce can find its way back to it.
+       *
+       * THE FIRM: "if someone had the wrong email address and a workflow already started, then we
+       * need to get the right email address and send the workflow again." emailSync already
+       * recognises a bounce and refuses to charge the debtor for it -- what it could not do was
+       * tell the WORKFLOW, because the send recorded no step. The bounce quotes the Message-ID,
+       * the Message-ID finds this row, and this column names the notice that never arrived.
+       */
+      workflow_step_id: step.id,
       sent_by: collector?.id ?? null,
       /* The workflow did this, not a person -- and it says so, because "sent by Itumeleng" on a
          notice nobody typed would be wrong about who to ask. */

@@ -27,6 +27,15 @@ export interface RunStep {
   /** Why it is held, or why it failed. Null on everything that is simply waiting for its day. */
   note: string | null
   sentAt: string | null
+  /**
+   * WHEN SOMEBODY ESTABLISHED THAT THIS NOTICE NEVER REACHED THE DEBTOR, or null.
+   *
+   * It stays `sent` beside this, which is the point: a send cannot be un-sent, and the file has
+   * to read "went to the wrong address on the 1st, re-issued on the 8th". What it unlocks is a
+   * re-issue of the workflow -- see workflow_step_not_served.
+   */
+  notServedAt: string | null
+  notServedReason: string | null
   /** The day number off the firm's own chart. The unit it is counted in is on the run. */
   day: number
   /**
@@ -156,10 +165,40 @@ export function stepInFocus(steps: RunStep[]): string | null {
  * SENT SAYS WHEN IT WENT, everything else says when it is FOR. Those are different facts and
  * printing them in the same words is how a step that never went comes to look like one that did.
  */
+/**
+ * WHY A NOTICE NEVER REACHED THE DEBTOR, in the firm's words.
+ *
+ * A CLOSED LIST RATHER THAN FREE TEXT. The sentence lands on the step and is read months later by
+ * whoever asks why a statutory sequence ran twice on one debt -- "wrong addy" typed in a hurry is
+ * not an answer to that. These four are the ways it actually happens, and the first is the only
+ * one the mail system can report by itself.
+ *
+ * NO "SOMETHING ELSE". A reason nobody can categorise is one that belongs in a note on the
+ * account, where it can be a paragraph, rather than compressed into a label that will be
+ * mistaken for one of these.
+ */
+export const NOT_SERVED_REASONS = [
+  'The address does not exist',
+  'The address belongs to somebody else',
+  'The debtor says they never received it',
+  'We had the wrong debtor',
+] as const
+
 export function words(step: RunStep): string {
   const when = step.sentAt
     ? `sent ${shortDate(step.sentAt.slice(0, 10))}`
     : `due ${shortDate(step.dueOn)}`
+  /*
+   * AND A NOTICE KNOWN NOT TO HAVE ARRIVED SAYS SO FIRST.
+   *
+   * THE FIRM: "they've basically only been served a new notice." A step that bounced reads
+   * `sent` on every screen in the system, which is the firm believing a debtor has been served
+   * when they have not -- and it is the one thing on a run somebody has to act on. So it leads,
+   * ahead of the state, rather than being a footnote under it.
+   */
+  if (step.notServedAt) {
+    return `${stepName(step)} — never reached them, ${when}`
+  }
   return `${stepName(step)} — ${RUN_STEP_WORDS[step.state].label}, ${when}`
 }
 

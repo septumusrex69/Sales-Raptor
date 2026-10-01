@@ -4,9 +4,10 @@ import { Card } from '../ui/Card'
 import { WorkflowTrack } from './WorkflowTrack'
 import { useAuth } from '../../store/AuthContext'
 import {
-  releaseStep, startWorkflow, type AccountRun, type StartableWorkflow,
+  markStepNotServed, releaseStep, startWorkflow,
+  type AccountRun, type StartableWorkflow,
 } from '../../lib/accountRun.ts'
-import { RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } from '../../lib/runSteps.ts'
+import { NOT_SERVED_REASONS, RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocus, type RunStep } from '../../lib/runSteps.ts'
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 import {
@@ -654,8 +655,11 @@ function StepDetail({ step, run, live, onSent }: {
   live: boolean
   onSent: () => Promise<void>
 }) {
-  const { session } = useAuth()
+  const { session, currentUser } = useAuth()
+  const userId = currentUser?.id ?? null
   const [busy, setBusy] = useState(false)
+  /** Whether the "it never reached them" reasons are showing. */
+  const [notServing, setNotServing] = useState(false)
   /* Held: it went nowhere, and whether the reason moved. Error: the request itself failed, which
      is not a reason a step holds and is not on the card above. */
   const [said, setSaid] = useState<
@@ -682,6 +686,25 @@ function StepDetail({ step, run, live, onSent }: {
     }
   }
 
+  /*
+   * SAYING A NOTICE NEVER ARRIVED. The reasons are a short closed list rather than free text: the
+   * sentence goes on the step and is read later by whoever asks why a sequence ran twice, and
+   * "wrong addy" typed in a hurry is not that. "Something else" is deliberately absent -- a
+   * reason nobody can categorise is one worth a note on the account instead.
+   */
+  async function sayNotServed(reason: string) {
+    setBusy(true); setSaid(null)
+    try {
+      await markStepNotServed({ stepId: step.id, reason, by: userId })
+      setNotServing(false)
+      await onSent()
+    } catch (e) {
+      setSaid({ kind: 'error', text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className={`mt-2 rounded-lg border px-3 py-2 ${stopped
       ? 'border-[var(--c-gold-deep)]/30 bg-gold-50'
@@ -700,6 +723,62 @@ function StepDetail({ step, run, live, onSent }: {
         {step.sentAt ? `sent ${shortDate(step.sentAt.slice(0, 10))}` : `due ${shortDate(step.dueOn)}`}
       </p>
       {step.note && <p className="text-[11px] text-slate-600 mt-1 leading-snug">{step.note}</p>}
+
+      {/*
+        A NOTICE THAT NEVER ARRIVED SAYS SO, ABOVE EVERYTHING ELSE ABOUT IT.
+        
+        THE FIRM: "if someone had the wrong email address and a workflow already started... they've
+        basically only been served a new notice." A bounced step reads `sent` everywhere, which is
+        the firm believing a debtor has been served when they have not.
+        
+        THE STEP STAYS SENT BESIDE THIS. A send cannot be un-sent, and the file has to show both
+        attempts -- hiding the first would make it look like one notice went out a week later,
+        which is worse for the firm than the mistake.
+      */}
+      {step.notServedAt && (
+        <p className="text-[11px] text-negative-700 mt-1 leading-snug">
+          <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />
+          Never reached them.{step.notServedReason ? ` ${step.notServedReason}` : ''}
+          {' '}The workflow can be issued again.
+        </p>
+      )}
+
+      {/*
+        AND THE WAY TO SAY SO BY HAND, which matters more than the bounce does.
+        
+        A hard bounce marks this by itself. The dangerous wrong address is the one that does NOT
+        bounce: a real, working mailbox belonging to somebody who is not the debtor. Nothing in
+        the mail system will ever report that -- somebody finds out, and this is where they say it.
+        
+        ONLY ON A SENT STEP, and never offered twice.
+      */}
+      {step.state === 'sent' && !step.notServedAt && (
+        notServing ? (
+          <div className="mt-2">
+            <p className="text-[11px] text-slate-600 leading-snug">
+              Say this did not reach the debtor. The notice stays on the file; the workflow becomes
+              available to issue again.
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              {NOT_SERVED_REASONS.map((r) => (
+                <button key={r} type="button" disabled={busy}
+                  onClick={() => void sayNotServed(r)}
+                  className="text-[11px] px-2 py-1 rounded-lg border border-slate-200 bg-white
+                    text-slate-700 hover:border-negative-100 disabled:opacity-50">
+                  {r}
+                </button>
+              ))}
+              <button type="button" onClick={() => setNotServing(false)}
+                className="text-[11px] text-slate-500 px-1.5">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setNotServing(true)}
+            className="mt-2 text-[11px] font-medium text-slate-500 hover:text-negative-700">
+            It never reached them
+          </button>
+        )
+      )}
       {said?.kind === 'held' && (
         <p className="text-[11px] text-slate-500 mt-1 leading-snug">
           {said.changed

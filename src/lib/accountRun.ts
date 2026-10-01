@@ -79,6 +79,7 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
       workflow_versions!inner(day_unit, trigger_kind, workflows!inner(name)),
       workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
       workflow_run_steps(id, due_on, state, note, sent_at, instalment_no,
+        not_served_at, not_served_reason,
         workflow_nodes!inner(label, channel, day, ordinal, needs_release, after_minutes))
     `)
     .eq('account_id', accountId)
@@ -131,6 +132,11 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
         state: s.state as RunStepState,
         note: s.note ?? null,
         sentAt: s.sent_at ?? null,
+        /* Named by hand like every field here -- see CLAUDE.md on mappers that drop a column
+           silently. Present in the select above and in the interface, or a notice known not to
+           have arrived reads on the screen exactly like one that did. */
+        notServedAt: s.not_served_at ?? null,
+        notServedReason: s.not_served_reason ?? null,
       }))
       /* AND THE DAY NUMBER IS NO LONGER A TIE-BREAK WORTH HAVING ON AN INSTALMENT STEP, where it
          is a position on the chart rather than a date -- so the date leads, then the node's own
@@ -180,6 +186,41 @@ export async function releaseStep(accessToken: string, stepId: string): Promise<
     result: (body.result ?? 'held') as 'sent' | 'held' | 'stillHeld' | 'failed',
     note: body.note ?? null,
   }
+}
+
+/**
+ * THIS NOTICE NEVER REACHED THEM.
+ *
+ * THE FIRM: "if someone had the wrong email address and a workflow already started, then we need
+ * to get the right email address and send the workflow again -- they've basically only been
+ * served a new notice."
+ *
+ * A HARD BOUNCE DOES THIS BY ITSELF (see emailSync), and this is the hand-worked half -- which
+ * matters more than it sounds. The dangerous wrong address is the one that does NOT bounce: a
+ * real, working mailbox belonging to somebody who is not the debtor. Nothing in the mail system
+ * will ever report that. Somebody finds out, and this is how they say so.
+ *
+ * A DELIBERATE ACT, NEVER A SIDE EFFECT OF CORRECTING THE ADDRESS. A debtor can have three email
+ * addresses and a collector tidying a contact record is not a finding that service failed; if
+ * editing the address did this, the firm would be re-serving debtors every time somebody fixed a
+ * typo.
+ *
+ * WHAT IT UNLOCKS is a fresh run of the same workflow -- `startWorkflow` already honours
+ * `reissue_allowed`. The step itself stays `sent`.
+ */
+export async function markStepNotServed(input: {
+  stepId: string
+  reason: string
+  by: string | null
+}): Promise<{ already: boolean }> {
+  const { data, error } = await supabase.rpc('workflow_step_not_served', {
+    p_step: input.stepId,
+    p_reason: input.reason,
+    p_by: input.by,
+  })
+  if (error) throw new Error(error.message)
+  const row = Array.isArray(data) ? data[0] : data
+  return { already: Boolean(row?.already) }
 }
 
 /**

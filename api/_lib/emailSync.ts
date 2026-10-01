@@ -14,6 +14,8 @@ import {
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
 import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
+import { actsOnItsOwn, bounceSeverity } from '../../src/lib/bounceSeverity.js'
+import { notifyHeld } from './workflow/notify.js'
 
 export interface EmailConnectionRow {
   user_id: string
@@ -366,6 +368,105 @@ async function markUserEmailOnRecord(
  * mail from it is somebody else's — and a debtor writing from an address we had given up on is
  * precisely the contact a collector needs to see.
  */
+/**
+ * A BOUNCE THAT IS ABOUT A WORKFLOW NOTICE, AND WHAT TO DO ABOUT IT.
+ *
+ * THE FIRM: "the notifications that would come in, for example, if it was sent to an email
+ * address that does not exist."
+ *
+ * THE CHAIN. A bounce quotes the Message-ID of the message it is reporting on, `account_emails`
+ * stores that Message-ID, and the send now records which workflow step produced it. So a bounce
+ * can name the notice that failed without anybody reading it.
+ *
+ * NOTHING HAPPENS WITHOUT A HARD BOUNCE. `bounceSeverity` reads the RFC 3463 class digit and
+ * returns `unknown` for anything it cannot read confidently; `actsOnItsOwn` admits only `hard`.
+ * A soft bounce leaves the step exactly as it was -- the address is real and the retry may well
+ * deliver, and voiding a notice that did arrive is the expensive mistake.
+ *
+ * AND IT NEVER THROWS. This runs inside the mail sync, which is reading hundreds of messages for
+ * the whole firm; a bounce that cannot be traced must not stop the mailbox from syncing. Every
+ * failure here is logged and swallowed, and the manual "never reached them" on the account is the
+ * backstop for anything this misses.
+ */
+async function bounceHitAWorkflowStep(
+  admin: SupabaseClient,
+  parsed: { text?: string | null; html?: string | false | null; inReplyTo?: string | null; references?: string | string[] | null },
+  accountId: string,
+  path: string,
+  uid: number,
+): Promise<void> {
+  try {
+    /*
+     * THE SEVERITY FIRST, because it is free and it refuses most of the work. The report's text
+     * is where RFC 3464 puts the status line; the HTML part of a bounce, where there is one, is a
+     * human-readable restatement and carries no machine-readable status.
+     */
+    const severity = bounceSeverity(parsed.text ?? '')
+    if (!actsOnItsOwn(severity)) {
+      console.log(`[emailSync] ${path} UID ${uid}: ${severity} bounce — noted, workflow untouched`)
+      return
+    }
+
+    /*
+     * WHICH MESSAGE IT IS ABOUT. In-Reply-To is where a well-formed bounce puts it; References
+     * carries it on the ones that do not. Both are tried because neither is universal, and a
+     * bounce naming nothing is a bounce we can only note.
+     */
+    const refs = typeof parsed.references === 'string'
+      ? [parsed.references]
+      : Array.isArray(parsed.references) ? parsed.references : []
+    const candidates = [parsed.inReplyTo, ...refs]
+      .flatMap((r) => (r ?? '').split(/\s+/))
+      .map((r) => r.trim())
+      .filter(Boolean)
+    if (candidates.length === 0) return
+
+    const { data: sent } = await admin
+      .from('account_emails')
+      .select('id, workflow_step_id, debtor_address')
+      .eq('account_id', accountId)
+      .in('message_id', candidates)
+      .not('workflow_step_id', 'is', null)
+      .limit(1)
+      .maybeSingle()
+    if (!sent?.workflow_step_id) return
+
+    const { data: marked, error } = await admin.rpc('workflow_step_not_served', {
+      p_step: sent.workflow_step_id,
+      p_reason: `The email to ${sent.debtor_address ?? 'the address on file'} was returned as undeliverable.`,
+      p_by: null,
+    })
+    if (error) { console.error(`[emailSync] not-served failed: ${error.message}`); return }
+
+    const row = Array.isArray(marked) ? marked[0] : marked
+    /* ALREADY MARKED: the sweep has met this bounce before. Nothing to say twice. */
+    if (!row || row.already) return
+
+    /*
+     * AND SOMEBODY IS TOLD, through the same path a held step uses -- the collector and their own
+     * team leader. A notice that never arrived sitting silently on a run is the firm believing a
+     * debtor has been served when they have not.
+     */
+    const { data: account } = await admin
+      .from('debtor_accounts')
+      .select('assigned_to, case_number, debtor_first_name, debtor_surname')
+      .eq('id', accountId).maybeSingle()
+    await notifyHeld(admin, {
+      accountId,
+      collectorId: (account?.assigned_to as string | null) ?? null,
+      debtorName: [account?.debtor_first_name, account?.debtor_surname].filter(Boolean).join(' ') || null,
+      caseNumber: (account?.case_number as string | null) ?? null,
+      stepLabel: row.step_label ?? 'A notice',
+      reason: `It was returned as undeliverable — ${sent.debtor_address ?? 'the address on file'} `
+        + 'does not exist. Find a working address, then issue the workflow again.',
+    })
+    console.log(`[emailSync] ${path} UID ${uid}: hard bounce — step ${sent.workflow_step_id} marked never served`)
+  } catch (e) {
+    /* Never fatal: see the note above. */
+    console.error(`[emailSync] bounce-to-workflow failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 /**
  * The raw header lines a bounce is recognised by.
  *
@@ -1299,6 +1400,28 @@ async function syncMailbox(
          * this branch just refused. It belongs to that account; it is simply not the debtor's.
          */
         if (mailboxRowId) await markUserEmailLinked(admin, mailboxRowId, accountMatch.accountId)
+
+        /*
+         * AND A HARD BOUNCE TELLS THE WORKFLOW, which is the half that was missing.
+         *
+         * THE FIRM: "if someone had the wrong email address and a workflow already started, then
+         * we need to get the right email address and send the workflow again -- they've basically
+         * only been served a new notice."
+         *
+         * The bounce already arrives, is recognised, and is written on the account. What it could
+         * not do was say WHICH notice failed, because the send recorded no step. It does now, and
+         * the bounce quotes the Message-ID of the message it is reporting on -- so the chain is
+         * Message-ID -> account_emails -> workflow_step_id -> the step that never arrived.
+         *
+         * ONLY A HARD ONE, AND NEVER ON ITS OWN JUDGEMENT. A full mailbox or a greylisted first
+         * attempt is "try again", and marking those as never served would void a notice that did
+         * arrive and restart a clock that was already running. bounceSeverity returns `unknown`
+         * for anything it cannot read confidently and `actsOnItsOwn` refuses everything but
+         * `hard` -- the slow direction is a nuisance, the fast one is a defective demand.
+         */
+        if (automated === 'bounce') {
+          await bounceHitAWorkflowStep(admin, parsed, accountMatch.accountId, path, uid)
+        }
         continue
       }
 

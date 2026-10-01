@@ -19373,3 +19373,113 @@ as $$
     else array[]::text[]
   end
 $$;
+
+-- ============================================================================
+-- A NOTICE THAT NEVER REACHED THE DEBTOR WAS NEVER SERVED.
+--
+-- THE FIRM: "if someone had the wrong email address and a workflow already started, then we need
+-- to get the right email address and send the workflow again -- they've basically only been
+-- served a new notice. How are we going to do this?"
+--
+-- THE ANSWER WAS ALREADY HALF HERE. `workflow_runs.reissue_allowed` exists because the
+-- once-per-account-and-version rule assumes the first clock was valid: "where the firm has
+-- conceded the amount was wrong, the first demand was defective and the clock it started was
+-- never good -- so a fresh sequence is one clock, not two." A notice sent to an address the
+-- debtor does not have is the same class of defect. All that was missing was a second reason to
+-- set the flag.
+--
+-- THE STEP STAYS `sent`. A send cannot be un-sent, and the file has to read "went to the wrong
+-- address on the 1st, re-issued on the 8th" -- deleting the first attempt would hide the mistake
+-- and make it look like one notice went out on the 8th, which is worse for the firm than the
+-- mistake itself.
+--
+-- AND THE LINK A BOUNCE TRAVELS BACK ALONG. emailSync already recognises a bounce, refuses to
+-- file it as the debtor's correspondence and charges no item 6 for it -- but nothing told the
+-- WORKFLOW, because the send never recorded which step produced it. account_emails and
+-- sms_messages now carry the step, so a hard bounce can find the notice it is about.
+-- ============================================================================
+alter table public.workflow_run_steps
+  add column if not exists not_served_at timestamptz,
+  add column if not exists not_served_reason text,
+  add column if not exists not_served_by uuid references public.profiles (id) on delete set null;
+
+comment on column public.workflow_run_steps.not_served_at is
+  'This notice went out and never reached the debtor -- a hard bounce, or an address that turned '
+  'out to belong to somebody else. The step STAYS sent: a send cannot be un-sent, and the file '
+  'has to read "went to the wrong address on the 1st, re-issued on the 8th" rather than hiding '
+  'the first attempt. What it unlocks is workflow_runs.reissue_allowed.';
+
+alter table public.account_emails
+  add column if not exists workflow_step_id uuid references public.workflow_run_steps (id) on delete set null;
+
+alter table public.sms_messages
+  add column if not exists workflow_step_id uuid references public.workflow_run_steps (id) on delete set null;
+
+comment on column public.account_emails.workflow_step_id is
+  'The workflow step that sent this, where a workflow did. The link a bounce travels back along: '
+  'the bounce quotes the Message-ID, the Message-ID finds this row, and this column says which '
+  'notice never arrived. Null on a message a person composed by hand.';
+
+create index if not exists account_emails_step_idx
+  on public.account_emails (workflow_step_id) where workflow_step_id is not null;
+create index if not exists sms_messages_step_idx
+  on public.sms_messages (workflow_step_id) where workflow_step_id is not null;
+
+create or replace function public.workflow_step_not_served(
+  p_step uuid, p_reason text, p_by uuid default null)
+returns table (run_id uuid, account_id uuid, step_label text, already boolean)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_run uuid; v_account uuid; v_state text; v_label text; v_already boolean;
+begin
+  select s.run_id, r.account_id, s.state, n.label, s.not_served_at is not null
+    into v_run, v_account, v_state, v_label, v_already
+  from public.workflow_run_steps s
+  join public.workflow_runs r on r.id = s.run_id
+  join public.workflow_nodes n on n.id = s.node_id
+  where s.id = p_step;
+
+  if v_run is null then
+    raise exception 'That step is not there.' using errcode = 'no_data_found';
+  end if;
+
+  /* ONLY A NOTICE THAT ACTUALLY WENT OUT. A step that is pending or held has not been served on
+     anybody, so there is nothing to say was never served -- and marking one would unlock a
+     re-issue of a sequence that has not run. */
+  if v_state <> 'sent' then
+    raise exception 'That notice has not been sent, so it cannot be marked as never delivered.'
+      using errcode = 'check_violation';
+  end if;
+
+  /* IDEMPOTENT. The morning sweep can meet the same bounce twice, and a second marking must not
+     overwrite the first person's reason or re-announce it. */
+  if v_already then
+    return query select v_run, v_account, v_label, true;
+    return;
+  end if;
+
+  update public.workflow_run_steps
+     set not_served_at = now(), not_served_reason = p_reason, not_served_by = p_by
+   where id = p_step;
+
+  /*
+   * AND THE RUN MAY BE ISSUED AGAIN. This is the whole purpose of the marking: the once-per-
+   * account-and-version rule exists because two runs of a statutory sequence are two clocks on
+   * one debt, and that reasoning assumes the first clock was valid. A notice that never reached
+   * the debtor never started a good clock, so a fresh sequence is one clock, not two -- the same
+   * argument the corrected-amount dispute already uses.
+   */
+  update public.workflow_runs set reissue_allowed = true where id = v_run;
+
+  return query select v_run, v_account, v_label, false;
+end $$;
+
+comment on function public.workflow_step_not_served(uuid, text, uuid) is
+  'Records that a sent notice never reached the debtor, and unlocks a re-issue of its workflow. '
+  'The step stays sent -- a send cannot be un-sent and the file must show both attempts. '
+  'Idempotent, and refuses a step that was never sent.';
+
+revoke all on function public.workflow_step_not_served(uuid, text, uuid) from public, anon;
+grant execute on function public.workflow_step_not_served(uuid, text, uuid) to authenticated, service_role;
