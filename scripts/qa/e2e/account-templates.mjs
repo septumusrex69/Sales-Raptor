@@ -64,11 +64,33 @@ const TEMPLATES = [
     seed_key: 'letter-s129', updated_at: '2026-09-01T08:00:00Z',
   },
   {
-    /* The covering email, which CARRIES the letter above. attachment_id is what makes its
-       "please find the enclosed notice" true. */
-    id: 'tpl-email-1', scope: 'collections', kind: 'email', name: 'Section 129 covering email',
+    /*
+     * THE COVERING EMAIL, WHICH CARRIES THE LETTER ABOVE. attachment_id is what makes its "please
+     * find the enclosed document" true.
+     *
+     * AN ACKNOWLEDGEMENT OF DEBT RATHER THAN A SECTION 129, and the swap is the point rather than
+     * a detail. The firm asked that the compose box offer only what a person sends BY HAND -- "the
+     * other stuff works with workflows" -- and a section 129 covering email is the clearest case
+     * of what must NOT be in it: a statutory notice a collector could issue a second time, on a
+     * second clock. The AoD is the by-hand email that posts a document, so it is the honest
+     * fixture for proving an attachment travels with its message.
+     */
+    id: 'tpl-email-1', scope: 'collections', kind: 'email',
+    name: 'Acknowledgement of debt - covering email (individual)',
+    subject: 'Acknowledgement of debt - account {{reference}}', format: 'text',
+    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed document. The balance is {{balance}}.',
+    position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
+    seed_key: 'email-aod-individual', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * AND ONE THE WORKFLOW SENDS, which exists in this fixture ONLY to be absent from the picker.
+     * Without it the assertion below would pass on any code at all -- there would be nothing that
+     * could have appeared and did not.
+     */
+    id: 'tpl-email-wf', scope: 'collections', kind: 'email', name: 'Section 129 covering email',
     subject: 'Section 129 notice - account {{reference}}', format: 'text',
-    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed notice. The balance is {{balance}}.',
+    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed notice.',
     position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
     seed_key: 'email-s129', updated_at: '2026-09-01T08:00:00Z',
   },
@@ -365,12 +387,25 @@ try {
   /* The covering email, which carries the section 129. The list says so before it is picked. */
   t.ok('...marking the one that posts a letter',
     await page.getByText('posts a letter').first().isVisible())
-  await page.getByRole('button', { name: /Section 129 covering email/ }).first().click()
+  /*
+   * AND WHAT THE WORKFLOW SENDS IS NOT IN THE LIST.
+   *
+   * THE FIRM: "you can remove all of the email templates from the emails except for the statement
+   * of account and the acknowledgements of debt, because the other stuff works with workflows."
+   *
+   * THE ROW STILL EXISTS -- it is in the fixture above, and in the real library it is what the
+   * section 129 sequence sends. What changed is that a collector is not offered it by hand, which
+   * is the difference between narrowing a picker and breaking a workflow.
+   */
+  t.ok('a notice the workflow sends is not offered by hand',
+    await page.getByRole('button', { name: /Section 129 covering email/ }).count() === 0)
+
+  await page.getByRole('button', { name: /Acknowledgement of debt/ }).first().click()
   await page.waitForTimeout(2500)
 
   t.check('picking it fills the subject',
     await page.getByLabel(/Subject/).first().inputValue(),
-    'Section 129 notice - account REF/0')
+    'Acknowledgement of debt - account REF/0')
   t.ok('...and the body, merged against this debtor',
     (await page.locator('textarea').first().inputValue()).includes('Mhlongo'))
   /*

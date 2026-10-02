@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, FileText, Loader2 } from 'lucide-react'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
+import { offeredByHand } from '../../lib/byHand.ts'
 import { renderTemplate, type TemplateKind, type TemplateScope } from '../../lib/messageTemplates'
 
 /**
@@ -78,7 +79,19 @@ export function UseTemplate({ scope, kind, audience, values, onPick, disabled, l
       try {
         const all = await fetchLibrary(scope)
         if (!cancelled) {
-          setRows(all.filter((r) => r.kind === kind && r.active
+          /*
+           * ONLY WHAT A PERSON SENDS BY HAND.
+           *
+           * THE FIRM: "you can remove all of the email templates from the emails except for the
+           * statement of account and now the acknowledgements of debt, because the other stuff
+           * works with workflows."
+           *
+           * NARROWED HERE RATHER THAN DELETED THERE: 33 of these templates are what the workflows
+           * send, so removing the rows would break every sequence the firm has. The Library page
+           * still lists every one of them, which is where the firm reads and corrects its own
+           * wording -- a template hidden there would be one nobody could fix. See offeredByHand.
+           */
+          setRows(all.filter((r) => r.kind === kind && r.active && offeredByHand(r)
             && (!audience || r.audience === null || r.audience === audience)))
         }
       } catch (e) {
