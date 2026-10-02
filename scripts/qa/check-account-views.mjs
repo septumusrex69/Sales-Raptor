@@ -11,8 +11,9 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  ACCOUNT_VIEWS, QUIET_VIEW_DAYS, activeView, viewParams, viewsFor,
+  ACCOUNT_VIEWS, QUIET_VIEW_DAYS, activeView, landingParams, landingView, viewParams, viewsFor,
 } from '../../src/lib/accountViews.ts'
+import { ROLE_DEPARTMENTS, departmentOf } from '../../src/lib/departments.ts'
 import { filterChips, hasAccountFilters, queryFromParams } from '../../src/lib/accountFilters.ts'
 
 let pass = 0
@@ -202,6 +203,134 @@ ok('...offered beside the count it changes', /ml-auto flex items-center gap-1/.t
  */
 ok('a size the book cannot fill is not offered', /PAGE_SIZES\.filter\(\(n, i\) => i === 0 \|\| n <= total \* 2\)/.test(list))
 ok('...but the smallest always is', /i === 0 \|\|/.test(list))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE BOOK OPENS ON YOUR OWN DESK.
+ *
+ * THE FIRM: "by default they should only see their own book unless they change the scope function.
+ * They should be able to see any account in the book, but when they click on Accounts, what they
+ * view is their accounts that they are working."
+ *
+ * BOTH HALVES ARE HELD HERE, and the second is the one an optimisation would quietly remove. This
+ * is a LANDING, not a permission: nothing is hidden, Whole book keeps its place and its count, and
+ * a pasted link still wins. The assertions below are mostly about the ways it must NOT fire.
+ * ------------------------------------------------------------------------------------------- */
+
+/* WHO LANDS ON THEIR DESK: the department that carries accounts and a diary, read off the one map
+   rather than a fourth hand-written list of roles. */
+for (const role of ['Pre-legal Agent', 'Pre-legal Team Leader', 'Call Centre Manager']) {
+  check(`a ${role} opens on their own desk`, landingView(departmentOf(role)), 'my_desk')
+}
+/* AND WHO DOES NOT. An administrator carries no book at all, so an empty My desk would be the
+   whole of what Raptor showed them. */
+for (const role of ['Administrator', 'Sales Representative', 'Liaison', 'Read Only']) {
+  check(`a ${role} opens on the whole book`, landingView(departmentOf(role)), 'whole_book')
+}
+/* HELD OVER EVERY ROLE IN THE UNION, so a role added to UserRole and forgotten lands somewhere
+   decided rather than wherever the map happened to leave it. */
+for (const role of Object.keys(ROLE_DEPARTMENTS)) {
+  ok(`${role} lands on a view that exists`,
+    ACCOUNT_VIEWS.some((v) => v.id === landingView(departmentOf(role))))
+}
+
+/* ---------- and it only fires on a question nobody asked ---------- */
+
+const land = (search, role = 'Pre-legal Agent') =>
+  landingParams(new URLSearchParams(search), departmentOf(role), ME)
+
+check('a bare /accounts lands on my desk', land('')?.toString(), `who=${ME}`)
+/*
+ * THE URL IS THE STATE ON THIS SCREEN, so anything it already says must win -- a link somebody was
+ * sent, a bookmark, a filter built by hand. A redirect that overrode those would make every shared
+ * link open on the reader's own desk instead of the account they were sent to.
+ */
+for (const asked of ['who=nobody', 'adrift=1', 'bucket=Failed+PTPs', 'q=Dube', 'quiet=30',
+  `who=${ME}`, 'sub=Promise+To+Pay']) {
+  check(`"${asked}" is left exactly as it is`, land(asked), null)
+}
+/*
+ * AND THE WHOLE BOOK BUTTON SETS NOTHING AT ALL, which is why the page fires this once per visit
+ * rather than on every change. Asserted here as the reason, and on the page itself below.
+ */
+check('the whole book is the absence of a question', viewParams('whole_book', ME).toString(), '')
+
+/* A CLIENT IS NOT A QUESTION ABOUT THE BOOK. Arriving from a client record is still "show me the
+   book" -- about one client -- so it lands on that client's share of my desk and carries the
+   parameter through rather than dropping it. */
+check('a client on its own still lands on my desk', land('client=c1')?.get('who'), ME)
+check('...and the client is carried through', land('client=c1')?.get('client'), 'c1')
+/* BUT A CLIENT BESIDE A REAL QUESTION IS LEFT ALONE, because the question is the thing being
+   asked. */
+check('a client beside a filter is left alone', land('client=c1&adrift=1'), null)
+/* AN EMPTY PARAMETER IS NOT A QUESTION EITHER: the filter panel writes '' to clear, and a cleared
+   filter must land like a bare URL rather than pinning somebody to the whole book. */
+check('a cleared filter is still a bare page', land('adrift=&q=')?.toString(), `who=${ME}`)
+/* PAGE IS NOT A QUESTION. It is how far down the same list somebody has read. */
+check('a page number is not a question', land('page=2')?.get('who'), ME)
+
+/*
+ * AND NOTHING HAPPENS WITHOUT SOMEBODY TO BE. `my_desk` with no id is the whole book wearing a
+ * different name -- viewParams sets nothing -- so firing before the session resolves would spend
+ * the one redirect on a view that means something else entirely.
+ */
+check('no user, no redirect',
+  landingParams(new URLSearchParams(''), 'Call centre', null), null)
+/* AND THE LANDING IT PRODUCES IS A REAL VIEW, not a URL that merely looks like one. */
+check('what it lands on is recognised as My desk',
+  activeView(land('') ?? new URLSearchParams(), ME), 'my_desk')
+
+/* ---------- the page fires it once, and says so when the desk is empty ---------- */
+
+ok('the page lands the book on arrival', /landingParams\(params, departmentOf\(currentUser\.role\)/.test(list))
+/*
+ * ONCE PER VISIT, AND THIS IS THE ASSERTION THAT KEEPS THE WHOLE BOOK BUTTON WORKING. That button
+ * sets no parameters, so a redirect running on every parameter change would bounce straight off it
+ * and the tab could never be clicked at all -- a scope control that cannot widen the scope.
+ */
+ok('...once per visit, so the whole book can still be chosen',
+  /const landed = useRef\(false\)/.test(list) && /if \(landed\.current/.test(list))
+/*
+ * READ OUT OF THE LANDING EFFECT ITSELF, which is the false positive this assertion walked into
+ * first. The view-tab button a hundred lines below also writes `setParams(next, { replace: true })`
+ * -- so a file-wide search found that, passed, and reported nothing when the landing was changed to
+ * push a history entry. A landing that pushes means the back button walks into the redirect and
+ * bounces straight forward again, which is a page somebody cannot leave.
+ */
+const landingEffect = list.slice(list.indexOf('const landed = useRef(false)'),
+  list.indexOf('const setParam = useCallback') > list.indexOf('const landed = useRef(false)')
+    ? list.indexOf('const setParam = useCallback')
+    : list.indexOf('const landed = useRef(false)') + 900)
+ok('the landing effect was found', /landingParams/.test(landingEffect))
+ok('...and leaves no history entry behind it',
+  /setParams\(next, \{ replace: true \}\)/.test(landingEffect))
+/* AND ONLY ONCE THERE IS A USER, or the one redirect is spent on a view that cannot name a desk. */
+ok('...and not before the session has a user', /if \(landed\.current \|\| !currentUser\) return/.test(list))
+/*
+ * NOTHING IS HIDDEN. The whole book keeps its tab and its count: this is where the firm's second
+ * sentence lives -- "they should be able to see any account in the book" -- and it is the half an
+ * optimisation would remove while the first half went on working perfectly.
+ */
+ok('the whole book is still offered to everybody',
+  ACCOUNT_VIEWS.some((v) => v.id === 'whole_book' && !v.leadersOnly))
+ok('...to a collector as well as a leader', viewsFor(false).some((v) => v.id === 'whole_book'))
+/*
+ * AND AN EMPTY DESK SAYS WHAT IS TRUE. The book now opens here, so a collector with nothing
+ * allocated meets the empty state rather than a list -- and "No accounts match these filters" over
+ * a page they did not filter reads as a fault in the software.
+ */
+ok('an empty desk says nothing is allocated', /Nothing is allocated to you\./.test(list))
+/*
+ * PRESENCE FIRST, THEN ORDER. `indexOf` returns -1, so an order-only assertion passes vacuously
+ * the moment the branch it orders is deleted -- which is exactly the trap this codebase has
+ * written down. A character-count window was tried first and is no better: it passes or fails on
+ * how long the comment above the branch happens to be.
+ */
+const deskBranch = list.indexOf("current === 'my_desk' ?")
+const filterBranch = list.indexOf(') : narrowed ?')
+ok('the empty desk branch is there at all', deskBranch > 0)
+ok('...and so is the filter one it did not replace', filterBranch > 0)
+ok('...rather than blaming filters nobody set', deskBranch > 0 && deskBranch < filterBranch)
+ok('...and offers the whole book from there', /Show the whole book/.test(list))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

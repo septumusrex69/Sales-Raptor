@@ -14,6 +14,8 @@
  * "No diary date 355" gets worked.
  */
 
+import type { Department } from './departments'
+
 export type AccountViewId =
   | 'whole_book'
   | 'my_desk'
@@ -156,4 +158,76 @@ export interface ViewCounts {
 /** The views this person is offered. An agent is not shown the unallocated pile; it is not theirs. */
 export function viewsFor(canSeeOtherDesks: boolean): AccountView[] {
   return ACCOUNT_VIEWS.filter((v) => !v.leadersOnly || canSeeOtherDesks)
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * WHERE THE BOOK OPENS, AND WHY IT IS NOT THE WHOLE BOOK.
+ *
+ * THE FIRM: "when a debt collector or a team leader, you know, like a pre-legal clerk, if they go
+ * in on the accounts pane, they can see all the accounts. Now, that's fine. But I think by default
+ * they should only see their own book unless they change the scope function. They should be able to
+ * see any account in the book, but when they click on Accounts, what they view is their accounts
+ * that they are working."
+ *
+ * BOTH HALVES MATTER AND THE SECOND IS THE EASY ONE TO LOSE. This is a landing, not a permission:
+ * nothing is hidden, Whole book stays one click away with its own count on it, and a pasted link to
+ * somebody else's account still opens. What changes is only what you see when you ask for nothing
+ * in particular -- and the whole book is nobody's question. A collector opening twenty-three
+ * thousand accounts sorted by account number has to build a filter before the screen is about their
+ * day, and the one view that always is sat behind a click.
+ *
+ * DERIVED FROM THE DEPARTMENT, NOT FROM A SECOND LIST OF ROLES. The call centre is the department
+ * whose people carry accounts and a diary -- departments.ts says so in its own blurb -- and
+ * COLLECTING_ROLES is already derived from the same map for the hand-out box. A fourth hand-written
+ * role list is the drift this codebase has watched happen twice.
+ *
+ * AN EMPTY DESK IS A TRUE SCREEN, not a broken one, so a collector with nothing allocated still
+ * lands on My desk and reads that they have none -- which is the fact they need. What would be a
+ * broken screen is landing an ADMINISTRATOR there: they carry no book at all, so an empty My desk
+ * would be the whole of what Raptor showed them, and they get the book they actually work with.
+ * ------------------------------------------------------------------------------------------- */
+
+/**
+ * The view somebody lands on when they ask for the book and nothing else.
+ *
+ * Pure and role-shaped rather than count-shaped: deciding it off a live count means the first
+ * paint is one view and the second is another, and a screen that moves under somebody is worse
+ * than a screen that opened somewhere they did not expect.
+ */
+export function landingView(department: Department): AccountViewId {
+  return department === 'Call centre' ? 'my_desk' : 'whole_book'
+}
+
+/**
+ * Should a bare /accounts be redirected, and to what?
+ *
+ * NULL FOR ANYTHING THE URL ALREADY SAYS, which is the guard the whole thing rests on. THE URL IS
+ * THE STATE on this screen -- a view is nothing but parameters -- so a link somebody was sent, a
+ * bookmark, a filter they built, and the Whole book button itself all produce a URL that must win.
+ * Only the complete absence of a question gets an answer put in its place.
+ *
+ * `client` and `page` are not questions. Arriving from a client record at /accounts?client=X is
+ * still "show me the book" -- about one client -- so it lands on that client's share of my desk
+ * rather than on their whole book, and the parameter is carried through.
+ */
+export function landingParams(
+  params: URLSearchParams,
+  department: Department,
+  currentUserId: string | null,
+): URLSearchParams | null {
+  const asked = new URLSearchParams(params)
+  asked.delete('client')
+  asked.delete('page')
+  if ([...asked.keys()].some((k) => (asked.get(k) ?? '') !== '')) return null
+
+  const view = landingView(department)
+  /* NOTHING TO REDIRECT TO. `my_desk` without an id is the whole book wearing a different name --
+     see viewParams -- so a session that has not resolved its user yet is left alone rather than
+     sent somewhere that means something else. */
+  if (view === 'whole_book' || !currentUserId) return null
+
+  const next = viewParams(view, currentUserId)
+  const client = params.get('client')
+  if (client) next.set('client', client)
+  return next
 }

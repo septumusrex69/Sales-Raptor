@@ -190,7 +190,53 @@ try {
 
   const table = page.locator('table tbody tr')
   await table.first().waitFor({ timeout: 20000 })
-  await t.shot(page, '01-accounts-whole-book')
+
+  /* ---------- the book opens on your own desk ---------- */
+
+  /*
+   * THE FIRM: "by default they should only see their own book unless they change the scope
+   * function ... when they click on Accounts, what they view is their accounts that they are
+   * working."
+   *
+   * ASSERTED IN A REAL BROWSER BECAUSE IT IS A REDIRECT, and a redirect is the one thing a unit
+   * check cannot see land. landingParams is pure and holds its own rules; what only this layer can
+   * prove is that the effect actually runs, that the URL it writes is the one the list then
+   * QUERIES on, and that it settles rather than bouncing -- a landing that re-fires on every
+   * parameter change would make the Whole book button unclickable, and the symptom of that is a
+   * tab that flickers back, not an exception anybody catches.
+   */
+  await page.waitForFunction(
+    (me) => new URL(window.location.href).searchParams.get('who') === me,
+    PROFILE.id, { timeout: 15000 })
+  t.ok('the book opens on my desk', new URL(page.url()).searchParams.get('who') === PROFILE.id)
+  /* AND THE LIST ASKED THE DATABASE THE SAME QUESTION. The URL changing while the query behind it
+     still fetched the whole book would be the worst version of this: a screen that says My desk
+     over somebody else's accounts. */
+  t.ok('...and the list asked the database for that desk',
+    seen.some((u) => u.includes('debtor_accounts') && u.includes(`assigned_to=eq.${PROFILE.id}`)))
+  const deskTab = page.getByRole('button', { name: /^My desk/ })
+  t.ok('...with My desk lit rather than Whole book',
+    (await deskTab.getAttribute('class') ?? '').includes('bg-navy-950'))
+  await t.shot(page, '01-accounts-my-desk')
+
+  /*
+   * AND THE SCOPE CONTROL STILL WIDENS IT, which is the firm's other sentence -- "they should be
+   * able to see any account in the book" -- and the half that would go on looking fine while being
+   * broken. The Whole book view sets NO parameters at all, so if the landing ever re-fired on a
+   * parameter change this click would bounce straight back to the desk.
+   */
+  await page.getByRole('button', { name: /^Whole book/ }).click()
+  await page.waitForFunction(() => !new URL(window.location.href).searchParams.get('who'),
+    { timeout: 15000 })
+  t.ok('the whole book is one click away', !new URL(page.url()).searchParams.get('who'))
+  /* IT STAYS THERE. Half a second is long enough for a redirect on the next render to put it back,
+     which is exactly the failure the once-per-visit guard exists to stop. */
+  await page.waitForTimeout(600)
+  t.ok('...and does not bounce back to my desk',
+    !new URL(page.url()).searchParams.get('who'))
+
+  await page.waitForFunction(() => /Showing \d+ of 736/.test(document.body.innerText), { timeout: 15000 })
+  await t.shot(page, '02-accounts-whole-book')
 
   /* ---------- the views row ---------- */
 

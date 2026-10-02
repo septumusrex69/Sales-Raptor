@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Loader2, Search, UserCheck, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -12,8 +12,9 @@ import {
 } from '../../lib/accountBook'
 import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountFilters'
 import {
-  QUIET_VIEW_DAYS, activeView, viewParams, viewsFor, type ViewCounts,
+  QUIET_VIEW_DAYS, activeView, landingParams, viewParams, viewsFor, type ViewCounts,
 } from '../../lib/accountViews'
+import { departmentOf } from '../../lib/departments'
 import { CLIENT_FLAGS, DESK_POSITIONS, clientFlag, deskPosition } from '../../lib/clientPosition'
 import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
@@ -75,6 +76,32 @@ export function AccountsList() {
   const companyId = params.get('client') ?? undefined
   const companyName = companies.find((c) => c.id === companyId)?.name
   const canSeeOthers = canHandOutAccounts(currentUser)
+
+  /*
+   * THE BOOK OPENS ON YOUR OWN DESK.
+   *
+   * THE FIRM: "by default they should only see their own book unless they change the scope
+   * function ... when they click on Accounts, what they view is their accounts that they are
+   * working." Who it applies to and why it is a landing rather than a permission are argued on
+   * landingParams; what is decided HERE is when it may fire, and there are two rules.
+   *
+   * ONCE PER VISIT, which is what keeps the Whole book button working. That button sets no
+   * parameters at all -- the whole book IS the absence of a question -- so a redirect that ran on
+   * every parameter change would bounce straight back off it and the tab could never be clicked.
+   * The ref is set on the first run and the screen is left alone from then on; coming back to
+   * /accounts from somewhere else re-mounts and lands on the desk again, which is the firm's
+   * sentence exactly.
+   *
+   * AND ONLY ONCE THERE IS SOMEBODY TO BE. `currentUser` arrives a tick after the first paint, and
+   * firing while it is null would spend the one redirect on a view that cannot name a desk.
+   */
+  const landed = useRef(false)
+  useEffect(() => {
+    if (landed.current || !currentUser) return
+    landed.current = true
+    const next = landingParams(params, departmentOf(currentUser.role), currentUser.id)
+    if (next) setParams(next, { replace: true })
+  }, [currentUser, params, setParams])
 
   const setParam = useCallback((key: string, value: string | null) => {
     const next = new URLSearchParams(params)
@@ -472,7 +499,30 @@ export function AccountsList() {
           </div>
         ) : accounts.length === 0 ? (
           <div className="p-10 text-center">
-            {narrowed ? (
+            {current === 'my_desk' ? (
+              /*
+                AN EMPTY DESK IS A TRUE SCREEN, NOT A BROKEN ONE -- and it needs to say which.
+                The book now opens here, so a collector with nothing allocated meets this instead
+                of a list, and "No accounts match these filters" over a page they did not filter
+                reads as a fault in the software. It says what is actually true, and puts the
+                whole book one click away rather than making them find the tab.
+              */
+              <>
+                <p className="text-sm text-slate-600">Nothing is allocated to you.</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  This is your own desk, which is where the book opens.{' '}
+                  <button type="button" className="text-brand-600 underline"
+                    onClick={() => {
+                      const next = viewParams('whole_book', currentUser?.id ?? null)
+                      if (companyId) next.set('client', companyId)
+                      setParams(next, { replace: true })
+                    }}>
+                    Show the whole book
+                  </button>{' '}
+                  to see every account.
+                </p>
+              </>
+            ) : narrowed ? (
               <>
                 <p className="text-sm text-slate-600">No accounts match these filters.</p>
                 <button className="text-xs font-medium text-brand-600 hover:underline mt-1" onClick={clearFilters}>
