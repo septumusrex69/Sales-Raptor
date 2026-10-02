@@ -94,7 +94,10 @@ import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
 import { useTitleSlot } from '../../components/layout/TitleSlot'
-import { compareTraceReports, comparisonLine, previousTraceFor } from '../../lib/traceCompare.ts'
+import { compareTraceReports } from '../../lib/traceCompare.ts'
+import {
+  newFindingWord, reportsLine, traceSubjects, type TraceSubject,
+} from '../../lib/traceSubjects.ts'
 import { roundLine, traceRound } from '../../lib/traceRound.ts'
 import {
   hasProgress, instalmentProgress, moneyProgress, progressPercent, type PaymentProgress,
@@ -2984,16 +2987,20 @@ function StandingPanel({
   /* Everything still owned, across the company's own report and every director's. */
   const ownedProperty = useMemo(() => propertyAcross(traces), [traces])
 
-  const sinceLastTrace = useMemo(() => {
-    const latest = traces[0]
-    if (!latest) return null
-    const earlier = previousTraceFor(traces, latest)
-    if (!earlier) return null
-    return {
-      when: earlier.enquiredOn ?? earlier.createdAt.slice(0, 10),
-      ...compareTraceReports(latest.items, earlier.items),
-    }
-  }, [traces])
+  /*
+   * ONE CARD PER PERSON, NOT PER REPORT.
+   *
+   * THE FIRM, looking at an account traced twice: "there should not be two traces on a single
+   * individual... one person can have one trace on the trace results. If it's the second one, a
+   * next of kin, it opens a new trace."
+   *
+   * AND THE COMPARISON MOVED ONTO THE CARD WITH IT. It was a banner over the whole panel, which
+   * was the only honest place for it while the panel drew a card per report -- with two cards for
+   * one person there was no card it belonged to. Grouped by subject there is, and on a company
+   * account with four directors a single banner was answering for whichever of them happened to
+   * be traced last.
+   */
+  const subjects = useMemo(() => traceSubjects(traces), [traces])
 
   return (
     /*
@@ -3070,32 +3077,6 @@ function StandingPanel({
               Upload a trace I already have
             </button>
           </div>
-        </div>
-      )}
-
-      {/*
-        SAID ABOVE THE FINDINGS, because it is how to read them rather than one of them.
-        
-        NOTHING NEW IS STILL SAID OUT LOUD. A second search the account has been charged for that
-        found nothing the first one did not is a fact worth putting in front of whoever decides
-        to run a third -- and it is the answer to "why am I reading this again".
-        
-        AND NOTHING HERE CALLS A FINDING DEAD. A number missing from the newer report is not a
-        disconnected number: bureaux age records out and two profiles carry different columns.
-        Only a collector who dialled it may say otherwise, which is what an outcome is for.
-      */}
-      {sinceLastTrace && (
-        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-          <p className="text-[11px] text-slate-600">
-            <span className={`font-medium ${
-              sinceLastTrace.added > 0 ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
-              {comparisonLine(sinceLastTrace)}
-            </span>
-            {' '}
-            <span className="text-slate-400">
-              Compared with the report of {formatDate(sinceLastTrace.when)}.
-            </span>
-          </p>
         </div>
       )}
 
@@ -3190,8 +3171,9 @@ function StandingPanel({
         </div>
       )}
 
-      {traces.map((trace) => (
-        <TraceFound key={trace.id} trace={trace} onOpen={() => onOpenTrace(trace.id)} />
+      {subjects.map((subject) => (
+        <TraceFound key={subject.key} subject={subject}
+          onOpen={() => onOpenTrace(subject.latest.id)} />
       ))}
 
       {/*
@@ -3363,20 +3345,101 @@ function StandingPanel({
  * The bureau's twenty-odd other numbers are not on this panel and are not lost — they are one
  * click away, in the trace itself, where they can be worked.
  */
-function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }) {
+function TraceFound({ subject, onOpen }: {
+  subject: TraceSubject<FiledTrace>
+  onOpen: () => void
+}) {
+  const trace = subject.latest
   const found = traceSummary(trace.items)
   /* WHERE THIS ATTEMPT STANDS. Derived, never stored -- see traceRound. */
   const round = traceRound(trace.items)
-  const who = trace.subjectKind === 'director' ? trace.subjectName : null
+  const who = subject.name
   const kin = found.relatives[0] ?? null
+
+  /*
+   * WHAT THE LATEST REPORT ADDED, listed rather than counted.
+   *
+   * THE FIRM: "it only shows the new results -- oh, there's a new phone number, or oh, there's a
+   * new address, or oh, this guy bought a new property -- and it kind of flags that, puts it on
+   * top, like new info."
+   *
+   * THE COUNT WAS NOT THE ANSWER. "4 new findings on this report" still leaves somebody reading
+   * the whole card to find the four, which is the work the firm was complaining about. So the four
+   * are named, at the top, before anything they have already seen.
+   */
+  const since = subject.previous
+    ? compareTraceReports(trace.items, subject.previous.items)
+    : null
+  const added = since ? since.changes.filter((c) => c.state === 'new') : []
+  const earlierOn = subject.previous
+    ? (subject.previous.enquiredOn ?? subject.previous.createdAt.slice(0, 10))
+    : null
 
   return (
     <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden">
+      {/*
+        WHOSE TRACE THIS IS, and only where it is not obvious. The debtor's own report needs no
+        heading -- their name is the heading of the account -- and a strip saying so on every
+        ordinary card is exactly the bulk the firm asked to be rid of.
+      */}
+      {(who || reportsLine(subject)) && (
+        <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 flex flex-wrap
+          items-baseline justify-between gap-x-2">
+          {who && <span className="text-[11px] font-medium text-slate-600">{who}</span>}
+          {reportsLine(subject) && (
+            <span className="text-[10px] text-slate-400">{reportsLine(subject)}</span>
+          )}
+        </div>
+      )}
+
+      {/*
+        NEW INFORMATION, ON TOP, IN GREEN.
+
+        ABSENT WHERE THERE IS NOTHING NEW TO SAY -- which is not the same as absent where there is
+        no new finding. A second search the account has been charged for under item 4(c) that found
+        nothing the first one did not is a fact worth putting in front of whoever decides to run a
+        third, so that case gets one quiet grey line rather than silence.
+
+        AND NOTHING HERE CALLS A FINDING DEAD. A number on the earlier report and not on this one
+        is not a disconnected number: bureaux age records out and two profiles carry different
+        columns. Only a collector who dialled it may say otherwise, which is what an outcome is
+        for -- so a dropped finding is not drawn here at all.
+      */}
+      {since && added.length > 0 && (
+        <div className="px-2.5 py-2 bg-[var(--c-green)]/5 border-b border-[var(--c-green)]/20">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--c-green)]">
+            New since {earlierOn ? formatDate(earlierOn) : 'the last report'}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {added.slice(0, 4).map((c) => (
+              <li key={`${c.kind}:${c.value}`} className="text-sm text-slate-800 break-words">
+                <span className="text-[11px] text-slate-500">{newFindingWord(c.kind)}: </span>
+                {c.value}
+              </li>
+            ))}
+          </ul>
+          {added.length > 4 && (
+            <p className="text-[11px] text-slate-500 mt-0.5">and {added.length - 4} more</p>
+          )}
+        </div>
+      )}
+      {since && added.length === 0 && (
+        <p className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 text-[11px] text-slate-500">
+          Nothing on this report the one before it did not already have.
+        </p>
+      )}
+
       <Finding icon={<Phone size={12} />} label="Phone number"
         action={(
+          /*
+            ONE LINK, AND IT OPENS THE TRACE. The firm: "I'd rather just leave one, like open the
+            trace, not review trace." It said Review, which reads as something you do once and are
+            finished with -- and there were two of them on the screen because there were two cards
+            for one person.
+          */
           <button type="button" onClick={onOpen}
             className="text-[11px] font-medium text-[var(--c-steel)] hover:underline shrink-0">
-            {who ? 'Review' : 'Review trace'} &rarr;
+            Open the trace &rarr;
           </button>
         )}>
         {found.phone === null ? (

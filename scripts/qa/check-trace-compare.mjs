@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs'
 import {
   compareTraceReports, compareTraces, comparisonLine, previousTraceFor, traceKey,
 } from '../../src/lib/traceCompare.ts'
+import { reportsLine, traceSubjects } from '../../src/lib/traceSubjects.ts'
 
 let pass = 0
 const failures = []
@@ -168,7 +169,7 @@ check('the list and the counts are the same thing',
  * which is worse than saying nothing at all.
  */
 const trace = (id, over = {}) => ({
-  id, subjectKind: 'debtor', directorId: null, enquiredOn: null,
+  id, subjectKind: 'debtor', directorId: null, subjectName: null, enquiredOn: null,
   createdAt: '2026-01-01T00:00:00Z', items: [], ...over,
 })
 
@@ -200,23 +201,129 @@ check('the earlier report is the one the bureau looked at earlier',
 check('...and a later report is not offered as the earlier one',
   previousTraceFor([filedToday, pulledRecently], filedToday), null)
 
+/* ---------------------------------------------------------------------------------------------
+ * ONE PERSON, ONE TRACE
+ *
+ * THE FIRM: "there should not be two traces on a single individual... one person can have one
+ * trace on the trace results. If it's the second one, a next of kin, it opens a new trace."
+ *
+ * WHICH IS A DIFFERENT CUT OF THE SAME DATA. previousTraceFor answers "what should THIS report be
+ * read against"; traceSubjects answers "how many people are on this account, and which report
+ * speaks for each". They key on the same thing deliberately -- two statements of "the same
+ * subject" would eventually disagree, and that failure shows as a card claiming an update with
+ * nothing new on it, for ever.
+ * ------------------------------------------------------------------------------------------- */
+
+const named = (id, over) => trace(id, { subjectName: null, ...over })
+
+{
+  const subjects = traceSubjects([debtorNew, directorOne, debtorOld])
+  /* TWO PEOPLE OUT OF THREE REPORTS. This is the whole of what the firm was looking at: the
+     debtor traced twice drew two cards carrying the same address, employer and next of kin. */
+  check('three reports about two people are two subjects', subjects.length, 2)
+  check('...and the debtor comes first', subjects[0].kind, 'debtor')
+  /* THE LATEST SPEAKS FOR THE SUBJECT, and the one before it is what the card compares against. */
+  check('...showing their newest report', subjects[0].latest.id, 'd2')
+  check('...against their own previous one', subjects[0].previous?.id, 'd1')
+  check('...and counting how many there are', subjects[0].reports, 2)
+  /* A director traced once has nothing to compare against and must not borrow the debtor's. */
+  check('a first report has no previous one', subjects[1].previous, null)
+  check('...and says so by counting one', subjects[1].reports, 1)
+}
+
+/*
+ * WHEN THE BUREAU LOOKED, NOT WHEN THE ROW WAS WRITTEN -- the same rule previousTraceFor uses. A
+ * PDF filed today can be a report pulled in March, so ordering on createdAt alone would make a
+ * six-month-old report the one the card draws and report its stale numbers as this week's news.
+ */
+{
+  const stale = named('late', { enquiredOn: '2026-03-01', createdAt: '2026-09-22T00:00:00Z' })
+  const fresh = named('recent', { enquiredOn: '2026-09-01', createdAt: '2026-09-01T00:00:00Z' })
+  const [only] = traceSubjects([stale, fresh])
+  check('the card draws the report the bureau pulled last', only.latest.id, 'recent')
+  check('...and compares it against the older one', only.previous?.id, 'late')
+}
+
+/*
+ * A DIRECTOR IS KEYED ON THEIR ID, NOT THEIR NAME. A bureau prints "E FERREIRA" on one report and
+ * "Elizabeth Ferreira" on the next, and those are one person -- keyed on the name they would be
+ * two subjects, and the second report would draw as a brand new person with nothing to compare
+ * against, which is the bug this whole change is about.
+ */
+{
+  const first = named('f1', { subjectKind: 'director', directorId: 'dir-9', subjectName: 'E FERREIRA', enquiredOn: '2026-05-01' })
+  const second = named('f2', { subjectKind: 'director', directorId: 'dir-9', subjectName: 'Elizabeth Ferreira', enquiredOn: '2026-09-01' })
+  const subjects = traceSubjects([second, first])
+  check('two spellings of one director are one subject', subjects.length, 1)
+  check('...named as the newest report has them', subjects[0].name, 'Elizabeth Ferreira')
+  /* AND A DIRECTOR WITH NO ID FALLS BACK TO THE NAME rather than joining every unidentified
+     director into one. Squeezed and lowercased, so spacing and case do not split them. */
+  const a = named('a', { subjectKind: 'director', directorId: null, subjectName: 'Jan  Botha' })
+  const b = named('b', { subjectKind: 'director', directorId: null, subjectName: 'jan botha' })
+  check('...and one without an id is matched on the name', traceSubjects([a, b]).length, 1)
+  const c = named('c', { subjectKind: 'director', directorId: null, subjectName: 'Someone Else' })
+  check('...but not to a different name', traceSubjects([a, c]).length, 2)
+}
+
+/* THE DEBTOR'S CARD IS NOT HEADED WITH THEIR NAME. It is the heading of the account they are
+   looking at, and repeating it is the bulk the firm asked to be rid of. */
+check('the debtor\'s own card needs no name on it', traceSubjects([debtorNew])[0].name, null)
+/* AND "2 reports" IS SAID ONLY WHERE THERE ARE TWO. A line reading "1 report" on every ordinary
+   first trace is furniture. */
+check('one report says nothing about how many there are',
+  reportsLine(traceSubjects([debtorNew])[0]), null)
+check('...and two say so', reportsLine(traceSubjects([debtorNew, debtorOld])[0]),
+  '2 reports — showing the latest')
+
+/* NOTHING AT ALL IS NOT A CRASH. An account with no trace draws no cards, and a function that
+   threw on an empty list would take the whole panel with it. */
+check('an account with no trace has no subjects', traceSubjects([]).length, 0)
+
 /* ---------- and it is on the screen, not merely computed ---------- */
 
 const detail = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')
-ok('the trace panel compares the newest report with the one before it',
-  /compareTraceReports\(latest\.items, earlier\.items\)/.test(detail))
-/* Against the SAME SUBJECT, or a company's own report is read as a director's. */
-ok('...paired on the subject rather than on the date alone',
-  /previousTraceFor\(traces, latest\)/.test(detail))
+/*
+ * AND IT IS ON THE CARD NOW, NOT OVER THE PANEL.
+ *
+ * THE FIRM, looking at an account traced twice: "there should not be two traces on a single
+ * individual... one person can have one trace on the trace results." The panel drew a card per
+ * REPORT, so a debtor traced twice got two cards carrying the same address, the same employer and
+ * the same next of kin -- and the comparison had to be a banner above them both, because with two
+ * cards for one person there was no card it belonged to.
+ *
+ * Grouped by subject there is one, and on a company account with four directors a single banner
+ * was answering for whichever of them happened to be traced last.
+ */
+ok('the panel groups the reports by who they are about', /traceSubjects\(traces\)/.test(detail))
+ok('...and draws one card for each person', /subjects\.map\(\(subject\) =>/.test(detail))
+ok('...comparing that person\'s newest report with their own previous one',
+  /compareTraceReports\(trace\.items, subject\.previous\.items\)/.test(detail))
 /* One report has nothing to say, and a line saying so would be a line about nothing. */
 ok('...and says nothing where there is only one report',
-  /if \(!earlier\) return null/.test(detail))
-ok('...and the sentence it shows is the shared one',
-  /comparisonLine\(sinceLastTrace\)/.test(detail))
-/* Named, so somebody can tell WHICH report it is being read against -- "since the last trace" on
-   an account with four of them is not checkable by the person reading it. */
-ok('...naming the report it was compared with',
-  /Compared with the report of \{formatDate\(sinceLastTrace\.when\)\}/.test(detail))
+  /subject\.previous\s*\n?\s*\? compareTraceReports/.test(detail))
+
+/*
+ * AND WHAT IS NEW IS LISTED, NOT COUNTED. THE FIRM: "it only shows the new results -- oh, there's
+ * a new phone number, or oh, there's a new address, or oh, this guy bought a new property -- and
+ * it kind of flags that, puts it on top, like new info."
+ *
+ * "4 new findings on this report" still leaves somebody reading the whole card to find the four,
+ * which is the work they were complaining about.
+ */
+ok('the new findings are named', /newFindingWord\(c\.kind\)/.test(detail))
+ok('...under a heading that dates them', /New since \{earlierOn/.test(detail))
+ok('...and a second search that bought nothing says so',
+  /Nothing on this report the one before it did not already have\./.test(detail))
+/*
+ * AND NOTHING DROPPED IS DRAWN. A number on the earlier report and not on this one is not a dead
+ * number: bureaux age records out and two profiles carry different columns. Only a collector who
+ * dialled it may say otherwise. Asserted as an absence over the block that lists the new ones.
+ */
+{
+  const card = detail.slice(detail.indexOf('function TraceFound'), detail.indexOf('function Finding'))
+  ok('the card lists what is new', /c\.state === 'new'/.test(card))
+  ok('...and never what is missing', !/'dropped'/.test(card))
+}
 
 console.log(`${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

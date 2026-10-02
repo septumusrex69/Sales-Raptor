@@ -63,7 +63,16 @@ ok('...and names its own first column', TRACE_CATEGORIES.every((c) => c.valueHea
 eq('property is not something you try', categoryById('property').worked, false)
 eq('...nor a directorship', categoryById('companies').worked, false)
 eq('a number is', categoryById('phones').worked, true)
-eq('an address is too — you can confirm somebody lives there', categoryById('addresses').worked, true)
+/*
+ * AND NEITHER IS AN ADDRESS OR AN EMPLOYER, which is a reversal. THE FIRM: "addresses or
+ * employment is not a prerequisite for having worked a trace. There's nothing need to be done with
+ * that. They just save as an address if you want to." A number is confirmed by ringing it; an
+ * address is confirmed by posting something and waiting, which does not happen in the afternoon
+ * somebody works a trace -- so the column could only ever be filled in weeks later, and a column
+ * like that stops being read.
+ */
+eq('an address is not either', categoryById('addresses').worked, false)
+eq('...nor employment', categoryById('employment').worked, false)
 eq('an unknown id falls back rather than throwing', categoryById('nonsense').id, 'phones')
 
 /* ---------- one number, filed three times ---------- */

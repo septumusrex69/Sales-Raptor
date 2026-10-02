@@ -273,7 +273,29 @@ eq('...nor is one already tried',
 
 /* ---------- what may be put on the account ---------- */
 
-ok('an untried number can be promoted', canPromote(I({})))
+/*
+ * AND A NUMBER MUST HAVE BEEN ANSWERED FIRST. THE FIRM: "if you're working a trace and it says no
+ * answer and you saved it as a home number, how can that be? You can't save it as a home number if
+ * it has not been tested... wrong person and then save as their own number -- it doesn't make
+ * sense."
+ *
+ * The fault was that Save asked nothing. Promoting marks the contact VERIFIED, so an untested
+ * number went onto the account under a tick and the next collector rang it believing somebody had
+ * proved it.
+ */
+ok('an untried number cannot be promoted', !canPromote(I({})))
+ok('...nor one that merely rang', !canPromote(I({ outcome: 'no_answer' })))
+ok('...but one the debtor answered can', canPromote(I({ outcome: 'verified' })))
+/* REACHING SOMEBODY ELSE IS STILL REACHING. A wife who picks up the debtor's old mobile is a live
+   line and a person who knows them -- see the next-of-kin button beside Save. */
+ok('...and so can one somebody else answered', canPromote(I({ outcome: 'reached_other' })))
+/* AN ADDRESS AND AN EMPLOYER ARE NOT WORKED AT ALL, so there is nothing for them to have been
+   answered on: the firm's "they just save as an address if you want to". */
+ok('an address can be saved without any of that', canPromote(I({ kind: 'address', value: '1 Main Rd' })))
+ok('...and an employer too', canPromote(I({ kind: 'employer', value: 'Acme' })))
+/* A LINKED PERSON goes on as a next of kin, which records who the bureau connected rather than
+   claiming a line works -- so it needs no outcome either. */
+ok('...and a linked person', canPromote(I({ kind: 'link', value: 'Elise Ferreira' })))
 /* Pressing the button twice must not put the same number on the list twice. */
 ok('...but not one already on the account', !canPromote(I({ promotedContactId: 'c1' })))
 /* Promoting a number a collector has just disproved is the one thing this must never allow. */
@@ -390,7 +412,11 @@ ok('...from a button on the panel, not a line of text', /Open \{traces\.length >
  * modal instead of ringing. So the ways in are named: "Review trace" at the top, and the untried
  * count at the foot.
  */
-ok('...and the summary carries its own way in', /\{who \? 'Review' : 'Review trace'\}/.test(detail))
+/* ONE LINK, AND IT OPENS THE TRACE. The firm: "I'd rather just leave one, like open the trace, not
+   review trace" -- and there were two of them on screen because there were two cards for one
+   person, which is what traceSubjects fixed. */
+ok('...and the summary carries its own way in', /Open the trace &rarr;/.test(detail))
+ok('...and no longer calls it a review', !/'Review trace'/.test(detail))
 /*
  * PhoneLink is given its own content on purpose. Its default rendering is "<icon> number", and
  * the gutter of this row already carries a telephone -- so the row shipped with two receivers on

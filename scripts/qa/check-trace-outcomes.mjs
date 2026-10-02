@@ -23,7 +23,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  OUTCOMES_FOR, TRACE_CATEGORIES, TRACE_OUTCOMES, canPromote, outcomeLabelIn,
+  OUTCOMES_FOR, TRACE_CATEGORIES, TRACE_OUTCOMES, canPromote, categoryById, outcomeLabelIn,
   outcomeOptionsFor, principalAddress, principalPhone, currentEmployer, traceSummary,
 } from '../../src/lib/traceStore.ts'
 
@@ -62,15 +62,25 @@ ok('an address cannot be disconnected', !of('addresses').includes('unreachable')
 ok('...and cannot fail to answer', !of('addresses').includes('no_answer'))
 ok('an employer cannot be disconnected', !of('employment').includes('unreachable'))
 ok('...and cannot fail to answer', !of('employment').includes('no_answer'))
-/* WHAT THEY CAN BE: there and still there, or gone. The firm's "an address is an address or not
-   an address", with the third state they actually need — they were there and have moved. */
-check('an address says whether they are still there', of('addresses'),
-  ['verified', 'moved_on', 'not_theirs'])
-check('...and so does an employer', of('employment'), ['verified', 'moved_on', 'not_theirs'])
-/* AND THE SAME VALUE IS WORDED FOR THE LIST IT IS ON — one fact, two sentences. */
-check('a confirmed address reads as confirmed', outcomeLabelIn('addresses', 'verified'), 'Confirmed')
-check('...and a confirmed employer as still there',
-  outcomeLabelIn('employment', 'verified'), 'Still there')
+/*
+ * AND THEY ARE NOT ASKED ANYTHING AT ALL NOW, WHICH IS A REVERSAL.
+ *
+ * THE FIRM: "addresses or employment is not a prerequisite for having worked a trace. There's
+ * nothing need to be done with that. They just save as an address if you want to."
+ *
+ * Which is how they are actually used: a number is confirmed by ringing it, an address by posting
+ * something and waiting, and the second does not happen in the afternoon somebody works a trace.
+ * An outcome column that can only honestly be filled in weeks later stays empty and then stops
+ * being read -- and worse, it made an address a thing somebody had to answer for before the trace
+ * read as worked.
+ */
+check('an address is not worked at all', of('addresses'), [])
+check('...and nor is an employer', of('employment'), [])
+ok('...which is what the list itself says', !categoryById('addresses').worked)
+ok('...for both of them', !categoryById('employment').worked)
+/* THE PICKER IS NOT DRAWN FOR THEM, so the only option an empty list could ever produce --
+   "Not tested" standing alone -- never reaches the screen. */
+check('...so the only option left is the absence of one', outcomeOptionsFor('addresses').length, 1)
 check('...and a confirmed number as reaching the debtor',
   outcomeLabelIn('phones', 'verified'), 'Reached the debtor')
 
@@ -145,7 +155,11 @@ ok('...nor somebody who says they do not know them',
 /* BUT A LIVE ONE STILL CAN, or the rule above would have quietly closed the panel's whole
    purpose. */
 ok('a number that reached somebody can be saved', canPromote(I({ outcome: 'reached_other' })))
-ok('...and an untried one', canPromote(I({ outcome: null })))
+/* AN UNTRIED NUMBER CANNOT. THE FIRM: "you can't save it as a home number if it has not been
+   tested." Promoting marks the contact verified, so an untested number went on under a tick. */
+ok('...but not an untried number', !canPromote(I({ outcome: null })))
+/* An address needs no outcome, because it is no longer worked -- see above. */
+ok('...while an untried address still can be', canPromote(I({ kind: 'address', value: '1 Main Rd' })))
 
 /*
  * AND A FINDING THEY HAVE MOVED ON FROM IS NOT THE PRINCIPAL ONE. A former address still dates the

@@ -121,16 +121,13 @@ export const OUTCOMES_FOR: Record<TraceCategoryId, { outcome: TraceOutcome; labe
     /* A BOUNCE IS THE EMAIL'S DISCONNECTED: the address does not exist any more. */
     { outcome: 'unreachable', label: 'Bounced' },
   ],
-  addresses: [
-    { outcome: 'verified', label: 'Confirmed' },
-    { outcome: 'moved_on', label: 'They have moved' },
-    { outcome: 'not_theirs', label: 'Not theirs' },
-  ],
-  employment: [
-    { outcome: 'verified', label: 'Still there' },
-    { outcome: 'moved_on', label: 'No longer there' },
-    { outcome: 'not_theirs', label: 'Not theirs' },
-  ],
+  /*
+   * EMPTY, BECAUSE AN ADDRESS AND AN EMPLOYER ARE NO LONGER WORKED -- see TRACE_CATEGORIES.
+   * Kept as keys rather than removed so outcomeOptionsFor never has to guard against a missing
+   * one, and so an outcome written before this change still reads back under its old label.
+   */
+  addresses: [],
+  employment: [],
   people: [
     { outcome: 'reached_other', label: 'Spoke to them' },
     { outcome: 'no_answer', label: 'No answer' },
@@ -427,8 +424,37 @@ export function savesAs(item: TraceItem): string {
  * all; the second is what stops the same number arriving on the contact list three times because
  * three people pressed the button.
  */
+/**
+ * WHICH KINDS A PERSON MUST HAVE REACHED SOMEBODY ON BEFORE SAVING.
+ *
+ * THE FIRM: "if you're working a trace and it says no answer and you saved it as a home number,
+ * how can that be? That doesn't make sense. You can't save it as a home number if it has not been
+ * tested... wrong person and then save as their own number -- it doesn't make sense."
+ *
+ * They are right, and the fault was that Save asked nothing. Putting a number on the account marks
+ * the contact VERIFIED (see promoteTraceItem), so the old behaviour let somebody file a number
+ * that had rung out once, under a tick, as the debtor's home number -- and the next collector
+ * rings it believing somebody has already proved it.
+ *
+ * NUMBERS AND EMAILS ONLY. An address and an employer are not worked at all now, and a linked
+ * person saved as a next of kin is a record of who the bureau connected rather than a claim that
+ * a line works -- neither is a thing somebody can have "reached".
+ */
+const MUST_BE_REACHED: readonly TraceItemKind[] = ['mobile', 'phone', 'work', 'email']
+
+/** The two outcomes that mean a human answered. Either justifies putting it on the account. */
+const REACHED: readonly TraceOutcome[] = ['verified', 'reached_other']
+
 export function canPromote(item: TraceItem): boolean {
   if (item.promotedContactId !== null) return false
+  /*
+   * NOT UNTIL SOMEBODY HAS ANSWERED ON IT. "No answer" is a live line and not a confirmed one;
+   * untested is not a finding at all. Both leave the button off rather than showing one that
+   * would file an unproven number under a tick.
+   */
+  if (MUST_BE_REACHED.includes(item.kind) && !REACHED.includes(item.outcome as TraceOutcome)) {
+    return false
+  }
   /*
    * THREE WAYS OF SAYING "DO NOT PUT THIS ON THE ACCOUNT", and each is somebody's finding rather
    * than a guess: it was never them, they have left, or the person the bureau linked says they do
@@ -485,15 +511,37 @@ export const TRACE_CATEGORIES: TraceCategory[] = [
     blurb: 'Record an outcome and save useful addresses to the account.',
     valueHeading: 'Address', worked: true,
   },
+  /*
+   * NOT WORK, AT THE FIRM'S INSTRUCTION, AND THIS IS A REVERSAL.
+   *
+   * THE FIRM: "addresses or employment is not a prerequisite for having worked a trace. There's
+   * nothing need to be done with that. They just save as an address if you want to."
+   *
+   * WHICH IS HOW THESE ARE ACTUALLY USED. A number is confirmed by ringing it; an address is
+   * confirmed by posting something and waiting, or by somebody going there, and neither happens
+   * in the afternoon somebody works a trace. An outcome column that can only honestly be filled
+   * in weeks later is a column that stays empty and then stops being read -- and worse, it made
+   * an address something a collector had to answer for before the trace read as worked.
+   *
+   * traceRound already counted only numbers, emails and linked people, so the count does not
+   * move; what goes is the asking. They keep their Save button, which is the whole of what the
+   * firm wants done with them.
+   *
+   * WHAT IS LOST, SAID OUT LOUD: "They have moved" and "No longer there" were the two outcomes
+   * written for exactly these lists, and they are no longer offered anywhere. A stale address is
+   * still worth recording and there is now nowhere on a trace to record it. If that turns out to
+   * matter, it belongs on the ADDRESS on the account rather than on the trace -- the trace is the
+   * bureau's snapshot, and where somebody lives now is the account's own fact.
+   */
   {
     id: 'addresses', title: 'Addresses', kinds: ['address'],
-    blurb: 'Confirm where they are and save it to the account.',
-    valueHeading: 'Address', worked: true,
+    blurb: 'Save one to the account if it is worth having.',
+    valueHeading: 'Address', worked: false,
   },
   {
     id: 'employment', title: 'Employment', kinds: ['employer'],
-    blurb: 'Where they work is the route to a garnishee.',
-    valueHeading: 'Employer / role', worked: true,
+    blurb: 'Where they work is the route to a garnishee. Save one if it is worth having.',
+    valueHeading: 'Employer / role', worked: false,
   },
   {
     /*

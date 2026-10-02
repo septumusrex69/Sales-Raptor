@@ -779,8 +779,19 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote }: {
               A RELATIVE GOES ON AS A NEXT OF KIN, labelled. The firm asked for it in those words,
               and the label is what stops a collector opening a call to somebody's sister as
               though she were the debtor.
+
+              AND SO DOES A NUMBER SOMEBODY ELSE ANSWERED. THE FIRM: "if you reach someone else,
+              or a next of kin, on a specific number on the phone numbers, you should be able to
+              add them as a next of kin as well. Because now it only gives you save as work number
+              -- but it's not tested, it doesn't make sense."
+
+              WHICH IS THE CASE THE LIST SPLIT COULD NOT COVER. The linked-people list holds who
+              the BUREAU connected; a wife who picks up the debtor's old mobile is somebody the
+              COLLECTOR found, and until now the only thing offered was to file her line as the
+              debtor's own work number. Offered exactly where it is true -- somebody answered and
+              it was not the debtor -- which is what `reached_other` means.
             */}
-            {category === 'people' && (
+            {(category === 'people' || row.outcome === 'reached_other') && (
               <button type="button" onClick={() => onPromote(true)} disabled={busy}
                 className="text-xs font-medium text-[var(--c-steel)] hover:underline">
                 as next of kin
