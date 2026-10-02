@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
@@ -289,6 +289,19 @@ export function MailPage() {
   const [status, setStatus] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   /*
+   * ONE MESSAGE, ASKED FOR BY THE PAGE THAT SENT YOU HERE.
+   *
+   * THE FIRM, having clicked a meeting on the calendar: "it takes me to the emails. But it doesn't
+   * take me to that specific email." The meeting now opens as a meeting (see MeetingModal), and
+   * the invitation behind it is one press -- which has to land on the MESSAGE, or it is the same
+   * complaint with an extra step.
+   *
+   * READ ONCE AND CLEARED. A message id that stayed in the address would re-open and re-mark-read
+   * on every refresh, and would fight the person the moment they clicked a different message.
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [wanted, setWanted] = useState<string | null>(() => searchParams.get('message'))
+  /*
    * Bodies, once fetched, kept for as long as the page is up.
    *
    * Each one is an IMAP round trip, so collapsing a message and opening it again should not pay
@@ -527,6 +540,33 @@ export function MailPage() {
   }, [syncMine])
 
   const allChosen = items.length > 0 && chosen.size === items.length
+
+  /*
+   * OPEN THE ONE THE CALENDAR ASKED FOR, once the list holding it has arrived.
+   *
+   * IN AN EFFECT RATHER THAN ON MOUNT, because the list is fetched and the message is not there to
+   * open on the first render. It waits for the row, opens it through the same path a click uses --
+   * so it is marked read and its body is fetched exactly as it would have been -- and then clears
+   * the ask so a refresh does not re-open it and a click elsewhere is not fought.
+   *
+   * AND IT GIVES UP QUIETLY. A message that is not in the current tab (filed, junk, an older page)
+   * simply never matches, and the person is left in their mailbox rather than staring at an error
+   * about a message they can see is there. The id is cleared either way the moment it is used.
+   */
+  useEffect(() => {
+    if (!wanted) return
+    const found = items.find((m) => m.id === wanted)
+    if (!found) return
+    setWanted(null)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('message')
+      return next
+    }, { replace: true })
+    void toggleTo(found)
+    // toggleTo is redeclared each render; the guard above is the thing that stops a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted, items])
 
   /**
    * Open a message and read it.

@@ -190,3 +190,38 @@ export function dayHeadline(plan: DayPlan): string {
   if (bits.length === 0) return 'Nothing booked'
   return bits.join(' · ')
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * WHEN A MEETING IS, IN ONE SENTENCE
+ *
+ * HERE RATHER THAN IN THE COMPONENT THAT DRAWS IT, for the reason outcomeReady moved too: a pure
+ * function in a .tsx file cannot be imported by scripts/qa at all, so the only thing a check could
+ * do was match its source and hope. It is also the same question meetingTime above answers more
+ * narrowly, and two places deciding what an all-day event's time is would eventually disagree.
+ * ---------------------------------------------------------------------------------------------- */
+
+const DAY = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } as const
+const CLOCK = { hour: '2-digit', minute: '2-digit' } as const
+
+/**
+ * WHEN IT IS, IN ONE SENTENCE.
+ *
+ * THREE SHAPES, because a meeting has three. An all-day event has no clock to show and a 00:00
+ * against it would be a time nobody set; a meeting with an end shows the span, which is the thing
+ * somebody is deciding around; and an invitation whose time never resolved says so rather than
+ * inventing an hour -- see inviteInstant.
+ */
+export function whenItIs(m: DayMeeting): string {
+  if (m.allDay) return m.startsOn ? `${long(m.startsOn)} · all day` : 'All day'
+  if (!m.startsAt) return 'No time on the invitation'
+  const start = new Date(m.startsAt)
+  const day = start.toLocaleDateString('en-ZA', DAY)
+  const from = start.toLocaleTimeString('en-ZA', CLOCK)
+  if (!m.endsAt) return `${day} · ${from}`
+  const to = new Date(m.endsAt).toLocaleTimeString('en-ZA', CLOCK)
+  return `${day} · ${from} to ${to}`
+}
+
+/* A date-only value is parsed at midday, never midnight: `new Date('2026-10-08')` is midnight UTC,
+   which is the day before for every reader west of Greenwich. */
+const long = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString('en-ZA', DAY)

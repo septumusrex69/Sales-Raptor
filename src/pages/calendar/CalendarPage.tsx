@@ -10,6 +10,7 @@ import { companyById, formatDate, TODAY } from '../../data/mockData'
 import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
 import { localDay } from '../../lib/dayPlan.ts'
+import { MeetingModal } from '../../components/calendar/MeetingModal'
 
 /* A meeting is neither a task nor a deal date, so it does not borrow either one's colour. */
 const MEETING_EVENT_COLOR = 'var(--c-steel)'
@@ -21,6 +22,17 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 interface CalEvent {
   id: string
+  /**
+   * THE MEETING THIS CHIP IS, where it is one.
+   *
+   * THE FIRM: "if I click on the 8th where it says call centre discussion, it takes me to the
+   * emails... I don't want it to take me to the email at all -- rather to call centre discussion."
+   *
+   * A task chip and a deal chip go somewhere; a meeting chip OPENS something, because the meeting
+   * is not a page in this app -- it is a row, and MeetingModal is the reading of it. Carried on
+   * the event so the three kinds can sit in one list and still behave as themselves.
+   */
+  meeting?: CalendarEvent
   /** Client/company name — the primary thing shown, per the calendar's whole purpose of surfacing who a day's work is about. */
   primary: string
   /** Task type (e.g. "Follow-up") or "Expected Close" for a deal's close-date marker. */
@@ -49,12 +61,48 @@ function tasksUrlForDate(d: Date) {
   return buildDrilldownUrl('/tasks', { date: localDay(d) })
 }
 
+/**
+ * A CHIP IS A LINK OR A PRESS, AND THE EVENT DECIDES WHICH.
+ *
+ * A task chip and a deal chip go to a PAGE; a meeting chip opens a MEETING, which is not a page in
+ * this app -- it is a row, and MeetingModal is the reading of it. The three kinds sit in one list
+ * and have to behave as themselves, so the choice is made here rather than at each of the three
+ * places the calendar draws a chip. Written out three times it would be the Month view that kept
+ * working and the Day view that quietly still went to the mailbox.
+ *
+ * SAME CLASSES, SAME STYLE, SAME TITLE either way -- `type="button"` with no border of its own, so
+ * a chip is not two different-looking things depending on what it points at. `text-left` because a
+ * button centres its text and a link does not.
+ */
+function Chip({ event, onMeeting, className, style, title, children }: {
+  event: CalEvent
+  onMeeting: (m: CalendarEvent) => void
+  className: string
+  style?: React.CSSProperties
+  title?: string
+  children: React.ReactNode
+}) {
+  if (event.meeting) {
+    const m = event.meeting
+    return (
+      <button type="button" onClick={() => onMeeting(m)} className={`${className} text-left w-full`}
+        style={style} title={title}>
+        {children}
+      </button>
+    )
+  }
+  return <Link to={event.href} className={className} style={style} title={title}>{children}</Link>
+}
+
 export function CalendarPage() {
   const { tasks, deals, users } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [owner, setOwner] = useDefaultOwnerFilter(undefined, currentUser)
   const [view, setView] = useState<ViewMode>('Month')
+  /* The meeting being read. Null is the ordinary state -- see MeetingModal for why a meeting is
+     opened rather than navigated to. */
+  const [openMeeting, setOpenMeeting] = useState<CalendarEvent | null>(null)
   const [cursor, setCursor] = useState(new Date(TODAY))
 
   /*
@@ -136,7 +184,14 @@ export function CalendarPage() {
           date: new Date(when),
           color: MEETING_EVENT_COLOR,
           ownerId: m.ownerId,
-          href: '/mail',
+          /*
+           * IT WENT TO THE MAILBOX. Not the message -- the mailbox: `href: '/mail'` on every
+           * meeting in the calendar, so the one thing a click could not tell you was anything
+           * about the meeting. The chip now opens the meeting, and the invitation is one press
+           * inside it.
+           */
+          href: '',
+          meeting: m,
         }]
       })
 
@@ -223,9 +278,19 @@ export function CalendarPage() {
         </div>
       )}
 
-      {view === 'Month' && <MonthView cursor={cursor} events={events} />}
-      {view === 'Week' && <WeekView cursor={cursor} events={events} />}
-      {view === 'Day' && <DayView cursor={cursor} events={events} />}
+      {view === 'Month' && <MonthView cursor={cursor} events={events} onMeeting={setOpenMeeting} />}
+      {view === 'Week' && <WeekView cursor={cursor} events={events} onMeeting={setOpenMeeting} />}
+      {view === 'Day' && <DayView cursor={cursor} events={events} onMeeting={setOpenMeeting} />}
+
+      {/*
+        THE MEETING, READ AS A MEETING. The chip used to go to `/mail` -- the mailbox, not even the
+        message -- so the one thing a click could not tell you was anything about the meeting. See
+        MeetingModal, which is a reading of a row that was already carrying every detail the firm
+        asked for.
+      */}
+      {openMeeting && (
+        <MeetingModal meeting={openMeeting} onClose={() => setOpenMeeting(null)} />
+      )}
     </div>
   )
 }
@@ -237,7 +302,12 @@ function startOfWeek(d: Date) {
   return x
 }
 
-function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
+function MonthView({ cursor, events, onMeeting }: {
+  cursor: Date
+  events: CalEvent[]
+  /** Opening a meeting is the page's job, not the view's -- see Chip. */
+  onMeeting: (m: CalendarEvent) => void
+}) {
   const firstOfMonth = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
   const gridStart = startOfWeek(firstOfMonth)
   const days = Array.from({ length: 42 }).map((_, i) => {
@@ -290,15 +360,16 @@ function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
               </span>
               <div className="relative mt-1 space-y-1">
                 {dayEvents.slice(0, 3).map((e) => (
-                  <Link
+                  <Chip
                     key={e.id}
-                    to={e.href}
+                    event={e}
+                    onMeeting={onMeeting}
                     className="block text-[10px] font-medium px-1.5 py-0.5 rounded truncate hover:brightness-95"
                     style={{ backgroundColor: `${e.color}1a`, color: e.color }}
                     title={`${e.primary} — ${e.type}${e.note ? ` (${e.note})` : ''}`}
                   >
                     {e.primary}
-                  </Link>
+                  </Chip>
                 ))}
                 {dayEvents.length > 3 && <div className="text-[10px] text-slate-400 px-1.5">+{dayEvents.length - 3} more</div>}
               </div>
@@ -310,7 +381,12 @@ function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
   )
 }
 
-function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
+function WeekView({ cursor, events, onMeeting }: {
+  cursor: Date
+  events: CalEvent[]
+  /** Opening a meeting is the page's job, not the view's -- see Chip. */
+  onMeeting: (m: CalendarEvent) => void
+}) {
   const start = startOfWeek(cursor)
   const days = Array.from({ length: 7 }).map((_, i) => {
     const d = new Date(start)
@@ -330,9 +406,10 @@ function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
             </Link>
             <div className="p-2 space-y-1.5 min-h-[220px]">
               {dayEvents.map((e) => (
-                <Link
+                <Chip
                   key={e.id}
-                  to={e.href}
+                  event={e}
+                  onMeeting={onMeeting}
                   className="block text-[11px] px-1.5 py-1 rounded hover:brightness-95"
                   style={{ backgroundColor: `${e.color}1a`, color: e.color }}
                   title={`${e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · ${e.type}${e.note ? ` · ${e.note}` : ''}`}
@@ -341,7 +418,7 @@ function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
                   <span className="block text-[10px] opacity-80 truncate">
                     {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {e.type}
                   </span>
-                </Link>
+                </Chip>
               ))}
             </div>
           </Card>
@@ -351,14 +428,20 @@ function WeekView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
   )
 }
 
-function DayView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
+function DayView({ cursor, events, onMeeting }: {
+  cursor: Date
+  events: CalEvent[]
+  /** Opening a meeting is the page's job, not the view's -- see Chip. */
+  onMeeting: (m: CalendarEvent) => void
+}) {
   const dayEvents = events.filter((e) => sameDay(e.date, cursor)).sort((a, b) => a.date.getTime() - b.date.getTime())
   return (
     <Card padded={false}>
       <div className="divide-y divide-slate-50">
         {dayEvents.length === 0 && <p className="text-center text-slate-400 text-sm py-10">No events scheduled for this day.</p>}
         {dayEvents.map((e) => (
-          <Link key={e.id} to={e.href} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
+          <Chip key={e.id} event={e} onMeeting={onMeeting}
+            className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: e.color }} />
             <span className="text-sm text-slate-500 w-16 shrink-0">{e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
             <div className="min-w-0 flex-1">
@@ -369,7 +452,7 @@ function DayView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
               </p>
             </div>
             <UserAvatar userId={e.ownerId} size={24} />
-          </Link>
+          </Chip>
         ))}
       </div>
     </Card>
