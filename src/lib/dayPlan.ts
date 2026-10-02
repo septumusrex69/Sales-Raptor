@@ -64,6 +64,14 @@ export interface DayMeeting {
   /** The day it is on, where there is no instant. */
   startsOn: string | null
   location: string | null
+  /**
+   * The invitation's own words, where it carried any.
+   *
+   * HERE BECAUSE THE JOIN LINK IS IN THEM. An invitation prints the URL in the middle of its
+   * boilerplate and nowhere else, so a day's list that wanted a Join button had to read the notes
+   * -- see joinLink. Nullable and optional: a meeting somebody typed in by hand has none.
+   */
+  notes?: string | null
   /* WHO ELSE IS IN IT. A count on the row rather than a list: what somebody needs at a glance is
      whether this is a client meeting or a note to themselves. */
   attendees: { name: string | null; email: string | null }[]
@@ -343,4 +351,117 @@ export function shiftDay(day: string, by: number): string {
   const d = new Date(`${day}T12:00:00`)
   d.setDate(d.getDate() + by)
   return localDay(d)
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * THE LINK YOU ACTUALLY PRESS AT TWO MINUTES PAST
+ *
+ * THE FIRM, reading a Teams invitation on the calendar: "if the link is pulled in there as well,
+ * that'd be cool."
+ *
+ * IT WAS ALREADY ON THE SCREEN AND NOT PRESSABLE. An invitation's notes carry the join URL in the
+ * middle of forty lines of boilerplate -- meeting id, passcode, a tenant key, two help links and a
+ * conferencing-device paragraph -- and the one thing anybody needs from all of it is the first of
+ * those URLs. Finding it meant scrolling the notes and selecting a line of text by hand on a
+ * tablet, thirty seconds after the meeting had started.
+ *
+ * THE HARD PART IS NOT FINDING A URL, IT IS NOT FINDING THE WRONG ONE. The Teams boilerplate in
+ * front of the firm right now contains aka.ms/JoinTeamsMeeting (a help page), a webex.com/msteams
+ * marketing page, and a "System reference" meetup-join link that is the same meeting by another
+ * route. A button that opened the help page would be worse than no button: it looks like it worked.
+ *
+ * SO IT IS A CLOSED LIST OF SHAPES, not "the first https:// in the notes". Anything this does not
+ * recognise gets no button, which is the honest answer -- the notes are still there to read.
+ * ---------------------------------------------------------------------------------------------- */
+
+/*
+ * The shapes, most specific first.
+ *
+ * TEAMS HAS TWO REAL ONES. `/meet/<id>` is what a modern invitation prints at the top; the older
+ * `/l/meetup-join/...` is what Outlook writes and is what the firm's own FNB invitation carries
+ * further down. Both open the meeting, so both count -- the order decides which wins when a single
+ * invitation carries both, and the short one is the one a person would have clicked.
+ */
+const JOIN_PATTERNS: readonly RegExp[] = [
+  /https:\/\/teams\.microsoft\.com\/meet\/\S+/i,
+  /https:\/\/teams\.(?:microsoft|live)\.com\/l\/meetup-join\/\S+/i,
+  /https:\/\/[\w.-]*zoom\.us\/j\/\S+/i,
+  /https:\/\/meet\.google\.com\/[a-z-]{10,}/i,
+  /https:\/\/[\w.-]*webex\.com\/(?:meet|join)\/\S+/i,
+  /https:\/\/[\w.-]*gotomeeting\.com\/join\/\S+/i,
+]
+
+/**
+ * The URL that opens this meeting, or null where the invitation does not carry one.
+ *
+ * NULL IS THE COMMON CASE AND IS NOT A FAILURE. A meeting in a boardroom has no link, and a button
+ * that appeared on every meeting and did nothing on half of them is the thing that teaches people
+ * not to press it.
+ *
+ * THE LOCATION IS LOOKED AT TOO, because some clients put the URL there and write "Microsoft Teams
+ * Meeting" in the notes. Notes first: where both carry one, the notes' is the invitation's own.
+ *
+ * PURE: it takes two strings and returns one.
+ */
+export function joinLink(notes: string | null | undefined, location?: string | null): string | null {
+  for (const text of [notes, location]) {
+    if (!text) continue
+    for (const pattern of JOIN_PATTERNS) {
+      const hit = pattern.exec(text)
+      /* TRAILING PUNCTUATION IS NOT PART OF A URL. An invitation writes "Join: <url>" and a human
+         writes "see https://…meet/123." -- the full stop belongs to the sentence, and a link with
+         one on the end 404s. Angle brackets likewise: Outlook wraps URLs in them. */
+      if (hit) return hit[0].replace(/[)>\].,;'"]+$/, '')
+    }
+  }
+  return null
+}
+
+/**
+ * WHO THE MEETING IS WITH, in one name.
+ *
+ * THE FIRM: "I see Bredell Ferreira partnership, and then call centre discussion. It's more
+ * important... that it's with this person. Simone Pretorius -- that's really important."
+ *
+ * A subject line names the SUBJECT; what somebody scanning a month actually wants is who they will
+ * be sitting with, because that is what decides whether a Tuesday is free.
+ *
+ * THE ORGANISER FIRST, because they are the one who called it and the one to ring if it has to
+ * move. Falling back to the first attendee who is not us -- an invitation the firm sent itself has
+ * the firm as organiser, and "with Stephan" on Stephan's own calendar says nothing.
+ *
+ * NULL WHERE THERE IS NOBODY ELSE, which is a real answer: a note to yourself in the calendar is
+ * not a meeting with anybody, and "with —" would be furniture on every one of them.
+ */
+export function meetingWith(m: {
+  organiserName: string | null
+  organiserEmail?: string | null
+  attendees: { name: string | null; email: string | null }[]
+}, ourAddresses: readonly string[] = []): string | null {
+  const ours = new Set(ourAddresses.map((a) => a.trim().toLowerCase()).filter(Boolean))
+  const mine = (email: string | null | undefined) => !!email && ours.has(email.trim().toLowerCase())
+
+  if (m.organiserName && !mine(m.organiserEmail)) return tidyName(m.organiserName)
+  for (const a of m.attendees) {
+    if (mine(a.email)) continue
+    if (a.name) return tidyName(a.name)
+    /* AN ADDRESS IS A NAME WHEN THERE IS NO NAME. "oscar.moagi@fnb.co.za" tells somebody who it is
+       with; dropping the attendee because the invitation omitted a display name does not. */
+    if (a.email) return a.email
+  }
+  return m.organiserName ? tidyName(m.organiserName) : null
+}
+
+/*
+ * "Moagi, Oscar" is how Exchange writes a name and is not how anybody says it.
+ *
+ * Only on a SINGLE comma, and only where both halves look like names: "Smith, Jones and Partners"
+ * is a firm, and turning it into "Jones and Partners Smith" would be worse than leaving it.
+ */
+function tidyName(name: string): string {
+  const parts = name.split(',')
+  if (parts.length !== 2) return name.trim()
+  const [last, first] = parts.map((p) => p.trim())
+  if (!last || !first || /\s/.test(first)) return name.trim()
+  return `${first} ${last}`
 }

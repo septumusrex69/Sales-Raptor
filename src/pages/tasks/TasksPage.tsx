@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, CalendarDays, MapPin, Plus, Search, Users } from 'lucide-react'
+import { CalendarClock, CalendarDays, MapPin, Plus, Search, Users, Video } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -12,7 +12,8 @@ import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
 import {
-  dayCounts, dayHeadline, localDay, meetingTime, planDay, shiftDay, taskTime, weekStrip,
+  dayCounts, dayHeadline, joinLink, localDay, meetingTime, meetingWith, planDay, shiftDay,
+  taskTime, weekStrip,
 } from '../../lib/dayPlan.ts'
 import { TaskDayPicker } from '../../components/tasks/TaskDayPicker'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
@@ -354,7 +355,13 @@ export function TasksPage() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-slate-700 truncate">{m.title}</p>
+                  {/* WHO IT IS WITH, FIRST. The firm's point on the calendar is the same here: a
+                      subject names the subject, and what you want at nine in the morning is who
+                      you are sitting with. */}
                   <p className="text-xs text-slate-400 flex items-center gap-2 truncate">
+                    {meetingWith(m, [currentUser?.email ?? '']) && (
+                      <span className="truncate">with {meetingWith(m, [currentUser?.email ?? ''])}</span>
+                    )}
                     {m.location && (
                       <span className="inline-flex items-center gap-1 truncate">
                         <MapPin size={11} className="shrink-0" /> {m.location}
@@ -365,9 +372,22 @@ export function TasksPage() {
                         <Users size={11} /> {m.attendees.length}
                       </span>
                     )}
-                    {!m.location && m.attendees.length === 0 && m.organiserName}
                   </p>
                 </div>
+                {/*
+                  JOIN, STRAIGHT OFF THE DAY'S LIST. THE FIRM: "if the link is pulled in there into
+                  the task, that'd be cool." This page is what somebody has open at nine in the
+                  morning, and making them go to the calendar, find the meeting and open it to
+                  reach a URL that was in the invitation all along is three presses too many.
+                */}
+                {joinLink(m.notes, m.location) && (
+                  <a href={joinLink(m.notes, m.location) as string}
+                    target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5
+                      rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 shrink-0">
+                    <Video size={12} /> Join
+                  </a>
+                )}
                 <Link to="/calendar" className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Open
                 </Link>

@@ -21,8 +21,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  NO_DAY_COUNT, dayCountSentence, dayCounts, dayHeadline, localDay, meetingDay, meetingTime,
-  planDay, shiftDay, taskTime, weekStrip,
+  NO_DAY_COUNT, dayCountSentence, dayCounts, dayHeadline, joinLink, localDay, meetingDay,
+  meetingTime, meetingWith, planDay, shiftDay, taskTime, weekStrip,
 } from '../../src/lib/dayPlan.ts'
 import { monthSpan } from '../../src/lib/dayWords.ts'
 
@@ -44,6 +44,7 @@ const code = (p) => read(p)
 const cal = code('src/pages/calendar/CalendarPage.tsx')
 const tasks = code('src/pages/tasks/TasksPage.tsx')
 const picker = code('src/components/tasks/TaskDayPicker.tsx')
+const meetingBox = code('src/components/calendar/MeetingModal.tsx')
 const grid = code('src/components/ui/DayGrid.tsx')
 const diaryPicker = code('src/components/diary/DiaryDatePicker.tsx')
 const lib = code('src/lib/dayPlan.ts')
@@ -360,6 +361,111 @@ ok('...and the day chosen is the day in the URL', /next\.set\('date', day\)/.tes
 ok('a month square says how much is on it', /dayEvents\.length > 0 && \(/.test(cal))
 ok('...and a week column says it in words',
   /dayEvents\.length === 1 \? '1 thing' : `\$\{dayEvents\.length\} things`/.test(cal))
+
+/* ---------------------------------------------------------------------------------------------
+ * TWO FIGURES ON A DAY, NOT ONE TOTAL
+ *
+ * THE FIRM, booking a task: "you can see what other tasks you have left to do, but you can't see
+ * meetings. There should be two little numbers at the bottom, possibly with different colours --
+ * because if you want to book something: oh, I've got five meetings that day, how many tasks are
+ * you going to do?"
+ *
+ * One figure cannot carry it. Five meetings and one task is a day that is gone; one meeting and
+ * five tasks is a day with room in it; both of them read as "6".
+ * ------------------------------------------------------------------------------------------- */
+
+ok('the square shows meetings apart from tasks', /c\.meetings > 0 && \(/.test(picker) && /c\.tasks > 0 && \(/.test(picker))
+/* THE CALENDAR'S OWN BLUE for a meeting -- a third colour for the same thing would be a third
+   thing to learn. */
+ok('...in the colour a meeting already wears', /color: 'var\(--c-steel\)'/.test(picker))
+/* AND THE KEY, because two numbers in two colours is a riddle until somebody says which is which. */
+ok('...and says which is which', /meetings\s*<\/span>[\s\S]{0,200}tasks/.test(picker))
+/* A DASH WHERE THERE IS NEITHER, so the line holds and the column stays scannable. */
+ok('...with a dash on an empty day', /c\.total === 0 \? '\u2013'/.test(picker))
+/* AND THE GRID STILL DECIDES NOTHING: the footer is handed to it, like every other part of a
+   cell -- the diary has one count against a capacity and this has two against none. */
+ok('the grid draws what it is given', /footer\?: React\.ReactNode/.test(grid))
+ok('...and still holds no policy of its own', !/meetings|capacity|dayLoad/.test(grid))
+
+/* ---------------------------------------------------------------------------------------------
+ * WHO IT IS WITH, AND THE LINK THAT OPENS IT
+ *
+ * THE FIRM: "I see Bredell Ferreira partnership, and then call centre discussion. It's more
+ * important that... it's with this person. Simone Pretorius -- that's really important." And:
+ * "if the link is pulled in there as well, that'd be cool."
+ * ------------------------------------------------------------------------------------------- */
+
+const US = ['stephan@bredellferreira.co.za']
+const invite = (over) => ({
+  organiserName: 'Moagi, Oscar', organiserEmail: 'Oscar.Moagi@fnb.co.za',
+  attendees: [{ name: null, email: 'CAMILLE@BREDELFERREIRA.co.za' }], ...over,
+})
+
+/* THE ORGANISER FIRST: they called it, and they are the one to ring if it has to move. */
+check('a meeting says who called it', meetingWith(invite(), US), 'Oscar Moagi')
+/* "Moagi, Oscar" is how Exchange writes a name and is not how anybody says it. */
+check('...the way a person would say it', meetingWith(invite({ organiserName: 'Pretorius, Simone' }), US), 'Simone Pretorius')
+/* AND ONLY ON A SINGLE COMMA BETWEEN TWO NAMES. "Smith, Jones and Partners" is a firm, and
+   turning it into "Jones and Partners Smith" would be worse than leaving it alone. */
+check('...but a firm with a comma in it is left alone',
+  meetingWith(invite({ organiserName: 'Smith, Jones and Partners' }), US), 'Smith, Jones and Partners')
+/*
+ * AND IT LEAVES US OUT. An invitation the firm sent itself has the firm as organiser, and "with
+ * Stephan" on Stephan's own calendar says nothing at all.
+ */
+check('a meeting we called names the other person',
+  meetingWith(invite({
+    organiserName: 'Stephan', organiserEmail: 'stephan@bredellferreira.co.za',
+    attendees: [{ name: 'Simone Pretorius', email: 's@example.co.za' }],
+  }), US), 'Simone Pretorius')
+/* AN ADDRESS IS A NAME WHEN THERE IS NO NAME -- dropping an attendee because the invitation
+   omitted a display name tells somebody less, not more. */
+check('...falling back to an address where there is no name',
+  meetingWith({ organiserName: null, organiserEmail: null, attendees: [{ name: null, email: 'ops@acme.co.za' }] }, US),
+  'ops@acme.co.za')
+/* NOBODY ELSE IS A REAL ANSWER: a note to yourself in the calendar is not a meeting with anybody,
+   and "with —" would be furniture on every one of them. */
+check('a meeting with nobody says nobody',
+  meetingWith({ organiserName: null, organiserEmail: null, attendees: [] }, US), null)
+
+/*
+ * THE JOIN LINK, AND THE HARD PART IS NOT FINDING A URL -- IT IS NOT FINDING THE WRONG ONE.
+ *
+ * The firm's own Teams boilerplate carries aka.ms/JoinTeamsMeeting (a help page) and a
+ * webex.com/msteams marketing page beside the real link. A button that opened the help page would
+ * be worse than no button, because it looks like it worked.
+ */
+const TEAMS = [
+  'Microsoft Teams meeting',
+  'Join: https://teams.microsoft.com/meet/3723873974543254?p=f51WYaIJEBYHNuEHZr',
+  'Meeting ID: 372 387 397 454 325 4',
+  'Need help?<https://aka.ms/JoinTeamsMeeting?omkt=en-US> | System reference<https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0>',
+  'More info<https://www.webex.com/msteams?confid=1>',
+].join('\n')
+check('the join link comes out of the invitation',
+  joinLink(TEAMS, 'Microsoft Teams Meeting'),
+  'https://teams.microsoft.com/meet/3723873974543254?p=f51WYaIJEBYHNuEHZr')
+ok('...and not the help page', !/aka\.ms/.test(joinLink(TEAMS, null) ?? ''))
+ok('...nor the marketing page', !/webex\.com\/msteams/.test(joinLink(TEAMS, null) ?? ''))
+/* TRAILING PUNCTUATION IS NOT PART OF A URL: an invitation wraps one in angle brackets and a human
+   ends the sentence with a full stop, and a link carrying either 404s. */
+check('a bracketed link loses its bracket',
+  joinLink('Join<https://zoom.us/j/12345678>'), 'https://zoom.us/j/12345678')
+check('...and a sentence loses its full stop',
+  joinLink('See https://meet.google.com/abc-defg-hij.'), 'https://meet.google.com/abc-defg-hij')
+/* THE LOCATION IS LOOKED AT TOO, because some clients put the URL there and write "Microsoft Teams
+   Meeting" in the notes. */
+check('a link in the location is found', joinLink(null, 'https://zoom.us/j/999'), 'https://zoom.us/j/999')
+/* NULL IS THE COMMON CASE AND NOT A FAILURE. A meeting in a boardroom has no link, and a button
+   that appeared on all of them and worked on half would teach people not to press it. */
+check('a meeting in a room has no link', joinLink('Boardroom, third floor', 'Boardroom'), null)
+
+/* AND IT IS PRESSABLE IN BOTH PLACES SOMEBODY LOOKS. */
+ok('the meeting itself offers Join', /Join the meeting/.test(meetingBox))
+ok("...and so does the day's own list", /<Video size=\{12\} \/> Join/.test(tasks))
+/* OFF THE INVITATION'S OWN WORDS, which is where the URL is -- so a day list that wanted a button
+   had to be given the notes. */
+ok('...read off the notes the invitation carried', /notes\?: string \| null/.test(read('src/lib/dayPlan.ts')))
 
 console.log(`\ncheck-day-plan: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

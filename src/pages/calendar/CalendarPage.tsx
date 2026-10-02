@@ -9,7 +9,7 @@ import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
 import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
-import { localDay } from '../../lib/dayPlan.ts'
+import { localDay, meetingWith } from '../../lib/dayPlan.ts'
 import { MeetingModal } from '../../components/calendar/MeetingModal'
 
 /* A meeting is neither a task nor a deal date, so it does not borrow either one's colour. */
@@ -39,6 +39,17 @@ interface CalEvent {
   type: string
   /** Free-text detail (task title) — only set when distinct from `primary`, so we don't repeat the same string twice on cramped chips. */
   note?: string
+  /**
+   * WHO IT IS WITH. Meetings only.
+   *
+   * THE FIRM: "I see Bredell Ferreira partnership, and then call centre discussion. It's more
+   * important that... it's with this person. Simone Pretorius -- that's really important."
+   *
+   * A subject line names the SUBJECT. What somebody scanning a month wants is who they will be
+   * sitting with, because that is what decides whether a Tuesday is free. See meetingWith, which
+   * leaves US out: "with Stephan" on Stephan's own calendar says nothing.
+   */
+  who?: string | null
   date: Date
   color: string
   ownerId: string
@@ -181,6 +192,7 @@ export function CalendarPage() {
           primary: m.title,
           type: 'Meeting',
           note: m.location ?? undefined,
+          who: meetingWith(m, [currentUser?.email ?? '']),
           date: new Date(when),
           color: MEETING_EVENT_COLOR,
           ownerId: m.ownerId,
@@ -384,9 +396,15 @@ function MonthView({ cursor, events, onMeeting }: {
                     onMeeting={onMeeting}
                     className="block text-[10px] font-medium px-1.5 py-0.5 rounded truncate hover:brightness-95"
                     style={{ backgroundColor: `${e.color}1a`, color: e.color }}
-                    title={`${e.primary} — ${e.type}${e.note ? ` (${e.note})` : ''}`}
+                    title={`${e.primary} — ${e.type}${e.who ? ` with ${e.who}` : ''}${e.note ? ` (${e.note})` : ''}`}
                   >
-                    {e.primary}
+                    {/*
+                      WHO IT IS WITH, ON ITS OWN LINE. The firm's point, and it costs ten pixels on
+                      the one kind of chip that has somebody behind it: a task is yours and a deal
+                      date is a date, so only a meeting carries this.
+                    */}
+                    <span className="block truncate">{e.primary}</span>
+                    {e.who && <span className="block truncate opacity-70">with {e.who}</span>}
                   </Chip>
                 ))}
                 {dayEvents.length > 3 && <div className="text-[10px] text-slate-400 px-1.5">+{dayEvents.length - 3} more</div>}
@@ -441,8 +459,11 @@ function WeekView({ cursor, events, onMeeting }: {
                   title={`${e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · ${e.type}${e.note ? ` · ${e.note}` : ''}`}
                 >
                   <span className="font-semibold">{e.primary}</span>
+                  {/* WITH WHOM BEATS WHAT KIND, because the colour already says what kind. On
+                      anything that is not a meeting the type is still the useful half. */}
                   <span className="block text-[10px] opacity-80 truncate">
-                    {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })} · {e.type}
+                    {e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}
+                    {' · '}{e.who ? `with ${e.who}` : e.type}
                   </span>
                 </Chip>
               ))}
@@ -473,7 +494,7 @@ function DayView({ cursor, events, onMeeting }: {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-slate-700 truncate">{e.primary}</p>
               <p className="text-xs text-slate-400">
-                {e.type}
+                {e.who ? `with ${e.who}` : e.type}
                 {e.note ? ` · ${e.note}` : ''}
               </p>
             </div>

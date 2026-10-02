@@ -92,6 +92,40 @@ export function TaskDayPicker({
       : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
     return {
       count: c.total,
+      /*
+        TWO FIGURES, NOT ONE TOTAL.
+
+        THE FIRM: "you can see what other tasks you have left to do, but you can't see meetings.
+        There should be two little numbers at the bottom, possibly with different colours --
+        because if you want to book something: oh, I've got five meetings that day, how many tasks
+        are you going to do?"
+
+        One figure cannot carry it. Five meetings and one task is a day that is gone; one meeting
+        and five tasks is a day with room in it; both of them read as "6".
+
+        MEETINGS IN THE CALENDAR'S OWN BLUE, which is the colour a meeting already wears on the
+        calendar and in the day list -- a third colour for the same thing would be a third thing to
+        learn. Tasks stay in the ordinary text colour: they are the thing being booked, and the
+        figure that should stand out is the one that is already spent.
+
+        A DASH WHERE THERE IS NEITHER, so the line holds and the column stays scannable -- the
+        reason the single count was drawn that way too.
+      */
+      footer: c.total === 0 ? '–' : (
+        <>
+          {c.meetings > 0 && (
+            <span style={{ color: 'var(--c-steel)' }} title={`${c.meetings} meeting${c.meetings === 1 ? '' : 's'}`}>
+              {c.meetings}
+            </span>
+          )}
+          {c.meetings > 0 && c.tasks > 0 && <span className="text-slate-300">/</span>}
+          {c.tasks > 0 && (
+            <span className="text-slate-600" title={`${c.tasks} task${c.tasks === 1 ? '' : 's'}`}>
+              {c.tasks}
+            </span>
+          )}
+        </>
+      ),
       tone,
       disabled: past && !allowPast,
       title: [
@@ -121,6 +155,21 @@ export function TaskDayPicker({
       </div>
 
       <DayGrid days={days} value={value} onChange={onChange} cellFor={cellFor} />
+
+      {/*
+        WHAT THE TWO FIGURES ARE. Said once, under the grid, rather than guessed at -- two numbers
+        in two colours is a riddle until somebody tells you, and then it is obvious for ever.
+      */}
+      <p className="mt-1.5 text-[10px] text-slate-400 flex items-center gap-2">
+        <span className="inline-flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--c-steel)' }} />
+          meetings
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+          tasks
+        </span>
+      </p>
 
       {/*
         ONE SENTENCE ABOUT THE DAY ACTUALLY CHOSEN. The grid shows the shape, this says what it

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
-import { CalendarClock, Mail, MapPin, StickyNote, User, Users } from 'lucide-react'
+import { CalendarClock, Mail, MapPin, StickyNote, User, Users, Video } from 'lucide-react'
 import { Modal } from '../ui/Modal'
-import { whenItIs } from '../../lib/dayPlan.ts'
+import { joinLink, whenItIs } from '../../lib/dayPlan.ts'
 import type { CalendarEvent } from '../../lib/calendarEvents.ts'
 
 /**
@@ -35,6 +35,17 @@ export function MeetingModal({ meeting, onClose }: {
   onClose: () => void
 }) {
   const when = whenItIs(meeting)
+  /*
+   * THE LINK YOU ACTUALLY PRESS AT TWO MINUTES PAST.
+   *
+   * THE FIRM: "if the link is pulled in there as well, that'd be cool."
+   *
+   * It was on this screen already and not pressable: the join URL sits in the middle of forty
+   * lines of Teams boilerplate -- meeting id, passcode, tenant key, two help links -- so getting
+   * into the meeting meant selecting a line of text by hand on a tablet thirty seconds after it
+   * had started. joinLink picks the one URL out of that and refuses the help pages; see its note.
+   */
+  const join = joinLink(meeting.notes, meeting.location)
   /* NAMED, NOT COUNTED. "3 attendees" is the fact a calendar square has room for; on the meeting
      itself the question is who, and a count here would send somebody back to the email. */
   const people = meeting.attendees.filter((a) => a.name || a.email)
@@ -83,8 +94,22 @@ export function MeetingModal({ meeting, onClose }: {
         ABSENT where the meeting was made by hand: there is no invitation, and a button that lands
         somebody in an inbox with nothing selected is the fault this whole screen exists to fix.
       */}
+      {/*
+        JOIN, AND IT IS THE GOLD ONE. At two minutes past the hour it is the only control on this
+        screen anybody wants; the invitation and the notes are what you read beforehand.
+      */}
+      {join && (
+        <div className="mt-5">
+          <a href={join} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg
+              border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+            <Video size={15} /> Join the meeting
+          </a>
+        </div>
+      )}
+
       {meeting.userEmailId && (
-        <div className="mt-5 pt-3 border-t border-slate-100">
+        <div className={`${join ? 'mt-3' : 'mt-5'} pt-3 border-t border-slate-100`}>
           <Link to={`/mail?message=${encodeURIComponent(meeting.userEmailId)}`}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg
               border border-slate-200 text-slate-600 hover:bg-slate-50">

@@ -25,6 +25,22 @@ export interface DayCell {
    * a picker with no count at all (a reminder books nothing, so a number there would be a lie).
    */
   count: number | null
+  /**
+   * WHAT GOES UNDER THE DATE INSTEAD, where one number cannot say it.
+   *
+   * THE FIRM, booking a task: "you can see what other tasks you have left to do, but you can't see
+   * meetings. There should be two little numbers at the bottom, possibly with different colours --
+   * because if you want to book something: oh, I've got five meetings that day, how many tasks are
+   * you going to do?"
+   *
+   * They are right and one figure cannot carry it: five meetings and one task is a day that is
+   * gone, one meeting and five tasks is a day with room in it, and both of them read as "6".
+   *
+   * A NODE RATHER THAN A SECOND NUMBER FIELD, because this file draws and decides nothing -- see
+   * the header. The diary has one count against a capacity; the task picker has two against no
+   * capacity at all; a grid that knew the difference would be a grid with both policies in it.
+   */
+  footer?: React.ReactNode
   /** Classes for a choosable cell: border, background, text, hover. */
   tone: string
   disabled: boolean
@@ -73,7 +89,11 @@ export function DayGrid({ days, value, cellFor, onChange }: {
               ].join(' ')}
             >
               <span className="block text-sm font-semibold leading-none">{Number(date.slice(8, 10))}</span>
-              {cell.count !== null && (
+              {cell.footer !== undefined ? (
+                <span className="block text-[10px] leading-none mt-1 tabular-nums">
+                  {cell.disabled ? '·' : cell.footer}
+                </span>
+              ) : cell.count !== null && (
                 <span className="block text-[10px] leading-none mt-1 tabular-nums">
                   {cell.disabled ? '·' : cell.count || '–'}
                 </span>
