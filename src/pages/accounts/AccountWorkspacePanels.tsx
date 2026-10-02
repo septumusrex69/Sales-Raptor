@@ -806,11 +806,30 @@ export function ContactForm({ accountId, initialKind, busy, onDone, run, forComp
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!value.trim()) return
+    /*
+     * WHOSE IT IS GOES IN ITS OWN COLUMNS ON A PERSON TOO.
+     *
+     * THE FIRM: "on the data details, if you say add a number, how do you add an additional
+     * number?" -- and then, approving the fix, "you can open the other things, adding the next of
+     * kin by hand or adding additional debtor details."
+     *
+     * IT HALF EXISTED. A number could be added; the name and role fields were rendered only when
+     * `forCompany`, so on a person the form offered kind, value and a free-text "whose is it?".
+     * That meant A NEXT OF KIN COULD NOT BE ADDED BY HAND AT ALL -- the only way one ever reached
+     * an account was by promoting a linked person off a trace, and a trace is not always there.
+     *
+     * person_name AND person_role RATHER THAN THE LABEL, which is the whole point: the account
+     * screen groups the people it shows on person_name, so a sister typed into a caption is a
+     * caption. It is the same shape promoteTraceItem writes, so a next of kin added by hand and
+     * one saved off a trace are one kind of row.
+     */
     const ok = await run(() => addContact({
       accountId, kind, value,
+      /* The label keeps its old job on a person: "the one he actually answers". On a company it
+         belongs to nobody, which is what the name and role are for. */
       label: forCompany ? null : label,
-      personName: forCompany ? person : null,
-      personRole: forCompany ? role : null,
+      personName: person.trim() || null,
+      personRole: role.trim() || null,
     }))
     if (ok) { setValue(''); setLabel(''); setPerson(''); setRole(''); onDone() }
   }
@@ -824,19 +843,34 @@ export function ContactForm({ accountId, initialKind, busy, onDone, run, forComp
       <input value={value} onChange={(e) => setValue(e.target.value)} autoFocus
         placeholder={kind === 'email' ? 'name@example.co.za' : kind === 'address' ? 'Street, suburb, city' : '+27 ...'}
         className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-      {forCompany ? (
-        <>
-          {/* Left blank, it belongs to the company itself — a switchboard, the general mailbox. */}
-          <input value={person} onChange={(e) => setPerson(e.target.value)}
-            placeholder="Who do you ask for? (blank = the company)"
-            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-          <input value={role} onChange={(e) => setRole(e.target.value)}
-            placeholder="What do they do there? (optional)"
-            className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
-        </>
-      ) : (
+      {!forCompany && (
         <input value={label} onChange={(e) => setLabel(e.target.value)}
-          placeholder="Whose is it? (optional)"
+          placeholder="What is it? (optional — the one he answers)"
+          className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+      )}
+      {/*
+        WHOSE IT IS, ON BOTH KINDS OF ACCOUNT, WORDED FOR THE ONE IT IS ON.
+        
+        On a company the question is who to ask for at a switchboard; on a person it is who else
+        this reaches and what they are to the debtor -- a sister, a neighbour, the employer's
+        payroll clerk. Same two columns, because they ARE the same two facts, and the account
+        screen groups the people it shows on person_name either way.
+        
+        BLANK IS THE DEBTOR THEMSELVES, which is the ordinary case and must stay the quickest: a
+        collector adding a second mobile for the debtor types a number and presses Save.
+      */}
+      <input value={person} onChange={(e) => setPerson(e.target.value)}
+        placeholder={forCompany
+          ? 'Who do you ask for? (blank = the company)'
+          : 'Whose is it? (blank = the debtor)'}
+        className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+      {/* ONLY ONCE THERE IS SOMEBODY TO DESCRIBE. A role with no name is a caption attached to
+          nobody, and the field would sit there asking a question that cannot be answered. */}
+      {person.trim() && (
+        <input value={role} onChange={(e) => setRole(e.target.value)}
+          placeholder={forCompany
+            ? 'What do they do there? (optional)'
+            : 'What are they to the debtor? (sister, neighbour, employer)'}
           className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
       )}
       <button type="submit" disabled={busy || !value.trim()}
