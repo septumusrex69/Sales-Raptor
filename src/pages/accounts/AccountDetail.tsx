@@ -82,6 +82,9 @@ import { Modal } from '../../components/ui/Modal'
 import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import { TestClockPanel } from '../../components/collections/TestClockPanel'
 import { SigningPanel } from './SigningPanel'
+import { LeavingModal } from './LeavingModal'
+import { hasOpenDiaryEntry } from '../../lib/diary'
+import { shouldAskOnLeaving } from '../../lib/leavingAccount.ts'
 import {
   fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn,
   type AccountRun, type StartableWorkflow,
@@ -284,6 +287,20 @@ export function AccountDetail() {
     return () => { live = false }
   }, [account?.id, account?.debtorIdNumber, account?.debtorKind])
   const [diariseOpen, setDiariseOpen] = useState(false)
+  /*
+   * WHETHER THIS VISIT HAS CHANGED ANYTHING, AND WHETHER THERE IS A DAY TO COME BACK ON.
+   *
+   * THE FIRM: "I'm confirming that with you when you rediarise. Or if you go out of the account.
+   * To confirm the status of the account. And also if you want to rediarise."
+   *
+   * `touched` IS SET BY THE ACTIONS, NOT BY THE PAGE NOTICING. Opening an account to read a figure
+   * is most of what anybody does on a busy day, and asking a team leader who looked at a balance
+   * to confirm a status they never touched is how a status gets confirmed without being read. See
+   * leavingAccount.ts, which owns the rule.
+   */
+  const [touched, setTouched] = useState(false)
+  const [hasEntry, setHasEntry] = useState<boolean | null>(null)
+  const [leavingOpen, setLeavingOpen] = useState(false)
   const [tracing, setTracing] = useState(false)
   /** Null = closed. A kind inside it is the office the trace's status line implied. */
   const [practitioner, setPractitioner] = useState<{ suggest: PractitionerKind | null } | null>(null)
@@ -452,6 +469,17 @@ export function AccountDetail() {
     setEmails(e)
     setStanding(st)
     setTraces(tr)
+    /*
+     * ANYTHING THAT RELOADS THE ACCOUNT HAS CHANGED IT. Every action on this page calls reload when
+     * it is done -- a call, an SMS, an email, a note, a trace, an arrangement -- so this is the one
+     * place that has to know, rather than nine call sites remembering to say so. Reading the page
+     * does not reload it, which is exactly the line leavingAccount draws.
+     */
+    setTouched(true)
+    /* AND WHETHER IT NOW HAS A DATE. Re-asked on every reload, because diarising IS one of the
+       actions: a prompt that kept firing after somebody had just answered it is the thing the firm
+       complained about, moved rather than cured. */
+    setHasEntry(await hasOpenDiaryEntry(account.id))
   }, [account, loadRuns])
 
   const { busy: savingComment, run: runComment } = useWriter(reload)
@@ -1713,6 +1741,52 @@ export function AccountDetail() {
           director={director.editing}
           onClose={() => setDirector(null)}
           onSaved={reload}
+        />
+      )}
+
+      {/*
+        WORKED, AND NO DAY TO COME BACK ON.
+
+        THE FIRM: "I'm confirming that with you when you rediarise. Or if you go out of the account.
+        To confirm the status of the account. And also if you want to rediarise."
+
+        A BAR RATHER THAN A PROMPT ON THE WAY OUT, and the reason is honest rather than a design
+        choice: blocking a navigation needs react-router's useBlocker, which needs a data router,
+        and this app is on <BrowserRouter>. Converting it is a change to App.tsx -- a file CLAUDE.md
+        says to touch lightly -- for one prompt. So the question is asked where it cannot be missed
+        instead of where it cannot be escaped, and the interception is a separate piece of work.
+
+        IT ONLY APPEARS WHERE ALL FOUR ARE TRUE, which is what stops it being noise. See
+        shouldAskOnLeaving: something was done, it is this person's account, it is not closed, and
+        there is no entry already.
+      */}
+      {account && shouldAskOnLeaving({
+        worked: touched,
+        hasOpenEntry: hasEntry !== false,
+        mine: account.assignedTo === currentUser?.id,
+        closed: isWrittenOff(account.status),
+      }) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg
+          border border-[#c9a052] bg-gold-50 px-3 py-2">
+          <span className="text-xs text-slate-700">
+            You have worked this account and it has no date to come back on.
+          </span>
+          <button type="button" onClick={() => setLeavingOpen(true)}
+            className="text-xs font-medium text-[var(--c-steel)] hover:underline">
+            Give it a date
+          </button>
+        </div>
+      )}
+
+      {leavingOpen && account && (
+        <LeavingModal
+          standing={position === 'new' ? null : position}
+          accountLabel={[name, account.accountNumber].filter(Boolean).join(' · ')}
+          onDiarise={() => { setLeavingOpen(false); setDiariseOpen(true) }}
+          /* WHERE A STATUS IS ACTUALLY CHANGED, which is by recording what happened. The box
+             deliberately offers no list of rungs -- see LeavingModal. */
+          onRecord={() => { setLeavingOpen(false); setTab('Overview'); setNoteOpen(true) }}
+          onClose={() => setLeavingOpen(false)}
         />
       )}
 

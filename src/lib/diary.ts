@@ -248,6 +248,29 @@ async function countDone(ownerId: string, date: string): Promise<number> {
   return count ?? 0
 }
 
+/**
+ * IS THERE ALREADY A DAY FOR THIS ACCOUNT TO COME BACK ON?
+ *
+ * Asked by the account page so that somebody who has just worked an account is prompted for a date
+ * only where there is not one -- see shouldAskOnLeaving. A prompt that fires on an account already
+ * diarised is one people learn to dismiss, and then it is no longer a prompt.
+ *
+ * `head: true`, so this is a count and not a page of rows: the question is whether ANY exists, and
+ * fetching the entries to find out would load a list nothing draws.
+ */
+export async function hasOpenDiaryEntry(accountId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from('diary_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('account_id', accountId)
+    .eq('state', 'open')
+  /* A LOOKUP THAT FAILED SAYS "YES". The cost of being wrong is asymmetric: a false no nags
+     somebody who already diarised it, which is the behaviour the firm complained about; a false
+     yes stays quiet, and the account is still on the "No diary date" list a team leader works. */
+  if (error) return true
+  return (count ?? 0) > 0
+}
+
 /** Everything ever diarised on one account, newest first — the account page's Diary tab. */
 export async function fetchAccountDiary(accountId: string): Promise<DiaryEntry[]> {
   const { data, error } = await supabase
