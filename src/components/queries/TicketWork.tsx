@@ -52,12 +52,33 @@ import type { AccountNote } from '../../lib/accountWorkspace'
 export type TicketAction = 'email' | 'call' | 'note'
 
 export function TicketWork({
-  notes, canEmail, emailWhy, busy, onEmail, onNote, onCall,
+  notes, canReachClient, canEmail, clientWhy, emailWhy, busy, onEmail, onNote, onCall,
 }: {
   /** The ticket's own thread. Oldest first — a ticket is a short exchange read in order. */
   notes: AccountNote[]
-  /** False where this person may not write to the client, or has no mailbox connected. */
+  /**
+   * MAY THIS PERSON TOUCH THE CLIENT AT ALL?
+   *
+   * THE FIRM, of a ticket that a collector raised and a liaison owns: "the debt collector has
+   * viewing options and it can view, but it cannot, for example, send an email to the client, it
+   * doesn't have that permissions. However, the liaison can do anything within the ticket."
+   *
+   * THE LINE IS WHETHER IT REACHES THE CLIENT, not whether it writes to the database. A call to the
+   * client is the same act as an email to them — somebody at the credit provider is spoken to on
+   * the firm's behalf — so it sits behind the same permission, and `canSendToClient`'s own note
+   * already says why: the conversation with a client belongs to whoever holds the relationship.
+   *
+   * A NOTE IS NOT CLIENT CONTACT and stays open to everybody who can see the ticket. The collector
+   * raised it, it is their debtor, and "he rang again this morning about this" is exactly the thing
+   * the liaison needs and the only person who knows it is the one the firm has just made read-only.
+   * Locking the note as well would make the ticket a worse record to protect a relationship the
+   * note does not touch.
+   */
+  canReachClient: boolean
+  /** False where they may reach the client but have no mailbox connected. */
   canEmail: boolean
+  /** Why they may not reach the client at all. Null when they may. */
+  clientWhy: string | null
   /** Said on the button rather than discovered on Send. Null when it is allowed. */
   emailWhy: string | null
   busy: boolean
@@ -110,8 +131,14 @@ export function TicketWork({
             bg-brand-600 text-white shadow-sm hover:bg-brand-700 disabled:opacity-50">
           <Mail size={14} /> Email the client
         </button>
-        <button type="button" onClick={() => setOpen(open === 'call' ? null : 'call')} disabled={busy}
+        {/* RINGING THE CLIENT IS CLIENT CONTACT, so it sits behind the same permission as writing
+            to them — see canReachClient. Disabled rather than hidden: a collector should be able to
+            see that the firm does call the client about this, and who does it. */}
+        <button type="button" onClick={() => setOpen(open === 'call' ? null : 'call')}
+          disabled={busy || !canReachClient}
+          title={clientWhy ?? 'Record a call you have had with the client about this'}
           className={`inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border
+            disabled:opacity-50
             ${open === 'call' ? 'border-navy-950 bg-navy-950 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
           <Phone size={14} /> Log a call
         </button>
@@ -123,7 +150,18 @@ export function TicketWork({
       </div>
       {/* THE REASON IT IS DISABLED, BESIDE THE BUTTON rather than in a tooltip only: on the iPad
           the firm works on there is no hover to reveal one. */}
-      {emailWhy && <p className="mt-1.5 text-[11px] text-slate-500">{emailWhy}</p>}
+      {/* ONE SENTENCE, NOT TWO. Where somebody may not reach the client at all, that is the reason
+          both buttons are off and repeating it under each would be the same line twice. */}
+      {(clientWhy ?? emailWhy) && (
+        <p className="mt-1.5 text-[11px] text-slate-500">{clientWhy ?? emailWhy}</p>
+      )}
+      {/* AND WHAT THEY CAN STILL DO, because a panel of greyed buttons reads as a page that is not
+          for you — and it is: the note is the collector's half of this ticket. */}
+      {clientWhy && (
+        <p className="mt-0.5 text-[11px] text-slate-400">
+          You can still add a note — anything you write here reaches whoever is answering it.
+        </p>
+      )}
 
       {open && (
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">

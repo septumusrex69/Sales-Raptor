@@ -273,11 +273,25 @@ export function QueryDetail() {
     ? (users.find((u) => u.id === data.query.ownerId)?.name ?? 'Somebody who has left')
     : null
   const mayWriteToClient = canSendToClient(currentUser?.role)
-  const forwardWhy = !mayWriteToClient
-    ? 'Only a liaison or a manager writes to the client about a dispute.'
-    : !mailbox
-      ? 'Connect your mailbox in Settings before you can forward anything.'
-      : null
+  /*
+   * TWO DIFFERENT REASONS TO BE UNABLE TO PRESS SOMETHING, AND THEY ARE NOT THE SAME REASON.
+   *
+   * THE FIRM: "the debt collector has viewing options and it can view, but it cannot, for example,
+   * send an email to the client, it doesn't have that permissions. However, the liaison can do
+   * anything within the ticket."
+   *
+   * MAY NOT is about the role and covers everything that reaches the client — a call as much as an
+   * email. CANNOT YET is about a mailbox and covers only the email. Collapsed into one sentence,
+   * a collector was told to go and connect a mailbox for a thing they would still not be allowed
+   * to do, which is a sentence that sends somebody to Settings for nothing.
+   */
+  const clientWhy = mayWriteToClient
+    ? null
+    /* THE PANEL'S SECOND LINE already says what they CAN do, in better words. Saying it here
+       too put "You can still add a note" on the screen twice, an inch apart. */
+    : 'Only a liaison or a manager deals with the client on a ticket.'
+  const forwardWhy = clientWhy
+    ?? (!mailbox ? 'Connect your mailbox in Settings before you can send anything.' : null)
 
   return (
     <div className="space-y-4">
@@ -393,7 +407,9 @@ export function QueryDetail() {
       {q.accountId && (
         <TicketWork
           notes={notes}
+          canReachClient={mayWriteToClient}
           canEmail={forwardWhy === null}
+          clientWhy={clientWhy}
           emailWhy={forwardWhy}
           busy={busy}
           onEmail={() => setWriting(true)}

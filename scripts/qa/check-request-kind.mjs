@@ -284,6 +284,118 @@ const disputesCount = navCounts.slice(navCounts.indexOf('from public.account_que
 ok('...and still counts only what is waiting on you', /owner_id = auth\.uid\(\)/.test(disputesCount))
 ok('...not what you raised and gave away', !/raised_by/.test(disputesCount))
 
+/* ---------------------------------------------------------------------------------------------
+ * A TICKET FOLLOWS THE JOB, NOT THE PERSON WHO HAD IT ON THE DAY.
+ *
+ * THE FIRM: "if an account is reshuffled to another person, the dispute raised goes to the new
+ * owner of the account. And the same goes for the liaison. If the liaison for a specific client is
+ * changed, the ticket goes to the new liaison."
+ *
+ * TWO HALVES AND THEY ARE NOT THE SAME MECHANISM, which is the thing worth writing down.
+ *
+ * THE COLLECTOR'S HALF IS DERIVED. A ticket already records who raised it; whose desk the ACCOUNT
+ * sits on is a live fact about the account, so the board reads it on every fetch. The firm
+ * reshuffles in bulk, thousands at a time, and a stored third id would be a third thing every
+ * hand-out had to rewrite — the one it forgot would be invisible.
+ *
+ * THE LIAISON'S HALF HAS TO BE A WRITE. `owner_id` is not "the client's liaison"; it is whoever was
+ * given this particular ticket, which may be a team leader or nobody. It cannot be derived from the
+ * client, so the rows that were with the OLD liaison are moved and the new one is told.
+ * ------------------------------------------------------------------------------------------- */
+
+const detail = code('src/pages/companies/CompanyDetail.tsx')
+
+/* ---------------- the account's current desk, derived ---------------- */
+
+ok('a queued ticket carries whose desk the account is on now', /accountOwnerId: string \| null/.test(lib))
+ok('...read off the account on every fetch', /accountOwnerId: a\.assigned_to \?\? null/.test(lib))
+ok('...and the join actually asks for it',
+  /debtor_accounts\(account_number[^)]*assigned_to\)/.test(lib))
+/* EVERY ONE OF THE JOINS. The board reads one, the Communications queue another and a client's own
+   list a third; a ticket that follows the account on one screen and not the others is worse than
+   one that follows it nowhere, because nobody can say which screen is right. */
+check('...on all three of them',
+  (lib.match(/debtor_accounts\(account_number[^)]*assigned_to\)/g) ?? []).length, 3)
+ok('the board counts it as mine', /r\.accountOwnerId === who/.test(board))
+/*
+ * AND IT DOES NOT LEAVE THE RAISER. They asked for it and may still be waiting on the answer;
+ * dropping it off their board the moment the book is shared out would lose the one person who
+ * knows why it was raised. Held as the OR rather than as a replacement.
+ */
+ok('...without taking it off the person who raised it',
+  /r\.ownerId === who \|\| r\.raisedBy === who \|\| r\.accountOwnerId === who/.test(board))
+/* A BATCH SITS ON NOBODY'S DESK — it is about a client's spreadsheet, not a debtor's account. */
+ok('a batch ticket follows no collector', /accountOwnerId: null/.test(lib))
+
+/* ---------------- the client's liaison, written ---------------- */
+
+ok('changing a client s liaison moves their open tickets',
+  /export async function moveClientTicketsToLiaison/.test(lib))
+ok('...and the client screen calls it', /moveClientTicketsToLiaison\(\{/.test(detail))
+ok('...with who it moved from', /from,/.test(detail))
+
+/*
+ * FOUR THINGS IT WILL NOT TOUCH, and each is a way this could do harm. Named one at a time, because
+ * "it moves the right ones" is not a rule anybody can check.
+ */
+ok('a closed ticket does not move', /\.neq\('status', 'closed'\)/.test(lib))
+ok('...nor one somebody else was given', /\.eq\('owner_id', from\)/.test(lib))
+ok('...nor an unowned one', /if \(!from \|\| !to \|\| from === to\) return/.test(lib))
+ok('...and only this client s', /\.in\('account_id', ids\)/.test(lib))
+/* SAVING THE SAME NAME AGAIN IS NOT A CHANGE, which on a form with a Save button is the common
+   press — and it would otherwise ring the liaison's bell for every open ticket they already hold. */
+ok('...and saving the same liaison again moves nothing', /from === to/.test(lib))
+
+/* AND THE NEW LIAISON IS TOLD. A handover of somebody's open work that arrives silently is one
+   they discover from a client asking why nobody answered. */
+ok('the new liaison is told about each one',
+  /moveClientTicketsToLiaison[\s\S]{0,1400}await tellTheOwner\(\{/.test(lib))
+
+/*
+ * AND IT NEVER FAILS THE LIAISON CHANGE. The caller has already saved the new liaison; this is the
+ * consequence. Failing it would leave the firm unable to change a liaison because some ticket
+ * somewhere would not move.
+ */
+ok('a ticket that will not move does not undo the change',
+  /moveClientTicketsToLiaison\(\{[\s\S]{0,400}\}\)\.catch\(/.test(detail))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND WHAT A COLLECTOR MAY DO ON A TICKET THEY NO LONGER OWN
+ *
+ * THE FIRM: "the debt collector has viewing options and it can view, but it cannot, for example,
+ * send an email to the client, it doesn't have that permissions. However, the liaison can do
+ * anything within the ticket."
+ *
+ * THE LINE IS WHETHER IT REACHES THE CLIENT. A call to them is the same act as an email — somebody
+ * at the credit provider is spoken to on the firm's behalf — so it sits behind the same permission.
+ * A NOTE IS NOT CLIENT CONTACT and stays open: the collector raised it, it is their debtor, and
+ * "he rang again this morning" is exactly what the liaison needs from the one person who knows.
+ * ------------------------------------------------------------------------------------------- */
+
+const work = code('src/components/queries/TicketWork.tsx')
+const query = code('src/pages/queries/QueryDetail.tsx')
+
+ok('ringing the client needs the same permission as writing to them',
+  /disabled=\{busy \|\| !canReachClient\}/.test(work))
+ok('...which is canSendToClient', /canSendToClient\(currentUser\?\.role\)/.test(query))
+ok('...handed to the panel as what it is', /canReachClient=\{mayWriteToClient\}/.test(query))
+/* AND A NOTE IS NOT GATED. Held as an absence, because locking it too would read like consistency
+   and would make the ticket a worse record to protect a relationship the note does not touch. */
+const noteButton = work.slice(work.indexOf('Add a note') - 420, work.indexOf('Add a note') + 20)
+ok('the note button was found', /Add a note/.test(noteButton))
+ok('...and adding a note needs no client permission', !/canReachClient/.test(noteButton))
+
+/*
+ * TWO DIFFERENT REASONS, SAID APART. "May not" is about the role and covers everything that reaches
+ * the client; "cannot yet" is about a mailbox and covers only the email. Collapsed into one, a
+ * collector was sent to Settings to connect a mailbox for a thing they still would not be allowed
+ * to do.
+ */
+ok('the reason names the permission where that is the reason',
+  /Only a liaison or a manager deals with the client/.test(query))
+ok('...and the mailbox only where that is', /Connect your mailbox in Settings/.test(query))
+ok('...and the panel says what they CAN still do', /You can still add a note/.test(work))
+
 console.log(`\ncheck-request-kind: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

@@ -212,6 +212,22 @@ export interface QueueRow extends AccountQuery {
   accountNumber: string | null
   debtorName: string
   companyId: string | null
+  /**
+   * WHOSE DESK THE ACCOUNT IS ON **NOW**, which is not the same as who raised the ticket.
+   *
+   * THE FIRM: "if an account is reshuffled to another person, the dispute raised goes to the new
+   * owner of the account."
+   *
+   * DERIVED, NEVER COPIED ONTO THE TICKET. A ticket carries who must ANSWER it (the liaison) and
+   * who RAISED it (a collector, on the day). Neither moves when the book is shared out again — and
+   * the firm reshuffles in bulk, thousands at a time, so a stored third id would be a third thing
+   * every hand-out had to remember to rewrite and the one it forgot would be invisible.
+   *
+   * Read off the account on every fetch instead, so it is right the moment the account moves and
+   * cannot drift. The same reasoning the diary applies to a missed entry and the book applies to a
+   * client's position.
+   */
+  accountOwnerId: string | null
 }
 
 /**
@@ -223,7 +239,7 @@ export interface QueueRow extends AccountQuery {
 export async function fetchOpenQueries(): Promise<QueueRow[]> {
   const { data, error } = await supabase
     .from('account_queries')
-    .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id)')
+    .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to)')
     .eq('status', 'open')
     .order('raised_at', { ascending: true })
   if (error) throw new Error(error.message)
@@ -234,6 +250,7 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
       accountNumber: a.account_number ?? null,
       debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
       companyId: a.company_id ?? null,
+      accountOwnerId: a.assigned_to ?? null,
     }
   })
 }
@@ -249,10 +266,10 @@ export async function fetchOpenQueries(): Promise<QueueRow[]> {
 export async function fetchAllQueries(closedLimit = 40): Promise<QueueRow[]> {
   const [open, closed] = await Promise.all([
     supabase.from('account_queries')
-      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id)')
+      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to)')
       .eq('status', 'open').order('raised_at', { ascending: true }),
     supabase.from('account_queries')
-      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id)')
+      .select('*, debtor_accounts(account_number, debtor_first_name, debtor_surname, company_id, assigned_to)')
       .eq('status', 'closed').order('closed_at', { ascending: false }).limit(closedLimit),
   ])
   for (const r of [open, closed]) if (r.error) throw new Error(r.error.message)
@@ -267,6 +284,7 @@ function toQueueRow(r: any): QueueRow {
     accountNumber: a.account_number ?? null,
     debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
     companyId: a.company_id ?? null,
+    accountOwnerId: a.assigned_to ?? null,
   }
 }
 
@@ -320,6 +338,7 @@ export async function fetchQueriesForClient(companyId: string): Promise<QueueRow
       accountNumber: a.account_number ?? null,
       debtorName: [a.debtor_first_name, a.debtor_surname].filter(Boolean).join(' ') || 'Unnamed debtor',
       companyId: a.company_id ?? null,
+      accountOwnerId: a.assigned_to ?? null,
     }
   })
   for (const r of (byBatch.data ?? []) as any[]) {
@@ -331,6 +350,9 @@ export async function fetchQueriesForClient(companyId: string): Promise<QueueRow
          "Unnamed debtor" on one would read as an account we failed to name. */
       debtorName: (h.reference as string | null) ?? 'One handover sheet',
       companyId: h.company_id ?? null,
+      /* A BATCH SITS ON NOBODY'S DESK. It is about a client's own spreadsheet, not a debtor's
+         account, so there is no collector for it to follow when the book is shared out. */
+      accountOwnerId: null,
     })
   }
   rows.sort((a, b) => (a.raisedAt < b.raisedAt ? 1 : -1))
@@ -797,6 +819,85 @@ export async function updateQuery(
     })
   }
   return q
+}
+
+/**
+ * WHEN A CLIENT GETS A NEW LIAISON, THEIR OPEN TICKETS GO WITH THEM.
+ *
+ * THE FIRM: "the same goes for the liaison. If the liaison for a specific client is changed, the
+ * ticket goes to the new liaison."
+ *
+ * WHY THIS ONE IS A WRITE AND THE COLLECTOR'S HALF IS NOT. A ticket's `owner_id` is not "the
+ * client's liaison" — it is whoever was given this particular ticket, which may be a team leader,
+ * the liaison manager, or nobody. So it cannot be derived from the client the way the account's
+ * current desk can. What CAN be said is that the tickets sitting with the OLD liaison were sitting
+ * with them BECAUSE they were the liaison, and those are the ones that move.
+ *
+ * ------------------------------------------------------------------------------------------------
+ * FOUR THINGS IT WILL NOT TOUCH, AND EACH IS A WAY THIS COULD DO HARM
+ * ------------------------------------------------------------------------------------------------
+ *
+ *   A CLOSED TICKET. Its owner is part of the record of who answered it. Moving one would rewrite
+ *   history to say somebody dealt with a dispute they have never seen.
+ *
+ *   A TICKET SOMEBODY ELSE HOLDS. Given to a team leader for a decision, or escalated to the
+ *   liaison manager, it is with them for a reason that has nothing to do with who looks after the
+ *   client. Only rows whose owner IS the departing liaison move.
+ *
+ *   AN UNOWNED TICKET. "Nobody yet — leave it unassigned" is an option on the box and means it sits
+ *   on the board for whoever picks it up. Handing those to the new liaison would quietly assign
+ *   work nobody had decided to give them.
+ *
+ *   ANOTHER CLIENT'S. Scoped through the accounts of THIS company, which is why the ids are read
+ *   first rather than filtered in one statement — PostgREST has no join to filter an update by.
+ *
+ * AND THE NEW LIAISON IS TOLD, once per ticket, through the same bell everything else uses. A
+ * handover of somebody's open work that arrives silently is a handover they discover from a client
+ * asking why nobody answered.
+ *
+ * NEVER FATAL TO THE CHANGE ITSELF. The caller has already saved the new liaison on the client;
+ * this is the consequence. Failing it would leave the firm unable to change a liaison because some
+ * ticket somewhere would not move.
+ */
+export async function moveClientTicketsToLiaison(input: {
+  companyId: string
+  from: string | null | undefined
+  to: string | null | undefined
+  actor: { id: string | null; name: string | null }
+}): Promise<{ moved: number }> {
+  const { companyId, from, to } = input
+  /* NOTHING TO DO where there was no liaison, where there is no new one, or where somebody saved
+     the same name again -- and the last of those is the common one on a form with a Save button. */
+  if (!from || !to || from === to) return { moved: 0 }
+
+  const { data: accounts, error: accErr } = await supabase
+    .from('debtor_accounts').select('id').eq('company_id', companyId)
+  if (accErr) throw new Error(accErr.message)
+  const ids = (accounts ?? []).map((a) => (a as { id: string }).id)
+  if (ids.length === 0) return { moved: 0 }
+
+  const { data, error } = await supabase
+    .from('account_queries')
+    .update({ owner_id: to, updated_at: new Date().toISOString() })
+    .in('account_id', ids)
+    .eq('owner_id', from)
+    .neq('status', 'closed')
+    .select('id, kind, request_for')
+  if (error) throw new Error(error.message)
+
+  const moved = (data ?? []) as { id: string; kind: string; request_for: string | null }[]
+  for (const q of moved) {
+    await tellTheOwner({
+      ownerId: to,
+      actorId: input.actor.id,
+      queryId: q.id,
+      kind: (q.kind ?? 'dispute') as EscalationKind,
+      requestFor: q.request_for,
+      raisedByName: input.actor.name,
+    })
+  }
+  if (moved.length > 0) await refreshNavCounts()
+  return { moved: moved.length }
 }
 
 /**

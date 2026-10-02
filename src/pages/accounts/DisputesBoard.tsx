@@ -135,6 +135,26 @@ export function DisputesBoard() {
    * ticket, and the second has every reason to come back to it — it is their account, their call,
    * and the thing holding up their collection. So "mine" means either.
    *
+   * AND A THIRD: WHOSE DESK THE ACCOUNT IS ON TODAY.
+   *
+   * THE FIRM: "if an account is reshuffled to another person, the dispute raised goes to the new
+   * owner of the account."
+   *
+   * A ticket records who raised it ON THE DAY, and the firm reshuffles the book in bulk — so an
+   * account that moves from one collector to another leaves its open disputes behind on the old
+   * one's board and arrives on the new one's with nothing. The new collector rings a debtor who
+   * says "I already disputed this", and the only place that fact lives is somebody else's screen.
+   *
+   * DERIVED, NEVER COPIED ONTO THE TICKET. Reading the account's current owner on every fetch is
+   * right the moment the account moves and cannot drift; a stored third id would be a third thing
+   * every hand-out had to rewrite, and the one it forgot would be invisible. Same reasoning the
+   * diary applies to a missed entry.
+   *
+   * IT DOES NOT LEAVE THE RAISER. They asked for it, they may still be waiting on the answer, and
+   * dropping it off their board the moment the book is shared out would lose the one person who
+   * knows why it was raised. If the firm would rather it moved outright, that is `||` to `?:` on
+   * one line.
+   *
    * THE SIDEBAR BADGE IS DELIBERATELY NOT CHANGED. nav_counts stays `owner_id = auth.uid()`,
    * because a badge counts work waiting on YOU and a ticket sitting with the liaison is not that.
    * A badge you cannot clear by doing your own work is a badge people stop reading — which is the
@@ -142,7 +162,8 @@ export function DisputesBoard() {
    * nagging, and they are not the same job.
    */
   const isMine = useCallback(
-    (r: QueueRow, who: string) => r.ownerId === who || r.raisedBy === who,
+    (r: QueueRow, who: string) =>
+      r.ownerId === who || r.raisedBy === who || r.accountOwnerId === who,
     [],
   )
 

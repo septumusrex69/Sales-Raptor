@@ -159,6 +159,63 @@ try {
   await t.shot(page, 'ticket-work-email')
 
   await context.close()
+
+  /* ---------- and the collector who raised it can look but not reach the client ---------- */
+
+  /*
+   * THE FIRM: "the debt collector has viewing options and it can view, but it cannot, for example,
+   * send an email to the client, it doesn't have that permissions. However, the liaison can do
+   * anything within the ticket."
+   *
+   * THE SAME PAGE, THE SAME TICKET, A DIFFERENT PERSON — which is the only way to prove a
+   * permission. A check that reads `canSendToClient` out of the source proves the function exists;
+   * this proves the buttons actually come back disabled for the person the firm named.
+   */
+  {
+    const seen = await signedInPage(browser, PROFILE, [
+      [(u) => u.includes('/rest/v1/profiles') && /id=eq\./.test(u), () => ({ body: [PROFILE] })],
+      [(u) => u.includes('/rest/v1/profiles'), () => ({ body: [PROFILE, LIAISON] })],
+      [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
+      [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACC] })],
+      [(u) => u.includes('/rest/v1/account_notes'), () => ({ body: NOTES })],
+      [(u) => u.includes('/rest/v1/account_emails'), () => ({ body: [] })],
+      [(u) => u.includes('/rest/v1/account_queries') && /id=eq\./.test(u), () => ({ body: Q })],
+      [(u) => u.includes('/rest/v1/account_queries'), () => ({ body: [Q] })],
+    ], [])
+    await seen.page.setViewportSize({ width: 1440, height: 900 })
+    await seen.page.route('**/api/email/status', (r) => r.fulfill({
+      status: 200, contentType: 'application/json',
+      /* A CONNECTED MAILBOX ON PURPOSE. Without one the buttons would be off for the wrong reason
+         and this block would pass on code that had no permission check in it at all. */
+      body: JSON.stringify({ connected: true, email: 'vusi@bredellferreira.co.za' }),
+    }))
+    await seen.page.goto(`http://localhost:${PORT}/queries/${QID}`)
+    await seen.page.waitForTimeout(2000)
+
+    const text = await seen.page.locator('body').innerText()
+    t.ok('the collector knows who is signed in', !/Loading…/.test(text))
+    /* THEY CAN SEE IT. The firm's "viewing options" — the ticket, its thread, where it stands. */
+    t.ok('the collector can read the ticket', /Debtor stated that they were not communicated/.test(text))
+    t.ok('...and its thread', /They are pulling the file/.test(text))
+
+    t.check('...but cannot email the client',
+      await seen.page.getByRole('button', { name: /Email the client/ }).isDisabled(), true)
+    /* RINGING THE CLIENT IS THE SAME ACT. Somebody at the credit provider is spoken to on the
+       firm's behalf, so it sits behind the same permission. */
+    t.check('...nor ring them', await seen.page.getByRole('button', { name: /Log a call/ }).isDisabled(), true)
+    /*
+     * BUT THE NOTE IS THEIRS. They raised it, it is their debtor, and "he rang again this morning
+     * about this" is exactly what the liaison needs from the one person who knows it.
+     */
+    t.check('...while a note is still theirs to add',
+      await seen.page.getByRole('button', { name: /Add a note/ }).isDisabled(), false)
+    /* AND THE SCREEN SAYS WHY, AND WHAT THEY CAN STILL DO. A row of greyed buttons with no sentence
+       reads as a page that is not for you — and half of it is. */
+    t.ok('...and the reason is on the screen', /Only a liaison or a manager deals with the client/.test(text))
+    t.ok('...with what is still open to them', /You can still add a note/.test(text))
+    await t.shot(seen.page, 'ticket-work-collector')
+    await seen.context.close()
+  }
 } catch (e) {
   /* A CRASH IS A FAILURE, REPORTED. Thrown out of the try the run prints a stack and no count at
      all — and run-all reads the count, so a file that reports nothing is a file nobody sees. */

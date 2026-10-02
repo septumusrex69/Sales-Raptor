@@ -50,6 +50,7 @@ import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
 import { canBeClientLiaison, canEditOwned } from '../../lib/permissions'
+import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
 
@@ -1120,7 +1121,26 @@ export function CompanyDetail() {
           reps={reps}
           all={users}
           onClose={() => setOwnerOpen(false)}
-          onSave={(accountOwnerId) => updateCompany(company.id, { accountOwnerId })}
+          onSave={(accountOwnerId) => {
+            const from = company.accountOwnerId
+            updateCompany(company.id, { accountOwnerId })
+            /*
+             * AND THE OPEN TICKETS GO WITH THEM. THE FIRM: "if the liaison for a specific client is
+             * changed, the ticket goes to the new liaison."
+             *
+             * AFTER THE CLIENT IS SAVED AND NEVER IN ITS WAY. The liaison change is the thing the
+             * person pressed Save for; the tickets following is the consequence. Failing one would
+             * leave the firm unable to change a liaison because some ticket somewhere would not
+             * move — see moveClientTicketsToLiaison for the four kinds it refuses to touch.
+             */
+            void moveClientTicketsToLiaison({
+              companyId: company.id,
+              from,
+              to: accountOwnerId,
+              actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null },
+            }).catch(() => { /* the liaison changed; a ticket that did not follow is not a failure
+                                of that, and the board still shows it to whoever holds it. */ })
+          }}
         />
       )}
       {dealOpen && <AddDealModal subjectName={company.name} onClose={() => setDealOpen(false)} onSave={(input) => addDeal({ ...input, companyId: company.id })} />}
