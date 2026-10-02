@@ -41,7 +41,17 @@ const I = (over) => ({
 
 /* ---------- four outcomes, and the middle two are not the same ---------- */
 
-eq('there are four things that can happen to a number', TRACE_OUTCOMES.length, 4)
+/*
+ * SEVEN NOW, AND THE THREE THAT ARRIVED ARE WHY. The firm, looking at the workspace: "if you click
+ * on the not tested, it says, okay, well, wrong person or disconnected. What does that mean? An
+ * address is an address or not an address. Employment the same." Four outcomes written for a
+ * telephone were offered against every list.
+ *
+ * ASSERTED BY NAME RATHER THAN BY COUNT. A count only says the number changed; naming them says a
+ * value cannot quietly disappear and take every row that carries it with it.
+ */
+eq('every outcome a finding can have', TRACE_OUTCOMES.map((o) => o.outcome).sort(),
+  ['denies_link', 'moved_on', 'no_answer', 'not_theirs', 'reached_other', 'unreachable', 'verified'])
 /*
  * A NUMBER THAT RINGS OUT IS NOT A DEAD NUMBER. One is a live line nobody answered — worth
  * another hour of the day — and the other is switched off or disconnected. The firm asked for
@@ -236,9 +246,28 @@ eq('...and what they actually direct', summary.directorships.map((d) => d.id), [
  * UNTRIED IS THE MEASURE OF WHETHER THE SEARCH HAS BEEN USED. The firm pays for every trace; a
  * count of what nobody has rung yet is the one number that says whether it was worth it.
  */
-eq('...and how much of it nobody has tried', summary.untried, 2)
+/*
+ * FOUR, NOT TWO -- THE TWO LINKED PEOPLE COUNT NOW.
+ *
+ * The firm, testing on a real account: "there is a Cherie Hennen and I saved it as a next of kin.
+ * But Elise Ferreira is there. What if I haven't tried to call Elise Ferreira? There should be
+ * outcomes of these ones as well." They were not counted, so a trace read as fully worked through
+ * with every relative untouched -- and a wrong number on the debtor's own profile is exactly when
+ * the relatives become the work.
+ */
+eq('...and how much of it nobody has tried', summary.untried, 4)
+/*
+ * AN ADDRESS IS STILL NOT COUNTED, and that is a decision rather than an omission. An address is
+ * confirmed by a letter coming back or by somebody going there, which is not the same day's work
+ * as going down a list of numbers -- and a trace that could never read as finished until somebody
+ * had posted something would read as unfinished for ever.
+ */
 eq('an address is not counted as an untried number',
   traceSummary([I({ kind: 'address' })]).untried, 0)
+eq('...nor an employer', traceSummary([I({ kind: 'employer' })]).untried, 0)
+/* A LINKED PERSON IS. See above: they are the work once the debtor's own numbers are spent. */
+eq('but a linked person nobody has rung is',
+  traceSummary([I({ kind: 'link', value: 'Elise Ferreira' })]).untried, 1)
 eq('...nor is one already tried',
   traceSummary([I({ outcome: 'no_answer' })]).untried, 0)
 

@@ -19511,3 +19511,44 @@ alter table public.companies
 
 comment on column public.companies.default_interest_rate_annual is
   'The interest rate in THIS CLIENT''S mandate, as a percent a year (24 means 24%). The firm, asked why the handover sheet no longer carries a rate: "the rate is in the agreement the firm already holds" — this is where that agreement''s rate is recorded, and an account opened for this client inherits it. NULL means nobody has recorded one, which is NOT the same as nought: an account opened under a null client opens at 0% and no interest runs on it at all. Not to be confused with commission_rate, which is what the FIRM charges the CLIENT.';
+
+-- ---------------------------------------------------------------------------------------------
+-- WHAT A FINDING TURNED OUT TO BE, IN THE WORDS OF THE LIST IT IS ON.
+--
+-- THE FIRM, looking at the trace workspace: "if you go and you click on the not tested, it says,
+-- okay, well, wrong person or disconnected. What does that mean? An address is an address or not
+-- an address. Employment the same."
+--
+-- They are right: four outcomes written for a telephone were offered against addresses and
+-- employers too, so an address could be marked Disconnected and an employer No answer.
+--
+-- THREE NEW VALUES, AND EACH MEANS ONE THING EVERYWHERE. The wording is per list (traceStore's
+-- OUTCOMES_FOR), but the stored value never changes meaning, so a report can group on it:
+--
+--   reached_other  a person was reached and it was NOT the debtor. On the debtor's own numbers
+--                  that is the spouse who answers -- the firm: "it's possible in the details
+--                  provided by the debtor that you could reach the spouse." On a linked person it
+--                  is the only kind of "reached" there is: reaching the DEBTOR on a relative's
+--                  number is so rare the firm asked for it not to be offered at all.
+--   moved_on       they were there and they are not now. An address they have left, an employer
+--                  they have left. Not the same as "not theirs", which says it was never them.
+--   denies_link    a linked person says they do not know the debtor. The bureau connected them
+--                  and a human has now disconnected them.
+--
+-- `verified` KEEPS ITS MEANING and gains two more readings: an address Confirmed, an employer
+-- Still there. Same fact -- somebody checked and it holds.
+-- ---------------------------------------------------------------------------------------------
+alter table public.account_trace_items drop constraint if exists account_trace_items_outcome_check;
+
+alter table public.account_trace_items
+  add constraint account_trace_items_outcome_check
+  check (outcome in (
+    'verified', 'no_answer', 'unreachable', 'not_theirs',
+    'reached_other', 'moved_on', 'denies_link'
+  ));
+
+comment on column public.account_trace_items.outcome is
+  'What somebody found when they actually tried it. Null until tried. The value means one thing '
+  'everywhere; how it is WORDED depends on the list it is on -- see traceStore.OUTCOMES_FOR. '
+  'reached_other is a person who is not the debtor; moved_on is "was there, is not now"; '
+  'denies_link is a linked person disowning the connection the bureau drew.';

@@ -23,7 +23,9 @@ export type TraceItemKind =
  * firm asked for exactly this distinction: "you called the person on the trace, you couldn't make
  * contact, but it was ringing or the phone was off or whatever."
  */
-export type TraceOutcome = 'verified' | 'no_answer' | 'unreachable' | 'not_theirs'
+export type TraceOutcome =
+  | 'verified' | 'no_answer' | 'unreachable' | 'not_theirs'
+  | 'reached_other' | 'moved_on' | 'denies_link'
 
 /**
  * How an outcome reads at a glance. Green worked, amber is worth another try, red is dead, and
@@ -32,8 +34,31 @@ export type TraceOutcome = 'verified' | 'no_answer' | 'unreachable' | 'not_their
  */
 export type OutcomeTone = 'grey' | 'green' | 'amber' | 'red'
 
+/**
+ * EVERY OUTCOME, ONCE. The stored value means ONE thing wherever it appears; what changes between
+ * lists is the WORDING, which OUTCOMES_FOR decides. `label` here is the phone's wording, because
+ * that is the list most of them were written for and the one a reader meets first.
+ *
+ * FOUR OF THESE WERE WRITTEN FOR A TELEPHONE AND OFFERED AGAINST EVERYTHING. The firm found it:
+ * "if you click on the not tested, it says, okay, well, wrong person or disconnected. What does
+ * that mean? An address is an address or not an address. Employment the same."
+ */
 export const TRACE_OUTCOMES: { outcome: TraceOutcome; label: string; tone: OutcomeTone; meaning: string }[] = [
-  { outcome: 'verified', label: 'Reached them', tone: 'green', meaning: 'It is them, and this reaches them.' },
+  { outcome: 'verified', label: 'Reached the debtor', tone: 'green', meaning: 'It is them, and this reaches them.' },
+  /*
+   * A PERSON, BUT NOT THE DEBTOR -- and on two lists it means two different days' work.
+   *
+   * THE FIRM, of the debtor's own numbers: "it's possible in the details provided by the debtor
+   * that you could meet the spouse or reach the spouse, so there should be an option for reached
+   * someone." And of a linked person it is the ONLY kind of reaching there is: "it's very
+   * seldomly, actually doesn't really happen, that you've reached the debtor on the linked people.
+   * So don't, don't add anything there."
+   *
+   * AMBER, NOT GREEN. The line is live and a human answered it, which is worth more than a
+   * ring-out and less than the debtor -- and a green tick against a number that has never produced
+   * the debtor would read as a solved problem.
+   */
+  { outcome: 'reached_other', label: 'Reached someone else', tone: 'amber', meaning: 'Somebody answered, but not the debtor. Say who, and what they said.' },
   { outcome: 'no_answer', label: 'No answer', tone: 'amber', meaning: 'A live number nobody picked up. Worth another hour of the day.' },
   /*
    * "Wrong person", not "Not the debtor". On a director's profile the subject is not the debtor
@@ -42,18 +67,95 @@ export const TRACE_OUTCOMES: { outcome: TraceOutcome; label: string; tone: Outco
    */
   { outcome: 'not_theirs', label: 'Wrong person', tone: 'grey', meaning: 'Somebody else answered. It is not their number.' },
   { outcome: 'unreachable', label: 'Disconnected', tone: 'red', meaning: 'Switched off, unobtainable or disconnected.' },
+  /*
+   * WAS THERE, IS NOT NOW -- a different fact from "it was never them", and the one an address and
+   * an employer actually need. A former address is still evidence (it dates the move); it is
+   * simply not where to serve.
+   */
+  { outcome: 'moved_on', label: 'They have moved', tone: 'red', meaning: 'They were there and they are not any more.' },
+  /* THE BUREAU JOINED THEM AND A HUMAN HAS UNJOINED THEM. Worth storing rather than deleting: the
+     next trace will print the same link, and this says somebody has already asked. */
+  { outcome: 'denies_link', label: 'Says they do not know them', tone: 'grey', meaning: 'The bureau connected them. They say otherwise.' },
 ]
 
 /**
- * The same list with "not tested" on the front, which is what the picker offers.
+ * The same list with "not tested" on the front.
  *
- * Untried is a REAL choice here, not the absence of one: picking it is the firm's "you can
- * unverify it", and a picker that can only ever move forwards leaves a wrong outcome standing.
+ * Untried is a REAL choice, not the absence of one: picking it is the firm's "you can unverify
+ * it", and a picker that can only ever move forwards leaves a wrong outcome standing.
+ *
+ * EVERY OUTCOME THERE IS, for anything that needs the whole vocabulary. A PICKER uses
+ * outcomeOptionsFor(category) instead -- offering all seven against an address is the fault this
+ * was rebuilt to end.
  */
 export const OUTCOME_OPTIONS: { outcome: TraceOutcome | null; label: string; tone: OutcomeTone; meaning: string }[] = [
   { outcome: null, label: 'Not tested', tone: 'grey', meaning: 'Nobody has tried it yet.' },
   ...TRACE_OUTCOMES,
 ]
+
+/**
+ * WHICH OUTCOMES A LIST MAY OFFER, AND WHAT EACH IS CALLED THERE.
+ *
+ * THE RULE THIS EXISTS FOR: a question with no true answer is worse than no question. An address
+ * cannot be Disconnected and an employer cannot fail to pick up, and a column of "Not tested"
+ * against rows nobody could ever answer is how a column comes to mean nothing.
+ *
+ * AND LINKED PEOPLE HAVE NO "REACHED THE DEBTOR" AT ALL. Not an oversight -- the firm asked for it
+ * to be left off, because reaching the debtor on a relative's number almost never happens and an
+ * option that is almost never right is one that gets picked by mistake. The most that can come off
+ * a linked person is `reached_other`, and no dispute can be taken from one.
+ */
+export const OUTCOMES_FOR: Record<TraceCategoryId, { outcome: TraceOutcome; label: string }[]> = {
+  phones: [
+    { outcome: 'verified', label: 'Reached the debtor' },
+    { outcome: 'reached_other', label: 'Reached someone else' },
+    { outcome: 'no_answer', label: 'No answer' },
+    { outcome: 'not_theirs', label: 'Wrong person' },
+    { outcome: 'unreachable', label: 'Disconnected' },
+  ],
+  emails: [
+    { outcome: 'verified', label: 'They replied' },
+    { outcome: 'reached_other', label: 'Somebody else replied' },
+    { outcome: 'no_answer', label: 'No reply' },
+    { outcome: 'not_theirs', label: 'Not their address' },
+    /* A BOUNCE IS THE EMAIL'S DISCONNECTED: the address does not exist any more. */
+    { outcome: 'unreachable', label: 'Bounced' },
+  ],
+  addresses: [
+    { outcome: 'verified', label: 'Confirmed' },
+    { outcome: 'moved_on', label: 'They have moved' },
+    { outcome: 'not_theirs', label: 'Not theirs' },
+  ],
+  employment: [
+    { outcome: 'verified', label: 'Still there' },
+    { outcome: 'moved_on', label: 'No longer there' },
+    { outcome: 'not_theirs', label: 'Not theirs' },
+  ],
+  people: [
+    { outcome: 'reached_other', label: 'Spoke to them' },
+    { outcome: 'no_answer', label: 'No answer' },
+    { outcome: 'not_theirs', label: 'Wrong number' },
+    { outcome: 'denies_link', label: 'Says they do not know them' },
+  ],
+  /* A COMPANY AND A DEED CANNOT BE RUNG. Empty rather than absent, so a caller asking for a list
+     gets one and the picker simply never draws -- see TRACE_CATEGORIES.worked. */
+  companies: [],
+  property: [],
+}
+
+/** What a list calls an outcome. Falls back to the phone's wording, which is TRACE_OUTCOMES. */
+export function outcomeLabelIn(category: TraceCategoryId, o: TraceOutcome | null | undefined): string | null {
+  if (!o) return null
+  return OUTCOMES_FOR[category]?.find((x) => x.outcome === o)?.label ?? outcomeLabel(o)
+}
+
+/** The picker's options for a list: "not tested" first, then whatever that list may say. */
+export function outcomeOptionsFor(category: TraceCategoryId): { outcome: TraceOutcome | null; label: string; tone: OutcomeTone }[] {
+  return [
+    { outcome: null, label: 'Not tested', tone: 'grey' },
+    ...OUTCOMES_FOR[category].map((o) => ({ ...o, tone: outcomeTone(o.outcome) })),
+  ]
+}
 
 export const outcomeLabel = (o: TraceOutcome | null | undefined): string | null =>
   TRACE_OUTCOMES.find((x) => x.outcome === o)?.label ?? null
@@ -125,8 +227,15 @@ const PHONE_KINDS: TraceItemKind[] = ['mobile', 'phone', 'work']
 export function principalPhone(items: TraceItem[]): TraceItem | null {
   const rank = (i: TraceItem): number => {
     if (i.outcome === 'verified') return 0
-    if (i.outcome === 'no_answer') return 1
-    if (i.outcome === null) return 2
+    /*
+     * A NUMBER THAT PRODUCED A HUMAN BEATS ONE THAT RANG OUT, and loses to one that produced the
+     * debtor. Somebody answered on it -- the spouse, the mother -- so the line is live and there
+     * is a person on the other end who knows them. That is a better bet than silence and a worse
+     * one than the debtor's own voice.
+     */
+    if (i.outcome === 'reached_other') return 1
+    if (i.outcome === 'no_answer') return 2
+    if (i.outcome === null) return 3
     return 9 /* unreachable or not theirs: never principal. */
   }
   const usable = items.filter((i) => PHONE_KINDS.includes(i.kind) && rank(i) < 9)
@@ -142,7 +251,11 @@ export function principalPhone(items: TraceItem[]): TraceItem | null {
 
 /** The same reasoning for an address: confirmed first, then most recently seen. */
 export function principalAddress(items: TraceItem[]): TraceItem | null {
-  const usable = items.filter((i) => i.kind === 'address' && i.outcome !== 'not_theirs')
+  /* NOT THEIRS, AND NOT ONE THEY HAVE LEFT. A former address still dates the move and is kept as
+     evidence; it is simply not where anybody is served. */
+  const usable = items.filter(
+    (i) => i.kind === 'address' && i.outcome !== 'not_theirs' && i.outcome !== 'moved_on',
+  )
   if (usable.length === 0) return null
   return [...usable].sort((a, b) => {
     const av = a.outcome === 'verified' ? 0 : 1, bv = b.outcome === 'verified' ? 0 : 1
@@ -153,7 +266,11 @@ export function principalAddress(items: TraceItem[]): TraceItem | null {
 
 /** Where they work, most recently seen first. Employment is the route to a garnishee. */
 export function currentEmployer(items: TraceItem[]): TraceItem | null {
-  const jobs = items.filter((i) => i.kind === 'employer' && i.outcome !== 'not_theirs')
+  /* THE CURRENT one. A job somebody has left is not a garnishee route, and the bureau's own
+     "seen on" cannot tell the two apart -- only somebody who rang the employer can. */
+  const jobs = items.filter(
+    (i) => i.kind === 'employer' && i.outcome !== 'not_theirs' && i.outcome !== 'moved_on',
+  )
   if (jobs.length === 0) return null
   return [...jobs].sort((a, b) => (b.seenOn ?? '').localeCompare(a.seenOn ?? ''))[0]
 }
@@ -202,7 +319,24 @@ export function traceSummary(items: TraceItem[]): TraceSummary {
      */
     relatives: items.filter((i) => i.kind === 'link' && i.status === 'relative'),
     directorships: items.filter((i) => i.kind === 'directorship' && /active/i.test(i.status ?? '')),
-    untried: items.filter((i) => (PHONE_KINDS.includes(i.kind) || i.kind === 'email') && i.outcome === null).length,
+    /*
+     * EVERY FINDING SOMEBODY COULD TRY, which now includes the LINKED PEOPLE.
+     *
+     * It counted phones and emails only, so a trace read as fully worked through with every linked
+     * person untouched -- and "worked through" is the whole measure the trace rounds are built on
+     * (a round is spent when nothing is left to try). A number that is wrong on the debtor's own
+     * profile is exactly when the relatives become the work, so leaving them out understated the
+     * one case the count exists for.
+     *
+     * ADDRESSES AND EMPLOYERS ARE NOT COUNTED. They are confirmed by a letter coming back or by
+     * ringing the employer, which is not the same day's work as going down a list of numbers, and
+     * a trace that could never read as finished until somebody had posted something would read as
+     * unfinished for ever.
+     */
+    untried: items.filter(
+      (i) => (PHONE_KINDS.includes(i.kind) || i.kind === 'email' || i.kind === 'link')
+        && i.outcome === null,
+    ).length,
   }
 }
 
@@ -286,7 +420,16 @@ export function savesAs(item: TraceItem): string {
  */
 export function canPromote(item: TraceItem): boolean {
   if (item.promotedContactId !== null) return false
+  /*
+   * THREE WAYS OF SAYING "DO NOT PUT THIS ON THE ACCOUNT", and each is somebody's finding rather
+   * than a guess: it was never them, they have left, or the person the bureau linked says they do
+   * not know them. Saving any of the three would put a dead detail on the contact list wearing the
+   * same clothes as a good one -- and since promoting now marks a contact VERIFIED (see
+   * promoteTraceItem), it would be a dead detail wearing a tick.
+   */
   if (item.outcome === 'not_theirs') return false
+  if (item.outcome === 'moved_on') return false
+  if (item.outcome === 'denies_link') return false
   return item.kind !== 'property'
 }
 
@@ -344,9 +487,17 @@ export const TRACE_CATEGORIES: TraceCategory[] = [
     valueHeading: 'Employer / role', worked: true,
   },
   {
+    /*
+     * WORKED, AT THE FIRM'S INSTRUCTION. It was false, so a linked person could not be marked at
+     * all -- the firm, testing on a real account: "there is a Cherie Hennen and I saved it as a
+     * next of kin. But Elise Ferreira is there. What if I haven't tried to call Elise Ferreira?
+     * There should be outcomes of these ones as well."
+     *
+     * ITS OWN FOUR OUTCOMES, and none of them is "reached the debtor" -- see OUTCOMES_FOR.
+     */
     id: 'people', title: 'Linked people', kinds: ['link'],
-    blurb: 'A shared surname is a possible relative, not a confirmed one. Save one as a next of kin.',
-    valueHeading: 'Name', worked: false,
+    blurb: 'A shared surname is a possible relative, not a confirmed one. Ring one, or save them as a next of kin.',
+    valueHeading: 'Name', worked: true,
   },
   {
     id: 'companies', title: 'Companies', kinds: ['directorship'],

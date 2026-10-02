@@ -221,7 +221,12 @@ eq('the picker offers not-tested as a real choice', OUTCOME_OPTIONS[0].outcome, 
  * outcome standing, and the next collector rings a number this one already proved dead.
  */
 eq('...labelled', OUTCOME_OPTIONS[0].label, 'Not tested')
-eq('...and it offers every outcome besides', OUTCOME_OPTIONS.length, 5)
+/*
+ * OUTCOME_OPTIONS IS NOW THE WHOLE VOCABULARY -- every outcome there is, for anything that needs
+ * all of them. What a PICKER draws is outcomeOptionsFor(category), which is narrower and is the
+ * point of the rebuild; see check-trace-outcomes.
+ */
+eq('...and it offers every outcome besides', OUTCOME_OPTIONS.length, 8)
 eq('reaching them is the green one', outcomeTone('verified'), 'green')
 eq('a number that rang is worth another try, not a dead one', outcomeTone('no_answer'), 'amber')
 eq('a disconnected one is dead', outcomeTone('unreachable'), 'red')

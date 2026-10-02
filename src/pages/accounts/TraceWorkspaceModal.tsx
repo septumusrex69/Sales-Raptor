@@ -6,7 +6,8 @@ import {
 import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
 import {
-  OUTCOME_OPTIONS, TRACE_CATEGORIES, TRACE_SORTS, canPromote, categoryById, categoryCounts,
+  TRACE_CATEGORIES, TRACE_OUTCOMES, TRACE_SORTS, canPromote, categoryById, categoryCounts,
+  outcomeOptionsFor,
   linkedHow, linkedNumber, outcomeTone, pageOf, riskTone, savesAs, workRows,
   type FiledTrace, type OutcomeFilter, type OutcomeTone, type TraceCategoryId,
   type TraceItem, type TraceItemKind, type TraceOutcome, type TraceRow, type TraceSort,
@@ -309,7 +310,10 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
                     className="text-sm rounded-lg border border-slate-200 px-2.5 py-2 bg-white text-slate-600">
                     <option value="any">All outcomes</option>
                     <option value="untested">Not tested</option>
-                    {OUTCOME_OPTIONS.filter((o) => o.outcome !== null).map((o) => (
+                    {/* THIS LIST'S OWN, not all seven. Filtering an address list by "Disconnected"
+                        returns nothing for ever, which reads as a broken filter rather than as a
+                        question that was never askable. */}
+                    {outcomeOptionsFor(category.id).filter((o) => o.outcome !== null).map((o) => (
                       <option key={o.outcome} value={o.outcome as string}>{o.label}</option>
                     ))}
                   </select>
@@ -423,7 +427,10 @@ function Row({ row, category, worked, busy, onOutcome, onPromote }: {
    * the number a collector chasing a relative most wants to press.
    */
   const shared = category === 'people' ? linkedNumber(row.label) : null
+  /* STRUCK THROUGH: every way a finding can be dead. `moved_on` and `denies_link` joined the two
+     that were here -- an address they have left is as useless to ring as a disconnected line. */
   const ruledOut = row.outcome === 'not_theirs' || row.outcome === 'unreachable'
+    || row.outcome === 'moved_on' || row.outcome === 'denies_link'
   /* Ruled out or a property: there is nothing to put on the contact list. */
   const savable = row.items.some(canPromote)
 
@@ -493,9 +500,20 @@ function Row({ row, category, worked, busy, onOutcome, onPromote }: {
               onChange={(e) => onOutcome(e.target.value === '' ? null : e.target.value as TraceOutcome)}
               disabled={busy}
               aria-label={`Outcome for ${row.value}`}
-              title={OUTCOME_OPTIONS.find((o) => o.outcome === row.outcome)?.meaning}
+              title={TRACE_OUTCOMES.find((o) => o.outcome === row.outcome)?.meaning}
               className="text-sm rounded-lg border border-slate-200 pl-1.5 pr-1 py-1.5 bg-white text-slate-700">
-              {OUTCOME_OPTIONS.map((o) => (
+              {/*
+                THE LIST'S OWN WORDS, AND ONLY THE ANSWERS IT CAN HAVE.
+                
+                THE FIRM: "if you click on the not tested, it says, okay, well, wrong person or
+                disconnected. What does that mean? An address is an address or not an address.
+                Employment the same." One picker written for a telephone was drawn against all
+                four lists, so an address could be marked Disconnected and an employer No answer.
+                
+                A question with no true answer is worse than no question: a column of "Not tested"
+                against rows nobody could ever answer is how a column comes to mean nothing.
+              */}
+              {outcomeOptionsFor(category).map((o) => (
                 <option key={o.label} value={o.outcome ?? ''}>{o.label}</option>
               ))}
             </select>
