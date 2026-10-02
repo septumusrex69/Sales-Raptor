@@ -514,7 +514,11 @@ ok('promoting never decides the primary number', /isPrimary: false/.test(data))
 ok('a linked person\'s shared number is pulled out of the label',
   /const shared = category === 'people' \? linkedNumber\(row\.label\) : null/.test(workspace))
 ok('...and is rung through the same button as every other number',
-  /\{shared !== null && \([\s\S]{0,120}<PhoneLink number=\{shared\} \/>/.test(workspace))
+  /\{shared !== null && \([\s\S]{0,200}<PhoneLink number=\{shared\}/.test(workspace))
+/* AND THE RING REACHES THE ACCOUNT. It did not: the press dialled and recorded nothing -- no item
+   2 fee, no timeline line, no account_calls row for BuzzBox to match. See check-call-outcome. */
+ok('...and that ring is recorded on the account',
+  /<PhoneLink number=\{shared\} onDialled=\{\(c\) => onDial\(c\.to\)\} \/>/.test(workspace))
 ok('...with how they are linked said beside it', /linkedHow\(row\.label\)/.test(workspace))
 
 /* ---------- starting the search ---------- */

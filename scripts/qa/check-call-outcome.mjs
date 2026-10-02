@@ -200,6 +200,88 @@ ok('a standing promise is not written again',
 ok('...and outcomeReady asks for nothing either',
   outcomeReady({ ...EMPTY_OUTCOME, outcome: 'promised' }, true))
 
+/* ---------------------------------------------------------------------------------------------
+ * THE BOX SAYS WHERE THE ACCOUNT ALREADY IS
+ *
+ * THE FIRM: "the account asks you every single time after you've spoken to someone if you want to
+ * update the status... maybe it should show you what the current status is... because if you're
+ * still busy tracing someone, it's still on tracing already, until you find someone. It always is
+ * in a state of asking you what the status is."
+ *
+ * THEY WERE DESCRIBING A BLANK QUESTION. Five options, none marked, no sign the app already knew
+ * the answer -- so leaving an account alone was indistinguishable from forgetting to answer.
+ * ------------------------------------------------------------------------------------------- */
+
+ok('the picker takes where the account stands', /current\?: ClientPosition \| null/.test(picker))
+ok('...and says it before it asks', /Now <span[\s\S]{0,120}standing\.label/.test(picker))
+/* THE WHOLE POINT: choosing nothing has to read as an outcome, not an empty field. */
+ok('...and says what choosing nothing does',
+  /the account stays on/.test(picker) && /!chosen && standing/.test(picker))
+/* AND THE RUNG IT IS ON IS MARKED IN THE GRID, so nobody picks it again out of doubt. */
+ok('...and marks the rung it is already on', /const isNow = k === currentKey && !on/.test(picker))
+
+/*
+ * MARKED, NOT CHOSEN, and this is the one that actually matters.
+ *
+ * Pre-selecting the current rung would write the record behind it AGAIN on every call -- a second
+ * promise with its own due date, a second dispute with its own clock. The whole design of
+ * callOutcome is that a status is a consequence of something recorded; a status that re-records
+ * itself every time somebody opens the box is that rule running backwards.
+ */
+ok('...without pre-choosing it', !/outcome: currentKey/.test(picker))
+ok('...and it is excluded from the chosen state', /k === currentKey && !on/.test(picker))
+
+/*
+ * AND THE MARKER DOES NOT CHANGE THE BUTTON'S NAME.
+ *
+ * It did, and the e2e caught it: a second line inside the button made its accessible name
+ * "Arranged where it is now", so anything looking for the rung by name stopped finding it -- a
+ * screen reader included. The rung is the name; the fact lives in the title beside it.
+ */
+ok('...without renaming the button', /aria-hidden="true"[\s\S]{0,80}where it is now/.test(picker))
+ok('...and the fact is in the title instead', /where the account is now`/.test(picker))
+
+/* IT ADDS NO WAY TO SET A POSITION BY HAND. The firm settled that rule when asked directly and
+   callOutcome records it: a status is a consequence of something recorded, never a keystroke. */
+ok('the picker still writes nothing by itself',
+  !/onChange\(\{ \.\.\.value, position:/.test(picker))
+
+/* THE ACCOUNT PAGE PASSES THE POSITION IT ALREADY DERIVED, rather than deriving a second one --
+   two readings of one position is how the hero and the call box come to disagree. */
+ok('the page hands the call box its position', /standing=\{position === 'new' \? null : position\}/.test(page))
+ok('...and the call box passes it to the picker', /current=\{standing \?\? null\}/.test(box))
+ok('...and does not derive its own', !/deskPosition\(/.test(box) && !/clientPosition\(/.test(box))
+/*
+ * 'new' IS A DESK RUNG, NOT ONE OF THE THIRTEEN. It is what the account page shows for an account
+ * nobody has worked yet; a client is never told it, and the call box must not offer to leave an
+ * account on it.
+ */
+ok('...and a desk-only rung is not passed as one of the thirteen',
+  /position === 'new' \? null/.test(page))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND A NUMBER RUNG OFF THE TRACE IS A CALL ON THE ACCOUNT
+ *
+ * THE FIRM: "I should also be able to call the numbers from in the trace." The press already rang
+ * -- every number there has been a PhoneLink all along -- so what was missing was the RECORD: no
+ * item 2 fee, no timeline line, and no account_calls row for BuzzBox to match its events against.
+ * ------------------------------------------------------------------------------------------- */
+
+const trace = code('src/pages/accounts/TraceWorkspaceModal.tsx')
+ok('a trace number reports the dial', /onDialled=\{\(c\) => onDial\(c\.to\)\}/.test(trace))
+/* BOTH OF THEM: the row's own number and the one a linked person shares with the debtor, which is
+   the number a collector chasing a relative most wants to press. */
+check('...on the row and on the linked person alike',
+  (trace.match(/onDialled=\{\(c\) => onDial\(c\.to\)\}/g) ?? []).length, 2)
+/* THROUGH THE SAME FUNCTION THE ACCOUNT'S CALL BUTTON USES. Written twice they drift, and the
+   failure is a book where a call is billable or not depending which screen it was placed from. */
+ok('...through the one recorder', /recordDial\(\{ accountId: trace\?\.accountId/.test(trace))
+ok('...imported from the account\u2019s own call library',
+  /import \{ recordDial \} from '\.\.\/\.\.\/lib\/accountCalls'/.test(trace))
+/* NEVER ALLOWED TO FAIL THE CALL. The conversation is happening; a fee that will not write is
+   something to report, not a red box over a call that went through. */
+ok('...and a failed fee does not break the call', /\.catch\(\(e\) => setError/.test(trace))
+
 console.log(`\ncheck-call-outcome: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

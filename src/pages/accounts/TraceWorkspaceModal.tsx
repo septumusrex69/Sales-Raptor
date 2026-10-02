@@ -17,6 +17,7 @@ import {
   type TraceItem, type TraceItemKind, type TraceOutcome, type TraceRow, type TraceSort,
 } from '../../lib/traceStore.ts'
 import { promoteTraceItem, recordTraceOutcome, traceReportUrl } from '../../lib/traceStoreData.ts'
+import { recordDial } from '../../lib/accountCalls'
 import { formatDate, formatMoney } from '../../data/mockData'
 
 /**
@@ -137,6 +138,33 @@ export function TraceWorkspaceModal({
    */
   useEffect(() => { setPage(1) }, [openCategory, search, outcomeFilter, sort, trace.id])
   useEffect(() => { setOpenCategory('phones'); setSearch(''); setOutcomeFilter('any') }, [trace.id])
+
+  /**
+   * A NUMBER RUNG OFF THE TRACE IS A CALL ON THE ACCOUNT.
+   *
+   * THE FIRM: "I should also be able to call the numbers from in the trace." The press already
+   * rang -- every number here has been a PhoneLink all along -- so what was missing was not the
+   * dialling, it was the RECORD. recordDial raises Annexure B item 2, writes "Called ..." onto the
+   * timeline and inserts the account_calls row, which is the only thing BuzzBox can match its
+   * events back to. Without it a collector worked through a fresh trace, rang six numbers, and the
+   * account showed nothing and charged nothing.
+   *
+   * THE SAME FUNCTION THE ACCOUNT'S OWN CALL BUTTON USES, so there is one way a call is recorded
+   * rather than two. Written twice they drift, and the failure is a book where some calls are
+   * billable and some are not depending on which screen somebody was looking at.
+   *
+   * NO EXTENSION, because PhoneLink has already placed the call by the time this runs and reports
+   * only what it dialled. BuzzBox's own event carries the extension and is matched on the number.
+   *
+   * NEVER ALLOWED TO FAIL THE CALL. The conversation is happening; a fee that would not write is
+   * something to report afterwards, not a red box over a call that went through. Same reasoning as
+   * the account_calls insert inside recordDial itself.
+   */
+  function dial(number: string) {
+    void recordDial({ accountId: trace?.accountId ?? '', number, extension: null, actor })
+      .then(() => onChanged())
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }
 
   /**
    * An outcome goes on EVERY finding behind the row.
@@ -504,7 +532,8 @@ export function TraceWorkspaceModal({
                             if (category.id === 'people') {
                               setRelationship(''); setSaying({ row, asNextOfKin: kin })
                             } else void promote(row, kin)
-                          }} />
+                          }}
+                          onDial={dial} />
                       ))}
                       {shown.rows.length === 0 && (
                         <tr>
@@ -620,7 +649,7 @@ const KIND_WORD: Partial<Record<TraceItemKind, string>> = {
   phone: 'Home', work: 'Work', mobile: 'Mobile',
 }
 
-function Row({ row, category, worked, isNew, busy, onOutcome, onPromote }: {
+function Row({ row, category, worked, isNew, busy, onOutcome, onPromote, onDial }: {
   row: TraceRow
   category: TraceCategoryId
   worked: boolean
@@ -635,6 +664,19 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote }: {
   busy: boolean
   onOutcome: (outcome: TraceOutcome | null) => void
   onPromote: (asNextOfKin: boolean) => void
+  /**
+   * A CALL FROM HERE IS A CALL ON THE ACCOUNT.
+   *
+   * THE FIRM: "I should also be able to call the numbers from in the trace."
+   *
+   * The numbers were already PhoneLinks, so the press already rang -- which is what made this
+   * worth finding rather than obvious. What it did not do was TELL THE ACCOUNT: no item 2 fee, no
+   * line on the timeline, and no account_calls row, which is the marker BuzzBox matches its events
+   * against. A collector working a fresh trace rings six numbers, and the account shows none of it
+   * and bills none of it. Same handler as the account's own Call button, so there is one way a
+   * call is recorded rather than two.
+   */
+  onDial: (number: string) => void
 }) {
   const dialable = category === 'phones'
   /*
@@ -667,7 +709,9 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote }: {
             )}
             <div className={`break-words ${ruledOut ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
               {/* Dialled from here, through the same button as everywhere else in the app. */}
-              {dialable && !ruledOut ? <PhoneLink number={row.value} /> : row.value}
+              {dialable && !ruledOut
+                ? <PhoneLink number={row.value} onDialled={(c) => onDial(c.to)} />
+                : row.value}
             </div>
             {/*
               THE TYPES IT WAS FILED UNDER, which is the whole evidence that this row is three
@@ -676,7 +720,9 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote }: {
             */}
             {/* Rung from here, through the same button as everywhere else in the app. */}
             {shared !== null && (
-              <p className="text-sm mt-0.5"><PhoneLink number={shared} /></p>
+              <p className="text-sm mt-0.5">
+                <PhoneLink number={shared} onDialled={(c) => onDial(c.to)} />
+              </p>
             )}
             <p className="text-xs text-slate-400">
               {[

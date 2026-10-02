@@ -13,6 +13,7 @@ import {
 } from '../../lib/callOutcome'
 import { recordOutcome } from '../../lib/recordOutcome'
 import type { ChargeResult } from '../../lib/accountCharges'
+import type { ClientPosition } from '../../lib/clientPosition'
 
 /**
  * THE FIVE OUTCOMES A CALL SOMEBODY ANSWERED CAN HAVE.
@@ -51,8 +52,17 @@ const SPOKE_TO_THEM = CALL_OUTCOME_ORDER.filter((k) => CALL_OUTCOMES[k].reached)
  * "No answer" by a machine that had merely failed to see it. Ask every time; let the person
  * disagree with the PABX.
  */
-export function CallButton({ accountId, numbers, actor, livePromise, className, onDone }: {
+export function CallButton({ accountId, numbers, actor, livePromise, standing, className, onDone }: {
   accountId: string
+  /**
+   * WHERE THE ACCOUNT ALREADY STANDS, so the outcome box can say so rather than ask blind.
+   *
+   * THE FIRM: "it always is in a state of asking you what the status is." See OutcomePicker.current
+   * for the whole of it. Passed down rather than computed here: the rail on the account page has
+   * already worked it out, and two derivations of one position is how the hero and the call box
+   * come to disagree about the same debtor.
+   */
+  standing?: ClientPosition | null
   /**
    * Every number that could reach this debtor, primary first. More than one and the button asks
    * which; exactly one and it just rings it.
@@ -414,6 +424,7 @@ export function CallButton({ accountId, numbers, actor, livePromise, className, 
             <OutcomePicker
               value={choice}
               offer={SPOKE_TO_THEM}
+              current={standing ?? null}
               livePromise={livePromise ?? null}
               /* THE NOTE ABOVE IS THE WORDS. One sentence, typed once -- see wordsAskedAs. */
               wordsAskedAs="What was said?"
