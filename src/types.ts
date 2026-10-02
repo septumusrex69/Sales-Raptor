@@ -402,6 +402,19 @@ export interface Task {
   completedAt?: string
   /** Set when this task's due date was auto-rolled forward because it was missed; cleared once completed. */
   autoRescheduledFrom?: string
+  /**
+   * WHY IT WAS CANCELLED, in the words of whoever cancelled it.
+   *
+   * THE FIRM: "you should also be able to cancel a task -- the cancel reason... the client has
+   * cancelled the meeting, and then it will also be on the notes of the client."
+   *
+   * 'Cancelled' has been a status all along and the only thing it could say was that somebody had.
+   * A meeting the CLIENT called off and one the firm dropped because it was no longer needed are
+   * the same row, and six months later that is the whole question: a client who keeps moving is a
+   * different problem from a firm that keeps forgetting.
+   */
+  cancelReason?: string
+  cancelledAt?: string
 }
 
 export type ActivityType =

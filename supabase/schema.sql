@@ -19552,3 +19552,26 @@ comment on column public.account_trace_items.outcome is
   'everywhere; how it is WORDED depends on the list it is on -- see traceStore.OUTCOMES_FOR. '
   'reached_other is a person who is not the debtor; moved_on is "was there, is not now"; '
   'denies_link is a linked person disowning the connection the bureau drew.';
+
+-- ---------------------------------------------------------------------------
+-- WHY A TASK WAS CANCELLED, AND WHEN.
+--
+-- THE FIRM: "you should also be able to edit a task, the name of the task, and also cancel a task.
+-- The cancel reason... the client has cancelled the meeting, and then it will also be on the notes
+-- of the client."
+--
+-- 'Cancelled' HAS BEEN A STATUS ALL ALONG and the only thing it could say was that somebody had
+-- cancelled. A meeting the CLIENT called off and one the firm dropped because it was no longer
+-- needed are the same row, and six months later the question is which -- it is the difference
+-- between a client who keeps moving and a firm that keeps forgetting.
+--
+-- NULLABLE, because every task cancelled before today has no reason and inventing one would be
+-- worse than the gap. The screen asks for it from now on.
+-- ---------------------------------------------------------------------------
+alter table public.tasks
+  add column if not exists cancel_reason text,
+  add column if not exists cancelled_at timestamptz;
+
+comment on column public.tasks.cancel_reason is
+  'Why it was cancelled, in the words of whoever cancelled it. Goes onto the client''s own file as '
+  'an activity, which is where the firm looks for it.';

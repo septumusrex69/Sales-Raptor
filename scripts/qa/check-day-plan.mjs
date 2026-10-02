@@ -45,6 +45,7 @@ const cal = code('src/pages/calendar/CalendarPage.tsx')
 const tasks = code('src/pages/tasks/TasksPage.tsx')
 const picker = code('src/components/tasks/TaskDayPicker.tsx')
 const meetingBox = code('src/components/calendar/MeetingModal.tsx')
+const store = code('src/store/AppStore.tsx')
 const grid = code('src/components/ui/DayGrid.tsx')
 const diaryPicker = code('src/components/diary/DiaryDatePicker.tsx')
 const lib = code('src/lib/dayPlan.ts')
@@ -466,6 +467,61 @@ ok("...and so does the day's own list", /<Video size=\{12\} \/> Join/.test(tasks
 /* OFF THE INVITATION'S OWN WORDS, which is where the URL is -- so a day list that wanted a button
    had to be given the notes. */
 ok('...read off the notes the invitation carried', /notes\?: string \| null/.test(read('src/lib/dayPlan.ts')))
+
+/* ---------------------------------------------------------------------------------------------
+ * A TASK CAN BE CHANGED, CALLED OFF, AND BELONG TO A CLIENT
+ *
+ * THE FIRM: "you should also be able to edit a task, the name of the task, and also cancel a task
+ * -- the cancel reason. It could be attached to a client: this client has a meeting on the 15th,
+ * schedule the meeting, goes onto the notes of the client... the client has cancelled the meeting,
+ * and then it will also be on the notes of the client. So all the data is captured there."
+ * ------------------------------------------------------------------------------------------- */
+
+/* ONE BOX FOR BOTH. Two would drift: the day picker, the blank time and the client are the same
+   decisions whichever end you came in at. */
+ok('adding and editing are one box', /function TaskModal\(\{/.test(tasks))
+ok('...and the box knows which it is', /editing \? 'Edit task' : 'Add Task'/.test(tasks))
+/* THE DAY AND THE TIME COME APART THROUGH taskTime, the same function the list reads them with --
+   an edit box that guessed differently would put 00:00 into a field somebody left blank. */
+ok('...reading a time back the way the list does', /time: taskTime\(editing\) \?\? ''/.test(tasks))
+ok('a task can be edited from the list', /onClick=\{\(\) => setEditTask\(t\)\}/.test(tasks))
+
+/* CANCELLING ASKS WHY. 'Cancelled' has been a status all along and the only thing it could say was
+   that somebody had -- a meeting the CLIENT called off and one the firm dropped are the same row. */
+ok('cancelling asks why', /function CancelTaskModal\(\{/.test(tasks))
+ok('...and stores the answer', /cancelReason: reason/.test(tasks))
+/* ASKED FOR, NOT REQUIRED: a required reason is a box everybody fills with a full stop, and a file
+   of full stops is worse than one with gaps, because the gaps at least read as gaps. */
+ok('...without forcing one', /Optional &mdash;/.test(tasks.slice(tasks.indexOf('function CancelTaskModal'))))
+/* AND NOT ON ONE ALREADY FINISHED: there is nothing to call off, and a button that refuses is
+   worse than one that is not there. */
+ok('...and is absent on a task already finished',
+  /t\.status !== 'Completed' && t\.status !== 'Cancelled' && \(/.test(tasks))
+
+/*
+ * AND ALL THREE EVENTS LAND ON THE CLIENT'S OWN FILE.
+ *
+ * Creating a task already wrote there and completing one did; CANCELLING did not, so a meeting a
+ * client called off left no trace anywhere except a row quietly leaving a list -- which is the one
+ * event a client file most needs, and the one that went unrecorded.
+ */
+ok('cancelling writes to the client', /patch\.status === 'Cancelled' && previous\.status !== 'Cancelled'/.test(store))
+/* THE REASON IS IN THE SENTENCE, not a second field nobody reads: an activity feed is read as a
+   column of sentences, and "Meeting cancelled: Quarterly review" without the why is the same
+   sentence for a client who postponed and a firm that gave up. */
+ok('...with the reason in the sentence', /cancelled: \$\{previous\.title\}\$\{why/.test(store))
+ok('...on the client it was about', /companyId: previous\.companyId/.test(store))
+
+/*
+ * AND A TASK CAN BE GIVEN A CLIENT AT ALL, which it could not.
+ *
+ * `companyId` has been on a task all along and nothing on this screen could set it, so every task
+ * added here was attached to nobody -- three working activity writes with nothing to write to.
+ */
+ok('the box can attach a client', /companyId: form\.companyId \|\| undefined/.test(tasks))
+/* UNDEFINED, NOT AN EMPTY STRING: the column is a uuid and '' is not one. */
+ok('...and no client is nothing, not an empty string', !/companyId: form\.companyId,/.test(tasks))
+ok('...named on the row so the list can say whose it is', /relatedToLabel: companies\.find/.test(tasks))
 
 console.log(`\ncheck-day-plan: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

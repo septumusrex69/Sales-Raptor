@@ -1193,6 +1193,34 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         })
       }
 
+      /*
+       * AND A CANCELLATION IS WRITTEN DOWN WHERE THE FIRM LOOKS FOR IT.
+       *
+       * THE FIRM: "this client has a meeting on the 15th -- schedule the meeting, goes onto the
+       * notes of the client. Email received: the client has cancelled the meeting -- and then it
+       * will also be on the notes of the client, the place where the client lives. So all the data
+       * is captured there."
+       *
+       * Creating a task already wrote to the client's file and completing one did; CANCELLING did
+       * not, so a meeting a client called off left no trace anywhere except a row quietly leaving a
+       * list. That is the single most informative thing a client file can carry about a client who
+       * keeps moving appointments, and it was the one event that went unrecorded.
+       *
+       * THE REASON IS IN THE SUBJECT, not in a second field nobody reads. A client's activity feed
+       * is read as a column of sentences, and "Meeting cancelled: Quarterly review" without the
+       * why is the same sentence for a client who postponed and a firm that gave up.
+       */
+      if (previous && patch.status === 'Cancelled' && previous.status !== 'Cancelled') {
+        const why = (patch.cancelReason ?? '').trim()
+        addActivity({
+          type: taskCompletionActivityType(previous.type),
+          subject: `${previous.type} cancelled: ${previous.title}${why ? ` — ${why}` : ''}`,
+          leadId: previous.leadId,
+          dealId: previous.dealId,
+          companyId: previous.companyId,
+        })
+      }
+
       // Status and due date both move the Tasks badge, so refresh on any edit rather than
       // trying to work out which fields mattered.
       refreshNavCounts()

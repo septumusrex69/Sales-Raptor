@@ -43,9 +43,16 @@ function formatLongDate(dateParam: string) {
 }
 
 export function TasksPage() {
-  const { tasks, users, updateTask, addTask } = useAppStore()
+  const { tasks, users, companies, updateTask, addTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
+  /* THE CLIENTS A TASK CAN BE ABOUT, by name, so a picker reads as a list of clients rather than
+     a list of ids. Sorted, because a select nobody can find a name in twice is a select nobody
+     uses. */
+  const companyOptions = useMemo(
+    () => companies.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    [companies],
+  )
   const [searchParams, setSearchParams] = useSearchParams()
   const [view, setView] = useState<View>(() => {
     const fromUrl = readParam(searchParams, 'view')
@@ -71,6 +78,8 @@ export function TasksPage() {
     return () => { cancelled = true }
   }, [currentUser])
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
+  const [editTask, setEditTask] = useState<Task | null>(null)
+  const [cancelTask, setCancelTask] = useState<Task | null>(null)
 
   const today = startOfDay(TODAY)
   const tomorrow = new Date(today)
@@ -442,9 +451,29 @@ export function TasksPage() {
                     : formatDate(t.dueDate)}
                 </span>
                 <UserAvatar userId={t.ownerId} size={24} />
+                {/*
+                  EDIT, RESCHEDULE, CANCEL. THE FIRM: "you should also be able to edit a task, the
+                  name of the task, and also cancel a task -- the cancel reason."
+
+                  Reschedule stays its own button rather than folding into Edit: moving a date is
+                  the thing that happens fifty times a day, and burying it inside a form with six
+                  fields would make the common case the slow one.
+
+                  CANCEL IS ABSENT ON ONE ALREADY FINISHED. There is nothing to call off, and a
+                  button that refuses is worse than one that is not there.
+                */}
+                <button onClick={() => setEditTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+                  Edit
+                </button>
                 <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Reschedule
                 </button>
+                {t.status !== 'Completed' && t.status !== 'Cancelled' && (
+                  <button onClick={() => setCancelTask(t)}
+                    className="text-xs font-medium text-slate-400 hover:text-[var(--c-rust-deep)] shrink-0">
+                    Cancel
+                  </button>
+                )}
               </div>
             )
           })}
@@ -452,9 +481,10 @@ export function TasksPage() {
         </div>
       </Card>
 
-      {addOpen && (
-        <AddTaskModal
+      {(addOpen || editTask) && (
+        <TaskModal
           reps={reps}
+          companies={companyOptions}
           defaultOwnerId={currentUser?.id ?? ''}
           /*
             THE WHOLE STORE, NOT THE SCOPED LIST. The box can give a task to somebody else, and
@@ -465,8 +495,32 @@ export function TasksPage() {
           meetings={meetings}
           currentUserId={currentUser?.id ?? ''}
           today={localDay(today)}
-          onClose={() => setAddOpen(false)}
-          onSave={(input) => addTask(input)}
+          editing={editTask ?? undefined}
+          onClose={() => { setAddOpen(false); setEditTask(null) }}
+          onSave={(input) => {
+            if (editTask) updateTask(editTask.id, input)
+            else addTask(input)
+          }}
+        />
+      )}
+      {/*
+        CANCELLING ASKS WHY, and the answer goes on the client's file.
+
+        THE FIRM: "you should also be able to cancel a task -- the cancel reason... the client has
+        cancelled the meeting, and then it will also be on the notes of the client."
+      */}
+      {cancelTask && (
+        <CancelTaskModal
+          task={cancelTask}
+          onClose={() => setCancelTask(null)}
+          onCancel={(reason) => {
+            updateTask(cancelTask.id, {
+              status: 'Cancelled',
+              cancelReason: reason,
+              cancelledAt: new Date().toISOString(),
+            })
+            setCancelTask(null)
+          }}
         />
       )}
       {rescheduleTask && (
@@ -480,23 +534,38 @@ export function TasksPage() {
   )
 }
 
-function AddTaskModal({
+/**
+ * ADDING A TASK AND EDITING ONE ARE THE SAME BOX.
+ *
+ * THE FIRM: "you should also be able to edit a task, the name of the task."
+ *
+ * There was no way to change anything about a task but its date -- a title typed wrong stayed
+ * wrong, and the only way out was to cancel it and type it again, which leaves two rows on the
+ * client's file for one piece of work. ONE COMPONENT, because two would drift: the day picker, the
+ * blank time and the client are the same decisions whichever end you came in at.
+ */
+function TaskModal({
   reps,
+  companies,
   defaultOwnerId,
   allTasks,
   meetings,
   currentUserId,
   today,
+  /** The task being changed, or undefined when one is being made. */
+  editing,
   onClose,
   onSave,
 }: {
   reps: User[]
+  companies: { id: string; name: string }[]
   defaultOwnerId: string
   allTasks: Task[]
   meetings: CalendarEvent[]
   currentUserId: string
   /** 'YYYY-MM-DD'. Passed down rather than read from the clock, like every other picker here. */
   today: string
+  editing?: Task
   onClose: () => void
   onSave: (input: Partial<Task> & { title: string; dueDate: string }) => void
 }) {
@@ -508,7 +577,26 @@ function AddTaskModal({
    * indistinguishable from a wanted one. Blank, a time is a decision; filled in for you, it is
    * noise that the day's list would then print as fact.
    */
-  const [form, setForm] = useState({ title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority, ownerId: defaultOwnerId, date: '', time: '' })
+  const [form, setForm] = useState(() => {
+    if (!editing) {
+      return {
+        title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority,
+        ownerId: defaultOwnerId, date: '', time: '', companyId: '',
+      }
+    }
+    /* THE DAY AND THE TIME COME APART AGAIN, through the same function the list reads them with --
+       taskTime is what decides whether a time was ever chosen, and an edit box that guessed
+       differently would put 00:00 into a field somebody deliberately left blank. */
+    return {
+      title: editing.title,
+      type: editing.type,
+      priority: editing.priority,
+      ownerId: editing.ownerId,
+      date: localDay(new Date(editing.dueDate)),
+      time: taskTime(editing) ?? '',
+      companyId: editing.companyId ?? '',
+    }
+  })
 
   /*
    * WHAT THE OWNER'S DAY ALREADY HOLDS -- recomputed when the owner changes, because the question
@@ -529,14 +617,36 @@ function AddTaskModal({
   )
   /* Wide enough for seven columns: the grid caps itself at 32rem. */
   return (
-    <Modal title="Add Task" onClose={onClose} width={520}>
+    <Modal title={editing ? 'Edit task' : 'Add Task'} onClose={onClose} width={520}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
           if (!form.title || !form.date) return
           /* Midnight where no time was given -- which is exactly what taskTime reads back as
              "any time that day". An empty string here would make an Invalid Date. */
-          onSave({ title: form.title, type: form.type, priority: form.priority, ownerId: form.ownerId, dueDate: new Date(`${form.date}T${form.time || '00:00'}`).toISOString() })
+          onSave({
+            title: form.title,
+            type: form.type,
+            priority: form.priority,
+            ownerId: form.ownerId,
+            dueDate: new Date(`${form.date}T${form.time || '00:00'}`).toISOString(),
+            /*
+              THE CLIENT, SO THE WORK LANDS ON THEIR FILE.
+
+              THE FIRM: "it could be attached to a client -- this client has a meeting on the 15th.
+              Schedule the meeting, goes onto the notes of the client... so all the data is
+              captured there."
+
+              `companyId` has been on a task all along and nothing on this screen could set it, so
+              every task added here was attached to nobody. AppStore writes an activity on the
+              client when a task is created, completed or cancelled -- all three were working and
+              all three had nothing to write to.
+
+              UNDEFINED, NOT AN EMPTY STRING: the column is a uuid, and '' is not one.
+            */
+            companyId: form.companyId || undefined,
+            relatedToLabel: companies.find((c) => c.id === form.companyId)?.name,
+          })
           onClose()
         }}
       >
@@ -585,6 +695,20 @@ function AddTaskModal({
           is a time ON. The day is now a grid rather than a field, so the order reads the way the
           decision is made: what it is, which day, then whose it is and whether an hour was meant.
         */}
+        {/*
+          WHOSE CLIENT IT IS ABOUT. Optional, because most tasks are about nobody -- and a required
+          client would have somebody picking one at random to get past the form.
+        */}
+        <FormField label="Client">
+          <select className={inputClass} value={form.companyId}
+            onChange={(e) => setForm({ ...form, companyId: e.target.value })}>
+            <option value="">Not about a client</option>
+            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <span className="block text-[11px] text-slate-400 mt-1">
+            Booking it, finishing it and cancelling it all go onto their file.
+          </span>
+        </FormField>
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Owner">
             <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
@@ -609,7 +733,7 @@ function AddTaskModal({
             Cancel
           </button>
           <button type="submit" className="text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
-            Add Task
+            {editing ? 'Save changes' : 'Add Task'}
           </button>
         </div>
       </form>
@@ -617,3 +741,62 @@ function AddTaskModal({
   )
 }
 
+
+/**
+ * CALLING A TASK OFF, AND SAYING WHY.
+ *
+ * THE FIRM: "you should also be able to cancel a task -- the cancel reason... the client has
+ * cancelled the meeting, and then it will also be on the notes of the client, the place where the
+ * client lives. So all the data is captured there."
+ *
+ * 'Cancelled' HAS BEEN A STATUS ALL ALONG and the only thing it could ever say was that somebody
+ * had cancelled. A meeting the CLIENT called off and one the firm dropped because it was no longer
+ * needed are the same row, and six months later that is the whole question: a client who keeps
+ * moving appointments is a different problem from a firm that keeps forgetting them.
+ *
+ * THE REASON IS ASKED FOR AND NOT REQUIRED. A required one is a box everybody fills with a full
+ * stop, and a file of full stops is worse than a file with gaps in it -- the gaps at least read as
+ * gaps. What the box does instead is make the useful answer the easy one.
+ */
+function CancelTaskModal({ task, onClose, onCancel }: {
+  task: Task
+  onClose: () => void
+  onCancel: (reason: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  return (
+    <Modal title={`Cancel this ${task.type.toLowerCase()}?`} onClose={onClose} width={440}>
+      <p className="text-sm text-slate-500">
+        <span className="font-medium text-slate-700">{task.title}</span>
+        {task.relatedToLabel && <span> &middot; {task.relatedToLabel}</span>}
+      </p>
+      {/*
+        NOTHING IS DELETED. A cancelled task stays on the list under Completed's own filter and on
+        the client's file for ever -- which is the point of recording it at all.
+      */}
+      <p className="text-[13px] text-slate-500 mt-2">
+        It comes off the working lists and stays on the record.
+        {task.companyId && ' This goes onto the client’s file.'}
+      </p>
+
+      <FormField label="Why?">
+        <input className={inputClass} value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="The client moved it to next month" autoFocus />
+        <span className="block text-[11px] text-slate-400 mt-1">
+          Optional &mdash; but it is the half somebody reading this in six months actually needs.
+        </span>
+      </FormField>
+
+      <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+        <button type="button" onClick={onClose}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+          Keep it
+        </button>
+        <button type="button" onClick={() => onCancel(reason.trim())}
+          className="text-sm font-medium px-3.5 py-2 rounded-lg bg-[var(--c-rust-deep)] text-white hover:brightness-110">
+          Cancel the {task.type.toLowerCase()}
+        </button>
+      </div>
+    </Modal>
+  )
+}
