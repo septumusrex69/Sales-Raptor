@@ -20,6 +20,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { ticketBody, ticketSubject } from '../../src/lib/ticketEmail.ts'
+import { QUERY_STAGE_LABEL, stageLine } from '../../src/lib/disputeCategories.ts'
 
 let pass = 0
 const failures = []
@@ -40,6 +41,9 @@ const page = code('src/pages/queries/QueryDetail.tsx')
 const panel = code('src/components/queries/TicketWork.tsx')
 const letter = code('src/lib/ticketEmail.ts')
 const workspace = code('src/lib/accountWorkspace.ts')
+/* The card on the ACCOUNT, where the firm read the stale stage. TicketWork's own panel is `panel`
+   above; this is the other screen the same ticket is drawn on. */
+const card = code('src/pages/accounts/QueryPanel.tsx')
 
 /* ---------------------------------------------------------------------------------------------
  * THE EMAIL THE TICKET ALREADY KNOWS HOW TO WRITE
@@ -126,9 +130,17 @@ ok('a note written here is an account note carrying the ticket',
   /addNote\(\{[\s\S]{0,400}queryId: q\.id/.test(page))
 ok('...and so is a call', (page.match(/addNote\(\{[\s\S]{0,400}queryId: q\.id/g) ?? []).length >= 2)
 ok('...read back off the ticket', /fetchQueryNotes/.test(page) && /fetchQueryNotes/.test(workspace))
-/* OLDEST FIRST. A ticket is a short exchange read in order — what was asked, what was answered. */
-ok('...oldest first, like a conversation',
-  /query_id.{0,60}order\('created_at', \{ ascending: true \}\)/s.test(workspace))
+/*
+ * NEWEST FIRST, AND THAT IS A REVERSAL. THE FIRM: "when I enter a note, the newest note goes under
+ * the first note. It should be on top."
+ *
+ * It was ascending on the reasoning that a ticket is a short exchange read in order. That is how
+ * you catch up on one you have never seen; it is not what the list is for. A ticket is opened to
+ * find out where it GOT TO, and on one with nine notes the thing somebody needed was nine rows
+ * down and below the fold.
+ */
+ok('...newest first, because a ticket is opened to see where it got to',
+  /query_id.{0,60}order\('created_at', \{ ascending: false \}\)/s.test(workspace))
 
 /*
  * WHO WAS SPOKEN TO IS PART OF THE SENTENCE, not a column of its own. Six months later the question
@@ -181,6 +193,63 @@ ok('the two-column shape is only for an account ticket',
 /* THE FIGURES ARE DRAWN ONCE. In the rail on an account ticket, in the card on a batch — both and
    they would be the same four facts twice on one screen. */
 ok('...and the facts are not drawn twice', /\{!q\.accountId && \(\s*<dl/.test(page))
+
+/* ---------------------------------------------------------------------------------------------
+ * WHERE IT STANDS, AND WHEN SOMEBODY LOOKS AT IT AGAIN
+ *
+ * THE FIRM: "now it says awaiting liaison, but it's actually already been escalated to the client.
+ * So it should say awaiting client feedback and when to follow up next."
+ * ------------------------------------------------------------------------------------------- */
+
+/* "Awaiting client" could be read as waiting to SEND it; what is being waited on is their answer,
+   and on a ticket three weeks old that is the distinction somebody is checking. */
+check('a ticket with the client says what is being waited for',
+  QUERY_STAGE_LABEL.client, 'Awaiting client feedback')
+
+/* THE STAGE AND THE FOLLOW-UP ARE ONE SENTENCE. A ticket sitting with a client is not a problem; a
+   ticket sitting with a client that nobody has booked a day to chase is how one goes quiet. */
+{
+  const booked = stageLine({ stage: 'client', chaseOn: '2026-10-09', today: '2026-10-02' })
+  check('...and when it comes back', booked.followOn, '2026-10-09')
+  check('...which is not yet overdue', booked.overdue, false)
+  const late = stageLine({ stage: 'client', chaseOn: '2026-09-20', today: '2026-10-02' })
+  check('a follow-up date that has passed is overdue', late.overdue, true)
+  /* NO DATE IS SAID OUT LOUD by the caller, so this reports the absence rather than hiding it. */
+  const none = stageLine({ stage: 'client', chaseOn: null, today: '2026-10-02' })
+  check('no date booked is reported, not hidden', [none.waiting, none.followOn], [true, null])
+  ok('...and the screen says so in words', /no follow-up booked/.test(card))
+}
+/* NOT ON A TICKET NOBODY IS WAITING ON. It is the agent's to work now, and a follow-up date there
+   would be the screen asking them to book a reminder to do the thing they are looking at. */
+check('a ticket still with the agent is not waiting on anybody',
+  stageLine({ stage: 'agent', chaseOn: '2026-10-09', today: '2026-10-02' }).waiting, false)
+
+/* THE DATE, NOT A SENTENCE ABOUT IT: this file has no business deciding how the firm reads a date,
+   and the screen formats it. */
+ok('the screen formats the date', /follow up \$\{formatDate\(line\.followOn\)\}/.test(card))
+
+/*
+ * AND THE TICKET MOVES WHEN THE CLIENT IS ACTUALLY WRITTEN TO.
+ *
+ * The firm was reading a true record of a stale state: writing to the client WAS the escalation --
+ * the message went, it is in the thread, it is charged -- and the stage only moved if somebody
+ * separately remembered to press "Send to client".
+ */
+ok('sending to the client moves the ticket to them',
+  /if \(q\.stage !== 'client'\) \{[\s\S]{0,200}updateQuery\(q\.id, \{ stage: 'client' \}/.test(page))
+/* ONLY ON THE WAY UP: a second email is a chase, not a fresh escalation, and nothing here moves a
+   ticket back -- that is the liaison's decision when the client answers. */
+ok('...and only on the way up', !/stage: 'liaison'/.test(page))
+
+/*
+ * AND "VIEW DISPUTE" OPENS THE DISPUTE.
+ *
+ * THE FIRM: "if you say view dispute, it doesn't take you to the ticket -- it takes you to the
+ * dispute pane and then you have to double click." It went to the BOARD filtered to this account:
+ * one row, which you then had to find and open.
+ */
+ok('view dispute opens the ticket itself', /<Link to=\{`\/queries\/\$\{q\.id\}`\}/.test(card))
+ok('...rather than the board filtered to the account', !/\/queries\?q=\$\{encodeURIComponent/.test(card))
 
 console.log(`\ncheck-ticket-work: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

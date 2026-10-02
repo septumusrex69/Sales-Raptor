@@ -1047,7 +1047,6 @@ export function AccountDetail() {
   const disputesPanel = (
     <QueryPanel
       accountId={account.id}
-      accountLabel={account.accountNumber}
       queries={queries}
       users={users}
       actor={{

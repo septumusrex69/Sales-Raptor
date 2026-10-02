@@ -482,13 +482,19 @@ export function ComposeEmailModal({
         */}
         {showCc ? (
           <FormField label="Cc">
-            <input
-              className={inputClass}
-              value={cc}
-              onChange={(e) => setCc(e.target.value)}
-              placeholder="Nobody else"
-              autoFocus={initialCc === undefined}
-            />
+            {/*
+              THE SAME PICKER AS "To", AND THE SAME LIST.
+
+              THE FIRM, on writing to a client: "there's another person on the client's records as
+              well, so there should also be an option to CC -- who from the client do you want to
+              send it to."
+
+              It was a bare text box, so copying the second person at a client meant knowing their
+              address by heart and typing it correctly on a message that goes outside the building.
+              The names were already in hand two fields above.
+            */}
+            <RecipientField value={cc} onChange={setCc} contextual={recipients}
+              autoFocus={initialCc === undefined} />
           </FormField>
         ) : (
           <button type="button" onClick={() => setShowCc(true)}

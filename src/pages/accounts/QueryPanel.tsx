@@ -5,7 +5,7 @@ import { Card } from '../../components/ui/Card'
 import { formatMoney, formatDate } from '../../data/mockData'
 import {
   closeQuery, isStale, markDisputeReceived, markOutcomeDone, openDisputeOn, updateQuery,
-  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, QUERY_STAGE_LABEL,
+  stageForAssignee, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT, stageLine,
   type AccountQuery, type QueryOutcome, type QueryEffect, type QueryStage,
 } from '../../lib/accountQueries'
 import type { User } from '../../types'
@@ -48,10 +48,8 @@ const OUTCOME_CHIP: Record<QueryOutcome, string> = {
  * the business's decision, and a system that quietly halted work on an account would be taking
  * that decision away.
  */
-export function QueryPanel({ accountId, accountLabel, queries, users, actor, onChange, onRaise, busy, run, clientId, clientLiaisonId }: {
+export function QueryPanel({ accountId, queries, users, actor, onChange, onRaise, busy, run, clientId, clientLiaisonId }: {
   accountId: string
-  /** The account number, used to find this debtor again on the dispute board. */
-  accountLabel: string | null
   queries: AccountQuery[]
   /** Who a query can be given to. */
   users: User[]
@@ -134,7 +132,7 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
 
       <div className="space-y-2.5">
         {open.map((q) => (
-          <QueryCard key={q.id} query={q} accountId={accountId} accountLabel={accountLabel} users={users} actor={actor}
+          <QueryCard key={q.id} query={q} accountId={accountId} users={users} actor={actor}
             clientLiaisonId={clientLiaisonId} busy={busy} run={run} onChange={onChange} clientId={clientId} />
         ))}
       </div>
@@ -166,10 +164,9 @@ export function QueryPanel({ accountId, accountLabel, queries, users, actor, onC
   )
 }
 
-function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run, onChange, clientId, clientLiaisonId }: {
+function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, clientId, clientLiaisonId }: {
   query: AccountQuery
   accountId: string
-  accountLabel: string | null
   users: User[]
   /*
    * WITH THE GRANTS, not the role alone. What somebody may do is the role's template plus what
@@ -230,10 +227,30 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
         least useful of them at a glance, and the timeline records it on the "Dispute raised" note.
       */}
       <p className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-1.5">
-        <span className="inline-flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
-          {QUERY_STAGE_LABEL[q.stage]}
-        </span>
+        {/*
+          WHERE IT STANDS AND WHEN IT COMES BACK, in one breath.
+
+          THE FIRM: "it says awaiting liaison, but it's actually already been escalated to the
+          client. So it should say awaiting client feedback and when to follow up next."
+
+          A ticket sitting with a client is not a problem; a ticket sitting with a client that
+          nobody has booked a day to chase is how one goes quiet for a month -- so the absence of a
+          date is said out loud rather than left blank.
+        */}
+        {(() => {
+          const line = stageLine({ stage: q.stage, chaseOn: q.chaseOn, today: TODAY })
+          return (
+            <span className="inline-flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STAGE_DOT[q.stage] }} />
+              {line.label}
+              {line.waiting && (
+                <span className={line.overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-400'}>
+                  &middot; {line.followOn ? `follow up ${formatDate(line.followOn)}` : 'no follow-up booked'}
+                </span>
+              )}
+            </span>
+          )
+        })()}
         {q.category && (
           <span className="inline-flex items-center gap-1.5">
             <span className="text-slate-300">&middot;</span>{q.category}
@@ -340,7 +357,16 @@ function QueryCard({ query: q, accountId, accountLabel, users, actor, busy, run,
               View client
             </Link>
           )}
-          <Link to={accountLabel ? `/queries?q=${encodeURIComponent(accountLabel)}` : '/queries'}
+          {/*
+            STRAIGHT TO THE TICKET. THE FIRM: "if you say view dispute, it doesn't take you to the
+            ticket -- it takes you to the dispute pane and then you have to double click. It should
+            say view dispute and you should go there immediately."
+
+            It went to /queries?q=<account number>, which is the BOARD filtered to this account:
+            one row, which you then had to find and open. The board is where you go to see what is
+            outstanding; this button names one ticket and now opens it.
+          */}
+          <Link to={`/queries/${q.id}`}
             className="flex-1 text-[11px] font-medium py-1 rounded border border-brand-100 text-brand-500 hover:bg-white inline-flex items-center justify-center gap-1">
             View dispute
           </Link>

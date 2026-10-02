@@ -296,10 +296,22 @@ export async function fetchWorkspace(accountId: string): Promise<Workspace> {
  * OLDEST FIRST, unlike the account's timeline, for the same reason TicketEmails is: a ticket is a
  * short exchange read in order — what was asked, what was answered, what was done about it.
  */
+/**
+ * The thread on a ticket, NEWEST FIRST.
+ *
+ * THE FIRM: "when I enter a note, the newest note goes under the first note. It should be on top."
+ *
+ * It was ascending, which is how a conversation reads when you are catching up on it from the
+ * start. That is not what this list is for: a ticket is opened to find out where it got to, and
+ * on one with nine notes the thing somebody needs was nine rows down and below the fold.
+ *
+ * ONLY THIS LIST. The account's own timeline is a different question asked of the same table and
+ * keeps its own order -- the ordering belongs to the reading, not to the rows.
+ */
 export async function fetchQueryNotes(queryId: string): Promise<AccountNote[]> {
   const { data, error } = await supabase
     .from('account_notes').select('*').eq('query_id', queryId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
   return (data ?? []).map(toNote)
 }

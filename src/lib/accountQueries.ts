@@ -47,36 +47,20 @@ import {
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
   type DisputeStage as QueryStage, type QueryOutcome, type QueryEffect, type EscalationKind,
+  QUERY_STAGE_LABEL, stageLine,
   type ClientSection, REQUEST_KINDS,
   classificationMissing, explanationMissing, CLASSIFICATION_REQUIRED,
 } from './disputeCategories'
 
 export {
   canSendToClient, stageForAssignee, escalationChargeable, escalationNote, clientSection,
+  QUERY_STAGE_LABEL, stageLine,
   CAN_SEND_TO_CLIENT, QUERY_OUTCOME_LABEL, QUERY_EFFECT_LABEL, QUERY_EFFECT_HINT,
   ESCALATION_KINDS, ESCALATION_KIND_ORDER,
 }
 export type { EscalationKind, ClientSection }
 export { REQUEST_KINDS }
 export type { QueryStage, QueryOutcome, QueryEffect }
-
-/**
- * Who is being waited on.
- *
- * These read as "awaiting X" rather than "with X" for a reason the firm put plainly: once you have
- * escalated a dispute, being told it is *with* the liaison tells you nothing you did not do
- * yourself a second ago. What you actually want to know is that the ball is not in your court and
- * whose court it is in.
- *
- * `agent` is the exception and stays "with", because nobody is being waited on — it is sitting
- * with the collections desk, which is where it started.
- */
-export const QUERY_STAGE_LABEL: Record<QueryStage, string> = {
-  agent: 'With the agent',
-  team_leader: 'Awaiting team leader',
-  liaison: 'Awaiting liaison',
-  client: 'Awaiting client',
-}
 
 /** What happens when this query moves up, and what it is called on the button. */
 export const NEXT_STAGE: Record<QueryStage, { to: QueryStage; label: string; note: string } | null> = {
@@ -393,6 +377,23 @@ export async function fetchQuery(id: string): Promise<{
    */
   clientEmail: string | null
   clientContact: string | null
+  /**
+   * EVERYBODY AT THE CLIENT WE HAVE AN ADDRESS FOR.
+   *
+   * THE FIRM: "if I say email, then it already says Rinda at novacall.co.za. But there's another
+   * person on the client's records as well. So there should be an option to CC, or who from the
+   * client do you want to send it to -- which person at the client."
+   *
+   * The compose box has taken a list of recipients all along and was being handed one: the
+   * company's own address. A client is an organisation with people in it, and which of them a
+   * dispute goes to is a decision the liaison makes per ticket -- the accounts clerk for a
+   * reconciliation, the manager for a complaint.
+   *
+   * THE COMPANY'S OWN ADDRESS STAYS FIRST where there is one. It is the address the firm was given
+   * to use, and a picker that opened on whichever person happened to be added first would quietly
+   * change where client mail goes.
+   */
+  clientPeople: { email: string; label: string }[]
 } | null> {
   const { data, error } = await supabase
     .from('account_queries').select('*').eq('id', id).maybeSingle()
@@ -438,6 +439,38 @@ export async function fetchQuery(id: string): Promise<{
       .eq('id', companyId).maybeSingle()).data
     : null
 
+  /*
+   * AND THE PEOPLE AT IT. A second query because they are a second table, and it is asked only
+   * where there is a client to ask about -- a batch ticket with no company reaches none of this.
+   *
+   * ADDRESSES ONLY. A contact with no email cannot be written to, and offering their name in a
+   * recipient picker is a row that does nothing when it is chosen.
+   */
+  const people = companyId
+    ? (await supabase.from('contacts')
+      .select('first_name, last_name, job_title, email')
+      .eq('company_id', companyId)
+      .not('email', 'is', null)
+      .order('first_name')).data ?? []
+    : []
+
+  const seen = new Set<string>()
+  const clientPeople: { email: string; label: string }[] = []
+  const add = (email: string | null | undefined, label: string) => {
+    const clean = (email ?? '').trim().toLowerCase()
+    if (!clean || seen.has(clean)) return
+    seen.add(clean)
+    clientPeople.push({ email: clean, label })
+  }
+  /* THE COMPANY'S OWN ADDRESS FIRST -- see clientPeople. Named for whoever the company record says
+     to ask for, which is what the liaison knows them by. */
+  add(client?.email as string | null, (client?.contact_person as string | null)
+    ?? (client?.name as string | null) ?? 'the client')
+  for (const c of people) {
+    const name = [c.first_name, c.last_name].filter(Boolean).join(' ').trim()
+    add(c.email as string | null, [name, c.job_title].filter(Boolean).join(' \u00b7 ') || 'at the client')
+  }
+
   return {
     query: q,
     account: acc,
@@ -445,6 +478,7 @@ export async function fetchQuery(id: string): Promise<{
     clientName: (client?.name as string | null) ?? null,
     clientEmail: (client?.email as string | null) ?? null,
     clientContact: (client?.contact_person as string | null) ?? null,
+    clientPeople,
   }
 }
 

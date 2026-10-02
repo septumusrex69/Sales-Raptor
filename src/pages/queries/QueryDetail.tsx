@@ -6,7 +6,7 @@ import { useAuth } from '../../store/AuthContext'
 import { useAppStore } from '../../store/AppStore'
 import { formatDate } from '../../data/mockData'
 import {
-  ageInDays, closeQuery, fetchQuery, isStale,
+  ageInDays, closeQuery, fetchQuery, isStale, stageLine, updateQuery,
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type QueryStage,
 } from '../../lib/accountQueries'
@@ -471,10 +471,19 @@ export function QueryDetail() {
             <Fact label="Raised" value={`${formatDate(q.raisedAt)}${q.raisedByName ? ` by ${q.raisedByName}` : ''}`} />
             <Fact label={q.status === 'closed' ? 'Closed' : 'Age'}
               value={q.status === 'closed' ? formatDate(q.closedAt ?? q.raisedAt) : `${ageInDays(q)} days`} />
+            {/*
+              WHERE IT STANDS, AND IT IS THE FIRST THING ASKED OF A TICKET.
+
+              THE FIRM: "it says awaiting liaison, but it's actually already been escalated to the
+              client. So it should say awaiting client feedback and when to follow up next." This
+              rail carried who OWNS it and when it is chased and never which of those two states it
+              was in -- so a ticket that had gone to a client read exactly like one that had not.
+            */}
+            <Fact label="Stage" value={stageLine({ stage: q.stage, chaseOn: q.chaseOn }).label} />
             {/* The chase date is the only thing on this page that can be WRONG rather than merely
                 old, so it is the one that gets a colour. */}
-            <Fact label="Chase" tone={stale ? 'bad' : undefined}
-              value={q.chaseOn ? formatDate(q.chaseOn) : 'Not set'} />
+            <Fact label="Follow up" tone={stale ? 'bad' : undefined}
+              value={q.chaseOn ? formatDate(q.chaseOn) : 'Not booked'} />
             {q.requestFor && <Fact label="Asking for" value={q.requestFor} />}
             {data.clientName && <Fact label="Client" value={data.clientName} />}
           </dl>
@@ -614,10 +623,20 @@ export function QueryDetail() {
       */}
       {(forwarding || writing) && q.accountId && (
         <ComposeEmailModal
-          to={data.clientEmail ?? ''}
-          recipients={data.clientEmail
-            ? [{ email: data.clientEmail, label: data.clientContact ?? data.clientName ?? undefined }]
-            : []}
+          to={data.clientEmail ?? data.clientPeople[0]?.email ?? ''}
+          /*
+            EVERYBODY AT THE CLIENT, NOT JUST THE ADDRESS ON THE COMPANY RECORD.
+
+            THE FIRM: "if I say email, it already says Rinda at novacall.co.za. But there's another
+            person on the client's records as well. So there should be an option to CC, or who from
+            the client do you want to send it to -- which person at the client."
+
+            The box has taken a list all along; it was being handed one. A client is an organisation
+            with people in it, and which of them a dispute goes to is a decision the liaison makes
+            per ticket -- the accounts clerk for a reconciliation, the manager for a complaint. Cc
+            is already on the box behind "Add Cc", and it takes the same list.
+          */
+          recipients={data.clientPeople}
           initialSubject={forwarding
             ? forwardSubject(forwarding.subject)
             : ticketSubject({
@@ -691,6 +710,34 @@ export function QueryDetail() {
                panel above is what reads it back. Separately caught: a mail list that refreshed and
                a thread that did not is still a message that went out. */
             void fetchQueryNotes(q.id).then(setNotes).catch(() => { /* see above */ })
+
+            /*
+             * AND THE TICKET IS NOW WITH THE CLIENT, BECAUSE IT IS.
+             *
+             * THE FIRM: "now it says awaiting liaison, but it's actually already been escalated to
+             * the client."
+             *
+             * They were reading a true record of a stale state. Writing to the client WAS the
+             * escalation -- the message went, it is in the thread, it is charged -- and the stage
+             * only moved if somebody separately remembered to press "Send to client". A state with
+             * no record behind it is the fault this codebase keeps meeting; this is the other half
+             * of it, a record with no state in front of it.
+             *
+             * ONLY ON THE WAY UP. A ticket already with the client stays there -- a second email
+             * is a chase, not a fresh escalation -- and nothing here moves a ticket BACK, which is
+             * the liaison's own decision when the client answers.
+             */
+            if (q.stage !== 'client') {
+              void updateQuery(q.id, { stage: 'client' }, {
+                accountId: q.accountId,
+                actorId: currentUser?.id ?? null,
+                actorName: currentUser?.name ?? null,
+                note: 'Sent to the client.',
+              })
+                .then(() => fetchQuery(q.id))
+                .then(setData)
+                .catch(() => { /* the message went; the stage can be moved by hand. */ })
+            }
           }}
         />
       )}

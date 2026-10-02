@@ -466,3 +466,63 @@ export function escalationNote(kind: EscalationKind, description: string): strin
     default: return `Dispute raised: ${description}`
   }
 }
+
+/**
+ * Who is being waited on.
+ *
+ * These read as "awaiting X" rather than "with X" for a reason the firm put plainly: once you have
+ * escalated a dispute, being told it is *with* the liaison tells you nothing you did not do
+ * yourself a second ago. What you actually want to know is that the ball is not in your court and
+ * whose court it is in.
+ *
+ * `agent` is the exception and stays "with", because nobody is being waited on — it is sitting
+ * with the collections desk, which is where it started.
+ */
+export const QUERY_STAGE_LABEL: Record<DisputeStage, string> = {
+  agent: 'With the agent',
+  team_leader: 'Awaiting team leader',
+  liaison: 'Awaiting liaison',
+  /*
+   * THE FIRM'S OWN WORDS: "it says awaiting liaison, but it's actually already been escalated to
+   * the client. So it should say awaiting client feedback and when to follow up next."
+   *
+   * "Awaiting client" could be read as waiting to send it; what is being waited on is their
+   * ANSWER, and on a ticket that has been with a client for three weeks that is the distinction
+   * somebody is checking.
+   */
+  client: 'Awaiting client feedback',
+}
+
+/**
+ * WHERE IT STANDS, AND WHEN SOMEBODY LOOKS AT IT AGAIN.
+ *
+ * THE FIRM asked for the stage and the follow-up date together, and they are one sentence for a
+ * reason: a ticket sitting with a client is not a problem, and a ticket sitting with a client
+ * that nobody has booked a day to chase is exactly how one goes quiet for a month.
+ *
+ * NO DATE IS SAID OUT LOUD rather than left blank. A blank reads as a field that did not load;
+ * "no follow-up booked" reads as the thing it is, which is a loose end.
+ *
+ * PURE, and it takes the pieces rather than the row, so a check can exercise it without a
+ * database anywhere near it.
+ */
+export function stageLine(input: {
+  stage: DisputeStage
+  chaseOn: string | null
+  /** 'YYYY-MM-DD'. Passed in rather than read off a clock, like every other date in this app. */
+  today?: string | null
+}): { label: string; waiting: boolean; followOn: string | null; overdue: boolean } {
+  const label = QUERY_STAGE_LABEL[input.stage]
+  /* ONLY WHERE SOMEBODY IS BEING WAITED ON. A ticket still with the agent is theirs to work now,
+     and a follow-up date on it would be the screen asking them to book a reminder to do the thing
+     they are looking at. */
+  const waiting = input.stage !== 'agent'
+  return {
+    label,
+    waiting,
+    /* THE DATE, NOT A SENTENCE ABOUT IT. Dates are written by the screen that draws them -- this
+       file has no business deciding whether the firm reads "9 Oct 2026" or "09/10". */
+    followOn: waiting ? input.chaseOn : null,
+    overdue: waiting && !!input.chaseOn && !!input.today && input.chaseOn < input.today,
+  }
+}

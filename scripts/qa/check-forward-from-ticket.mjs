@@ -170,7 +170,24 @@ ok('the page asks for it that way', /forwarding\.body \?\? '',\s*\n\s*false,\s*\
 ok('the ticket knows the client’s address', /clientEmail: string \| null/.test(queries))
 ok('...read on the same round trip as the name',
   /\.select\('name, email, contact_person'\)/.test(queries))
-ok('the forward opens addressed to them', /to=\{data\.clientEmail \?\? ''\}/.test(page))
+ok('the forward opens addressed to them',
+  /to=\{data\.clientEmail \?\? data\.clientPeople\[0\]\?\.email \?\? ''\}/.test(page))
+/*
+ * AND EVERY PERSON AT THE CLIENT IS OFFERED. THE FIRM: "if I say email, it already says Rinda at
+ * novacall.co.za. But there's another person on the client's records as well -- there should be an
+ * option to CC, or who from the client do you want to send it to."
+ *
+ * The box has taken a list all along and was handed one address. A client is an organisation with
+ * people in it, and which of them a dispute goes to is a decision made per ticket.
+ */
+ok('...and offers everybody at the client', /recipients=\{data\.clientPeople\}/.test(page))
+ok('...gathered where the client is read', /clientPeople: \{ email: string; label: string \}\[\]/.test(queries))
+/* THE COMPANY'S OWN ADDRESS FIRST. It is the address the firm was given to use, and a picker that
+   opened on whichever person happened to be added first would quietly change where client mail
+   goes. */
+ok('...with the company address first', /add\(client\?\.email as string \| null,/.test(queries))
+/* ADDRESSES ONLY: a contact with no email is a row that does nothing when it is chosen. */
+ok('...and nobody without an address', /\.not\('email', 'is', null\)/.test(queries))
 /* NULL IS AN ANSWER, not a failure: a client with no address on file opens an empty To rather
    than hiding the button, because the sender may know what the record does not. */
 ok('...and an unknown address leaves the box open rather than the button hidden',

@@ -252,7 +252,16 @@ ok('the Cc box opens by itself on a reply-all',
 ok('...and is one line away on everything else', />\s*<Plus size=\{12\} \/> Add Cc/.test(composer))
 ok('...which opens the same field', /setShowCc\(true\)/.test(composer))
 ok('...and it opens with the people who were on the original', /useState\(initialCc \?\? ''\)/.test(composer))
-ok('...and it is a field, not a label', /onChange=\{\(e\) => setCc\(e\.target\.value\)\}/.test(composer))
+/*
+ * AND IT IS THE SAME PICKER AS "To", NOT A BARE TEXT BOX. THE FIRM, writing to a client: "there's
+ * another person on the client's records as well, so there should also be an option to CC -- who
+ * from the client do you want to send it to."
+ *
+ * Copying the second person at a client meant knowing their address by heart and typing it
+ * correctly onto a message that leaves the building. The names were already in hand two fields up.
+ */
+ok('...and it is the same picker as To',
+  /<RecipientField value=\{cc\} onChange=\{setCc\} contextual=\{recipients\}/.test(composer))
 /* Cleared to nothing, the message goes to the one recipient -- not to an empty Cc header. */
 ok('an emptied Cc box sends no Cc', /\.\.\.\(cc\.trim\(\) \? \{ cc: cc\.trim\(\) \} : \{\}\)/.test(composer))
 
