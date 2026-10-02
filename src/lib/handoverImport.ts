@@ -25,7 +25,7 @@ import {
 } from './handoverSheet.ts'
 /* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
    disagree, and the one that disagrees is whichever a person is not looking at. */
-import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
+import { DEFAULT_INTEREST_RATE_ANNUAL, isValidSaId, type NewDebtorInput } from './newDebtor.ts'
 import {
   missingDateMessage, substituteDefaultDate, substitutionMessage,
 } from './defaultDateFallback.ts'
@@ -1201,12 +1201,22 @@ export function toDebtorInput(
      * first live accounts opened at 0% while the calculator correctly reported that no interest was
      * running on any of them.
      *
-     * STILL NOUGHT WHERE NO RATE IS RECORDED, deliberately and unchanged. An account at nought is
-     * one somebody notices -- the client card and the account both now say which clients have no
-     * rate -- while an account opened at a guessed 24% is one nobody does, and a rate guessed onto
-     * a debtor is money charged to a person on the strength of a default.
+     * AND 24% WHERE NO RATE IS RECORDED, which reverses what this line said two commits ago.
+     *
+     * THE FIRM: "all debt clients are by default loaded on 24% interest. If we change it, we want
+     * to change it. We will reduce it if we want."
+     *
+     * It wrote nought, on the argument that an account at nought is one somebody notices while one
+     * at a guessed 24% is one nobody does. That argument was about GUESSING, and 24% is not a
+     * guess -- it is the firm's standing rate, what the migrated book charges, and the 2% a month
+     * their own letters quote. A default somebody has decided is a different thing from a default
+     * somebody inferred. See DEFAULT_INTEREST_RATE_ANNUAL.
+     *
+     * THE CLIENT'S OWN RATE STILL WINS, including a client recorded at nought: a mandate that
+     * charges no interest is a real mandate, and `=== null` rather than `|| ` is what keeps a
+     * deliberate zero from falling through to the firm's default.
      */
-    interestRateAnnual: clientInterestRateAnnual === null ? '0' : String(clientInterestRateAnnual),
+    interestRateAnnual: String(clientInterestRateAnnual ?? DEFAULT_INTEREST_RATE_ANNUAL),
     mobile: phone('cell_1'),
     workPhone: phone('work_phone'),
     altNumber: phone('cell_2'),

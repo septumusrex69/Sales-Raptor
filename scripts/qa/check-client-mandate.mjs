@@ -33,6 +33,7 @@
  * Run: node scripts/qa/check-client-mandate.mjs
  */
 import { readFileSync } from 'node:fs'
+import { DEFAULT_INTEREST_RATE_ANNUAL } from '../../src/lib/newDebtor.ts'
 
 let pass = 0
 const failures = []
@@ -274,8 +275,21 @@ ok('...and a rate over 100 is refused too', /<= 100/.test(card))
  * every account at 0% -- nothing accrues, every settlement quote is just the balance -- and the
  * first anybody knows is a collector asking why a simulation shows no interest.
  */
-ok('a mandate with no rate says so', /No interest rate on record/.test(card))
-ok('...and says what that means for the accounts', /run no interest at all/.test(card))
+/*
+ * AND AN EMPTY RATE SAYS WHAT WILL HAPPEN INSTEAD OF WARNING.
+ *
+ * THE FIRM, having been asked: "all debt clients are by default loaded on 24% interest. If we
+ * change it, we want to change it. We will reduce it if we want."
+ *
+ * So an empty box is the ordinary case now, not a fault — the amber it used to wear was for a
+ * client whose accounts ran NO interest at all, which is a state that no longer occurs. What it
+ * must still do is SAY the number, because a client card that is silent about the rate every one of
+ * its accounts will open at is a card that invites somebody to assume nought.
+ */
+ok('a mandate with no rate says what will happen', /Nothing recorded/.test(card))
+ok('...naming the standing rate rather than a sentence about it',
+  /DEFAULT_INTEREST_RATE_ANNUAL\}% a year/.test(card))
+ok('...and that it is the one to reduce', /Record a lower rate above/.test(card))
 /* AND IT DOES NOT CLAIM TO FIX THE BOOK. Changing a client's rate must not read as changing what
    is already on the book: accounts keep the rate they were opened with, which is the firm's own
    rule that imported figures stay as imported. */
@@ -294,12 +308,27 @@ ok('...and the field does not promise to change accounts already open',
 const imp = stripped('src/lib/handoverImport.ts')
 ok('the import takes the client s rate', /clientInterestRateAnnual: number \| null/.test(imp))
 ok('...and writes it onto the account',
-  /interestRateAnnual: clientInterestRateAnnual === null \? '0' : String\(clientInterestRateAnnual\)/
-    .test(imp))
-/* STILL NOUGHT WHERE NO RATE IS RECORDED, deliberately: an account at nought is one somebody
-   notices, an account at a guessed 24% is one nobody does -- and a guessed rate is money charged
-   to a real person on the strength of a default. */
-ok('...and guesses nothing where the client has none', /=== null \? '0'/.test(imp))
+  /interestRateAnnual: String\(clientInterestRateAnnual \?\? DEFAULT_INTEREST_RATE_ANNUAL\)/.test(imp))
+/*
+ * AND THE FIRM'S STANDING RATE WHERE THE CLIENT HAS NONE, which reverses what this asserted two
+ * commits ago. It held the import to 0%, on the argument that an account at nought is one somebody
+ * notices while one at a guessed 24% is one nobody does. That argument was about GUESSING; 24% is
+ * the firm's own standing rate, said in as many words, and a default somebody decided is a
+ * different thing from a default somebody inferred.
+ */
+check('...at the firm s standing rate where the client has none', DEFAULT_INTEREST_RATE_ANNUAL, 24)
+/*
+ * AND A CLIENT RECORDED AT NOUGHT STAYS AT NOUGHT. A mandate that charges no interest is a real
+ * mandate — `?? ` rather than `|| ` is the whole of what keeps a deliberate zero from falling
+ * through to the firm's default, and the two read alike.
+ */
+ok('...while a client deliberately on 0% is left there',
+  /clientInterestRateAnnual \?\? DEFAULT_INTEREST_RATE_ANNUAL/.test(imp)
+  && !/clientInterestRateAnnual \|\| DEFAULT_INTEREST_RATE_ANNUAL/.test(imp))
+/* ONE PLACE HOLDS IT. Three entry points were giving three answers — the by-hand form 24, the
+   Swordfish import 24, the handover sheet 0 — which is how they came to disagree at all. */
+ok('the by-hand form reads the same constant',
+  /interestRateAnnual: String\(DEFAULT_INTEREST_RATE_ANNUAL\)/.test(stripped('src/components/companies/AddDebtorModal.tsx')))
 
 const draft = stripped('src/lib/handoverDraft.ts')
 /*

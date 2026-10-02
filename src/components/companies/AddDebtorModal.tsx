@@ -3,7 +3,7 @@ import { Paperclip, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { DictateButton } from '../ui/Dictate'
 import { fileSize } from '../../lib/fileSize.ts'
-import { suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
+import { DEFAULT_INTEREST_RATE_ANNUAL, suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
 
 /**
  * One debtor, taken by hand.
@@ -47,7 +47,9 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
     handoverDate: today,
     // Standard, and stated rather than assumed — a rate left to a hidden default is a rate
     // nobody checked.
-    interestRateAnnual: '24',
+    /* THE FIRM'S STANDING RATE, from the one place that holds it rather than typed here as
+       well -- three entry points were giving three answers. See DEFAULT_INTEREST_RATE_ANNUAL. */
+    interestRateAnnual: String(DEFAULT_INTEREST_RATE_ANNUAL),
     mobile: '', workPhone: '', altNumber: '', email: '', address: '', employer: '',
     kin1Name: '', kin1Phone: '', kin2Name: '', kin2Phone: '',
   })

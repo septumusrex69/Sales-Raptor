@@ -17,7 +17,7 @@ import {
   parseSheetDate, planHandover, repairPhone, spellDate, toDebtorInput,
 } from '../../src/lib/handoverImport.ts'
 import { NOT_COLLECTED, aliasIndex, headingKey } from '../../src/lib/handoverSheet.ts'
-import { validateNewDebtor } from '../../src/lib/newDebtor.ts'
+import { DEFAULT_INTEREST_RATE_ANNUAL, validateNewDebtor } from '../../src/lib/newDebtor.ts'
 import { suggestedDesk } from '../../src/lib/linkedAccount.ts'
 
 let pass = 0
@@ -1010,10 +1010,20 @@ check('a declined column with data in it says how much',
   declined.notCollected.find((n) => n.heading === 'Interest Rate')?.filled, 1)
 check('...and an empty one says nought',
   declined.notCollected.find((n) => n.heading === 'Gender')?.filled, 0)
-/* AND THE RATE IS STILL NOUGHT ON THE ACCOUNT, which is the decision the list is protecting. The
-   assertion that matters: a sheet that supplies 24% must not open an account at 24%. */
+/*
+ * AND THE SHEET'S OWN RATE STILL DOES NOT REACH THE ACCOUNT, which is the decision this list
+ * protects — and it is a different decision from what the rate ends up being.
+ *
+ * The sheet above supplies 24 in one column and 0.25 in another, two units with nothing saying
+ * which is which. The account opens at the firm's standing rate because that is the firm's
+ * standing rate, NOT because the sheet said 24. Asserted with a client whose mandate says 15: if
+ * the sheet were being read, the account would open at 24.
+ */
 check('a declined interest rate does not reach the account',
-  toDebtorInput(declined.ready[0].values, declined.ready[0].defaultDate).interestRateAnnual, '0')
+  toDebtorInput(declined.ready[0].values, declined.ready[0].defaultDate, 15).interestRateAnnual, '15')
+check('...and with no mandate rate it is the firm s standing one, not the sheet s',
+  toDebtorInput(declined.ready[0].values, declined.ready[0].defaultDate).interestRateAnnual,
+  String(DEFAULT_INTEREST_RATE_ANNUAL))
 /*
  * AND THE TWO LISTS MAY NEVER BOTH CLAIM A HEADING. `declined` is consulted BEFORE the alias table,
  * so a heading added to both would be silently declined -- a column the sheet asks for, quietly not

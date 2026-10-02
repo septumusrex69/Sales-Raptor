@@ -6,6 +6,7 @@ import {
   CLIENT_DOCUMENT_KINDS, MANDATE_KIND, clientDocumentUrl, deleteClientDocument,
   fetchClientDocuments, uploadClientDocument, type ClientDocument,
 } from '../../lib/clientDocuments'
+import { DEFAULT_INTEREST_RATE_ANNUAL } from '../../lib/newDebtor'
 import type { Company } from '../../types'
 
 const KB = 1024
@@ -233,7 +234,8 @@ export function MandateCard({
               {!rateReadable
                 ? `“${rateDraft}” is not a rate between 0 and 100, so it will not be saved.`
                 : typedRate === ''
-                  ? 'Left empty, accounts for this client open at 0% and no interest runs on them.'
+                  ? `Left empty, accounts for this client open at the firm’s standing `
+                    + `${DEFAULT_INTEREST_RATE_ANNUAL}% a year. Set it lower here where the mandate says so.`
                   : 'Accounts opened for this client from now on inherit this. Accounts already on '
                     + 'the book keep the rate they were opened with.'}
             </p>
@@ -256,9 +258,17 @@ export function MandateCard({
               opened for this client.
             </p>
           ) : (
-            <p className="text-sm text-[var(--c-gold-deep)] mt-1">
-              No interest rate on record, so accounts opened for this client run no interest at all.
-              {canEdit ? ' Add what the mandate allows above.' : ''}
+            <p className="text-sm text-slate-600 mt-1">
+              {/*
+                NO LONGER A WARNING, because it is no longer a surprise. THE FIRM: "all debt clients
+                are by default loaded on 24% interest. If we change it, we want to change it. We
+                will reduce it if we want." An empty box is now the ordinary case and says what will
+                happen; the amber it used to wear was for a client whose accounts ran NO interest at
+                all, which is the state that no longer occurs.
+              */}
+              Nothing recorded, so accounts open at the firm’s standing{' '}
+              <span className="font-medium text-navy-950">{DEFAULT_INTEREST_RATE_ANNUAL}% a year</span>.
+              {canEdit ? ' Record a lower rate above where the mandate says one.' : ''}
             </p>
           )}
         </div>

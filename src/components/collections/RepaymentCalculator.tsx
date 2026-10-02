@@ -457,9 +457,9 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
         <p className="mt-1.5 text-[11px] text-slate-500">
           {(account.interestRateAnnual ?? 0) > 0
             ? 'No interest is running on this account, so none is included above.'
-            : 'This account is at 0% a year, so no interest is included above. The rate comes from '
-              + 'the client’s mandate — set it on the client, and accounts opened after that '
-              + 'inherit it.'}
+            : 'This account is at 0% a year, so no interest is included above. Accounts open at '
+              + 'the firm’s standing rate unless the client’s mandate says lower, so an account at '
+              + 'nought was opened before that was recorded.'}
         </p>
       )}
       {plan.hitInDuplum && (

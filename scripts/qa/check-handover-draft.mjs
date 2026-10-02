@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { planHandover, toDebtorInput } from '../../src/lib/handoverImport.ts'
-import { toAccountRow, validateNewDebtor } from '../../src/lib/newDebtor.ts'
+import { DEFAULT_INTEREST_RATE_ANNUAL, toAccountRow, validateNewDebtor } from '../../src/lib/newDebtor.ts'
 import { HANDOVER_COLUMNS } from '../../src/lib/handoverSheet.ts'
 
 let pass = 0
@@ -223,11 +223,26 @@ check('and a number that is not one is left alone',
   toDebtorInput({ name: 'Dube', capital: '100', cell_1: 'no number' }, '2026-03-18').mobile,
   'no number')
 /*
- * INTEREST IS NOUGHT, NOT A GUESSED 24%. The sheet stopped asking for a rate at the firm's
- * instruction -- it is in the agreement the firm already holds. An account opened at nought is
- * one somebody notices; opened at a rate nobody chose, it is one nobody does.
+ * INTEREST IS THE FIRM'S STANDING RATE WHERE THE CLIENT HAS RECORDED NONE, which reverses what
+ * this asserted two commits ago.
+ *
+ * THE FIRM: "all debt clients are by default loaded on 24% interest. If we change it, we want to
+ * change it. We will reduce it if we want."
+ *
+ * It held the import to nought, on the argument that an account at nought is one somebody notices
+ * while one at a guessed 24% is one nobody does. That argument was about GUESSING. 24% is not a
+ * guess — it is the firm's own standing rate, what the migrated book charges, the 2% a month their
+ * letters quote, and now said in as many words. A default somebody decided is a different thing
+ * from a default somebody inferred.
  */
-check('interest is left at nought rather than guessed', input.interestRateAnnual, '0')
+check('interest opens at the firm s standing rate',
+  input.interestRateAnnual, String(DEFAULT_INTEREST_RATE_ANNUAL))
+/* AND THE CLIENT'S OWN RATE WINS, including a deliberate nought — a mandate that charges no
+   interest is a real mandate, and `??` rather than `||` is the whole of what preserves it. */
+check('...unless the client s mandate says otherwise',
+  toDebtorInput({ name: 'Dube', capital: '100' }, '2026-03-18', 15).interestRateAnnual, '15')
+check('...including a mandate that charges none',
+  toDebtorInput({ name: 'Dube', capital: '100' }, '2026-03-18', 0).interestRateAnnual, '0')
 
 /*
  * ---------- every name column a client fills in reaches the account ----------

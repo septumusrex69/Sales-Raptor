@@ -263,6 +263,30 @@ export function validateNewDebtor(input: NewDebtorInput, today: string): Problem
  * client anyway, so it is inherited rather than typed: null where the client has none resolved,
  * which is a different fact from zero and the schema keeps them apart.
  */
+/**
+ * WHAT A DEBT COSTS A DEBTOR WHERE NOBODY HAS SAID OTHERWISE.
+ *
+ * THE FIRM, having been asked and having looked at eight accounts running at nought: "all debt
+ * clients are by default loaded on 24% interest. If we change it, we want to change it. We will
+ * reduce it if we want."
+ *
+ * THIS OVERRULES A DECISION MADE TWO COMMITS AGO, and the reversal is worth writing down rather
+ * than quietly swapping a constant. The import wrote 0% where a client had no rate recorded, on the
+ * argument that an account at nought is one somebody notices and an account at a guessed 24% is one
+ * nobody does. That argument was about GUESSING. 24% is not a guess — it is the firm's standing
+ * rate, it is what every account on the migrated book charges, it is the 2% a month the firm's own
+ * letters quote, and the firm has now said so in as many words. A default somebody has decided is a
+ * different thing from a default somebody inferred.
+ *
+ * STILL PER CLIENT, AND STILL OVERRIDABLE DOWNWARDS. `companies.default_interest_rate_annual` is
+ * read first and is what a mandate at a lower rate goes in; this is only what happens when that
+ * column is empty. "We will reduce it if we want" is exactly that column.
+ *
+ * ONE PLACE, because three entry points were giving three answers — the by-hand form defaulted to
+ * 24, the Swordfish import to 24 where its column was missing, and the handover sheet to 0.
+ */
+export const DEFAULT_INTEREST_RATE_ANNUAL = 24
+
 export function toAccountRow(
   input: NewDebtorInput,
   companyId: string,
