@@ -3,14 +3,36 @@ import { Check, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
 import { recordTrace } from '../../lib/accountTrace'
-import { TRACE_SOURCES, traceSourceById, type TraceSource } from '../../lib/traceSources.ts'
+import {
+  bureauSearchCounts, TRACE_SOURCES, traceSourceById, type TraceSource,
+} from '../../lib/traceSources.ts'
 import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
 import { isValidSaId } from '../../lib/newDebtor'
 import { scheduleFor } from '../../lib/annexureB'
 import type { ChargeResult } from '../../lib/accountCharges'
 
-/** Enough for a company and everyone who signed surety for it. */
-const COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+/**
+ * WHAT IT COST, SAID ONCE.
+ *
+ * The same sentence is on the modal's confirmation and on the line under the button, and the firm
+ * reads both -- written out twice they drift, and two different accounts of one fee is how somebody
+ * comes to believe a charge was raised that was not. CLAUDE.md's rule about the same figures on
+ * two screens, applied to a sentence.
+ *
+ * A NULL CHARGE IS NOT A REFUSAL. It is one necessary expense already raised for this person,
+ * which is a different thing from the ceiling and must not borrow its words.
+ */
+function chargeWords(
+  result: { charge: ChargeResult | null; count: number },
+  source: TraceSource,
+): string {
+  if (result.charge === null) return 'Recorded · no charge (already charged for this person)'
+  if (result.charge.reason === 'written-off') return 'Recorded · no charge (account written off)'
+  if (result.charge.reason !== 'charged') return 'Recorded · no charge (fee ceiling)'
+  const many = result.count > 1 && source.kind === 'credit_bureau'
+    ? `${result.count} searches · ` : ''
+  return `${source.name} · ${many}charged R${result.charge.exclVat.toFixed(2)} + VAT`
+}
 
 /**
  * Trace a debtor: XDS opens on the click, and Raptor asks afterwards how many searches were run.
@@ -79,7 +101,25 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
     if (resetTimer.current) clearTimeout(resetTimer.current)
   }, [])
 
-  const rate = scheduleFor(new Date()).items.find((i) => i.id === '4c')?.amount ?? 0
+  /*
+   * THE DAY'S SCHEDULE, READ ONCE AND USED FOR BOTH THE PRICE AND THE COUNT.
+   *
+   * `scheduleFor(new Date())` because a trace recorded now is priced on the gazette in force
+   * today -- CLAUDE.md's rule, and the reason this takes a date at all. The same schedule decides
+   * how many buttons there are, so the row and the price can never describe different tariffs.
+   */
+  const schedule = scheduleFor(new Date())
+  const rate = schedule.items.find((i) => i.id === '4c')?.amount ?? 0
+  const counts = bureauSearchCounts(schedule)
+  /*
+   * ONLY A BUREAU SEARCH IS COUNTED, and this is the half of the firm's "only up to four" that
+   * they did not have to say. Item 4(c) is priced PER SEARCH; every other source is item 3, once
+   * per person, and `recordTrace` already forces its quantity to one. So the row of numbers was a
+   * question with no true answer on SASSA, CSA and "somewhere else" -- press seven and one fee is
+   * raised. The same rule the trace outcomes follow: a question nobody can answer honestly is
+   * worse than no question.
+   */
+  const counted = source.kind === 'credit_bureau'
   /*
    * CHECKED BEFORE IT IS COPIED. It used to copy whatever was in the ID field, and on one account
    * that was a telephone number -- Swordfish's export carried one in the ID column and the ID was
@@ -148,7 +188,12 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
         alreadyChargedForSubject: false,
       })
       setResult({ charge: c, count })
-      setAsking(false)
+      /*
+       * THE MODAL STAYS OPEN, because the offer to upload is the next thing said and it is said
+       * HERE. It used to close and leave a link under the button for ten seconds -- see onUpload
+       * for why that moment matters, and see below for why ten seconds was the wrong way to use
+       * it. The line under the button is still written, for anyone who says Not now.
+       */
       await onDone()
       if (resetTimer.current) clearTimeout(resetTimer.current)
       resetTimer.current = setTimeout(() => setResult(null), 10000)
@@ -184,13 +229,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
           ceiling and must not borrow its words.
         */}
         <span className={`text-[11px] ${result.charge?.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
-          {result.charge === null
-            ? `Recorded · no charge (already charged for this person)`
-            : result.charge.reason === 'charged'
-              ? `${source.name} · ${result.count > 1 && source.kind === 'credit_bureau' ? `${result.count} searches · ` : ''}charged R${result.charge.exclVat.toFixed(2)} + VAT`
-              : result.charge.reason === 'written-off'
-                ? 'Recorded · no charge (account written off)'
-                : 'Recorded · no charge (fee ceiling)'}
+          {chargeWords(result, source)}
         </span>
       </>
     )}>
@@ -243,14 +282,24 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
       )}
 
       {asking && (
-        <Modal title="How many traces did you do?" onClose={() => setAsking(false)} width={460}>
-          <p className="text-sm text-slate-500">
-            {source.url
-              ? `${source.name} is open in a new tab. `
-              : `${source.name} is not a portal Raptor can open, so search it the way you normally do. `}
-            One account can carry a company and its sureties, so tell us how many
-            searches you ran and they go on the statement as a single line.
-          </p>
+        <Modal
+          /* THE TITLE FOLLOWS THE QUESTION. Only a bureau search is counted, so only a bureau
+             search is asked how many -- see `counted`. */
+          title={result ? 'Trace recorded' : counted ? 'How many searches did you run?' : 'Record this trace'}
+          onClose={() => { setAsking(false); setResult(null) }}
+          width={460}
+        >
+          {!result && (
+            <p className="text-sm text-slate-500">
+              {source.url
+                ? `${source.name} is open in a new tab. `
+                : `${source.name} is not a portal Raptor can open, so search it the way you normally do. `}
+              {counted
+                ? 'One account can carry a company and its sureties, so tell us how many searches '
+                  + 'you ran and they go on the statement as a single line.'
+                : 'Record it when you are done, and upload whatever it found.'}
+            </p>
+          )}
 
           {/*
             WHERE, IN THEIR OWN WORDS, for a source this list does not name. It goes on the
@@ -258,7 +307,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
             which is the firm's own rule about not naming a supplier on a document that leaves the
             building.
           */}
-          {source.id === 'other' && (
+          {!result && source.id === 'other' && (
             <label className="block mt-3">
               <span className="text-xs font-medium text-slate-600">Where did you look?</span>
               <input value={named} onChange={(e) => setNamed(e.target.value)}
@@ -277,12 +326,12 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
             the account behind this modal, and a digit wrong there is a search about somebody
             else that the firm still pays for.
           */}
-          {key.ok && copied === 'yes' && (
+          {!result && key.ok && copied === 'yes' && (
             <p className="text-xs text-[var(--c-green)] mt-3 inline-flex items-center gap-1.5">
               <Check size={13} /> The {key.what} {key.value} is on your clipboard — paste it into the search.
             </p>
           )}
-          {key.ok && (copied === 'no' || copied === 'asking') && (
+          {!result && key.ok && (copied === 'no' || copied === 'asking') && (
             <p className="text-xs text-slate-500 mt-3">
               Search on <span className="font-medium text-slate-700 select-all">{key.value}</span>
               {copied === 'no' && ' — this browser would not let us copy it for you.'}
@@ -293,35 +342,100 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
             other needs correcting, and a collector told only "no ID" would go and type the
             telephone number sitting in that field straight into the portal.
           */}
-          {problem !== null && (
+          {!result && problem !== null && (
             <p className="text-xs text-negative-700 mt-3 rounded-lg bg-negative-50 border border-negative-100 px-3 py-2">
               {problem}
             </p>
           )}
-          <div className="flex flex-wrap gap-2 mt-4">
-            {COUNTS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => void charge(n)}
-                disabled={busy}
-                className="w-11 h-11 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 bg-white hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50"
-              >
-                {n}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-slate-400 mt-3">
-            {rate > 0 && <>R{rate.toFixed(2)} plus VAT each, under Annexure B item 4(c). </>}
-            Nothing is charged until you choose.
-          </p>
-          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
-          <div className="flex items-center justify-end gap-2 mt-5">
-            {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
-            <button onClick={() => setAsking(false)} disabled={busy} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
-              Didn&apos;t trace
+          {/*
+            FOUR, AND THE FOUR IS THE GAZETTE'S. The firm: "make it only go up to four, not more
+            than that." Item 4(c) carries maxPerMonth 4 on every schedule, so five through ten
+            offered a number the tariff does not have. Taken off the schedule rather than typed --
+            see bureauSearchCounts.
+          */}
+          {!result && counted && (
+            <div className="flex flex-wrap gap-2 mt-4">
+              {counts.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => void charge(n)}
+                  disabled={busy}
+                  className="w-11 h-11 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 bg-white hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50"
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* AND WHERE THERE IS NOTHING TO COUNT, ONE BUTTON. Item 3 is once per person whatever
+              was searched, so a row of numbers here would be asking a question whose answer the
+              charge ignores. */}
+          {!result && !counted && (
+            <button type="button" onClick={() => void charge(1)} disabled={busy}
+              className="mt-4 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-900 text-white disabled:opacity-50">
+              Record the trace
             </button>
-          </div>
+          )}
+
+          {/* WHAT IT COSTS, IN THE WORDS OF THE ITEM IT IS ACTUALLY CHARGED UNDER. This said
+              "item 4(c)" whatever the source was, so a SASSA search quoted the bureau's line of
+              the gazette and the bureau's price for a fee raised under item 3. */}
+          {!result && (
+            <p className="text-xs text-slate-400 mt-3">
+              {counted
+                ? <>{rate > 0 && <>R{rate.toFixed(2)} plus VAT each, under Annexure B item 4(c). </>}
+                  Nothing is charged until you choose.</>
+                : <>R25.00 plus VAT, under Annexure B item 3, and only once for this person however
+                  many places you looked. Nothing is charged until you record it.</>}
+            </p>
+          )}
+
+          {/*
+            AND THE OFFER TO UPLOAD, THE MOMENT THEY COME BACK FROM THE PORTAL.
+
+            THE FIRM: "after you've reached this tab, I think I can automatically already ask you to
+            upload if you want to upload the trace." It was a link under the button that cleared
+            itself after ten seconds -- so the one minute a collector certainly has the PDFs on
+            their machine was spent on a link that had already gone. Asked here, it waits.
+
+            ASKED, NOT DONE. "If you want to" is the firm's own qualifier, and a file picker that
+            opens itself on somebody who ran the search to read it on screen is a dialog to dismiss.
+          */}
+          {result && (
+            <>
+              <p className={`text-sm ${result.charge?.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
+                {chargeWords(result, source)}
+              </p>
+              <p className="text-sm text-slate-500 mt-3">
+                Upload what {source.name} found and Raptor reads the numbers, addresses, employment
+                and linked people off it.
+              </p>
+              <div className="flex items-center justify-end gap-2 mt-5">
+                <button type="button" onClick={() => { setAsking(false); setResult(null); onUpload() }}
+                  className="text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-900 text-white">
+                  Upload what it found
+                </button>
+                {/* NOT NOW, NOT CANCEL. Nothing is undone by declining -- the trace is already
+                    recorded and charged -- and "Cancel" beside a fee that has been raised reads
+                    as though it takes it off. */}
+                <button type="button" onClick={() => { setAsking(false); setResult(null) }}
+                  className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
+                  Not now
+                </button>
+              </div>
+            </>
+          )}
+
+          {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+          {!result && (
+            <div className="flex items-center justify-end gap-2 mt-5">
+              {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
+              <button onClick={() => setAsking(false)} disabled={busy} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+                Didn&apos;t trace
+              </button>
+            </div>
+          )}
         </Modal>
       )}
     </RecordActionNote>

@@ -566,8 +566,20 @@ ok('...and an account with nothing usable says which of the two it is',
 /*
  * ASKED AFTERWARDS, which is the only moment the answer exists — an account can carry a company
  * and three sureties and nobody knows before opening the portal how many they will look for.
+ *
+ * ASSERTED ON THE QUESTION AND NOT ITS WORDING. This held the exact string "How many traces did you
+ * do?" and broke when the title became "How many searches did you run?" -- a check that fails on a
+ * reworded label is a check that gets loosened rather than read. What matters is that the count is
+ * asked for, that it is asked AFTER the portal opens, and that it is only asked where the charge
+ * actually multiplies. See check-trace-sources for the four it may offer.
  */
-ok('it asks how many searches were run', /How many traces did you do\?/.test(button))
+ok('it asks how many searches were run', /title=\{result \? 'Trace recorded' : counted \?/.test(button))
+ok('...only where the count changes the fee',
+  /const counted = source\.kind === 'credit_bureau'/.test(button))
+/* AFTER THE PORTAL, NOT BEFORE: the tab is opened by pick() and the asking flag is set in the same
+   tap, so the question is on screen behind the portal rather than in front of it. */
+ok('...after the portal has been opened',
+  button.indexOf('window.open(s.url') < button.indexOf('setAsking(true)'))
 /*
  * AND THE SOURCE GOES WITH IT. THE FIRM: "where do I do the other traces, like for example CSA and
  * stuff." The button went straight to XDS, so the only search Raptor could record was the one it

@@ -14,10 +14,10 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  BUREAU_ITEM, OTHER_ITEM, TRACE_SOURCES, chargeForSource, chargesForThisSearch,
+  BUREAU_ITEM, OTHER_ITEM, TRACE_SOURCES, bureauSearchCounts, chargeForSource, chargesForThisSearch,
   traceSourceById, traceSourceNote,
 } from '../../src/lib/traceSources.ts'
-import { scheduleFor } from '../../src/lib/annexureB.ts'
+import { ANNEXURE_B_2026, scheduleFor } from '../../src/lib/annexureB.ts'
 
 let pass = 0
 const failures = []
@@ -135,6 +135,95 @@ ok('...and never a made-up one', !/reason: 'ceiling'/.test(recorder))
 /* ONLY A BUREAU CHARGES BY THE SEARCH. Item 3 is one expense however many places were looked in. */
 ok('the count only multiplies a bureau search',
   /quantity: source\.kind === 'credit_bureau' \? count : 1/.test(recorder))
+
+/* ---------------------------------------------------------------------------------------------
+ * HOW MANY SEARCHES THE BUTTON MAY OFFER
+ *
+ * THE FIRM, looking at a row of buttons running to ten: "make it only go up to four, not more than
+ * that." They are reading their own tariff. Item 4(c) is `maxPerMonth: 4`, so five through ten
+ * offered a collector a number the gazette does not have.
+ * ------------------------------------------------------------------------------------------- */
+
+check('the button offers the gazette\u2019s four and no more',
+  bureauSearchCounts(ANNEXURE_B_2026), [1, 2, 3, 4])
+/*
+ * AND IT IS READ OFF THE SCHEDULE, NOT TYPED. The proof is that a schedule saying something else
+ * moves the buttons: a literal four here would pass this file and then disagree with the gazette
+ * the day the gazette changes.
+ */
+check('...taken off the schedule rather than written down',
+  bureauSearchCounts({ items: [{ id: '4c', maxPerMonth: 7 }] }), [1, 2, 3, 4, 5, 6, 7])
+/* A SCHEDULE THAT DOES NOT SAY FALLS BACK ON THE GAZETTE'S FOUR, not on one: every schedule
+   Raptor holds carries the cap, so a schedule without it is one with something wrong with it. */
+check('...and a schedule that does not say still offers four',
+  bureauSearchCounts({ items: [] }), [1, 2, 3, 4])
+check('...as does an item with no cap on it',
+  bureauSearchCounts({ items: [{ id: '4c' }] }), [1, 2, 3, 4])
+/* AND A NONSENSE ZERO STILL DRAWS A BUTTON. An empty row is a modal a collector cannot get out of
+   except by saying they did not trace -- after they have already run the search. */
+check('...and never an empty row', bureauSearchCounts({ items: [{ id: '4c', maxPerMonth: 0 }] }), [1])
+/* EVERY SCHEDULE RAPTOR HOLDS AGREES, because a 2019 fee re-read today is still a 2019 fee and the
+   button is drawn from whichever schedule the action's date lands on. */
+for (const year of [2019, 2023, 2026]) {
+  const schedule = scheduleFor(new Date(`${year}-06-15T00:00:00Z`))
+  const item = schedule.items.find((i) => i.id === '4c')
+  ok(`the ${year} schedule caps a bureau search at four`, item?.maxPerMonth === 4)
+  check(`...and the button follows it`, bureauSearchCounts(schedule), [1, 2, 3, 4])
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE BUTTON ASKS THE QUESTION THE CHARGE ACTUALLY ANSWERS
+ *
+ * The count row was drawn for every source. Item 3 is ONE expense however many places were looked
+ * in -- recordTrace forces its quantity to 1 -- so pressing seven on a SASSA search raised one fee.
+ * The same rule the trace outcomes follow: a question with no true answer is worse than none.
+ * ------------------------------------------------------------------------------------------- */
+
+const button = readFileSync(new URL('../../src/pages/accounts/TraceButton.tsx', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/^[ \t]*\/\/.*$/gm, ' ')
+
+ok('the ten is gone', !/\[1, 2, 3, 4, 5, 6, 7, 8, 9, 10\]/.test(button))
+ok('...and the row is drawn from the schedule', /counts\.map\(\(n\) =>/.test(button))
+ok('...which the button asks for', /bureauSearchCounts\(schedule\)/.test(button))
+/* ONE SCHEDULE FOR THE PRICE AND THE COUNT, or the row and the rand figure under it can describe
+   two different gazettes. */
+ok('...the same schedule the price comes off',
+  /const schedule = scheduleFor\(new Date\(\)\)/.test(button)
+  && /schedule\.items\.find\(\(i\) => i\.id === '4c'\)/.test(button))
+/* COUNTED ONLY WHERE COUNTING MEANS SOMETHING, and the predicate is the same one the charge uses. */
+ok('only a bureau search is counted', /const counted = source\.kind === 'credit_bureau'/.test(button))
+ok('...so the numbers are not drawn otherwise', /!result && counted && \(/.test(button))
+ok('...and there is a single button instead', /!result && !counted && \(/.test(button))
+/* AND THE PRICE LINE NAMES THE ITEM IT IS ACTUALLY CHARGED UNDER. It said 4(c) whatever the
+   source was, which quoted the bureau's line of the gazette on a fee raised under item 3. */
+ok('a non-bureau search is priced under item 3', /under Annexure B item 3/.test(button))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE OFFER TO UPLOAD IS MADE WHERE THE FILES ARE
+ *
+ * THE FIRM: "after you've reached this tab, I think I can automatically already ask you to upload
+ * if you want to upload the trace." It was a link under the button that cleared itself after ten
+ * seconds -- so the one minute a collector certainly has the PDFs was spent on a link already gone.
+ * ------------------------------------------------------------------------------------------- */
+
+/* THE MODAL STAYS OPEN ON THE RESULT, which is the whole of the fix: setAsking(false) on a
+   successful charge is what closed it before the offer could be made. */
+ok('recording does not close the box', !/setResult\(\{ charge: c, count \}\)\s*\n\s*setAsking\(false\)/.test(button))
+ok('...and the box offers the upload itself', /Upload what it found/.test(button))
+/* BOTH CALL SITES, WRITTEN DIFFERENTLY ON PURPOSE: the modal has to close itself first, the line
+   under the button is already outside it. Asserted separately so neither can quietly go. */
+ok('...calling the handler from inside the box', /setResult\(null\); onUpload\(\)/.test(button))
+ok('...and the line under the button still calls it too', /onClick=\{onUpload\}/.test(button))
+/* ASKED, NOT DONE. "If you want to" is the firm's own qualifier: a declining answer has to exist,
+   and it must not read as though it undoes the fee that was just raised. */
+ok('...and it can be declined', /Not now/.test(button))
+ok('...without the word Cancel beside a charge already raised',
+  !/>\s*Cancel\s*</.test(button))
+/* AND THE SENTENCE ABOUT THE MONEY IS WRITTEN ONCE. Two accounts of one fee is how somebody comes
+   to believe a charge was raised that was not. */
+ok('what it cost is said by one function', /function chargeWords\(/.test(button))
+ok('...and both places call it', (button.match(/chargeWords\(result, source\)/g) ?? []).length === 2)
 
 console.log(`\ncheck-trace-sources: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

@@ -46,6 +46,8 @@
  * PURE: no database, no clock.
  */
 
+import type { AnnexureBSchedule } from './annexureB.ts'
+
 export type TraceSourceKind =
   /** A registered credit bureau. Item 4(c), and only these. */
   | 'credit_bureau'
@@ -115,6 +117,36 @@ export const traceSourceById = (id: string): TraceSource =>
 export const BUREAU_ITEM = '4c'
 /** Item 3 — "other necessary expenses not specifically provided for". */
 export const OTHER_ITEM = '3'
+
+/**
+ * HOW MANY SEARCHES THE BUTTON MAY OFFER, TAKEN OFF THE GAZETTE RATHER THAN TYPED HERE.
+ *
+ * THE FIRM, looking at a row of buttons running to ten: "make it only go up to four, not more
+ * than that." They are reading their own tariff: item 4(c) is `maxPerMonth: 4` on every schedule
+ * Raptor holds, so five through ten offered a collector a number the gazette does not have.
+ *
+ * READ OFF THE SCHEDULE, so a gazette that changes the four changes the buttons and cannot leave
+ * them disagreeing. Off `maxPerMonth` DIRECTLY and not through `monthlyLimit`, which answers a
+ * different question: that one says whether the ENGINE refuses a fifth charge, and the firm turned
+ * that off on 10 September 2026 for a reason recorded in annexureB -- the gazette counts per
+ * ACCOUNT while the work happens per PERSON, and a company plus three sureties exhausts four in an
+ * afternoon of entirely necessary work. The number is still four either way; what the firm asked
+ * for is that the button stop offering more than the tariff names.
+ *
+ * FOUR WHERE THE SCHEDULE DOES NOT SAY. Every schedule Raptor holds carries the cap -- 2019, 2023
+ * and 2026 all say four -- so a schedule without one is a schedule with something wrong with it,
+ * and the gazette's own number is a better answer than a row of one button. The floor of one is for
+ * a nonsense zero, which would otherwise draw nothing and leave a collector no way out of the
+ * modal but "Didn't trace".
+ */
+export function bureauSearchCounts(schedule: AnnexureBSchedule): number[] {
+  const item = schedule.items.find((i) => i.id === BUREAU_ITEM)
+  const max = item?.maxPerMonth ?? BUREAU_SEARCHES_A_MONTH
+  return Array.from({ length: Math.max(1, max) }, (_, i) => i + 1)
+}
+
+/** What every schedule Raptor holds says, and the answer where one somehow does not say. */
+export const BUREAU_SEARCHES_A_MONTH = 4
 
 export interface TraceCharge {
   itemId: string
