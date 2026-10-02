@@ -86,3 +86,62 @@ export function importNoteBody(facts: ImportNoteFacts): string {
 
   return lines.join(' ')
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * AND WHEN A BATCH IS TAKEN BACK OUT.
+ *
+ * THE FIRM, looking at a client page after discarding two handovers: "the notes that I made of
+ * like retracting the handover file, that's also not there. You remember I took it out, those
+ * handover files."
+ *
+ * THE DISCARD HAD WORKED AND LEFT NO TRACE A PERSON COULD READ. It stamped `discarded_at`,
+ * `discarded_by` and the reason on the handover row — which is the right record and is on nobody's
+ * screen — while the client's Notes list went on showing three imports and nothing taking any of
+ * them back. A reversal that is invisible in the history is indistinguishable from data loss,
+ * which is the sentence already written at the top of handoverDiscard.ts and the reason the row is
+ * kept at all. It just never reached the one place somebody actually looks.
+ *
+ * THE SAME SHAPE AS THE IMPORT'S OWN NOTE, deliberately: the two sit next to each other in the
+ * client's history and a reader should be able to tell at a glance that one undid the other.
+ * ------------------------------------------------------------------------------------------- */
+
+export function discardNoteSubject(reference: string | null): string {
+  return `Handover withdrawn: ${(reference ?? '').trim() || 'one batch'}`
+}
+
+export interface DiscardNoteFacts {
+  /** How many accounts went with it. */
+  accounts: number
+  /** What they were worth, already formatted — the caller holds the money formatter. */
+  capital: string
+  /** Why, in the firm's own words. Null where nobody gave one. */
+  reason?: string | null
+  /** Notices already sent to those debtors, which do not un-send. */
+  noticesSent?: number
+}
+
+/**
+ * WHAT IT SAYS, AND WHY IT SAYS THE UNCOMFORTABLE PART.
+ *
+ * A wrongly imported batch is exactly the case where the handover email and SMS have already gone
+ * out — handoverDiscard refuses to block on them for that reason — so the debtors were written to
+ * and nothing can call those messages back. The note says so, because the person reading this in
+ * six months is reading it to answer a client asking why their debtor received a letter about an
+ * account the firm says it never had.
+ */
+export function discardNoteBody(facts: DiscardNoteFacts): string {
+  const parts = [
+    `${facts.accounts === 1 ? 'The account' : `All ${facts.accounts} accounts`} opened from this `
+      + `batch ${facts.accounts === 1 ? 'was' : 'were'} removed from the collections book, `
+      + `${facts.capital} capital between them.`,
+  ]
+  if (facts.noticesSent && facts.noticesSent > 0) {
+    parts.push(`${facts.noticesSent} ${facts.noticesSent === 1 ? 'notice had' : 'notices had'} `
+      + 'already gone out to those debtors and cannot be recalled.')
+  }
+  /* THE REASON LAST AND IN THEIR OWN WORDS, quoted so it reads as somebody's answer rather than as
+     the system's description of what it did. */
+  const why = (facts.reason ?? '').trim()
+  if (why) parts.push(`Reason given: ${why}`)
+  return parts.join(' ')
+}

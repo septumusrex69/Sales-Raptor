@@ -618,6 +618,16 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
                         handoverId: discarding.handoverId,
                         by: currentUser?.id ?? null,
                         reason: null,
+                        /*
+                         * FOR THE CLIENT'S OWN NOTE, and read off the card rather than fetched
+                         * inside the write — by the time the batch is marked its accounts are
+                         * already gone, so there is nothing left to add up. These are the exact
+                         * figures the person is looking at as they type DISCARD.
+                         */
+                        companyId,
+                        reference: discarding.reference,
+                        capital: discarding.capital,
+                        noticesSent: discarding.noticesSent,
                       })
                       setDiscarding(null); setTyped('')
                       setDone(`${accounts.toLocaleString('en-ZA')} ${accounts === 1 ? 'account was' : 'accounts were'} removed.`)

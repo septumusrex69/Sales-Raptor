@@ -27,6 +27,8 @@
  * afterwards is indistinguishable from data loss.
  */
 import { supabase } from './supabase'
+import { discardNoteBody, discardNoteSubject } from './importNote'
+import { formatCurrency } from '../data/mockData'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON. */
 
@@ -137,6 +139,12 @@ export async function discardHandover(input: {
   handoverId: string
   by: string | null
   reason: string | null
+  /** For the client's own note. Read before the accounts go, because afterwards there is nothing
+      left to add up — see the note below. */
+  companyId?: string | null
+  reference?: string | null
+  capital?: number
+  noticesSent?: number
 }): Promise<{ accounts: number }> {
   const ids = await accountIdsFor(input.handoverId)
   const blockers = await discardBlockers(ids)
@@ -163,6 +171,42 @@ export async function discardHandover(input: {
     })
     .eq('id', input.handoverId)
   if (markErr) throw new Error(markErr.message)
+
+  /*
+   * AND THE CLIENT'S OWN HISTORY SAYS IT HAPPENED.
+   *
+   * THE FIRM, after discarding two batches: "the notes that I made of like retracting the handover
+   * file, that's also not there. You remember I took it out, those handover files."
+   *
+   * THEY HAD, AND IT LEFT NO TRACE A PERSON COULD READ. The three stamps above are the right
+   * record and are on nobody's screen, while the client's Notes list went on showing three imports
+   * with nothing taking any of them back. "A reversal nobody can see afterwards is
+   * indistinguishable from data loss" is written at the top of this file as the reason the row is
+   * kept at all — it just never reached the one place somebody actually looks.
+   *
+   * LAST, AND IT CANNOT FAIL THE DISCARD. Same reasoning the import applies to its own note: this
+   * is a record of what happened, so it is written after the thing it records, and a timeline entry
+   * that failed is not worth undoing a reversal over. Swallowed rather than thrown — by this point
+   * the accounts are gone and the batch is marked, and reporting failure would be a lie about the
+   * part that matters.
+   */
+  if (input.companyId) {
+    try {
+      await supabase.from('activities').insert({
+        type: 'Note',
+        user_id: input.by,
+        company_id: input.companyId,
+        subject: discardNoteSubject(input.reference ?? null),
+        notes: discardNoteBody({
+          accounts: ids.length,
+          capital: formatCurrency(input.capital ?? 0),
+          reason: input.reason,
+          noticesSent: input.noticesSent,
+        }),
+        activity_date: new Date().toISOString(),
+      })
+    } catch { /* see above: the reversal happened; a note that did not file is not a failed one. */ }
+  }
 
   return { accounts: ids.length }
 }

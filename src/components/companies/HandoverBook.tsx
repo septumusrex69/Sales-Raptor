@@ -33,17 +33,40 @@ export function HandoverBook({ company, onUpload }: { company: Company; onUpload
     .filter((h) => h.companyId === company.id)
     .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
 
+  /*
+   * A BATCH THAT WAS TAKEN BACK OUT DOES NOT COUNT, AND IS STILL DRAWN.
+   * ------------------------------------------------------------------
+   * THE FIRM, on a client whose Handover Book read "3 batches received" and R 106 746 000 000 011
+   * 868: "the notes that I made of like retracting the handover file, that's also not there. You
+   * remember I took it out, those handover files."
+   *
+   * THEY HAD TAKEN THEM OUT. Two of the three carried `discarded_at`, their accounts were gone, and
+   * every figure here counted them anyway — the card read three batches and twenty-four accounts
+   * over a book of eight. A discard that leaves the client's own page saying the opposite is a
+   * discard nobody can trust.
+   *
+   * KEPT AND MARKED RATHER THAN HIDDEN, which is the same decision handoverDiscard makes about the
+   * row itself: a batch that arrived and was withdrawn is a fact about this client, and a client
+   * asking "what happened to the file I sent on the 1st" has to find an answer here. Hiding it
+   * would make the firm's own retraction invisible, which is half of what they were complaining
+   * about.
+   */
+  const live = rows.filter((h) => !h.discardedAt)
+  const discarded = rows.length - live.length
+
   // What they signed for, taken from the mandates themselves rather than the signup estimate,
   // so it follows any correction made on the deal.
   const signedBook = deals
     .filter((d) => d.companyId === company.id && d.stage === 'Won' && d.handoverAmount != null)
     .reduce((sum, d) => sum + (d.handoverAmount ?? 0), 0)
 
-  const received = rows.reduce((sum, h) => sum + h.capitalAmount, 0)
-  const accounts = rows.reduce((sum, h) => sum + (h.accountsCount ?? 0), 0)
+  const received = live.reduce((sum, h) => sum + h.capitalAmount, 0)
+  const accounts = live.reduce((sum, h) => sum + (h.accountsCount ?? 0), 0)
   const outstanding = Math.max(signedBook - received, 0)
   const fill = signedBook > 0 ? Math.round((received / signedBook) * 100) : null
-  const quietDays = rows.length > 0 ? daysSince(rows[0].receivedAt) : null
+  /* AND THE QUIET CLOCK RUNS OFF A BATCH THAT IS STILL THERE. A discarded one would say a client
+     sent something yesterday when what they sent has been taken back out. */
+  const quietDays = live.length > 0 ? daysSince(live[0].receivedAt) : null
 
   if (signedBook === 0 && rows.length === 0) return null
 
@@ -51,7 +74,8 @@ export function HandoverBook({ company, onUpload }: { company: Company; onUpload
     <Card>
       <CardHeader
         title="Handover Book"
-        subtitle={rows.length === 1 ? '1 batch received' : `${rows.length} batches received`}
+        subtitle={`${live.length === 1 ? '1 batch' : `${live.length} batches`} received`
+          + (discarded > 0 ? ` \u00b7 ${discarded} discarded` : '')}
         action={
           <button onClick={onUpload} className="text-xs font-medium text-brand-600 hover:underline">
             Upload a batch
@@ -84,9 +108,21 @@ export function HandoverBook({ company, onUpload }: { company: Company; onUpload
           {rows.map((h: Handover) => (
             <div key={h.id} className="flex items-baseline justify-between gap-3 px-1 py-2">
               <span className="min-w-0">
-                <span className="text-[13.5px] text-slate-700">{formatCurrency(h.capitalAmount)}</span>
+                {/* STRUCK THROUGH, NOT REMOVED. The figure is what the sheet said; the line through
+                    it is what the firm did about it. */}
+                <span className={`text-[13.5px] ${h.discardedAt ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                  {formatCurrency(h.capitalAmount)}
+                </span>
                 {h.accountsCount != null && <span className="text-[12px] text-slate-400 ml-2">{h.accountsCount} accounts</span>}
                 {h.reference && <span className="text-[12px] text-slate-400 ml-2 truncate">{h.reference}</span>}
+                {/* SAID IN WORDS AS WELL AS IN A LINE. A strikethrough alone is not a state to
+                    anybody reading this aloud down a telephone, and it is not a state at all to
+                    somebody who cannot see it. */}
+                {h.discardedAt && (
+                  <span className="text-[12px] text-[var(--c-gold-deep)] ml-2">
+                    discarded {formatDate(h.discardedAt)}
+                  </span>
+                )}
               </span>
               <span className="text-[11.5px] text-slate-400 shrink-0 tabular-nums">{formatDate(h.receivedAt)}</span>
             </div>

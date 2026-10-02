@@ -175,6 +175,25 @@ export interface Handover {
   notes?: string
   loggedBy?: ID
   createdAt: string
+  /**
+   * WHEN THIS BATCH WAS TAKEN BACK OUT, where it was.
+   *
+   * THE FIRM, looking at a client whose Handover Book read three batches and a hundred quadrillion
+   * rand: "the notes that I made of like retracting the handover file, that's also not there. You
+   * remember I took it out, those handover files."
+   *
+   * THEY HAD. Two of the three batches carried `discarded_at`, their accounts were gone, and the
+   * card counted all three anyway — because this field was on the table and not on the type, so
+   * nothing on a screen could see it. The silent-column fault CLAUDE.md names, this time on the
+   * app's side of the line rather than in a row mapper.
+   *
+   * A DISCARDED BATCH IS STILL A FACT ABOUT THE CLIENT. It arrived, and it was taken back out; it
+   * is kept and marked rather than deleted — see handoverDiscard.ts — so it is drawn and struck
+   * through rather than hidden. What it must not do is count.
+   */
+  discardedAt?: string
+  discardedBy?: ID
+  discardedReason?: string
 }
 
 export type DealKind = 'Service' | 'Handover'

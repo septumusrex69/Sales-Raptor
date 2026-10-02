@@ -165,6 +165,87 @@ ok('...and what they are worth', /formatCurrency\(discarding\.capital\)/.test(ca
  */
 ok('a batch whose accounts are gone is left out', /if \(ids\.length === 0\) continue/.test(lib))
 
+/* ---------------------------------------------------------------------------------------------
+ * AND THE CLIENT'S OWN PAGE SAYS IT HAPPENED.
+ *
+ * THE FIRM, on a client whose Handover Book read "3 batches received" and R 106 746 000 000 011 868
+ * over a book of eight accounts: "the notes that I made of like retracting the handover file,
+ * that's also not there. You remember I took it out, those handover files."
+ *
+ * THEY HAD TAKEN THEM OUT AND IT LEFT NO TRACE ANYBODY COULD READ. Two of the three batches carried
+ * `discarded_at`, their accounts were gone — and the card counted all three while the Notes list
+ * showed three imports with nothing taking any of them back.
+ *
+ * TWO FAULTS, ONE CAUSE: the reversal is recorded in places nobody looks. The stamps on the row are
+ * the right record; the client's page is where somebody actually asks the question.
+ * ------------------------------------------------------------------------------------------- */
+
+const book = code('src/components/companies/HandoverBook.tsx')
+const types = read('src/types.ts')
+const notes = read('src/lib/importNote.ts')
+
+/*
+ * THE FIELD HAD TO EXIST ON THE TYPE BEFORE ANY SCREEN COULD SEE IT. `discarded_at` has been on the
+ * table since the feature was built and was absent from `Handover` — the silent-column fault
+ * CLAUDE.md names, this time on the app's side of the line rather than in a row mapper.
+ */
+ok('a handover carries when it was discarded', /discardedAt\?: string/.test(types))
+
+ok('the book no longer counts a discarded batch',
+  /const live = rows\.filter\(\(h\) => !h\.discardedAt\)/.test(book))
+ok('...in the capital', /const received = live\.reduce/.test(book))
+ok('...in the account count', /const accounts = live\.reduce/.test(book))
+/* AND THE QUIET CLOCK. A discarded batch would say a client sent something yesterday when what
+   they sent has been taken back out — which is the number this card exists to surface. */
+ok('...and in how long the client has been quiet', /const quietDays = live\.length > 0/.test(book))
+ok('...and nothing is summed over every row any more', !/rows\.reduce/.test(book))
+
+/*
+ * KEPT AND MARKED RATHER THAN HIDDEN, which is the same decision the library makes about the row.
+ * A batch that arrived and was withdrawn is a fact about this client, and hiding it would make the
+ * firm's own retraction invisible — which is half of what they were complaining about.
+ */
+ok('a discarded batch is still drawn', /rows\.map\(\(h: Handover\)/.test(book))
+ok('...struck through', /line-through/.test(book))
+/* AND SAID IN WORDS. A strikethrough is not a state to anybody reading this down a telephone, and
+   it is not a state at all to somebody who cannot see it. */
+ok('...and said in words beside it', /discarded \{formatDate\(h\.discardedAt\)\}/.test(book))
+ok('...and counted in the heading', /discarded > 0 \?/.test(book))
+
+/* ---------------- and a note lands where somebody looks ---------------- */
+
+ok('discarding writes a note on the client', /from\('activities'\)\.insert/.test(lib))
+ok('...of the kind the client s own list draws', /type: 'Note'/.test(lib))
+ok('...against the client', /company_id: input\.companyId/.test(lib))
+ok('...saying what went and what it was worth',
+  /discardNoteBody\(\{[\s\S]{0,200}accounts: ids\.length[\s\S]{0,120}capital:/.test(lib))
+
+/*
+ * AND IT SAYS THE UNCOMFORTABLE PART. A wrongly imported batch is exactly the case where the
+ * handover email and SMS have already gone out — this feature refuses to block on them for that
+ * reason — so debtors were written to and nothing recalls those messages. The person reading this
+ * in six months is reading it to answer a client asking why their debtor got a letter about an
+ * account the firm says it never had.
+ */
+ok('...and that notices already sent cannot be recalled',
+  /cannot be recalled/.test(notes))
+
+/*
+ * LAST, AND IT CANNOT FAIL THE DISCARD. By the time it runs the accounts are gone and the batch is
+ * marked; reporting failure would be a lie about the part that matters. Same reasoning the import
+ * applies to its own note.
+ */
+const markAt2 = lib.indexOf('discarded_at')
+const noteAt = lib.indexOf("from('activities')")
+ok('the note is written after the batch is marked', markAt2 > 0 && noteAt > markAt2)
+ok('...and a note that will not file does not undo the reversal',
+  /try \{[\s\S]{0,600}from\('activities'\)[\s\S]{0,600}\} catch \{/.test(lib))
+
+/* THE FIGURES COME FROM THE SCREEN, not from a fetch inside the write: by the time the batch is
+   marked its accounts are gone and there is nothing left to add up. */
+ok('the figures are read before the accounts go', /capital: discarding\.capital/.test(card))
+ok('...including the notices the person was shown', /noticesSent: discarding\.noticesSent/.test(card))
+
 console.log(`\ncheck-handover-discard: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)
