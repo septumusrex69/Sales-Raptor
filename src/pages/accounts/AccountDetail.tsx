@@ -895,7 +895,7 @@ export function AccountDetail() {
      database refuses again. See TestClockPanel. */
   const testClockPanel = (
     <TestClockPanel key="test-clock" accountId={account.id} accountNumber={account.accountNumber}
-      onTick={reload} />
+      isTestAccount={account.isTestAccount} onTick={reload} />
   )
 
   /*

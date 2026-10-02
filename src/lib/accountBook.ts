@@ -47,6 +47,11 @@ export interface DebtorAccount {
    * cheaper and less error-prone than two columns of which one is always null.
    */
   debtorKind: 'individual' | 'company'
+  /**
+   * A DUMMY ACCOUNT THE FIRM SIMULATES ON, which is the only thing that lets the test clock
+   * rewrite its notice dates. Never true on a real debtor -- the clock sends real emails and SMSs.
+   */
+  isTestAccount: boolean
   capitalHandedOver: number
   capitalOutstanding: number
   inDuplum: boolean
@@ -148,6 +153,10 @@ const toAccount = (r: any): DebtorAccount => ({
   debtorIdNumber: r.debtor_id_number,
   /* Defaulted here as well as in the database: an old row read before the migration is a person. */
   debtorKind: r.debtor_kind === 'company' ? 'company' : 'individual',
+  /* MISSING FROM THIS MAPPER IT READS AS undefined FOR EVER AND NOTHING FAILS -- CLAUDE.md's own
+     warning, and here it would silently take the test clock off every account again, which is the
+     exact failure this column was added to fix. */
+  isTestAccount: !!r.is_test_account,
   capitalHandedOver: Number(r.capital_handed_over ?? 0),
   capitalOutstanding: Number(r.capital_outstanding ?? 0),
   inDuplum: !!r.in_duplum,

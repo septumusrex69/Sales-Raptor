@@ -59,14 +59,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { data: account, error: accountError } = await admin
-    .from('debtor_accounts').select('account_number').eq('id', accountId).maybeSingle()
+    .from('debtor_accounts').select('account_number, is_test_account').eq('id', accountId)
+    .maybeSingle()
   if (accountError) {
     res.status(500).json({ error: accountError.message })
     return
   }
   /* LOCK 2. The sentence is the point: a collector who somehow reached this on a real account
      should read what the rule is, not a constraint name. */
-  if (!isTestAccount(account?.account_number as string | null)) {
+  if (!isTestAccount({
+    accountNumber: account?.account_number as string | null,
+    isTestAccount: account?.is_test_account as boolean | null,
+  })) {
     res.status(403).json({ error: 'The test clock only moves test accounts.' })
     return
   }

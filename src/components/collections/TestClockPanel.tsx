@@ -29,10 +29,16 @@ import { isTestAccount } from '../../lib/testClock.ts'
  * AND IT IS NOT DRAWN AT ALL EXCEPT ON A TEST ACCOUNT. The same predicate the server checks and the
  * database enforces, so the button is never offered where the press would be refused -- and no real
  * debtor's page ever carries a control that rewrites the dates on their notices.
+ *
+ * WHICH IS ALSO HOW BOTH BUTTONS CAME TO BE INVISIBLE. That predicate used to read a BF-TEST prefix
+ * on the account's reference, and the firm's own test accounts are numbered RRC00001 to RRC00008 --
+ * so this panel was built, deployed and drawn on nothing. It is a flag on the account now.
  */
-export function TestClockPanel({ accountId, accountNumber, onTick }: {
+export function TestClockPanel({ accountId, accountNumber, isTestAccount: marked, onTick }: {
   accountId: string
   accountNumber: string | null
+  /** Marked by the firm as one of their dummy debtors. See testClock.isTestAccount. */
+  isTestAccount: boolean
   /** Reload the account, so the rail redraws with whatever the tick sent. */
   onTick: () => Promise<void> | void
 }) {
@@ -76,7 +82,7 @@ export function TestClockPanel({ accountId, accountNumber, onTick }: {
     return () => window.clearInterval(id)
   }, [running])
 
-  if (!isTestAccount(accountNumber)) return null
+  if (!isTestAccount({ accountNumber, isTestAccount: marked })) return null
 
   return (
     <Card>

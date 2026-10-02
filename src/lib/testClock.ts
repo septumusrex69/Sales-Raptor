@@ -24,23 +24,53 @@
  * account is a TEST account; and `workflow_test_advance` refuses a non-test account again in the
  * DATABASE, where no client can talk its way past it. The last is the one that matters -- the same
  * reasoning as the ledgers having no update policy.
+ *
+ * AND THE SECOND LOCK IS A FLAG ON THE ACCOUNT, not a prefix on its reference. It was a prefix, it
+ * matched none of the firm's own test accounts, and the whole feature was invisible because of it.
+ * See isTestAccount.
  */
 
 /** Staging. The only database a test clock may touch. See CLAUDE.md's environment table. */
 export const STAGING_PROJECT_REF = 'kvkajxpremantdkhmjvb'
 
 /**
- * The firm's test accounts, by the numbering they already use.
+ * A reference that was never a real account's.
  *
- * A PREFIX RATHER THAN A FLAG COLUMN, deliberately: a column is something somebody can tick on a
- * real account by accident, and a debtor whose account number begins BF-TEST does not exist. The
- * same predicate is applied on the server, in the database and on the screen, so the button is
- * never offered where the endpoint would refuse it.
+ * KEPT, BUT NO LONGER THE ONLY ANSWER. It was written here as "the firm's test accounts, by the
+ * numbering they already use" -- and they do not use it. Their simulations run on RRC00001 to
+ * RRC00008, which is also how they name those accounts out loud ("the one on RC00008"), so this
+ * prefix matched nothing they had: the panel never drew and the endpoint would have refused the
+ * press. Both controls the firm asked for were built, deployed and unreachable.
+ *
+ * It stays because anything carrying it was never a debtor, which costs nothing to keep true.
  */
 export const TEST_ACCOUNT_PREFIX = 'BF-TEST'
 
-export function isTestAccount(accountNumber: string | null | undefined): boolean {
-  return typeof accountNumber === 'string' && accountNumber.startsWith(TEST_ACCOUNT_PREFIX)
+/**
+ * IS THIS AN ACCOUNT THE TEST CLOCK MAY REWRITE?
+ *
+ * TAKES THE ACCOUNT, NOT ITS NUMBER, because the answer is now a fact stored on the row rather
+ * than a spelling. Renaming the firm's dummy debtors to satisfy a prefix was the alternative and it
+ * was worse: `accountNumber` is the CREDITOR's reference off the handover sheet, and overwriting it
+ * would have broken the way the firm refers to their own test data to make a lock happy.
+ *
+ * STILL THE SECOND LOCK OF THREE, and the weaker two. What actually makes the test clock safe is
+ * that it refuses unless the deployment points at STAGING, and that `workflow_test_advance` asks
+ * this same question again in the database where no client can talk its way past it. This one is
+ * here so the browser never offers a button the server would refuse, and so the refusal is a
+ * sentence rather than a constraint name.
+ *
+ * DEFAULTS TO NO. An account read before the column existed, or a row where the mapper dropped it,
+ * is a real debtor as far as this is concerned -- the direction an unknown has to fail in when the
+ * thing on the other side rewrites the dates on statutory notices.
+ */
+export function isTestAccount(
+  account: { accountNumber?: string | null; isTestAccount?: boolean | null } | null | undefined,
+): boolean {
+  if (!account) return false
+  if (account.isTestAccount === true) return true
+  const number = account.accountNumber
+  return typeof number === 'string' && number.startsWith(TEST_ACCOUNT_PREFIX)
 }
 
 /**

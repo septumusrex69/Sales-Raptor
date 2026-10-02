@@ -61,14 +61,51 @@ ok('...and a lookalike host', !isStagingDatabase(`https://evil-${STAGING_PROJECT
 
 /* ---------------- lock two: test accounts only ---------------- */
 
+/*
+ * THE LOCK THAT WAS SHUT ON THE FIRM.
+ *
+ * It read a BF-TEST prefix on the account's reference, described here as "the firm's own test
+ * numbering" -- and it was not. Their simulations run on RRC00001 to RRC00008, the numbers they use
+ * out loud for those accounts, so the predicate matched nothing they had: the panel drew on no page
+ * and the endpoint would have refused the press. Both controls the firm asked for -- "run the next
+ * workflow" and the two-minute beat -- were built, deployed and unreachable.
+ *
+ * SO IT IS A FLAG ON THE ACCOUNT NOW, and the assertions below are mostly about it failing CLOSED:
+ * the thing on the other side of this lock rewrites the dates on statutory notices.
+ */
 check('the firm’s own test numbering', TEST_ACCOUNT_PREFIX, 'BF-TEST')
-ok('a test account is allowed', isTestAccount('BF-TEST-028'))
-ok('a real account is refused', !isTestAccount('LDT-00341'))
-/* NULL IS NOT A TEST ACCOUNT. An account with no number is the one case where "unknown" could be
-   read as "fine", and it is the case a missing mapper produces. */
-ok('...and so is an account with no number', !isTestAccount(null) && !isTestAccount(undefined))
+
+/* THE WAY THE FIRM'S ACCOUNTS ACTUALLY QUALIFY, and the case that was broken: a real-looking
+   reference, marked. */
+ok('an account the firm marked is allowed',
+  isTestAccount({ accountNumber: 'RRC00005', isTestAccount: true }))
+/* AND THE SAME REFERENCE UNMARKED IS A DEBTOR. The flag is the whole of the difference, which is
+   what makes marking it a decision somebody takes rather than a spelling they fall into. */
+ok('...and the same account unmarked is refused',
+  !isTestAccount({ accountNumber: 'RRC00005', isTestAccount: false }))
+/* THE PREFIX STILL OPENS IT, because anything carrying it was never a debtor. */
+ok('a BF-TEST reference is still allowed', isTestAccount({ accountNumber: 'BF-TEST-028' }))
+ok('a real account is refused', !isTestAccount({ accountNumber: 'LDT-00341' }))
+
+/*
+ * EVERY SHAPE OF "I DO NOT KNOW" IS A REAL ACCOUNT. This is the direction the unknown has to fail
+ * in, and the shapes are the ones a dropped column actually produces: the mapper that forgets
+ * `is_test_account` yields undefined, and a row read before the migration yields nothing at all.
+ */
+ok('...and so is an account with no number',
+  !isTestAccount({ accountNumber: null }) && !isTestAccount({ accountNumber: undefined }))
+ok('...and so is an account with nothing on it', !isTestAccount({}))
+ok('...and so is no account at all', !isTestAccount(null) && !isTestAccount(undefined))
+/* THE DROPPED-COLUMN CASE SAID OUTRIGHT, because it is the one that fails silently everywhere
+   else -- CLAUDE.md's standing warning about hand-written mappers. */
+ok('...and so is a marked account whose flag never arrived',
+  !isTestAccount({ accountNumber: 'RRC00005', isTestAccount: undefined }))
+/* NOT TRUTHINESS. A string, a 1, an object -- none of those is somebody having ticked it. */
+ok('...and only a real true counts',
+  !isTestAccount({ accountNumber: 'RRC00005', isTestAccount: 'yes' })
+  && !isTestAccount({ accountNumber: 'RRC00005', isTestAccount: 1 }))
 /* A PREFIX, NOT A SUBSTRING: a debtor's own reference containing the words must not open this. */
-ok('...and so is a number that only contains it', !isTestAccount('ACC-BF-TEST-1'))
+ok('...and so is a number that only contains it', !isTestAccount({ accountNumber: 'ACC-BF-TEST-1' }))
 
 /* ---------------- lock three: the database refuses it again ---------------- */
 
@@ -78,7 +115,15 @@ ok('the database has the test-clock function', fnAt > 0)
 const fn = fnAt > 0 ? sql.slice(fnAt, sql.indexOf('$$;', fnAt)) : ''
 /* THE LOCK THAT ACTUALLY HOLDS. The two above are checks a client could one day be talked past;
    this is the ledgers' rule applied to the calendar. */
-ok('...which refuses a real account itself', /v_number not like 'BF-TEST%'/.test(fn))
+ok('...which refuses a real account itself',
+  /not \(coalesce\(v_is_test, false\) or coalesce\(v_number, ''\) like 'BF-TEST%'\)/.test(fn))
+/* AND IT READS THE FLAG OFF THE ROW RATHER THAN BEING TOLD IT. A caller that could pass "this is a
+   test account" as an argument is not a lock, it is a parameter. */
+ok('...reading the flag off the account itself',
+  /select account_number, is_test_account into v_number, v_is_test/.test(fn))
+/* COALESCED, BOTH SIDES. A null flag on a row written before the migration is NOT NULL in Postgres
+   now, but the function must not start passing accounts the moment that assumption changes. */
+ok('...and an unset flag is not a test account', /coalesce\(v_is_test, false\)/.test(fn))
 ok('...loudly, rather than by doing nothing', /raise exception[\s\S]{0,120}?is a real account/.test(fn))
 /* AND IT IS NOT REACHABLE BY A SIGNED-IN PERSON. Only the service_role client behind the endpoint
    can call it, so a leaked button is not a way in either. */
@@ -132,7 +177,10 @@ check('nothing moves when nothing is left', daysToNextStep(TODAY, []), 0)
 
 const api = code('api/_lib/workflow/advance.ts')
 ok('the endpoint refuses a production database', /isStagingDatabase\(process\.env\.VITE_SUPABASE_URL\)/.test(api))
-ok('...and refuses a real account', /isTestAccount\(account\?\.account_number/.test(api))
+ok('...and refuses a real account', /isTestAccount\(\{\s*\n?\s*accountNumber: account\?\.account_number/.test(api))
+/* AND IT ASKS THE DATABASE FOR THE FLAG. Selecting only the number is how this lock was shut on
+   the firm in the first place, and it would read as undefined -- a real account -- for ever. */
+ok('...having actually fetched the flag', /select\('account_number, is_test_account'\)/.test(api))
 ok('...and moves the account through the database function',
   /\.rpc\('workflow_test_advance'/.test(api))
 /*
@@ -162,7 +210,16 @@ ok('it is an action on the existing router', /run, release, start, advance,/.tes
 /* ---------------- and the screen never offers what the server would refuse ---------------- */
 
 const panel = code('src/components/collections/TestClockPanel.tsx')
-ok('the panel draws nothing on a real account', /if \(!isTestAccount\(accountNumber\)\) return null/.test(panel))
+ok('the panel draws nothing on a real account',
+  /if \(!isTestAccount\(\{ accountNumber, isTestAccount: marked \}\)\) return null/.test(panel))
+/* AND IT IS HANDED THE FLAG, or the panel asks the right question of a value nobody passed it. */
+const mount = code('src/pages/accounts/AccountDetail.tsx')
+ok('...and the page passes it in', /isTestAccount=\{account\.isTestAccount\}/.test(mount))
+/* AND THE MAPPER FILLS IT. A column in the table, the type and the select('*') but missing from
+   toAccount reads as undefined for ever and nothing fails -- which would put this lock straight
+   back where it was. CLAUDE.md names this exact failure. */
+const book = code('src/lib/accountBook.ts')
+ok('...and the mapper reads the column', /isTestAccount: !!r\.is_test_account/.test(book))
 /* THE SAME PREDICATE, not a second copy of the rule: written twice they drift, and the half that
    drifts is the one that offers the button. */
 ok('...by the same predicate the server uses', /from '\.\.\/\.\.\/lib\/testClock\.ts'/.test(panel))

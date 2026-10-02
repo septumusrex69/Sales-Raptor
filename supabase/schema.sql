@@ -19575,3 +19575,100 @@ alter table public.tasks
 comment on column public.tasks.cancel_reason is
   'Why it was cancelled, in the words of whoever cancelled it. Goes onto the client''s own file as '
   'an activity, which is where the firm looks for it.';
+
+
+-- ============================================================================
+-- A TEST ACCOUNT IS A FACT ABOUT THE ACCOUNT, NOT A SPELLING OF ITS REFERENCE.
+--
+-- The test clock has two locks and the second one was unreachable. It read
+-- `account_number like 'BF-TEST%'` -- a numbering convention the firm does not actually use. Their
+-- simulations run on RRC00001 to RRC00008, which is also how they refer to those accounts in
+-- conversation ("the one on RC00008"), so the panel never drew on any account they had and the
+-- database would have refused the press anyway. Both buttons the firm asked for -- "next step now"
+-- and the two-minute beat -- were built, deployed and invisible.
+--
+-- RENAMING THEM WAS THE WRONG FIX. account_number is the CREDITOR's reference off the handover
+-- sheet and it is what the firm says out loud when they mean an account; overwriting it to satisfy
+-- a prefix check would break how they talk about their own data to make a lock happy.
+--
+-- DEFAULT FALSE, so nothing becomes a test account by being migrated, and the staging-only lock is
+-- untouched and still the one doing the real work.
+alter table public.debtor_accounts
+  add column if not exists is_test_account boolean not null default false;
+
+comment on column public.debtor_accounts.is_test_account is
+  'A dummy account the firm simulates workflows on. Lets the test clock rewrite its notice dates. '
+  'Never set on a real debtor: the test clock sends real emails and SMSs.';
+
+-- The eight dummy debtors on staging. Named individually rather than swept, so a real account that
+-- lands in this database later is not quietly made writable by a WHERE clause nobody reread.
+update public.debtor_accounts set is_test_account = true
+ where account_number in
+   ('RRC00001','RRC00002','RRC00003','RRC00004','RRC00005','RRC00006','RRC00007','RRC00008');
+
+create or replace function public.workflow_test_advance(
+  p_account_id uuid, p_days integer
+) returns integer
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_number text;
+  v_is_test boolean;
+  v_moved integer := 0;
+begin
+  if p_days is null or p_days < 1 or p_days > 400 then
+    raise exception 'A test clock moves between 1 and 400 days at a time, not %.', p_days
+      using errcode = '22023';
+  end if;
+
+  select account_number, is_test_account into v_number, v_is_test
+    from public.debtor_accounts where id = p_account_id;
+  if not found then
+    raise exception 'No such account.' using errcode = '22023';
+  end if;
+  /* THE LOCK. Not a warning, not a log line -- a refusal, in the database.
+     EITHER WAY OF SAYING IT: the flag is how the firm marks their own dummy debtors, and the
+     BF-TEST prefix is kept because anything carrying it was never a real account to begin with. */
+  if not (coalesce(v_is_test, false) or coalesce(v_number, '') like 'BF-TEST%') then
+    raise exception 'The test clock only moves test accounts. % is a real account.',
+      coalesce(v_number, '(no reference)') using errcode = '42501';
+  end if;
+
+  /* The run itself, or the first pause-and-resume re-dates every step from the original start and
+     the compression is silently undone. Only RUNNING runs: a held run is paused, and pulling its
+     steps forward while it is paused fights the re-dating that happens when it is let go. */
+  update public.workflow_runs
+     set started_on = started_on - p_days
+   where account_id = p_account_id and state = 'running';
+
+  update public.workflow_run_holds h
+     set started_on = h.started_on - p_days,
+         ended_on = case when h.ended_on is null then null else h.ended_on - p_days end
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account_id and r.state = 'running';
+
+  with moved as (
+    update public.workflow_run_steps s
+       set due_on = s.due_on - p_days
+      from public.workflow_runs r
+     where s.run_id = r.id
+       and r.account_id = p_account_id
+       and r.state = 'running'
+       and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_moved from moved;
+
+  return v_moved;
+end $$;
+
+comment on function public.workflow_test_advance(uuid, integer) is
+  'Move a TEST account backwards under the calendar so its next workflow step falls due today. '
+  'Refuses any account that is not marked is_test_account and whose number does not begin '
+  'BF-TEST, and is granted to no role but service_role. Sent steps never move: their dates are '
+  'the record of notices that reached a debtor.';
+
+revoke all on function public.workflow_test_advance(uuid, integer) from public;
+revoke all on function public.workflow_test_advance(uuid, integer) from authenticated;
