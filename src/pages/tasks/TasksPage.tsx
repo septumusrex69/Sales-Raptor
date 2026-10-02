@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, MapPin, Plus, Search, Users } from 'lucide-react'
+import { CalendarClock, CalendarDays, MapPin, Plus, Search, Users } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -11,11 +11,24 @@ import { RescheduleTaskModal } from '../../components/ui/RescheduleTaskModal'
 import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
-import { dayHeadline, localDay, meetingTime, planDay, taskTime } from '../../lib/dayPlan.ts'
+import {
+  dayCounts, dayHeadline, localDay, meetingTime, planDay, shiftDay, taskTime, weekStrip,
+} from '../../lib/dayPlan.ts'
+import { TaskDayPicker } from '../../components/tasks/TaskDayPicker'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
-const VIEWS = ['My Tasks', 'Team Tasks', 'Overdue', 'Today', 'Tomorrow', 'This Week', 'Completed'] as const
+/*
+ * THE FIRM: "I think it's important to see next week as well."
+ *
+ * AND BOTH WEEKS ARE NOW CALENDAR WEEKS, Monday to Sunday, which is a change to what "This Week"
+ * meant. It was a ROLLING SEVEN DAYS from today -- so on a Thursday it reached into the middle of
+ * next week, and the two buttons would have overlapped by three days with no way to tell which
+ * one a task on Tuesday belonged to. A week the firm can name is the only kind two buttons can
+ * divide. It covers the whole week including the days already gone: a task missed on Monday is
+ * part of this week, and Overdue is the view for reading it as a miss.
+ */
+const VIEWS = ['My Tasks', 'Team Tasks', 'Overdue', 'Today', 'Tomorrow', 'This Week', 'Next Week', 'Completed'] as const
 type View = (typeof VIEWS)[number]
 
 function startOfDay(d: Date) {
@@ -61,8 +74,22 @@ export function TasksPage() {
   const today = startOfDay(TODAY)
   const tomorrow = new Date(today)
   tomorrow.setDate(tomorrow.getDate() + 1)
-  const weekEnd = new Date(today)
-  weekEnd.setDate(weekEnd.getDate() + 7)
+  /*
+   * THE TWO WEEKS, AS SETS OF DAYS.
+   *
+   * MEMBERSHIP OF A SET OF 'YYYY-MM-DD', not a pair of timestamps to compare against. A task's
+   * dueDate carries an hour, so a >= / <= range has to get the boundary instants exactly right at
+   * both ends and gets them wrong the first time somebody books a task for five in the afternoon
+   * on the Sunday. weekStrip is the same Monday-first week the day pickers draw.
+   */
+  const thisWeek = useMemo(() => new Set(weekStrip(localDay(today), 1)), [today])
+  const nextWeek = useMemo(
+    () => new Set(weekStrip(shiftDay(localDay(today), 7), 1)),
+    [today],
+  )
+  /* The day picker on the list, open or shut. Shut by default: the views answer most questions and
+     a calendar permanently above the table is a calendar, which is the other page. */
+  const [pickDay, setPickDay] = useState(false)
 
   // Every view except the explicit "Team Tasks" escape hatch is scoped to
   // the logged-in rep's own tasks — Administrators/Sales Managers keep
@@ -98,7 +125,10 @@ export function TasksPage() {
           list = list.filter((t) => startOfDay(new Date(t.dueDate)).getTime() === tomorrow.getTime())
           break
         case 'This Week':
-          list = list.filter((t) => new Date(t.dueDate) >= today && new Date(t.dueDate) <= weekEnd)
+          list = list.filter((t) => thisWeek.has(localDay(new Date(t.dueDate))))
+          break
+        case 'Next Week':
+          list = list.filter((t) => nextWeek.has(localDay(new Date(t.dueDate))))
           break
         case 'Completed':
           list = list.filter((t) => t.status === 'Completed')
@@ -110,7 +140,7 @@ export function TasksPage() {
       list = list.filter((t) => t.title.toLowerCase().includes(q) || (t.relatedToLabel ?? '').toLowerCase().includes(q))
     }
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-  }, [scopedTasks, tasks, view, dateFilter, search, today, tomorrow, weekEnd, currentUser])
+  }, [scopedTasks, tasks, view, dateFilter, search, today, tomorrow, thisWeek, nextWeek, currentUser])
 
   /*
    * WHICH ONE DAY THIS PAGE IS ABOUT, or null where it is about a range.
@@ -146,6 +176,18 @@ export function TasksPage() {
     })
   }
 
+  /* THE DAY GOES IN THE URL, like the one the calendar links to. Same parameter, so a day chosen
+     here and a day arrived at from a calendar square are the same state -- and the back button
+     works, which is what somebody expects after pressing into a day. */
+  function setDay(day: string) {
+    setDateFilter(day)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('date', day)
+      return next
+    })
+  }
+
   function clearDateFilter() {
     setDateFilter(undefined)
     setSearchParams((prev) => {
@@ -154,6 +196,22 @@ export function TasksPage() {
       return next
     })
   }
+
+  /*
+   * HOW FULL EACH DAY ALREADY IS, for whichever day picker is open.
+   *
+   * ONE CALCULATION FOR BOTH PICKERS and for the day headline, because they are answering the same
+   * question -- dayPlan.dayCounts walks the two lists once. The meetings are the signed-in
+   * person's: a calendar event belongs to one person and RLS scopes it to them, which is why
+   * giving a task to somebody else shows their tasks with a note saying so.
+   */
+  const myCounts = useMemo(
+    () => dayCounts({
+      meetings,
+      tasks: scopedTasks.filter((t) => t.ownerId === currentUser?.id),
+    }),
+    [meetings, scopedTasks, currentUser],
+  )
 
   const counts = useMemo(() => {
     const overdue = scopedTasks.filter((t) => new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled').length
@@ -186,6 +244,13 @@ export function TasksPage() {
 
       {dateFilter ? (
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* The same control that chose the day, so a wrong day is one press from the right one
+              rather than a clear-and-start-again. */}
+          <button onClick={() => setPickDay((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg
+              border border-slate-200 text-slate-600 hover:bg-slate-50">
+            <CalendarDays size={13} /> Another day
+          </button>
           {/* THE DAY, AND WHAT IS IN IT. "Tasks — 14 October" named the filter; the firm asked
               what you need to DO that day, and the count of meetings beside the count of tasks is
               the one glance that answers it. */}
@@ -206,7 +271,38 @@ export function TasksPage() {
               {v}
             </button>
           ))}
+          {/*
+            A DAY OF THEIR OWN CHOOSING.
+
+            THE FIRM: "in the tasks, maybe I should like be able to search for a specific day for
+            my tasks." Seven named views cover the week either side of today and nothing else --
+            the 14th of next month was reachable only by going to the calendar, finding the square
+            and clicking it, which is a long way round to a list this page already draws.
+          */}
+          <button onClick={() => setPickDay((v) => !v)}
+            className={`inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg
+              ${pickDay ? 'bg-slate-700 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+            <CalendarDays size={14} /> A day
+          </button>
         </div>
+      )}
+
+      {/*
+        AND THE PICKER ITSELF, WITH THE COUNTS ON IT.
+
+        `allowPast`, which is the one way this differs from the box that books a task: looking back
+        at last Tuesday is most of what a day filter is for, and booking onto it is not possible.
+      */}
+      {pickDay && (
+        <Card className="p-4">
+          <TaskDayPicker
+            value={dateFilter ?? ''}
+            onChange={(day) => { setDay(day); setPickDay(false) }}
+            counts={myCounts}
+            today={localDay(today)}
+            allowPast
+          />
+        </Card>
       )}
 
       <div className="flex flex-wrap items-center gap-2.5">
@@ -214,7 +310,11 @@ export function TasksPage() {
           <Search size={15} className="text-slate-400" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks..." className="text-sm outline-none flex-1 min-w-0" />
         </div>
-        <span className="text-xs text-slate-400">{filtered.length} tasks</span>
+        {/* "1 tasks" was on this screen every time a day held one. The firm's words are the firm's
+            words even in a count. */}
+        <span className="text-xs text-slate-400">
+          {filtered.length === 1 ? '1 task' : `${filtered.length} tasks`}
+        </span>
         <button onClick={() => setAddOpen(true)} className="ml-auto inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg bg-brand-600 text-white hover:bg-brand-700">
           <Plus size={15} /> Add Task
         </button>
@@ -332,7 +432,23 @@ export function TasksPage() {
         </div>
       </Card>
 
-      {addOpen && <AddTaskModal reps={reps} defaultOwnerId={currentUser?.id ?? ''} onClose={() => setAddOpen(false)} onSave={(input) => addTask(input)} />}
+      {addOpen && (
+        <AddTaskModal
+          reps={reps}
+          defaultOwnerId={currentUser?.id ?? ''}
+          /*
+            THE WHOLE STORE, NOT THE SCOPED LIST. The box can give a task to somebody else, and
+            what that person's day already holds is the figure the firm asked to see -- a count
+            drawn from the signed-in person's own tasks would describe the wrong day entirely.
+          */
+          allTasks={tasks}
+          meetings={meetings}
+          currentUserId={currentUser?.id ?? ''}
+          today={localDay(today)}
+          onClose={() => setAddOpen(false)}
+          onSave={(input) => addTask(input)}
+        />
+      )}
       {rescheduleTask && (
         <RescheduleTaskModal
           task={rescheduleTask}
@@ -347,11 +463,20 @@ export function TasksPage() {
 function AddTaskModal({
   reps,
   defaultOwnerId,
+  allTasks,
+  meetings,
+  currentUserId,
+  today,
   onClose,
   onSave,
 }: {
   reps: User[]
   defaultOwnerId: string
+  allTasks: Task[]
+  meetings: CalendarEvent[]
+  currentUserId: string
+  /** 'YYYY-MM-DD'. Passed down rather than read from the clock, like every other picker here. */
+  today: string
   onClose: () => void
   onSave: (input: Partial<Task> & { title: string; dueDate: string }) => void
 }) {
@@ -364,8 +489,27 @@ function AddTaskModal({
    * noise that the day's list would then print as fact.
    */
   const [form, setForm] = useState({ title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority, ownerId: defaultOwnerId, date: '', time: '' })
+
+  /*
+   * WHAT THE OWNER'S DAY ALREADY HOLDS -- recomputed when the owner changes, because the question
+   * is about THEIR day and not about the day of whoever is typing.
+   *
+   * MEETINGS ONLY FOR YOURSELF, and said out loud when it is somebody else. A calendar event
+   * belongs to one person and RLS scopes it to them, so there is no honest way to count another
+   * rep's meetings from here -- and a total that silently left them out would be the firm asking
+   * "how many meetings do I have that day" and being shown a number that cannot answer it.
+   */
+  const mine = form.ownerId === currentUserId
+  const counts = useMemo(
+    () => dayCounts({
+      meetings: mine ? meetings : [],
+      tasks: allTasks.filter((t) => t.ownerId === form.ownerId),
+    }),
+    [mine, meetings, allTasks, form.ownerId],
+  )
+  /* Wide enough for seven columns: the grid caps itself at 32rem. */
   return (
-    <Modal title="Add Task" onClose={onClose} width={420}>
+    <Modal title="Add Task" onClose={onClose} width={520}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -394,8 +538,42 @@ function AddTaskModal({
               ))}
             </select>
           </FormField>
-          <FormField label="Date" required>
-            <input type="date" className={inputClass} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+        </div>
+        {/*
+          THE DAY, WITH THE DAY'S LOAD ON IT.
+
+          THE FIRM: "it asks you when, but it should look like a rediarisation almost thing, to
+          show you how many meetings do you have for a specific day." It was an
+          `<input type="date">`, which accepts the 8th exactly as readily when the 8th already
+          holds four client meetings. ABOVE the time rather than beside it, because it is now a
+          three-week grid and not a field.
+        */}
+        <FormField label="Day" required>
+          <TaskDayPicker
+            value={form.date}
+            onChange={(date) => setForm({ ...form, date })}
+            counts={counts}
+            today={today}
+            note={mine ? undefined
+              : 'Counting their tasks only — a calendar belongs to the person whose it is.'}
+          />
+        </FormField>
+        {/*
+          WHOSE AND WHAT TIME, AFTER THE DAY.
+
+          The time used to sit beside Type and Priority, which put it two fields above the date it
+          is a time ON. The day is now a grid rather than a field, so the order reads the way the
+          decision is made: what it is, which day, then whose it is and whether an hour was meant.
+        */}
+        <div className="grid grid-cols-2 gap-3">
+          <FormField label="Owner">
+            <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
+              {reps.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
           </FormField>
           <FormField label="Time">
             <input type="time" className={inputClass} value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
@@ -406,15 +584,6 @@ function AddTaskModal({
             </span>
           </FormField>
         </div>
-        <FormField label="Owner">
-          <select className={inputClass} value={form.ownerId} onChange={(e) => setForm({ ...form, ownerId: e.target.value })}>
-            {reps.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </FormField>
         <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
           <button type="button" onClick={onClose} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
             Cancel

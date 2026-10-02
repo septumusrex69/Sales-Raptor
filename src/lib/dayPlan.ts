@@ -225,3 +225,122 @@ export function whenItIs(m: DayMeeting): string {
 /* A date-only value is parsed at midday, never midnight: `new Date('2026-10-08')` is midnight UTC,
    which is the day before for every reader west of Greenwich. */
 const long = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString('en-ZA', DAY)
+
+/* ------------------------------------------------------------------------------------------------
+ * HOW FULL EACH DAY IS, BEFORE ANYTHING IS BOOKED ONTO IT
+ *
+ * THE FIRM, on adding a task: "if you create a task, now you say, okay, well, add a task, but it
+ * asks you when -- but it should look like a rediarisation almost thing, to show you how many
+ * meetings do you have for a specific day."
+ *
+ * WHICH IS THE DIARY'S OWN ARGUMENT, MOVED. DiaryDatePicker puts the count on every day BEFORE the
+ * choice is made, and the reason is written there: a number that appears once you have already
+ * picked the 5th tells you that you have overbooked yourself and leaves you to work out which
+ * other day is better. The book it replaced is the evidence -- one agent came across from
+ * Swordfish carrying 44 accounts diarised onto a single date, every one still open weeks later.
+ *
+ * AND IT IS A DIFFERENT COUNT, WHICH IS WHY IT IS NOT THAT FUNCTION. The diary counts ACCOUNTS
+ * against a capacity the firm has set (50 a day, for everybody). A day of meetings and tasks has
+ * no such number and the firm has not been asked for one, so this counts and does not judge: no
+ * "full", no "over", no colour that says somebody is behind. Inventing a tasks-per-day ceiling
+ * here would put a warning on a screen that fires when nothing is wrong, which CLAUDE.md is blunt
+ * about -- people stop reading those, including the ones that matter.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** What a day holds, for a square in a grid. */
+export interface DayCount {
+  meetings: number
+  tasks: number
+  /** What "you have 6 things on Tuesday" counts. */
+  total: number
+}
+
+export const NO_DAY_COUNT: DayCount = { meetings: 0, tasks: 0, total: 0 }
+
+/**
+ * COUNT A RANGE IN ONE PASS, rather than calling planDay once per square.
+ *
+ * A month grid is 42 days and planDay filters the whole list for each one, so drawn that way the
+ * work is 42 times the diary it is modelled on. This walks the two lists once and drops each item
+ * into its day -- the same `meetingDay` and the same cancelled-task rule planDay uses, because the
+ * number under the 8th has to be the number of rows the 8th then shows. Two implementations of
+ * "what is on a day" is the drift dayPlan exists to prevent.
+ */
+export function dayCounts(input: {
+  meetings: DayMeeting[]
+  tasks: DayTask[]
+}): Map<string, DayCount> {
+  const out = new Map<string, DayCount>()
+  const at = (day: string): DayCount => {
+    const got = out.get(day)
+    if (got) return got
+    const made = { meetings: 0, tasks: 0, total: 0 }
+    out.set(day, made)
+    return made
+  }
+  for (const m of input.meetings) {
+    const day = meetingDay(m)
+    /* A meeting with no day resolved belongs on no square -- the calendar lists those separately
+       as the ones it could not place, and counting one into today would be a figure nobody can
+       find the row behind. */
+    if (!day) continue
+    const c = at(day)
+    c.meetings += 1
+    c.total += 1
+  }
+  for (const t of input.tasks) {
+    if (t.status === 'Cancelled') continue
+    const d = new Date(t.dueDate)
+    if (Number.isNaN(d.getTime())) continue
+    const c = at(localDay(d))
+    c.tasks += 1
+    c.total += 1
+  }
+  return out
+}
+
+/**
+ * WHAT A DAY HOLDS, IN WORDS.
+ *
+ * TWO KINDS COUNTED SEPARATELY, like dayHeadline and for the same reason: a single "6 things"
+ * hides the one fact somebody choosing a day actually needs, which is whether any of it is an
+ * appointment they have to be at. A day with four meetings on it is full in a way a day with four
+ * tasks on it is not.
+ *
+ * "NOTHING BOOKED" IS A REAL ANSWER and is said rather than left blank -- an empty line under a
+ * date reads as a count that failed to load, which is the opposite of the fact it is reporting.
+ */
+export function dayCountSentence(c: DayCount): string {
+  const bits: string[] = []
+  if (c.meetings) bits.push(c.meetings === 1 ? '1 meeting' : `${c.meetings} meetings`)
+  if (c.tasks) bits.push(c.tasks === 1 ? '1 task' : `${c.tasks} tasks`)
+  return bits.length ? bits.join(' · ') : 'Nothing booked'
+}
+
+/**
+ * THE DAYS OF A WEEK-ALIGNED STRIP, Monday first.
+ *
+ * ITS OWN RATHER THAN diaryPriority's `calendarStrip`, which this deliberately mirrors: that one
+ * is imported by SQL-facing diary code and by the account book, and a task picker reaching into it
+ * would tie the two together for the sake of six lines of date arithmetic. Monday first because
+ * the diary's grid is, and a person using both in one afternoon must not have to re-learn where
+ * Saturday is.
+ */
+export function weekStrip(from: string, weeks: number): string[] {
+  const start = new Date(`${from}T12:00:00`)
+  /* Monday as 0. getDay() is Sunday-based, so Sunday (0) is six days into the week, not before it. */
+  const back = (start.getDay() + 6) % 7
+  start.setDate(start.getDate() - back)
+  return Array.from({ length: weeks * 7 }, (_, i) => {
+    const d = new Date(start)
+    d.setDate(d.getDate() + i)
+    return localDay(d)
+  })
+}
+
+/** Shift a 'YYYY-MM-DD' by whole days, through month and year ends. */
+export function shiftDay(day: string, by: number): string {
+  const d = new Date(`${day}T12:00:00`)
+  d.setDate(d.getDate() + by)
+  return localDay(d)
+}

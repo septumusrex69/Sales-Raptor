@@ -358,6 +358,24 @@ function MonthView({ cursor, events, onMeeting }: {
               >
                 {d.getDate()}
               </span>
+              {/*
+                HOW MUCH IS ON THE DAY, as a number.
+
+                THE CHIPS DO NOT ANSWER THIS. The square fits three, so a day with three things on
+                it and a day with eleven look identical until you read the "+8 more" at the bottom
+                -- and scanning a month for the heavy days meant reading forty-two of those lines.
+                The firm asked to see a day's load before booking into it, and on a month grid the
+                load is one digit.
+
+                ABSENT AT ZERO rather than a nought on every empty square: forty-two noughts is
+                furniture, and the thing being looked for is the days that are not empty.
+              */}
+              {dayEvents.length > 0 && (
+                <span className="absolute top-1.5 right-1.5 pointer-events-none text-[10px] font-semibold
+                  tabular-nums text-slate-400">
+                  {dayEvents.length}
+                </span>
+              )}
               <div className="relative mt-1 space-y-1">
                 {dayEvents.slice(0, 3).map((e) => (
                   <Chip
@@ -403,6 +421,14 @@ function WeekView({ cursor, events, onMeeting }: {
             <Link to={tasksUrlForDate(d)} className="block px-3 py-2 border-b border-slate-100 text-center hover:bg-slate-50">
               <p className="text-[11px] text-slate-400">{WEEKDAYS[d.getDay()]}</p>
               <p className={`text-sm font-semibold ${isToday ? 'text-brand-600' : 'text-slate-700'}`}>{d.getDate()}</p>
+              {/* THE DAY'S LOAD, SPELT OUT. A week column is tall enough to show everything on it,
+                  so the number here is not telling you what is hidden -- it is what lets somebody
+                  pick the quiet day without counting rows in seven columns. Said in words rather
+                  than as a bare digit, because there is room for words. */}
+              <p className="text-[10px] text-slate-400 tabular-nums">
+                {dayEvents.length === 0 ? 'Clear'
+                  : dayEvents.length === 1 ? '1 thing' : `${dayEvents.length} things`}
+              </p>
             </Link>
             <div className="p-2 space-y-1.5 min-h-[220px]">
               {dayEvents.map((e) => (

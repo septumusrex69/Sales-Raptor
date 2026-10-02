@@ -6,6 +6,8 @@ import {
   type DayLoad, type DayLoadLevel,
 } from '../../lib/diaryPriority.ts'
 import { fetchDayLoads, type DayLoads } from '../../lib/diary.ts'
+import { DayGrid, type DayCell } from '../ui/DayGrid'
+import { longDate, monthSpan, shortDate } from '../../lib/dayWords.ts'
 
 /**
  * Choosing the day an account comes back.
@@ -30,8 +32,6 @@ const LEVEL_STYLE: Record<DayLoadLevel, string> = {
   full: 'bg-[var(--tint-rust)] border-[var(--c-rust)]/40 text-[var(--c-rust)] hover:border-[var(--c-rust)]',
   over: 'bg-[var(--tint-rust-deep)] border-[var(--c-rust-deep)]/50 text-[var(--c-rust-deep)] hover:border-[var(--c-rust-deep)]',
 }
-
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3, today, showLoad = true, onLoad }: {
   /** Whose diary the counts are for. Null counts the unassigned pile. */
@@ -92,6 +92,28 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
   const loadFor = (date: string): DayLoad =>
     dayLoad({ date, booked: loads?.get(date) ?? 0, capacity })
 
+  /**
+   * HOW ONE SQUARE READS. The diary's own policy, kept here rather than in the grid.
+   *
+   * A WEEKEND OR A PUBLIC HOLIDAY CANNOT BE CHOSEN: there is nobody at a desk, and five accounts
+   * in the imported book are diarised onto a Saturday. Nor can a day already gone -- an account
+   * cannot come back yesterday.
+   */
+  const cellFor = (date: string): DayCell => {
+    const load = loadFor(date)
+    const holiday = holidays.get(date)
+    const past = date < today
+    const disabled = load.closed || past
+    return {
+      count: showLoad ? load.booked : null,
+      tone: LEVEL_STYLE[load.level],
+      disabled,
+      title: disabled
+        ? (holiday ?? (past ? 'Already gone' : 'Nobody is at a desk'))
+        : showLoad ? `${longDate(date)} — ${dayLoadSentence(load)}` : longDate(date),
+    }
+  }
+
   const chosen = loadFor(value)
   const suggestion = loads ? firstDayWithRoom(today, loads, capacity) : null
 
@@ -136,54 +158,12 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {WEEKDAYS.map((d) => (
-          <span key={d} className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 text-center">
-            {d.slice(0, 1)}
-          </span>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-7 gap-1">
-        {days.map((date) => {
-          const load = loadFor(date)
-          const holiday = holidays.get(date)
-          const past = date < today
-          const disabled = load.closed || past
-          const selected = date === value
-
-          return (
-            <button
-              key={date}
-              type="button"
-              disabled={disabled}
-              onClick={() => onChange(date)}
-              title={disabled
-                ? (holiday ?? (past ? 'Already gone' : 'Nobody is at a desk'))
-                : showLoad ? `${longDate(date)} — ${dayLoadSentence(load)}` : longDate(date)}
-              className={[
-                'rounded-lg border px-1 py-1.5 text-center transition-colors',
-                disabled
-                  ? 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed'
-                  : LEVEL_STYLE[load.level],
-                selected ? 'ring-2 ring-navy-900 ring-offset-1' : '',
-              ].join(' ')}
-            >
-              <span className="block text-sm font-semibold leading-none">{Number(date.slice(8, 10))}</span>
-              {/*
-                The number under the date is the point of the control, so it holds its line even
-                at zero — a column of counts that appears and disappears is harder to scan than
-                one with a dash in it.
-              */}
-              {showLoad && (
-                <span className="block text-[10px] leading-none mt-1 tabular-nums">
-                  {disabled ? '·' : load.booked || '–'}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
+      {/*
+        THE GRID ITSELF IS SHARED with the task picker -- see DayGrid. What belongs to the diary is
+        everything decided here: the capacity, the levels, which days are closed. The seven columns
+        are not a diary decision and were the half that would have drifted.
+      */}
+      <DayGrid days={days} value={value} onChange={onChange} cellFor={cellFor} />
 
       {/*
         One sentence about the day that is actually chosen. The grid shows the shape; this says
@@ -211,18 +191,9 @@ export function DiaryDatePicker({ ownerId, capacity, value, onChange, weeks = 3,
 
 /* ---------- dates as words ---------- */
 
-const fmt = (date: string, opts: Intl.DateTimeFormatOptions) =>
-  new Intl.DateTimeFormat('en-ZA', { ...opts, timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
-
-export const longDate = (date: string) => fmt(date, { weekday: 'long', day: 'numeric', month: 'long' })
-export const shortDate = (date: string) => fmt(date, { day: 'numeric', month: 'short' })
-
-function monthSpan(days: string[]): string {
-  const first = fmt(days[0], { month: 'long', year: 'numeric' })
-  const last = fmt(days[days.length - 1], { month: 'long', year: 'numeric' })
-  if (first === last) return first
-  // Across a month end, drop the repeated year: "September – October 2026".
-  const [fm, fy] = first.split(' ')
-  const [lm, ly] = last.split(' ')
-  return fy === ly ? `${fm} – ${lm} ${ly}` : `${first} – ${last}`
-}
+/*
+ * MOVED TO lib/dayWords, AND RE-EXPORTED. Four files import them from here and the task picker
+ * needs the same three; a pure function in a .tsx file cannot be imported by scripts/qa at all,
+ * which is the reason three other functions have moved this session.
+ */
+export { longDate, shortDate } from '../../lib/dayWords.ts'

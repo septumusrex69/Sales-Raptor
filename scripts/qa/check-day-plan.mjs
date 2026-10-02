@@ -21,8 +21,10 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  dayHeadline, localDay, meetingDay, meetingTime, planDay, taskTime,
+  NO_DAY_COUNT, dayCountSentence, dayCounts, dayHeadline, localDay, meetingDay, meetingTime,
+  planDay, shiftDay, taskTime, weekStrip,
 } from '../../src/lib/dayPlan.ts'
+import { monthSpan } from '../../src/lib/dayWords.ts'
 
 let pass = 0
 const failures = []
@@ -41,6 +43,9 @@ const code = (p) => read(p)
 
 const cal = code('src/pages/calendar/CalendarPage.tsx')
 const tasks = code('src/pages/tasks/TasksPage.tsx')
+const picker = code('src/components/tasks/TaskDayPicker.tsx')
+const grid = code('src/components/ui/DayGrid.tsx')
+const diaryPicker = code('src/components/diary/DiaryDatePicker.tsx')
 const lib = code('src/lib/dayPlan.ts')
 
 /* ---------------------------------------------------------------------------------------------
@@ -202,6 +207,159 @@ ok('...and the meetings block is absent rather than empty',
 ok('meetings show on a single day, not on a range', /const dayShown = dateFilter/.test(tasks))
 ok('...which covers Today and Tomorrow as well',
   /view === 'Today' \? localDay\(today\)/.test(tasks) && /view === 'Tomorrow' \? localDay\(tomorrow\)/.test(tasks))
+
+/* ---------------------------------------------------------------------------------------------
+ * SEEING THE DAY'S LOAD BEFORE BOOKING ONTO IT
+ *
+ * THE FIRM, on the Add Task box: "it asks you when, but it should look like a rediarisation almost
+ * thing, to show you how many meetings do you have for a specific day." Which is the diary's own
+ * argument moved onto a task: the count has to be in front of somebody BEFORE the choice, because
+ * a number that appears after it tells them they have overbooked and leaves them to work out
+ * which other day was better.
+ * ------------------------------------------------------------------------------------------- */
+
+const meet = (id, startsAt) => ({
+  id, title: `m-${id}`, startsAt, endsAt: null, allDay: false, startsOn: null,
+  location: null, attendees: [], organiserName: null,
+})
+
+/* THE SAME DAY THE SAME WAY. dayCounts must place an item on the square planDay would draw it on,
+   or the number under the 14th is not the number of rows the 14th then shows. */
+const sameDayAsPlan = () => {
+  const meetings = [meet('a', '2026-10-14T09:00:00Z'), meet('b', '2026-10-15T09:00:00Z')]
+  const list = [task('t1', '2026-10-14T00:00:00'), task('t2', '2026-10-14T15:00:00')]
+  const counted = dayCounts({ meetings, tasks: list }).get(DAY)
+  const planned = planDay({ day: DAY, meetings, tasks: list })
+  return [counted.total, planned.total]
+}
+const [counted, planned] = sameDayAsPlan()
+check('a day counts what planDay would draw on it', counted, planned)
+
+/* TWO KINDS COUNTED SEPARATELY, because a day with four meetings is full in a way a day with four
+   tasks is not -- and whether any of it is an appointment is the one fact somebody picking a day
+   needs at a glance. */
+const mixed = dayCounts({
+  meetings: [meet('a', '2026-10-14T09:00:00Z')],
+  tasks: [task('t1', '2026-10-14T00:00:00'), task('t2', '2026-10-14T11:00:00')],
+}).get(DAY)
+check('meetings and tasks are counted apart', [mixed.meetings, mixed.tasks], [1, 2])
+check('...and said apart', dayCountSentence(mixed), '1 meeting · 2 tasks')
+check('...singular where there is one of each',
+  dayCountSentence({ meetings: 1, tasks: 1, total: 2 }), '1 meeting · 1 task')
+/* NOTHING IS A REAL ANSWER, said rather than left blank: an empty line under a date reads as a
+   count that failed to load, which is the opposite of the fact it is reporting. */
+check('an empty day says so', dayCountSentence(NO_DAY_COUNT), 'Nothing booked')
+
+/* A CANCELLED TASK IS NOT WORK -- the same exclusion planDay and the calendar both make, or the
+   number over a square counts rows the list below it will not show. */
+check('a cancelled task is not counted',
+  dayCounts({ meetings: [], tasks: [{ id: 'c', title: 'x', dueDate: '2026-10-14T00:00:00', status: 'Cancelled' }] }).size,
+  0)
+/* AND A MEETING WITH NO DAY RESOLVED BELONGS ON NO SQUARE. The calendar lists those separately as
+   the ones it could not place; counted into today they would be a figure with no row behind it. */
+check('a meeting with no day is not counted into one',
+  dayCounts({ meetings: [{ ...meet('x', null), startsOn: null }], tasks: [] }).size, 0)
+
+/* MONDAY FIRST, SEVEN AT A TIME. The diary's grid is Monday-first and somebody using both in one
+   afternoon must not have to re-learn where Saturday is. */
+const strip = weekStrip('2026-10-14', 2)
+check('a strip is whole weeks', strip.length, 14)
+check('...starting on the Monday of the week asked for', strip[0], '2026-10-12')
+/* SUNDAY IS THE END OF ITS WEEK, NOT THE START. getDay() is Sunday-based, so this is the one date
+   an off-by-one here gets wrong -- and it would silently shift a whole grid by a week. */
+check('...and a Sunday belongs to the week it ends', weekStrip('2026-10-18', 1)[0], '2026-10-12')
+check('a day shifts through a year end', shiftDay('2026-12-31', 1), '2027-01-01')
+check('...and backwards through one', shiftDay('2026-01-01', -1), '2025-12-31')
+/* ACROSS A MONTH END THE REPEATED YEAR GOES, and across a year end both stay. */
+check('a heading names the months it spans', monthSpan(['2026-09-28', '2026-10-04']),
+  'September – October 2026')
+check('...and keeps both years across a year end', monthSpan(['2026-12-28', '2027-01-03']),
+  'December 2026 – January 2027')
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE CONTROLS THAT DRAW IT
+ * ------------------------------------------------------------------------------------------- */
+
+/* ONE GRID. DiaryDatePicker's own comment is the argument -- "two calendars drift apart inside a
+   month" -- so the seven columns are shared and only the policy is not. */
+ok('the diary and the task picker draw one grid',
+  /<DayGrid /.test(diaryPicker) && /<DayGrid /.test(picker))
+/* AND THE GRID DECIDES NOTHING. A grid that knew about capacity would carry the diary's policy
+   into a task picker the firm has never given a ceiling for. */
+ok('...and the grid holds no policy of its own',
+  !/capacity|dayLoad|publicHolidays/.test(grid))
+
+/*
+ * IT COUNTS AND DOES NOT JUDGE.
+ *
+ * No "full", no "over", no red. The diary colours against the firm's 50-a-day; a day of meetings
+ * and tasks has no such number and the firm has not been asked for one. A warning that fires when
+ * nothing is wrong is worse than none.
+ */
+ok('the task picker does not grade a day', !/rust|'full'|'over'/.test(picker))
+/* A WEEKEND IS MARKED AND STILL CHOOSABLE, which is the deliberate difference from the diary: an
+   account cannot come back on a Saturday because nobody will work it, and a reminder about
+   Monday's trip written against the Sunday is somebody's own business. */
+ok('...and a closed day is marked rather than refused',
+  /Nobody is at a desk/.test(picker) && /disabled: past && !allowPast/.test(picker))
+
+/* THE COUNTS ARE HANDED IN, not fetched a second time -- a second fetch would be a second answer
+   to "what is on the 8th", which is what this whole file exists to prevent. */
+ok('the picker is given its counts', /counts: Map<string, DayCount>/.test(picker))
+ok('...computed once on the page', /dayCounts\(\{/.test(tasks))
+
+/* THE ADD BOX USES IT. This is the firm's actual request, and the input it replaced would accept
+   the 8th exactly as readily when the 8th already holds four client meetings. */
+ok('Add Task chooses the day on the grid', /<TaskDayPicker/.test(tasks))
+ok('...and no longer on a bare date field', !/type="date"/.test(tasks))
+/*
+ * AND IT COUNTS THE OWNER'S DAY, NOT THE TYPIST'S. A task can be given to somebody else, and a
+ * count drawn from the signed-in person's own tasks would describe the wrong day entirely.
+ * MEETINGS ONLY FOR YOURSELF, said out loud: a calendar event belongs to one person and RLS
+ * scopes it to them, so a total that silently left them out would answer the firm's question --
+ * "how many meetings do I have that day" -- with a number that cannot.
+ */
+ok('the box counts the owner\'s day', /tasks: allTasks\.filter\(\(t\) => t\.ownerId === form\.ownerId\)/.test(tasks))
+ok('...and says when it cannot see their meetings',
+  /Counting their tasks only/.test(tasks))
+
+/*
+ * NEXT WEEK, AND BOTH WEEKS ARE NOW WEEKS.
+ *
+ * THE FIRM: "I think it's important to see next week as well." This Week was a ROLLING SEVEN DAYS
+ * from today, so on a Thursday it reached into the middle of next week and the two buttons would
+ * have overlapped by three days with no way to tell which one a Tuesday task belonged to.
+ */
+/* THE BUTTON AND THE FILTER, BOTH. A `case 'Next Week'` with nothing in VIEWS to reach it is a
+   view that exists and cannot be opened -- and an assertion that matched either one would have
+   passed on exactly that. */
+ok('the list offers next week', /VIEWS = \[[^\]]*'Next Week'/.test(tasks))
+ok('...and filters on it', /case 'Next Week':/.test(tasks))
+ok('...and both weeks are calendar weeks', /weekStrip\(localDay\(today\), 1\)/.test(tasks)
+  && /weekStrip\(shiftDay\(localDay\(today\), 7\), 1\)/.test(tasks))
+/* THE WEEKS DO NOT OVERLAP. Asserted on the function rather than on the source, because this is
+   the thing the change was for. */
+const overlap = weekStrip('2026-10-15', 1)
+  .filter((d) => weekStrip(shiftDay('2026-10-15', 7), 1).includes(d))
+check('...and they do not overlap', overlap, [])
+
+/* A DAY OF THEIR OWN CHOOSING, which seven named views could not reach. */
+ok('the list can be filtered to any day', /allowPast/.test(tasks))
+/* AND THE DAY GOES IN THE URL, the same parameter a calendar square links to -- so a day chosen
+   here and a day arrived at from the calendar are one state, and the back button works. */
+ok('...and the day chosen is the day in the URL', /next\.set\('date', day\)/.test(tasks))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE CALENDAR SAYS HOW MUCH IS ON A DAY
+ *
+ * The square fits three chips, so a day with three things and a day with eleven looked identical
+ * until you read the "+8 more" at the bottom of it -- and scanning a month for the heavy days
+ * meant reading forty-two of those lines.
+ * ------------------------------------------------------------------------------------------- */
+
+ok('a month square says how much is on it', /dayEvents\.length > 0 && \(/.test(cal))
+ok('...and a week column says it in words',
+  /dayEvents\.length === 1 \? '1 thing' : `\$\{dayEvents\.length\} things`/.test(cal))
 
 console.log(`\ncheck-day-plan: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
