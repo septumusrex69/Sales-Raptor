@@ -465,3 +465,48 @@ function tidyName(name: string): string {
   if (!last || !first || /\s/.test(first)) return name.trim()
   return `${first} ${last}`
 }
+
+/**
+ * THE DAY A MEETING SHOULD BE PREPARED ON.
+ *
+ * THE FIRM: a meeting can raise a preparation task. The question that decides whether the feature
+ * is any use is WHEN, and the answer is not "the day before".
+ *
+ * THE WORKING DAY BEFORE, which is a different day one week in five. A meeting at nine on Monday
+ * prepared "the day before" is a task due on Sunday, which nobody sees and which arrives on Monday
+ * morning already late -- next to the meeting it was supposed to prepare. The firm's own diary
+ * rules are in working days for exactly this reason, and newAccounts.ts says why: "an account
+ * loaded at four on a Friday is late on Saturday morning with nobody in the building."
+ *
+ * AND TODAY WHERE THERE IS NO WORKING DAY LEFT. A meeting booked this afternoon for tomorrow
+ * morning cannot be prepared yesterday; a task dated in the past reads as overdue the moment it is
+ * made, which is how a list of overdue tasks comes to mean nothing. Today is late but true.
+ */
+export function prepareOn(meetingDay: string, today: string): string {
+  const before = previousWorkingDay(meetingDay)
+  return before < today ? today : before
+}
+
+/** The working day before this one. Saturday and Sunday step back to Friday. */
+function previousWorkingDay(day: string): string {
+  let d = shiftDay(day, -1)
+  /* Weekends only. Public holidays are not modelled anywhere in Raptor yet, and inventing a
+     calendar here would be a second one to keep in step with the diary's. */
+  while (isWeekend(d)) d = shiftDay(d, -1)
+  return d
+}
+
+function isWeekend(day: string): boolean {
+  const n = new Date(`${day}T12:00:00Z`).getUTCDay()
+  return n === 0 || n === 6
+}
+
+/**
+ * What the preparation task is called.
+ *
+ * NAMES THE MEETING, because a list of five tasks all called "Prepare" is a list nobody can read.
+ * The meeting's own title is what the person booked it as, which is what they will recognise.
+ */
+export function prepareTitle(meetingTitle: string): string {
+  return `Prepare for ${meetingTitle.trim() || 'the meeting'}`
+}

@@ -22,7 +22,7 @@
 import { readFileSync } from 'node:fs'
 import {
   NO_DAY_COUNT, dayCountSentence, dayCounts, dayHeadline, joinLink, localDay, meetingDay,
-  meetingTime, meetingWith, planDay, shiftDay, taskTime, weekStrip,
+  meetingTime, meetingWith, planDay, shiftDay, taskTime, weekStrip, prepareOn, prepareTitle,
 } from '../../src/lib/dayPlan.ts'
 import { monthSpan } from '../../src/lib/dayWords.ts'
 
@@ -522,6 +522,43 @@ ok('the box can attach a client', /companyId: form\.companyId \|\| undefined/.te
 /* UNDEFINED, NOT AN EMPTY STRING: the column is a uuid and '' is not one. */
 ok('...and no client is nothing, not an empty string', !/companyId: form\.companyId,/.test(tasks))
 ok('...named on the row so the list can say whose it is', /relatedToLabel: companies\.find/.test(tasks))
+
+/* ---------------------------------------------------------------------------------------------
+ * A MEETING CAN RAISE THE WORK IT NEEDS DOING BEFORE IT
+ *
+ * THE QUESTION THAT DECIDES WHETHER THE FEATURE IS ANY USE IS *WHEN*, and the answer is not "the
+ * day before". A nine o'clock Monday meeting prepared "the day before" is a task due on Sunday,
+ * which nobody sees and which arrives on Monday morning already late -- beside the meeting it was
+ * supposed to prepare.
+ * ------------------------------------------------------------------------------------------- */
+
+/* An ordinary midweek meeting prepares the day before. 2026-10-14 is a Wednesday. */
+check('a midweek meeting prepares the day before', prepareOn('2026-10-14', '2026-10-01'), '2026-10-13')
+/* AND A MONDAY ONE PREPARES ON THE FRIDAY, which is the whole reason this is not a subtraction.
+   2026-10-12 is a Monday; the day before it is a Sunday. */
+check('a Monday meeting prepares on the Friday', prepareOn('2026-10-12', '2026-10-01'), '2026-10-09')
+/* A SUNDAY MEETING TOO -- rare, but a weekend date must not produce another weekend date. */
+check('...and a Sunday one also lands on the Friday',
+  prepareOn('2026-10-11', '2026-10-01'), '2026-10-09')
+check('...and a Saturday one', prepareOn('2026-10-10', '2026-10-01'), '2026-10-09')
+
+/*
+ * AND NEVER IN THE PAST. A meeting booked this afternoon for tomorrow morning cannot be prepared
+ * yesterday; a task dated before today reads as overdue the moment it is made, which is how a list
+ * of overdue tasks comes to mean nothing. Today is late but true.
+ */
+check('a meeting tomorrow prepares today', prepareOn('2026-10-02', '2026-10-01'), '2026-10-01')
+check('...and one today prepares today', prepareOn('2026-10-01', '2026-10-01'), '2026-10-01')
+/* A MONDAY MEETING BOOKED ON THE MONDAY: the Friday has gone, so it is today rather than three
+   days ago. The case the weekend rule and the past rule meet on. */
+check('...and a Monday booked on the Monday is today',
+  prepareOn('2026-10-12', '2026-10-12'), '2026-10-12')
+
+/* THE TASK NAMES THE MEETING. A list of five tasks all called "Prepare" is a list nobody reads. */
+check('the task names the meeting', prepareTitle('Rinda Roo quarterly review'),
+  'Prepare for Rinda Roo quarterly review')
+/* AND AN UNTITLED MEETING STILL MAKES A SENTENCE rather than "Prepare for ". */
+check('...and an untitled one still reads', prepareTitle('   '), 'Prepare for the meeting')
 
 console.log(`\ncheck-day-plan: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

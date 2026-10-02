@@ -12,7 +12,8 @@ import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
 import {
-  dayCounts, dayHeadline, joinLink, localDay, meetingTime, meetingWith, planDay, shiftDay,
+  dayCounts, dayHeadline, joinLink, localDay, meetingTime, meetingWith, planDay,
+  prepareOn, prepareTitle, shiftDay,
   taskTime, weekStrip,
 } from '../../lib/dayPlan.ts'
 import { TaskDayPicker } from '../../components/tasks/TaskDayPicker'
@@ -397,6 +398,35 @@ export function TasksPage() {
                     <Video size={12} /> Join
                   </a>
                 )}
+                {/*
+                  A MEETING CAN RAISE THE WORK IT NEEDS DOING BEFORE IT.
+
+                  Offered on the day's list rather than inside the calendar, because this is the
+                  page somebody has open when they look at tomorrow and think "I need the figures
+                  for that". A preparation task raised from the calendar is one more screen away
+                  from the moment the thought happens.
+
+                  DATED THE WORKING DAY BEFORE, not "tomorrow minus one" -- see prepareOn. A
+                  Monday meeting prepared on Sunday is a task nobody sees.
+                */}
+                <button type="button"
+                  onClick={() => {
+                    addTask({
+                      title: prepareTitle(m.title),
+                      dueDate: prepareOn(dayShown ?? localDay(new Date()), localDay(new Date())),
+                      /* "Research" is the firm's own word for reading up before something. There
+                         is no 'Preparation' in TaskType and adding one for this would be a tenth
+                         word for a thing the list already has. */
+                      type: 'Research',
+                      /* WHOSE MEETING IT IS. A preparation task belongs to the person who has to
+                         walk into the room, which on this page is always the signed-in user --
+                         the calendar shown here is their own. */
+                      ownerId: currentUser?.id,
+                    })
+                  }}
+                  className="text-xs font-medium text-slate-500 hover:text-slate-800 hover:underline shrink-0">
+                  Prepare
+                </button>
                 <Link to="/calendar" className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Open
                 </Link>
