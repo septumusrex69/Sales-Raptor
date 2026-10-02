@@ -399,12 +399,20 @@ ok('...and the summary carries its own way in', /\{who \? 'Review' : 'Review tra
 ok('...and the number in it is dialled, not swallowed by a wrapping button',
   /<PhoneLink number=\{found\.phone\.value\}>\{found\.phone\.value\}<\/PhoneLink>/.test(detail))
 /*
- * The count says how much of what the firm paid for nobody has tried yet, which is the only
- * measure of whether the search was worth buying. Silent at nought: a line reading "0 untried"
- * has nothing to say and still takes a row.
+ * WHERE THE ATTEMPT STANDS IS A WAY IN TOO -- and it is no longer a count that vanishes.
+ *
+ * THIS USED TO ASSERT "{found.untried} finding(s) nobody has tried yet", drawn only while
+ * something was untried. The firm asked for the other half: "if we've worked through an entire
+ * trace, it should mention that the entire trace has been worked through." A line that disappears
+ * on completion makes finished and never-started read identically -- as silence -- so the panel
+ * now reports the ROUND, in all three of its states, and goes quiet only where there was never
+ * anything to ring. See traceRound and check-trace-round, which holds the rule itself.
  */
-ok('...and what nobody has tried yet is a way in too', /\{found\.untried\} finding/.test(detail))
-ok('...shown only when there is something untried', /\{found\.untried > 0 && \(/.test(detail))
+ok('...and where the attempt stands is a way in too', /roundLine\(round\)/.test(detail))
+ok('...drawn whenever there was something to ring', /\{round\.workable > 0 && \(/.test(detail))
+/* AND NOT ONLY WHILE SOMETHING IS UNTRIED, which is the fault that was being asserted. */
+ok('...and no longer vanishes once everything is tried',
+  !/\{found\.untried > 0 && \(/.test(detail))
 
 /*
  * MOVING BETWEEN THE TRACES, in the firm's words: "I need to go, for example, between the traces."
