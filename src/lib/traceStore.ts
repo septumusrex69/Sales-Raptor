@@ -825,6 +825,27 @@ export function searchKeyProblem(key: TraceSearchKey, debtorKind: 'individual' |
  * Where the link runs through a company instead, there is no number and this returns null rather
  * than offering something to dial that is not a telephone at all.
  */
+/**
+ * A COMPANY REGISTRATION NUMBER OUT OF WHATEVER THE BUREAU PRINTED BESIDE THE NAME.
+ *
+ * THE FIRM: "at the companies, like, you should ask if you can trace them." Tracing a linked
+ * company means searching CIPC on its registration number, and the bureau prints that in the row's
+ * label rather than as a field of its own.
+ *
+ * FOUND, NOT ASSUMED TO BE THE WHOLE LABEL -- same shape as linkedNumber below, and for the same
+ * reason: the label is "<role> · <what the bureau had>", so the number is somewhere inside it.
+ *
+ * NULL RATHER THAN A GUESS. traceSearchKey refuses anything that is not a registration number, so
+ * handing it a half-read string would produce "that is not a registration number" on a company
+ * whose number was simply never printed -- which reads as the firm's data being wrong rather than
+ * the bureau's being thin. Null falls through to the name, which every source can be searched on.
+ */
+export function registrationIn(label: string | null | undefined): string | null {
+  if (!label) return null
+  const match = /[A-Z]?\s*\d{4}\s*\/\s*\d{6}\s*\/\s*\d{2}/i.exec(label)
+  return match ? match[0].trim() : null
+}
+
 export function linkedNumber(label: string | null | undefined): string | null {
   if (!label) return null
   /*

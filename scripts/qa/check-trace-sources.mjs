@@ -17,6 +17,7 @@ import {
   BUREAU_ITEM, OTHER_ITEM, TRACE_SOURCES, bureauSearchCounts, chargeForSource, chargesForThisSearch,
   traceSourceById, traceSourceNote, traceSourceUrl,
 } from '../../src/lib/traceSources.ts'
+import { registrationIn } from '../../src/lib/traceStore.ts'
 import { ANNEXURE_B_2026, scheduleFor } from '../../src/lib/annexureB.ts'
 
 let pass = 0
@@ -360,6 +361,40 @@ ok('...and is cleared when the source changes', /setFound\(''\)/.test(button))
 
 /* AND THE SITE'S SECOND FIELD IS SAID BEFORE THE TRIP, not discovered on arrival. */
 ok('the box warns what else the site asks for', /source\.alsoNeeds &&/.test(button))
+
+/* ---------------------------------------------------------------------------------------------
+ * A LINKED COMPANY IS SOMETHING YOU CAN TRACE IN ITS OWN RIGHT
+ *
+ * THE FIRM, reading a row with nothing on the end of it: "again, at the companies, like, you
+ * should ask if you can trace them." A directorship cannot be rung and cannot answer, so the
+ * companies list is not one you WORK -- which left the whole column with no action at all. But a
+ * company the debtor directs is exactly where the money is.
+ * ------------------------------------------------------------------------------------------- */
+
+const workspace = readFileSync(
+  new URL('../../src/pages/accounts/TraceWorkspaceModal.tsx', import.meta.url), 'utf8')
+ok('a companies row offers a trace', /category === 'companies' \? \(\s*\n?\s*<TraceButton/.test(workspace))
+/* AS A COMPANY, which is what decides the key and therefore which sources make sense: CIPC and the
+   VAT vendor search answer about a company, and SASSA does not answer about one at all. */
+ok('...as a company rather than as the debtor', /debtorKind="company"/.test(workspace))
+ok('...searched on the registration number where the bureau printed one',
+  /idNumber=\{registrationIn\(row\.label\)\}/.test(workspace))
+ok('...and on its name either way', /debtorName=\{row\.value\}/.test(workspace))
+
+/* THE NUMBER IS FOUND IN THE LABEL, not assumed to be the whole of it: the bureau stores it as
+   "<role> · <what it had>". */
+check('a registration number is read out of a label',
+  registrationIn('Director · 2016/210735/07'), '2016/210735/07')
+check('...including a bureau prefix letter', registrationIn('Member · K2016/210735/07'), 'K2016/210735/07')
+/* NULL RATHER THAN A GUESS where none was printed. traceSearchKey refuses anything that is not a
+   registration number, so a half-read string would report "that is not a registration number" on a
+   company whose number the bureau simply never carried -- which reads as the firm's data being
+   wrong rather than the bureau's being thin. Null falls through to the name. */
+check('...and nothing where there is none', registrationIn('Director · Fastcase (Pty) Ltd'), null)
+check('...and nothing from an empty label', registrationIn(null), null)
+/* AND A TELEPHONE NUMBER IS NOT A REGISTRATION NUMBER. The two live in the same label field, and
+   one read as the other is a CIPC search for a debtor's mobile. */
+check('...and never a phone number', registrationIn('Cell · 082 573 3344'), null)
 
 console.log(`\ncheck-trace-sources: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

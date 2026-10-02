@@ -12,12 +12,13 @@ import { PhoneLink } from '../../components/PhoneLink'
 import {
   TRACE_CATEGORIES, TRACE_OUTCOMES, TRACE_SORTS, canPromote, categoryById, categoryCounts,
   outcomeOptionsFor,
-  linkedHow, linkedNumber, outcomeTone, pageOf, riskTone, savesAs, workRows,
+  linkedHow, linkedNumber, outcomeTone, pageOf, registrationIn, riskTone, savesAs, workRows,
   type FiledTrace, type OutcomeFilter, type OutcomeTone, type TraceCategoryId,
   type TraceItem, type TraceItemKind, type TraceOutcome, type TraceRow, type TraceSort,
 } from '../../lib/traceStore.ts'
 import { promoteTraceItem, recordTraceOutcome, traceReportUrl } from '../../lib/traceStoreData.ts'
 import { recordDial } from '../../lib/accountCalls'
+import { TraceButton } from './TraceButton'
 import { formatDate, formatMoney } from '../../data/mockData'
 
 /**
@@ -533,7 +534,10 @@ export function TraceWorkspaceModal({
                               setRelationship(''); setSaying({ row, asNextOfKin: kin })
                             } else void promote(row, kin)
                           }}
-                          onDial={dial} />
+                          onDial={dial}
+                          accountId={trace?.accountId ?? ''} actor={actor}
+                          onChanged={async () => { await onChanged() }}
+                          onUploadNew={() => onUploadNew?.()} />
                       ))}
                       {shown.rows.length === 0 && (
                         <tr>
@@ -649,7 +653,8 @@ const KIND_WORD: Partial<Record<TraceItemKind, string>> = {
   phone: 'Home', work: 'Work', mobile: 'Mobile',
 }
 
-function Row({ row, category, worked, isNew, busy, onOutcome, onPromote, onDial }: {
+function Row({ row, category, worked, isNew, busy, onOutcome, onPromote, onDial,
+  accountId, actor, onChanged, onUploadNew }: {
   row: TraceRow
   category: TraceCategoryId
   worked: boolean
@@ -677,6 +682,11 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote, onDial 
    * call is recorded rather than two.
    */
   onDial: (number: string) => void
+  /* FOR TRACING A LINKED COMPANY, which is a trace of its own against the same account. */
+  accountId: string
+  actor: { id: string | null; name: string | null }
+  onChanged: () => Promise<void>
+  onUploadNew: () => void
 }) {
   const dialable = category === 'phones'
   /*
@@ -803,7 +813,39 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote, onDial 
       )}
 
       <td className="px-3 py-2.5 whitespace-nowrap">
-        {row.promoted ? (
+        {/*
+          A LINKED COMPANY IS SOMETHING YOU CAN TRACE IN ITS OWN RIGHT.
+
+          THE FIRM, reading a row with nothing on the end of it: "again, at the companies, like,
+          you should ask if you can trace them."
+
+          THEY ARE RIGHT AND THE ROW WAS DEAD. A directorship cannot be rung and cannot answer, so
+          `companies` is not a list you WORK -- no outcome picker, nothing to save onto the
+          debtor's own contact list -- and that left the whole column with no action at all. But a
+          company the debtor directs is exactly where the money is: it has its own registered
+          address, its own directors and its own public record at CIPC.
+
+          IT TRACES THE COMPANY, NOT THE DEBTOR. debtorKind 'company' is what decides which key is
+          copied and which of the sources make sense -- CIPC and the VAT vendor search answer about
+          a company and SASSA does not. The name comes off the row, which is what the bureau
+          printed.
+        */}
+        {category === 'companies' ? (
+          <TraceButton
+            accountId={accountId}
+            actor={actor}
+            debtorKind="company"
+            /* The bureau prints the registration number in the label where it has one; the name is
+               what every source can be searched on either way. */
+            idNumber={registrationIn(row.label)}
+            debtorName={row.value}
+            label="Trace this company"
+            className="inline-flex items-center gap-1 text-sm font-medium px-2.5 py-1.5 rounded-lg
+              border border-slate-200 text-slate-700 hover:bg-slate-50"
+            onDone={onChanged}
+            onUpload={onUploadNew}
+          />
+        ) : row.promoted ? (
           <span className="text-positive-700 inline-flex items-center gap-1.5 text-sm">
             <Check size={14} /> Saved
           </span>
