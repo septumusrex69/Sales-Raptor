@@ -335,6 +335,21 @@ export interface Company {
   commissionBandsSource?: string
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
+  /**
+   * The interest rate in THIS CLIENT'S mandate, as a PERCENT a year — 24 means 24%.
+   *
+   * NOT A FRACTION, unlike commissionRate above, and the difference is deliberate rather than
+   * sloppy: this is the same unit `debtor_accounts.interest_rate_annual` holds, so the value copies
+   * from here onto an account without a conversion sitting between them. The old handover sheet
+   * asked for the rate twice in two units — "Interest Rate" 24 and "Percentage" 0.25 — and nothing
+   * said which was which; one unit, named in the field, is the lesson from that.
+   *
+   * UNDEFINED IS NOT NOUGHT. Undefined means nobody has recorded what the mandate says, and an
+   * account opened under such a client still opens at 0% with no interest running. The client card
+   * says so rather than leaving both silent, which is the state the firm found: eight live accounts
+   * at 0% and a simulation correctly reporting that no interest was running on any of them.
+   */
+  defaultInterestRateAnnual?: number
 }
 
 export type TaskType =

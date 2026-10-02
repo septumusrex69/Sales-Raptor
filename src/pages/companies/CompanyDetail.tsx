@@ -858,7 +858,7 @@ export function CompanyDetail() {
                 || currentUser?.role === 'Liaison Manager'}
               userId={currentUser?.id ?? null}
               userName={currentUser?.name ?? null}
-              onSetSignedAt={(iso) => updateCompany(company.id, { mandateSignedAt: iso })} />,
+              onSave={(patch) => updateCompany(company.id, patch)} />,
             <ClientBookCard key="book" companyId={company.id} />,
             /* Beside the handover book, because these are the two things a liaison opens this
                page for: what came in, and what is stuck. */

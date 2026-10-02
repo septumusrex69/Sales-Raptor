@@ -138,8 +138,11 @@ for (const wrong of ['Identity document', 'Proof of payment', 'Trace', 'Court do
 ok('the client page no longer hides the mandate when it is missing',
   !/company\.mandateSignedAt && <Field/.test(detail))
 ok('...and renders the card instead', /<MandateCard/.test(detail))
-ok('...which writes the date through the store',
-  /onSetSignedAt=\{\(iso\) => updateCompany\(company\.id, \{ mandateSignedAt: iso \}\)\}/.test(detail))
+/* ONE CALLBACK CARRYING THE WHOLE PATCH. It was `onSetSignedAt` alone; adding the mandate's
+   interest rate as a second callback made one Save press send two PATCHes at the same row, which
+   the browser check counts and refused. */
+ok('...which writes the mandate through the store',
+  /onSave=\{\(patch\) => updateCompany\(company\.id, patch\)\}/.test(detail))
 /* WHO MAY, mirroring the companies RLS update policy rather than inventing a second rule: offer
    a button the database will refuse and it appears to work and quietly does nothing. */
 ok('...only to somebody the database would allow',
@@ -211,6 +214,121 @@ const commission = stripped('src/components/companies/CommissionCard.tsx')
 ok('the commission card no longer repeats the mandate warning',
   !/No mandate on record/.test(commission))
 ok('...and the mandate card is where it is said', /no handover can be imported/.test(card))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE RATE THE MANDATE ALLOWS, WHICH NOTHING COULD RECORD.
+ *
+ * THE FIRM, reading a repayment simulation on an account handed over that morning: "it says that
+ * interest is not running. Why is interest not running? It should be running."
+ *
+ * IT WAS NOT RUNNING BECAUSE NO ACCOUNT HAD A RATE, and no account had a rate because the handover
+ * sheet stopped asking for one on the firm's own instruction -- "the rate is in the agreement the
+ * firm already holds" -- while nothing in Raptor held that agreement. All eight of the firm's first
+ * live accounts opened at 0%, and the calculator reported it correctly and inexplicably.
+ *
+ * SO THE RATE LIVES ON THE MANDATE, which is the piece of paper the firm named.
+ * ------------------------------------------------------------------------------------------- */
+
+/* `schema` is read once at the top of this file. */
+ok('the client carries the rate its mandate allows',
+  /add column if not exists default_interest_rate_annual/.test(schema))
+/* AND IT IS SAID WHICH DIRECTION OF MONEY THIS IS. `companies` already carries commission_rate --
+   what the FIRM charges the CLIENT -- and the two sitting on one table under similar names is
+   exactly the confusion CLAUDE.md spends a section on. */
+ok('...and the column says it is not the commission rate',
+  /default_interest_rate_annual[\s\S]{0,1400}commission_rate, which is what the FIRM charges/
+    .test(schema))
+
+ok('the mandate card offers it', /Interest the mandate allows/.test(card))
+ok('...and writes it through the store', /defaultInterestRateAnnual: pct/.test(card))
+/*
+ * ONE PRESS, ONE WRITE. The rate started as its own callback beside the date's, which meant two
+ * PATCHes at the same row from one Save -- two audit rows for one edit, and a window where the
+ * second could fail after the first had landed. The browser check counts the writes; this holds
+ * the shape that keeps it at one.
+ */
+ok('...in the same patch as the date',
+  /onSave\(\{[\s\S]{0,260}mandateSignedAt:[\s\S]{0,260}defaultInterestRateAnnual/.test(card))
+/* SAVED WITH THE DATE, not behind a second button: they are two readings of one piece of paper,
+   and two Save buttons on one card is two things to forget. */
+ok('...with the same Save as the date', /onSave\(\{[\s\S]{0,300}setEditing\(false\)/.test(card))
+/*
+ * AN UNREADABLE BOX IS LEFT ALONE RATHER THAN WRITTEN AS NOUGHT, and this is the assertion worth
+ * the most. Nought is a REAL rate meaning "no interest is ever charged on this client's book", so
+ * somebody who typed "24%" badly and got a silent zero would have taken interest off a whole book
+ * without being told.
+ */
+/* AND AN UNREADABLE BOX OMITS THE KEY ENTIRELY rather than sending undefined, which would take a
+   perfectly good stored rate off record because somebody mistyped. */
+ok('an unreadable rate is not written as nought',
+  /const rateOk = typed === ''/.test(card)
+  && /\.\.\.\(rateOk \? \{ defaultInterestRateAnnual: pct \} : \{\}\)/.test(card))
+ok('...and the field says so rather than failing quietly',
+  /is not a rate between 0 and 100/.test(card))
+/* AND A RATE OVER 100 IS REFUSED: 2400 typed for 24% is the slip that charges a debtor a hundred
+   times the interest, and it reads like a number rather than like a mistake. */
+ok('...and a rate over 100 is refused too', /<= 100/.test(card))
+
+/*
+ * THE ABSENCE IS WHAT THE CARD IS REALLY FOR. A mandate on record with no rate against it opens
+ * every account at 0% -- nothing accrues, every settlement quote is just the balance -- and the
+ * first anybody knows is a collector asking why a simulation shows no interest.
+ */
+ok('a mandate with no rate says so', /No interest rate on record/.test(card))
+ok('...and says what that means for the accounts', /run no interest at all/.test(card))
+/* AND IT DOES NOT CLAIM TO FIX THE BOOK. Changing a client's rate must not read as changing what
+   is already on the book: accounts keep the rate they were opened with, which is the firm's own
+   rule that imported figures stay as imported. */
+/* MATCHED ON ONE WHOLE CLAUSE rather than across the "+" that joins the two string literals:
+   `stripped` removes comments, not source concatenation, so a pattern spanning the join fails on
+   correct code -- which it did. */
+ok('...and the field does not promise to change accounts already open',
+  /keep the rate they were opened with/.test(card))
+
+/* ---------------- and it reaches an account ---------------- */
+
+/*
+ * A COLUMN NOBODY READS IS A COLUMN THAT DOES NOTHING. The import is where the rate has to land --
+ * `toDebtorInput` wrote the literal '0' on every row, which is the line the firm actually met.
+ */
+const imp = stripped('src/lib/handoverImport.ts')
+ok('the import takes the client s rate', /clientInterestRateAnnual: number \| null/.test(imp))
+ok('...and writes it onto the account',
+  /interestRateAnnual: clientInterestRateAnnual === null \? '0' : String\(clientInterestRateAnnual\)/
+    .test(imp))
+/* STILL NOUGHT WHERE NO RATE IS RECORDED, deliberately: an account at nought is one somebody
+   notices, an account at a guessed 24% is one nobody does -- and a guessed rate is money charged
+   to a real person on the strength of a default. */
+ok('...and guesses nothing where the client has none', /=== null \? '0'/.test(imp))
+
+const draft = stripped('src/lib/handoverDraft.ts')
+/*
+ * READ OUT OF THE **SELECT**, not out of the file. A bare search for the column name passed while
+ * the select had been narrowed back to `select('code')` -- because the name also appears a few
+ * lines below, where the fetched row is read. The failure that hides behind that is the whole bug
+ * returning silently: an unselected column is `undefined`, `clientRate` falls to null, and every
+ * account opens at 0% again with nothing anywhere saying so. Found by breaking it.
+ */
+ok('the batch reads the rate off the client',
+  /\.from\('companies'\)[\s\S]{0,120}select\('[^']*default_interest_rate_annual/.test(draft))
+/* AND THE ROW IS ACTUALLY READ BACK, which is the other half and the one the loose pattern was
+   accidentally testing. Both, named apart, so neither can stand in for the other. */
+ok('...and reads it off the row that comes back',
+  /\?\.default_interest_rate_annual/.test(draft))
+ok('...and hands it to every row', /toDebtorInput\(row\.values, row\.planned\?\.defaultDate \?\? null, clientRate\)/.test(draft))
+/*
+ * `Number(null)` IS NOUGHT, NOT NaN, which is the trap this walked into first: a client with no
+ * rate came through as an explicit 0% rather than as "nobody has said". The account opens the same
+ * either way; what differs is whether anything downstream can tell the two apart.
+ */
+ok('...reading a null column as "nobody has said", not as nought',
+  /rawRate === null \|\| rawRate === undefined/.test(draft))
+
+/* AND THE ACCOUNT SAYS WHY, where a collector meets it. The sentence the firm read said only THAT
+   no interest was running, which reads as a fault in the arithmetic -- and they read it as one. */
+const calc = stripped('src/components/collections/RepaymentCalculator.tsx')
+ok('the simulation says why no interest is running', /This account is at 0% a year/.test(calc))
+ok('...and where the rate comes from', /the client\u2019s mandate/.test(calc))
 
 console.log(`\ncheck-client-mandate: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

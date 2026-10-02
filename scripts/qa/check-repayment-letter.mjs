@@ -264,6 +264,24 @@ ok('...with a column for what they save', /YOU SAVE/.test(withLadder))
 ok('their own offer is named on the ladder', /Your offer/.test(withLadder))
 ok('...and it is the instalment they actually offered',
   withLadder.includes(money(faster[0].each)) && faster[0].theirs === true)
+/*
+ * AND IT SAYS HOW MANY PAYMENTS THAT IS, which the firm met the hard way: "it says your instalment,
+ * but it doesn't say how many instalments that's going to be." Their own row sat in a column where
+ * every other row holds a number, so the one figure the whole ladder argues with -- thirty-three
+ * months -- was the only one missing from it.
+ *
+ * ASSERTED AS THE REAL COUNT rather than as the presence of a bracket, because a label that says
+ * (1) on a thirty-three month offer is the same bug with punctuation in it.
+ */
+ok('...and says how many payments that is',
+  withLadder.includes(`Your offer (${faster[0].instalments})`))
+ok('...which is the number of rows the projection actually walked',
+  faster[0].instalments === plan.rows.length)
+/* NOT ON "Settle now", whose number is one and whose words already say so. */
+for (const o of faster.filter((x) => x.instalments === 1 && !x.theirs)) {
+  ok('a single payment is named rather than numbered', /Settle now/.test(withLadder))
+  ok('...without a count stapled to it', !/Settle now \(/.test(withLadder))
+}
 /* A DASH ON THEIR OWN ROW, NOT R 0.00. A nought in a column headed YOU SAVE reads as a saving that
    happens to be nothing; what is true is that it is the row everything else is measured from. */
 ok('...and saves nothing, said as a dash rather than a nought',

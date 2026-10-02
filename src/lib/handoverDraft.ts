@@ -535,8 +535,28 @@ export async function approveDraft(input: {
    */
   const [onBook, { data: client }] = await Promise.all([
     fetchAccountReferences(judged.draft.companyId).catch(() => []),
-    supabase.from('companies').select('code').eq('id', judged.draft.companyId).maybeSingle(),
+    /* `default_interest_rate_annual` comes along for the ride: it is the rate in this client's
+       mandate, and an account opened without it runs no interest at all. One fetch rather than a
+       second round trip, because both are facts about the same client row. */
+    supabase.from('companies').select('code, default_interest_rate_annual')
+      .eq('id', judged.draft.companyId).maybeSingle(),
   ])
+  /*
+   * THE MANDATE'S RATE, READ ONCE FOR THE WHOLE BATCH. A number that is not finite -- a null column,
+   * or text somebody put in it -- is NOT a rate, and must come back as null rather than as NaN:
+   * `String(NaN)` is "NaN", which validateNewDebtor refuses and which would abort the whole import
+   * over a client's blank field.
+   */
+  const rawRate = (client as { default_interest_rate_annual?: unknown } | null)
+    ?.default_interest_rate_annual
+  /* `Number(null)` IS NOUGHT, NOT NaN, so the null has to be caught before the conversion -- a
+     client with no rate recorded would otherwise come through as an explicit 0% rather than as
+     "nobody has said". The account opens the same either way; what differs is whether anything
+     downstream can tell the two apart. */
+  const clientRate = rawRate === null || rawRate === undefined || rawRate === ''
+    ? null
+    : (Number.isFinite(Number(rawRate)) ? Number(rawRate) : null)
+
   const needing = going.filter((r) => !(r.values.account_number ?? '').trim()).length
   const generated = nextReferences(onBook, (client?.code as string | null) ?? null, needing)
 
@@ -572,7 +592,7 @@ export async function approveDraft(input: {
    * for the same debt.
    */
   const built = going.map((row) => {
-    const debtor = toDebtorInput(row.values, row.planned?.defaultDate ?? null)
+    const debtor = toDebtorInput(row.values, row.planned?.defaultDate ?? null, clientRate)
     /*
      * THE SUBSTITUTE DATE, WHERE THE PLANNER SET ONE. THE FIRM: "when it's accepted it will be
      * minimum 30 days before handover -- let's make it default three months before handover."

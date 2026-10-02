@@ -397,9 +397,32 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
       {/* INTEREST THAT IS NOT RUNNING IS SAID OUT LOUD. A zero here has two meanings and only one
           of them is safe: a quotation that silently omits interest is one a debtor can hold the
           firm to. */}
+      {/*
+        AND IT NOW SAYS WHY, which is the difference between a fact and an answer.
+        ----------------------------------------------------------------------
+        THE FIRM, reading this exact line on a freshly handed-over account: "it says that interest
+        is not running. Why is interest not running? It should be running. So I'm sure that these
+        calculations are incorrect."
+
+        THE CALCULATION WAS RIGHT AND THE SENTENCE WAS USELESS. The account carried no rate -- the
+        handover sheet stopped asking for one on the firm's own instruction, "the rate is in the
+        agreement the firm already holds", and until now nothing in Raptor held that agreement's
+        rate -- so every imported account opened at 0% and this line reported it correctly and
+        inexplicably. A sentence that states a surprising fact without its cause reads as a bug in
+        the arithmetic, and the firm read it as exactly that.
+
+        THE RATE AND THE ACCRUAL ARE DIFFERENT ABSENCES. A rate of nought is a mandate that charges
+        no interest, or one nobody has recorded; a rate with nothing to accrue from is an account
+        whose interest has not started. Only the first is somebody's to fix, so only the first says
+        where.
+      */}
       {!plan.interestRunning && (
         <p className="mt-1.5 text-[11px] text-slate-500">
-          No interest is running on this account, so none is included above.
+          {(account.interestRateAnnual ?? 0) > 0
+            ? 'No interest is running on this account, so none is included above.'
+            : 'This account is at 0% a year, so no interest is included above. The rate comes from '
+              + 'the client’s mandate — set it on the client, and accounts opened after that '
+              + 'inherit it.'}
         </p>
       )}
       {plan.hitInDuplum && (
@@ -442,8 +465,14 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
                    order and same anchor as the PDF the debtor is sent, so the collector is reading
                    off the page in front of them. */
                 <tr key={o.instalments} className={o.theirs ? 'text-slate-800' : 'text-slate-600'}>
+                  {/* THE COUNT ON THEIR OWN ROW TOO -- see repaymentLetter, which carries the
+                      argument. The collector is reading off the same page the debtor is sent, so a
+                      number the PDF states and the panel does not is the one thing that cannot
+                      differ between them. */}
                   <td className={`text-left ${o.theirs ? 'font-medium' : ''}`}>
-                    {o.theirs ? 'Their offer' : (o.instalments === 1 ? 'Settle now' : o.instalments)}
+                    {o.theirs
+                      ? `Their offer (${o.instalments})`
+                      : (o.instalments === 1 ? 'Settle now' : o.instalments)}
                   </td>
                   <td className={`text-right ${o.theirs ? 'font-medium' : ''}`}>{money(o.each)}</td>
                   <td className={`text-right ${o.theirs ? 'font-medium' : ''}`}>{money(o.totalPaid)}</td>

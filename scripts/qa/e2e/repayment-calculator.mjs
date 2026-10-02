@@ -165,6 +165,10 @@ try {
      * under it are four figures the firm came up with rather than a comparison.
      */
     t.ok('...anchored on what they themselves offered', /Their offer/.test(body))
+    /* AND THE PANEL SAYS HOW MANY PAYMENTS THEIR OFFER IS. The collector is reading off the same
+       page the debtor is sent, so a count the PDF states and the panel does not is the one thing
+       that cannot differ between them. See repaymentLetter for the firm's words. */
+    t.ok('...and how many payments that is', /Their offer \(\d+\)/.test(body))
     const faster = await page.locator('table[aria-label="What paying it off faster would cost"] tbody tr').count()
     t.ok(`...and several speeds to choose from (${faster})`, faster >= 4)
     /* ---------- trying a different figure, without recording it ---------- */

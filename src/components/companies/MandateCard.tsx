@@ -48,18 +48,33 @@ const dateValue = (iso: string | undefined) => (iso ? new Date(iso).toISOString(
  * document is narrower still and enforced by RLS — nobody quietly removes the authority the firm
  * is collecting on.
  */
-export function MandateCard({ company, canEdit, canDelete, userId, userName, onSetSignedAt }: {
+export function MandateCard({
+  company, canEdit, canDelete, userId, userName, onSave,
+}: {
   company: Company
   canEdit: boolean
   canDelete: boolean
   userId: string | null
   userName: string | null
-  /** Writes `mandateSignedAt` through the store, so every screen reading it agrees at once. */
-  onSetSignedAt: (iso: string | undefined) => void
+  /**
+   * Writes the mandate through the store, so every screen reading it agrees at once.
+   *
+   * ONE CALLBACK FOR BOTH FIELDS, NOT TWO, and the Save button is why. They are two readings of
+   * one piece of paper behind one press, so two callbacks meant two PATCHes at the same row a
+   * few milliseconds apart -- two rows in the audit trail for one edit, two chances for the
+   * second to fail after the first succeeded, and a store that briefly holds half the change.
+   * The browser check counts the writes for exactly this reason.
+   *
+   * A KEY LEFT OUT IS LEFT ALONE; a key present and undefined takes that field off record.
+   */
+  onSave: (patch: { mandateSignedAt?: string | undefined; defaultInterestRateAnnual?: number | undefined }) => void
 }) {
   const [docs, setDocs] = useState<ClientDocument[] | null>(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(dateValue(company.mandateSignedAt))
+  const [rateDraft, setRateDraft] = useState(
+    typeof company.defaultInterestRateAnnual === 'number'
+      ? String(company.defaultInterestRateAnnual) : '')
   const [kind, setKind] = useState<string>(MANDATE_KIND)
   const [uploading, setUploading] = useState(false)
   const [opening, setOpening] = useState<string | null>(null)
@@ -88,9 +103,32 @@ export function MandateCard({ company, canEdit, canDelete, userId, userName, onS
      * the date read back would be a day early. Noon survives every timezone this firm will ever
      * be read in.
      */
-    onSetSignedAt(draft ? new Date(`${draft}T12:00:00`).toISOString() : undefined)
+    /*
+     * THE RATE SAVES WITH THE DATE, because they are one fact about one piece of paper and two
+     * Save buttons on one card is two things to forget. An unreadable box is left alone rather
+     * than written as nought: nought is a real rate meaning "no interest is ever charged", and
+     * somebody who typed "24%" and got a silent zero would have taken interest off a whole book.
+     */
+    const typed = rateDraft.replace(/[\s%]/g, '').trim()
+    const pct = typed === '' ? undefined : Number(typed)
+    const rateOk = typed === ''
+      || (Number.isFinite(pct) && (pct as number) >= 0 && (pct as number) <= 100)
+    /* ONE PATCH, both fields — see onSave. The rate's key is omitted entirely where the box could
+       not be read, so an unreadable value leaves the stored rate exactly as it was. */
+    onSave({
+      mandateSignedAt: draft ? new Date(`${draft}T12:00:00`).toISOString() : undefined,
+      ...(rateOk ? { defaultInterestRateAnnual: pct } : {}),
+    })
     setEditing(false)
   }
+
+  const rate = company.defaultInterestRateAnnual
+  const hasRate = typeof rate === 'number'
+  /* What the box currently holds, judged the same way `save` judges it, so the warning under the
+     field and the thing that actually gets written cannot disagree. */
+  const typedRate = rateDraft.replace(/[\s%]/g, '').trim()
+  const rateReadable = typedRate === ''
+    || (Number.isFinite(Number(typedRate)) && Number(typedRate) >= 0 && Number(typedRate) <= 100)
 
   async function onPick(files: FileList | null) {
     if (!files?.length) return
@@ -167,11 +205,63 @@ export function MandateCard({ company, canEdit, canDelete, userId, userName, onS
               ? 'The date the client signed, not the date it was filed.'
               : 'Saving it empty takes the mandate off record — no handover could then be imported.'}
           </p>
+
+          {/* ---------- and the rate the mandate sets ---------- */}
+          {/*
+            ON THE MANDATE CARD AND NOWHERE ELSE, because the mandate is where the firm said the
+            rate lives. Asked why the handover sheet no longer carries one: "the rate is in the
+            agreement the firm already holds." Nothing in Raptor held that agreement's rate, so the
+            import wrote 0 on every account and the firm met the consequence on a simulation —
+            "why is interest not running? It should be running."
+
+            BESIDE THE SIGNING DATE rather than in a card of its own: they are two readings of one
+            piece of paper, and a rate on a separate card is a rate nobody opens the page to set.
+          */}
+          <div className="mt-3 pt-3 border-t border-slate-200">
+            <label className="block text-xs font-medium text-slate-500 mb-1.5" htmlFor="mandate-interest">
+              Interest the mandate allows, % a year
+            </label>
+            <input id="mandate-interest" value={rateDraft} inputMode="decimal"
+              onChange={(e) => setRateDraft(e.target.value)} placeholder="e.g. 24"
+              className="w-28 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm bg-white" />
+            {/*
+              A WARNING ONLY WHEN SOMETHING IS WRONG. An empty box is a client whose mandate has
+              not been read yet, which the card already says below; a number this cannot read is
+              somebody about to lose what they typed, and that is worth interrupting for.
+            */}
+            <p className={`text-[11px] mt-2 ${rateReadable ? 'text-slate-400' : 'text-negative-700'}`}>
+              {!rateReadable
+                ? `“${rateDraft}” is not a rate between 0 and 100, so it will not be saved.`
+                : typedRate === ''
+                  ? 'Left empty, accounts for this client open at 0% and no interest runs on them.'
+                  : 'Accounts opened for this client from now on inherit this. Accounts already on '
+                    + 'the book keep the rate they were opened with.'}
+            </p>
+          </div>
         </div>
       ) : signed ? (
-        <p className="text-sm text-slate-700 mb-4">
-          Signed <span className="font-medium text-navy-950">{formatDate(signed)}</span>.
-        </p>
+        <div className="mb-4">
+          <p className="text-sm text-slate-700">
+            Signed <span className="font-medium text-navy-950">{formatDate(signed)}</span>.
+          </p>
+          {/*
+            THE RATE, OR ITS ABSENCE, AND THE ABSENCE IS THE ONE WORTH SAYING. A mandate on record
+            with no rate against it opens every account at 0%: nothing accrues, every settlement
+            quote is the balance, and the first anybody knows is a collector asking why a
+            simulation shows no interest. Which is exactly how the firm found it.
+          */}
+          {hasRate ? (
+            <p className="text-sm text-slate-600 mt-1">
+              Interest <span className="font-medium text-navy-950">{rate}% a year</span> on accounts
+              opened for this client.
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--c-gold-deep)] mt-1">
+              No interest rate on record, so accounts opened for this client run no interest at all.
+              {canEdit ? ' Add what the mandate allows above.' : ''}
+            </p>
+          )}
+        </div>
       ) : (
         <p className="text-sm text-negative-700 mb-4">
           No mandate on record, so no handover can be imported for this client.

@@ -19483,3 +19483,31 @@ comment on function public.workflow_step_not_served(uuid, text, uuid) is
 
 revoke all on function public.workflow_step_not_served(uuid, text, uuid) from public, anon;
 grant execute on function public.workflow_step_not_served(uuid, text, uuid) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- THE INTEREST RATE LIVES IN THE CLIENT'S MANDATE, AND NOTHING COULD RECORD IT.
+--
+-- THE FIRM, looking at a repayment simulation on a freshly handed-over account: "it says that
+-- interest is not running. Why is interest not running? It should be running."
+--
+-- IT WAS NOT RUNNING BECAUSE NO ACCOUNT HAD A RATE. The handover sheet deliberately stopped asking
+-- for one -- "the rate is in the agreement the firm already holds" -- and handoverImport has written
+-- interest_rate_annual = 0 on every account ever since, because nothing in Raptor held that
+-- agreement's rate for it to read. All eight of the firm's first live accounts opened at 0%.
+--
+-- THREE ENTRY POINTS WERE GIVING THREE ANSWERS: the by-hand form defaulted to 24, the Swordfish
+-- import defaulted to 24 where its column was missing, and the handover sheet wrote 0. This column
+-- is the one place the answer comes from, per client, because that is where the mandate is.
+--
+-- NULL IS NOT NOUGHT. Null means nobody has recorded a rate, and an account opened under such a
+-- client still opens at 0% -- the same as today, so nothing changes under anybody's feet -- but the
+-- client card says so and the account says so, instead of both being silent.
+--
+-- NOT commission_rate, which is the other direction of money entirely: what the FIRM charges the
+-- CLIENT. This is what the DEBTOR is charged.
+-- ---------------------------------------------------------------------------------------------
+alter table public.companies
+  add column if not exists default_interest_rate_annual numeric;
+
+comment on column public.companies.default_interest_rate_annual is
+  'The interest rate in THIS CLIENT''S mandate, as a percent a year (24 means 24%). The firm, asked why the handover sheet no longer carries a rate: "the rate is in the agreement the firm already holds" — this is where that agreement''s rate is recorded, and an account opened for this client inherits it. NULL means nobody has recorded one, which is NOT the same as nought: an account opened under a null client opens at 0% and no interest runs on it at all. Not to be confused with commission_rate, which is what the FIRM charges the CLIENT.';

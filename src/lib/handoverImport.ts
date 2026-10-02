@@ -1144,6 +1144,13 @@ export function toDebtorInput(
    * because the cell holds whatever was typed into it and this goes into a `date` column.
    */
   defaultDate: string | null,
+  /**
+   * THE RATE IN THIS CLIENT'S MANDATE, as a percent a year. Null where nobody has recorded one.
+   *
+   * PASSED IN, NOT READ, for the same reason the default date is: this function knows one row and
+   * the mandate is a fact about the client. approveDraft fetches it beside the client's code.
+   */
+  clientInterestRateAnnual: number | null = null,
 ): NewDebtorInput {
   const v = (k: string) => (values[k] ?? '').trim()
   /*
@@ -1183,10 +1190,23 @@ export function toDebtorInput(
     idNumber: v('id_number') || v('registration_number'),
     capital: v('capital'),
     handoverDate: defaultDate ?? '',
-    /* NOT ASKED FOR ON THE SHEET ANY MORE, at the firm's instruction -- the rate is in the
-       agreement the firm already holds. toAccountRow needs a number, and an account opened at
-       nought is one somebody notices; opened at a guessed 24% it is one nobody does. */
-    interestRateAnnual: '0',
+    /*
+     * NOT ASKED FOR ON THE SHEET, at the firm's instruction -- "the rate is in the agreement the
+     * firm already holds" -- SO IT IS READ OFF THAT AGREEMENT, which is the half that was missing.
+     *
+     * THE FIRM, on a repayment simulation for a freshly handed-over account: "it says that interest
+     * is not running. Why is interest not running? It should be running." It was not running
+     * because this line was the literal '0' and nothing in Raptor held the mandate's rate for it to
+     * read. The sheet stopped asking, the agreement was never recorded, and all eight of the firm's
+     * first live accounts opened at 0% while the calculator correctly reported that no interest was
+     * running on any of them.
+     *
+     * STILL NOUGHT WHERE NO RATE IS RECORDED, deliberately and unchanged. An account at nought is
+     * one somebody notices -- the client card and the account both now say which clients have no
+     * rate -- while an account opened at a guessed 24% is one nobody does, and a rate guessed onto
+     * a debtor is money charged to a person on the strength of a default.
+     */
+    interestRateAnnual: clientInterestRateAnnual === null ? '0' : String(clientInterestRateAnnual),
     mobile: phone('cell_1'),
     workPhone: phone('work_phone'),
     altNumber: phone('cell_2'),

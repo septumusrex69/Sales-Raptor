@@ -129,12 +129,40 @@ try {
     if (canAdd) {
       await addDate.click()
       await page.waitForTimeout(300)
+      /*
+       * AND THE RATE THE MANDATE ALLOWS IS IN THE SAME EDITOR.
+       *
+       * THE FIRM, reading a simulation on an account handed over that morning: "it says that
+       * interest is not running. Why is interest not running? It should be running." No account
+       * had a rate, because the handover sheet stopped asking for one -- "the rate is in the
+       * agreement the firm already holds" -- and nothing in Raptor held that agreement. A column
+       * nobody can fill is the same as no column, so the field is asserted in a real browser.
+       *
+       * ASKED FOR BEFORE IT IS FILLED, which is this file's own rule two screens up: a `fill` on a
+       * locator that is not there times out thirty seconds later and takes the run down before a
+       * single failure prints.
+       */
+      const hasRate = await page.locator('#mandate-interest').count() > 0
+      t.ok('the mandate asks what interest it allows', hasRate)
       await page.locator('#mandate-signed-on').fill('2026-09-30')
+      if (hasRate) await page.locator('#mandate-interest').fill('24')
       await page.getByRole('button', { name: 'Save' }).first().click()
       await page.waitForTimeout(700)
+      /*
+       * ONE PRESS, ONE PATCH, CARRYING BOTH. The rate began as its own callback beside the date's,
+       * and the write count above caught it: two PATCHes at one row from one Save is two audit
+       * rows for one edit and a window where the second fails after the first has landed.
+       */
+      if (saves.length === 1) {
+        const body = saves[0]
+        t.ok('...and that one write carries the rate',
+          JSON.stringify(body).includes('24'))
+        t.ok('...and the date with it',
+          JSON.stringify(body).includes('2026-09-30'))
+      }
     }
 
-    t.check('saving the date sends exactly one write', saves.length, 1)
+    t.check('saving the date and the rate sends exactly one write', saves.length, 1)
     /* THE COLUMN, not a camel-cased key that PostgREST would reject. */
     t.ok('...naming the mandate column', 'mandate_signed_at' in (saves[0] ?? {}))
 

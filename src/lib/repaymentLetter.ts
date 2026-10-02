@@ -318,13 +318,27 @@ export function repaymentLetter(input: RepaymentLetterInput): LetterDocument {
         ],
         ...(input.faster as SettlementOption[]).map((o) => [
           /*
-           * NAMED, NOT NUMBERED, AT BOTH ENDS OF THE LADDER. "31" under a PAYMENTS heading is a
-           * number a debtor reads past; "Your offer" is the line they recognise as their own, and
-           * it is what makes the three rows under it a comparison rather than a demand.
+           * NAMED **AND** NUMBERED AT BOTH ENDS OF THE LADDER, which is the firm's correction.
+           *
+           * It was named only, on the argument that "31" under a PAYMENTS heading is a number a
+           * debtor reads past while "Your offer" is the line they recognise as their own. The first
+           * half of that still holds and the row is still named. What it got wrong was treating the
+           * two as alternatives.
+           *
+           * THE FIRM, reading their own simulation: "it says your instalment, but it doesn't say how
+           * many instalments that's going to be." They were looking at a row reading `Your offer |
+           * R 50,00 | R 1 608,60` in a column where every other row holds a number -- so the one
+           * figure the whole table exists to compare against, THIRTY-THREE MONTHS, was the only one
+           * missing from it. A debtor offering R50 is not refusing to settle; they are offering to
+           * take until June 2029, and that is the fact the ladder is arguing with.
+           *
+           * "Settle now" keeps no number because its number is one and the words already say so.
            */
           {
             spans: [{
-              text: o.theirs ? 'Your offer' : (o.instalments === 1 ? 'Settle now' : String(o.instalments)),
+              text: o.theirs
+                ? `Your offer (${o.instalments})`
+                : (o.instalments === 1 ? 'Settle now' : String(o.instalments)),
               bold: Boolean(o.theirs),
             }],
           },

@@ -219,7 +219,10 @@ ok('...built by noteForAccount rather than assembled again', /noteForAccount\(ro
  */
 ok('the approval generates our reference', /nextReferences\(/.test(code))
 ok('...off the book as it stands', /fetchAccountReferences\(/.test(code))
-ok('...and off the client code', /select\('code'\)/.test(code))
+/* THE COLUMN, NOT THE WHOLE SELECT. Pinned to `select('code')` exactly, this failed the day the
+   same fetch also started reading the client's mandate interest rate -- a check reporting a bug in
+   correct code because another column joined it. What matters is that the client's code is read. */
+ok('...and off the client code', /\.from\('companies'\)\s*\n?\s*\.?select\('code[,')]/.test(code))
 /* A reference the client already carries wins: generating over it would open a second account
    for a debt already on the book. */
 ok('a reference already on the sheet is left alone',
