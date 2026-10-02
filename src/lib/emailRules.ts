@@ -499,8 +499,22 @@ export function recipientSummary(
 
 /* ---------- which tab a message is on ---------- */
 
-/** The mailbox's tabs. Here rather than in userMail so the rules below can be imported alone. */
-export type MailFilter = 'needs-filing' | 'filed' | 'no-record' | 'junk' | 'sent' | 'all'
+/**
+ * The mailbox's tabs. Here rather than in userMail so the rules below can be imported alone.
+ *
+ * THREE OF THESE WENT, AND MATCHING WENT WITH THEM. There used to be `needs-filing`, `filed` and
+ * `no-record` as well -- a queue of mail waiting to be put on a record, a list of what had been,
+ * and a shelf for mail that belonged on nobody's file.
+ *
+ * THE FIRM: "it's irritating having to match everybody. Just keep everyone in your main mailbox.
+ * If you want to match someone, match them. You don't have a match section any more or a needs
+ * match section or an open mail section -- there is just an option to say match to a record."
+ *
+ * Which takes matching from an OBLIGATION to a TOOL, and the three tabs were the obligation.
+ * `no-record` only ever existed to get a message out of the queue, so with the queue gone it had
+ * nothing left to do: a shelf for mail that is not waiting is just the mailbox.
+ */
+export type MailFilter = 'junk' | 'sent' | 'all'
 
 /**
  * Move one message's unread count on every tab it belongs to, without asking the database.
@@ -515,27 +529,28 @@ export type MailFilter = 'needs-filing' | 'filed' | 'no-record' | 'junk' | 'sent
  * on every keystroke-speed action, and a badge one out until the next load is cheaper than a list
  * that jumps. check-mail-queue.mjs holds the two side by side.
  */
-/** Just the facts a tab is decided on. A whole MailItem would drag the database types in. */
+/**
+ * Just the facts a tab is decided on. A whole MailItem would drag the database types in.
+ *
+ * TWO, NOW. It carried isFiled, isSettled and noRecordAt as well, for the three tabs that have
+ * gone -- and keeping them here would be an invitation to put a tab back on them without noticing
+ * that scope() no longer has a clause to match.
+ */
 export interface TabFacts {
   isSent: boolean
   isJunk: boolean
-  isFiled: boolean
-  isSettled: boolean
-  noRecordAt: string | null
 }
 
 export function bumpUnread(
   counts: Record<MailFilter, number>, mail: TabFacts, by: number,
 ): Record<MailFilter, number> {
   const on: MailFilter[] = []
+  /* Sent, junk, or the mailbox -- and exactly one of the three, which is what scope() says too.
+     A message on a record is still in All: being matched is a fact about it, not a place it
+     goes. */
   if (mail.isSent) on.push('sent')
-  else {
-    if (mail.isJunk) on.push('junk')
-    else on.push('all')
-    if (!mail.isSettled && !mail.isJunk) on.push('needs-filing')
-  }
-  if (mail.isFiled) on.push('filed')
-  if (mail.noRecordAt) on.push('no-record')
+  else if (mail.isJunk) on.push('junk')
+  else on.push('all')
 
   const next = { ...counts }
   for (const tab of on) next[tab] = Math.max(0, next[tab] + by)

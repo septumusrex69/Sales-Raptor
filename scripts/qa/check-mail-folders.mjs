@@ -78,16 +78,24 @@ ok('the columns are dropped', /drop column if exists oldest_seen_uid,/.test(sche
  * reload and a reload threw the reader to the top of the list. That makes this the one place
  * outside scope() that states which tabs a message is on — so it is exercised, not read.
  */
-const zero = { all: 0, 'needs-filing': 0, filed: 0, 'no-record': 0, junk: 0, sent: 0 }
-const mail = (over) => ({
-  isSent: false, isJunk: false, isFiled: false, isSettled: false, noRecordAt: null, ...over,
-})
+const zero = { all: 0, junk: 0, sent: 0 }
+const mail = (over) => ({ isSent: false, isJunk: false, ...over })
 
-/* An ordinary unmatched message: in the mailbox, and in the work queue. */
+/*
+ * THREE TABS, AND A MESSAGE IS ON EXACTLY ONE.
+ *
+ * There were six. THE FIRM: "it's irritating having to match everybody. Just keep everyone in your
+ * main mailbox... you don't have a match section any more or a needs match section or an open mail
+ * section." Needs matching was a queue, Matched was its scoreboard and Open mail was the way out of
+ * it, so all three went together -- what is left is what a mail server itself keeps.
+ *
+ * EXACTLY ONE is the property worth asserting, and it was not true before: a matched message
+ * counted on All and on Matched, which is right for a filter and wrong for a folder. Now the three
+ * are folders and the arithmetic is total.
+ */
 const plain = bumpUnread(zero, mail({}), 1)
-check('an unmatched message counts on All', plain.all, 1)
-check('...and on Needs matching', plain['needs-filing'], 1)
-check('...and nowhere else', plain.junk + plain.filed + plain['no-record'] + plain.sent, 0)
+check('an ordinary message counts on All', plain.all, 1)
+check('...and nowhere else', plain.junk + plain.sent, 0)
 
 /*
  * JUNK IS NOT IN ALL, at the firm's instruction: "normal mailbox goes to all, junk still goes to
@@ -97,29 +105,24 @@ check('...and nowhere else', plain.junk + plain.filed + plain['no-record'] + pla
 const junk = bumpUnread(zero, mail({ isJunk: true }), 1)
 check('junk counts on Junk', junk.junk, 1)
 check('...and not on All', junk.all, 0)
-check('...nor on Needs matching', junk['needs-filing'], 0)
 
-/* Sent mail is its own tab and no other: it is not waiting to be matched and it is not junk. */
-const sent = bumpUnread(zero, mail({ isSent: true, isFiled: false }), 1)
+/* Sent mail is its own tab and no other: it is not junk and it is not incoming. */
+const sent = bumpUnread(zero, mail({ isSent: true }), 1)
 check('sent mail counts on Sent', sent.sent, 1)
-check('...and on nothing else', sent.all + sent['needs-filing'] + sent.junk, 0)
+check('...and on nothing else', sent.all + sent.junk, 0)
 
-/* Matched mail is still in the mailbox, and is no longer waiting. */
-const filed = bumpUnread(zero, mail({ isFiled: true, isSettled: true }), 1)
-check('matched mail counts on Matched', filed.filed, 1)
-check('...and on All, because it is still in the mailbox', filed.all, 1)
-check('...but not on Needs matching', filed['needs-filing'], 0)
-
-/* Open mail has been dealt with deliberately, so it is settled and out of the queue. */
-const open = bumpUnread(zero, mail({ isSettled: true, noRecordAt: '2026-09-01T00:00:00Z' }), 1)
-check('open mail counts on Open mail', open['no-record'], 1)
-check('...and on All', open.all, 1)
-check('...and not in the queue', open['needs-filing'], 0)
+/*
+ * SENT WINS OVER JUNK, which is the one ordering that can be got wrong. A message the mail server
+ * flagged on the way out belongs in Sent -- it is a thing this firm wrote -- and putting it in the
+ * junk count would have somebody hunting their own outgoing mail in the spam shelf.
+ */
+const sentJunk = bumpUnread(zero, mail({ isSent: true, isJunk: true }), 1)
+check('sent mail that was flagged is still Sent', sentJunk.sent, 1)
+check('...and not junk', sentJunk.junk, 0)
 
 /* It goes down as well as up, and never below nothing — a count of -1 is a badge reading "-1". */
-const down = bumpUnread({ ...zero, all: 1, 'needs-filing': 1 }, mail({}), -1)
+const down = bumpUnread({ ...zero, all: 1 }, mail({}), -1)
 check('reading one takes it off All', down.all, 0)
-check('...and off Needs matching', down['needs-filing'], 0)
 check('and nothing goes below zero', bumpUnread(zero, mail({}), -1).all, 0)
 
 /* The original is left alone: React state that is mutated in place does not re-render. */

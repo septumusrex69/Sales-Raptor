@@ -324,7 +324,7 @@ export function scope<Q>(q: Q, input: MailScope): Q {
   if (wholeMailbox) {
     /* No tab clause at all. Deliberately empty rather than a chain of `else if`s each carrying
        `&& !wholeMailbox` -- one condition in one place is what keeps this readable. */
-  } else if (input.filter === 'needs-filing') out = out.eq('is_settled', false).eq('is_junk', false).eq('is_sent', false)
+  }
   /*
    * WHAT WE SENT, including from Outlook or a phone — the Sent folder is synced, so this is the
    * whole of it rather than only what Raptor sent itself.
@@ -334,10 +334,17 @@ export function scope<Q>(q: Q, input: MailScope): Q {
    * nobody is looking for on top of the ones they are.
    */
   else if (input.filter === 'sent') out = out.eq('is_sent', true)
-  // Matched means ON A RECORD, and only that. No-record mail has its own tab: putting it here
-  // would have the Matched list claiming a supplier is on somebody's file.
-  else if (input.filter === 'filed') out = out.eq('is_filed', true)
-  else if (input.filter === 'no-record') out = out.not('no_record_at', 'is', null)
+  /*
+   * AND THERE IS NO CLAUSE FOR BEING MATCHED, which is the whole of the firm's change.
+   *
+   * There were three more here: `needs-filing` (not on a record yet), `filed` (on one) and
+   * `no-record` (deliberately on nobody's). THE FIRM: "it's irritating having to match everybody.
+   * Just keep everyone in your main mailbox. If you want to match someone, match them."
+   *
+   * So whether a message is on a record is a FACT ABOUT IT, shown on the row, and no longer a
+   * place it lives. All is the mailbox; junk and sent are the two genuine folders a mail server
+   * itself keeps, which is why those two survive and the other three did not.
+   */
   else if (input.filter === 'junk') out = out.eq('is_junk', true)
   /*
    * "All" means the whole mailbox EXCEPT junk, at the firm's instruction: "normal mailbox goes
@@ -398,7 +405,7 @@ export async function countUnread(userId: string, input: MailScope): Promise<num
  * -- so an unread message a spam filter had misfiled sat in Junk with nothing anywhere saying so,
  * which is the one place it most needed saying.
  *
- * SIX COUNTS THROUGH scope(), NOT ONE RPC. A function in SQL would be a second definition of every
+ * THREE COUNTS THROUGH scope(), NOT ONE RPC. A function in SQL would be a second definition of every
  * tab's clauses, and this file has already been bitten by exactly that: nav_counts wrote its own
  * and drifted, so the badge said 3 over a list of 5. These are head counts on indexed columns and
  * they go out in parallel; the round trips are cheaper than the drift.
@@ -409,7 +416,7 @@ export async function countUnread(userId: string, input: MailScope): Promise<num
 export async function countUnreadByTab(
   userId: string, search?: string,
 ): Promise<Record<MailFilter, number>> {
-  const tabs: MailFilter[] = ['all', 'needs-filing', 'filed', 'no-record', 'junk', 'sent']
+  const tabs: MailFilter[] = ['all', 'junk', 'sent']
   const counts = await Promise.all(
     tabs.map((filter) => countUnread(userId, { filter, search }).catch(() => 0)),
   )
@@ -440,87 +447,31 @@ export async function fetchMail(input: MailScope & {
   return { items: rows.slice(0, limit).map(toItem), more: rows.length > limit }
 }
 
-/** How many messages are waiting to be filed. Counted in the database, not fetched and counted here. */
-export async function countNeedsFiling(userId: string): Promise<number> {
-  /*
-   * THROUGH scope(), SO THE NUMBER AND THE LIST CANNOT DISAGREE.
-   *
-   * These clauses were written out again here and had already drifted two ways from the list they
-   * sit over. The count required the message to be UNREAD and the list did not, so opening five
-   * unmatched messages took the badge to nought above a list of five — the exact "badge that says
-   * 3 over a list of 5" that scope() was extracted to prevent, reintroduced one level above the
-   * guard. And the count never excluded what we had SENT, which the list does.
-   *
-   * Reading is not matching. A message a collector has read is still on nobody's file, and the
-   * badge is counting work left, not mail left unopened.
-   */
-  const { count, error } = await scope(
-    supabase.from('user_emails').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-    { filter: 'needs-filing' },
-  )
-  if (error) throw new Error(error.message)
-  return count ?? 0
-}
-
-/**
- * This belongs on nobody's file.
+/*
+ * THE "NEEDS NO RECORD" FUNCTIONS WENT WITH THE QUEUE.
  *
- * The third answer to "what is this?", beside matching it and calling it junk. A telephone
- * provider, an accountant, a supplier: real work mail that is not junk, whose sender must not be
- * blocked because you need their mail, and which belongs to no debtor, lead or client. Without
- * this it sat in Needs matching for ever, and a work queue with permanent residents is a work
- * queue nobody reads.
+ * markNoRecordNeeded and clearNoRecordNeeded set and cleared `no_record_at`, which was how a
+ * supplier's invoice left the Needs matching queue without being put on a record. THE FIRM ended
+ * that queue -- "it's irritating having to match everybody. Just keep everyone in your main
+ * mailbox" -- and a function whose only job was to excuse a message from a queue has nothing to
+ * excuse it from.
  *
- * It does NOT mark the message read. Deciding a supplier's invoice needs no record says nothing
- * about whether anybody has read the invoice, and those are two different jobs.
- *
- * Refused on mail that is already on a record — that mail is somebody's history and a fee may
- * have been raised against it, so "needs no record" would be a plain contradiction.
+ * THE COLUMN STAYS, AND IS STILL WRITTEN BY THE SYNC. api/_lib/emailSync sets it for three cases
+ * -- a sender rule, the first read of a folder (the back catalogue), and mail from a colleague --
+ * and those writes are harmless now that nothing filters on it. It is left alone deliberately:
+ * ripping a column out of the sync to tidy up a screen is a change to how mail arrives, made for
+ * no benefit to the firm, and `is_settled` is generated from it in the database besides.
  */
-export async function markNoRecordNeeded(ids: string[], actorId: string | null): Promise<number> {
-  if (ids.length === 0) return 0
-  const { data, error } = await supabase
-    .from('user_emails')
-    .update({
-      no_record_at: new Date().toISOString(),
-      no_record_by: actorId,
-      // Saying it needs no record is a decision about it, which is the opposite of spam.
-      is_junk: false,
-    })
-    .in('id', ids)
-    .eq('is_filed', false)
-    .select('id')
-  if (error) throw new Error(error.message)
-  refreshNavCounts()
-  return (data ?? []).length
-}
-
-/** Put it back in the queue — the decision was wrong, or something changed. */
-export async function clearNoRecordNeeded(ids: string[]): Promise<number> {
-  if (ids.length === 0) return 0
-  const { data, error } = await supabase
-    .from('user_emails')
-    .update({ no_record_at: null, no_record_by: null })
-    .in('id', ids)
-    .not('no_record_at', 'is', null)
-    .select('id')
-  if (error) throw new Error(error.message)
-  refreshNavCounts()
-  return (data ?? []).length
-}
-
 /**
- * The two standing decisions that can be made about a sender.
+ * Which standing decision a rule is.
  *
- *   no_record    real work mail -- a supplier, an accountant -- that belongs on nobody's file.
- *   always_junk  spam. Their mail still arrives and is still filed; it lands under Junk.
- *
- * They are mutually exclusive by design, and the unique index on (user_id, pattern) makes them
- * so: a sender cannot be both a supplier and spam, and junking one REPLACES the other.
+ * 'no_record' settled a sender's mail on arrival so the Needs matching queue would stop asking
+ * about them. Nothing in the app creates one any more -- see the note above -- but the value is
+ * still in the table on rows the firm made, and the sync still reads them, so the type keeps it.
  */
 export type SenderRuleAction = 'no_record' | 'always_junk'
 
-/** A standing decision about one sender: their mail never needs matching. */
+/** A standing decision about one sender. */
 export interface SenderRule {
   id: string
   pattern: string
@@ -531,8 +482,10 @@ export interface SenderRule {
 
 export async function fetchSenderRules(
   userId: string,
-  /* Which standing decision. Defaulted so every existing caller keeps the list it asked for. */
-  action: SenderRuleAction = 'no_record',
+  /* Which standing decision. ASKED FOR RATHER THAN DEFAULTED: there is one caller left and it
+     wants the always-junk list, and a default of 'no_record' would now quietly return rules
+     nothing acts on. */
+  action: SenderRuleAction,
 ): Promise<SenderRule[]> {
   const { data, error } = await supabase
     .from('mail_sender_rules')
@@ -550,79 +503,17 @@ export async function fetchSenderRules(
   }))
 }
 
-/**
- * Stop asking about this sender, for good.
+/*
+ * AND SO DID THE "ALWAYS OPEN MAIL" RULES.
  *
- * The per-message action is lost on a supplier who writes every week — you would settle the same
- * sender over and over. This settles their mail as it arrives, so it lands in All already dealt
- * with and never joins the queue.
+ * addSenderRule, removeSenderRule and ruledBy maintained a standing rule that settled a sender's
+ * mail on arrival, so the queue would stop asking about an accountant who writes every week. With
+ * no queue there is nothing for such a rule to do, and the screen that offered it has gone.
  *
- * It also settles what is already sitting there, which is what somebody means by "stop asking
- * about them": a rule that only applied to future mail would leave today's four copies in the
- * queue and look broken.
- *
- * NOT a block, and the difference matters. Their mail still arrives, is still searchable, and can
- * still be matched later if it turns out to belong on a record after all. Nothing goes missing.
+ * fetchSenderRules above survives because the ALWAYS JUNK rules share the table and are a
+ * different thing entirely: they decide what a mail server's spam verdict could not, and nobody
+ * has asked for that to change.
  */
-export async function addSenderRule(input: {
-  userId: string
-  address: string
-  scope: 'address' | 'domain'
-  label?: string | null
-}): Promise<{ pattern: string; settled: number }> {
-  const address = input.address.trim().toLowerCase()
-  if (!address.includes('@')) throw new Error('That is not an email address.')
-
-  let pattern = address
-  if (input.scope === 'domain') {
-    /*
-     * The same guard the blocklist uses, for the same reason: on a shared provider a debtor
-     * writing from gmail.com is the normal case, and a rule there would settle their reply
-     * before anybody looked at it. Less costly than a block — the mail still arrives — but it
-     * would still take a debtor's reply out of the queue, which is exactly the queue's job.
-     */
-    const problem = domainBlockProblem(address)
-    if (problem) throw new Error(problem)
-    pattern = domainOf(address)!
-  }
-
-  const { error } = await supabase
-    .from('mail_sender_rules')
-    .upsert(
-      { user_id: input.userId, pattern, kind: input.scope, action: 'no_record', label: input.label ?? null },
-      { onConflict: 'user_id,pattern', ignoreDuplicates: true },
-    )
-  if (error) throw new Error(error.message)
-
-  // Settle what is already here. Matched mail is left alone: it is on a record already.
-  let q = supabase.from('user_emails')
-    .update({ no_record_at: new Date().toISOString() })
-    .eq('user_id', input.userId)
-    .eq('is_filed', false)
-    .is('no_record_at', null)
-  q = input.scope === 'domain'
-    ? q.ilike('from_address', `%@${pattern}`)
-    : q.ilike('from_address', pattern)
-  const { data: settled, error: sweepError } = await q.select('id')
-  if (sweepError) throw new Error(sweepError.message)
-
-  refreshNavCounts()
-  return { pattern, settled: settled?.length ?? 0 }
-}
-
-/** Start asking about them again. Mail already settled stays settled — see the note on the tab. */
-export async function removeSenderRule(id: string): Promise<void> {
-  const { error } = await supabase.from('mail_sender_rules').delete().eq('id', id)
-  if (error) throw new Error(error.message)
-}
-
-/** Is there already a standing rule covering this sender? */
-export function ruledBy(address: string, rules: SenderRule[]): SenderRule | null {
-  const clean = address.trim().toLowerCase()
-  const domain = domainOf(clean)
-  return rules.find((r) => (r.kind === 'address' ? r.pattern === clean : r.pattern === domain)) ?? null
-}
-
 /**
  * A picture that was drawn into a message rather than attached to it — a signature, nearly
  * always, which is the case this exists for: a great many South African firms sign off with one

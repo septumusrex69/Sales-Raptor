@@ -302,10 +302,16 @@ for (const label of ['Reply', 'Reply all', 'Forward', 'Mark unread']) {
 /*
  * THE FILING DECISIONS go behind the dots. They are taken once per message and never in a hurry,
  * so they cost a click and buy back a row that reads at a glance.
+ *
+ * AND THERE ARE NOW FIVE RATHER THAN SIX, OFFERED ALWAYS. "Mark as open" and "Put back in the
+ * queue" set and cleared a flag that let a message out of the Needs matching queue; THE FIRM ended
+ * that queue -- "it's irritating having to match everybody. Just keep everyone in your main
+ * mailbox" -- so there is nothing to be let out of. Matching and making a lead came the other way,
+ * out of the gold bar that used to own them while a message was unmatched.
  */
-for (const label of ['Mark as open', 'Put back in the queue', 'Move to junk',
+for (const label of ['Match to a record', 'Create a lead', 'Move to junk',
   'Not junk', 'Unmatch', 'Block sender']) {
-  ok(`${label} is in the menu`, more.includes(`label: '${label}'`))
+  ok(`${label} is in the menu`, more.includes(`'${label}'`))
   ok(`...and ${label} is not also a button on the bar`,
     !row.includes(`> ${label}`) && !row.includes(`label="${label}"`))
 }
@@ -313,9 +319,18 @@ for (const label of ['Mark as open', 'Put back in the queue', 'Move to junk',
 /* Each still carries the rule that decides whether it is offered at all. */
 ok('Unmatch is only on mail filed on a debtor account',
   /mail\.linkedTo\?\.kind === 'account' && onMove/.test(more))
-ok('free mail and junk are hidden on filed mail', (more.match(/!mail\.isFiled/g) ?? []).length === 2)
+/* Junk is hidden on filed mail -- a message on a record is neither junk nor anybody's to
+   reclassify, and junking clears the record link in the database anyway. */
+ok('junk is hidden on filed mail', (more.match(/!mail\.isFiled/g) ?? []).length === 1)
 ok('junk reverses on mail already in junk', /mail\.isJunk/.test(more))
-ok('free mail reverses on mail already marked free', /mail\.noRecordAt/.test(more))
+/* MATCHING AND BLOCKING ARE OFFERED ON EVERYTHING, which is the firm's "there is just an option to
+   say match to a record". Matching on a message already filed says "another record", because that
+   is what pressing it does -- the picker refiles rather than adding a second home. */
+ok('matching is offered whatever state the message is in',
+  /label: mail\.isFiled \? 'Match to another record' : 'Match to a record'/.test(more))
+ok('...and nothing is gated on a bar being up', !/barIsUp|barHasDisposal/.test(more))
+/* AND NOTHING EXCUSES A MESSAGE FROM A QUEUE ANY MORE. */
+ok('...and no flag is set to settle a message', !/noRecordAt|onNoRecord/.test(more))
 /* Blocking is the only one that reads as damage, and it is last. */
 ok('Block sender is marked as the damaging one', /label: 'Block sender'[\s\S]*danger: true/.test(more))
 

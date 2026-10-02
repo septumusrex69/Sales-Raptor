@@ -4,16 +4,20 @@
  * Three things the mail module got wrong in three different ways, and a check for each so they
  * cannot come back separately.
  *
- *  1. WAITING HAD THREE DEFINITIONS. scope() built the tab's clauses, countNeedsFiling wrote its
- *     own out again, and nav_counts() wrote a third in SQL. They had already drifted: the badge
- *     required the message to be unread and the list did not, so opening five unmatched messages
- *     took the badge to nought above a list of five. The sidebar was separately counting mail we
- *     had SENT, because nothing sets read_at on a message you wrote — a mailbox whose Sent folder
- *     syncs 2 000 messages put 2 000 on the badge, and no action a person can take cleared it.
+ *  1. WAITING HAD THREE DEFINITIONS, AND THEN IT HAD NONE. scope() built the tab's clauses,
+ *     countNeedsFiling wrote its own out again, and nav_counts() wrote a third in SQL; they had
+ *     already drifted, so opening five unmatched messages took the badge to nought above a list of
+ *     five. That was fixed by putting all three through one builder -- and then THE FIRM removed
+ *     the question: "it's irritating having to match everybody. Just keep everyone in your main
+ *     mailbox... Open mail falls away. Matched falls away. Needs matching falls away." So block 1
+ *     now holds the ABSENCE of all of it, in the tabs, in the builder and on the screen. The
+ *     sidebar's own fault is unchanged and still guarded: it counted mail we had SENT, because
+ *     nothing sets read_at on a message you wrote.
  *
- *  2. THE NAME DESCRIBED THE DATABASE. "No record needed" says what happens to the row. "Free
- *     mail" says the thing the person marking it cares about: mail on an account raises Annexure
- *     B item 6 for receiving it, and this raises nothing.
+ *  2. THE NAME DESCRIBED THE DATABASE, THREE TIMES, AND THEN THE THING ITSELF WENT. "No record
+ *     needed" said what happens to the row; "Free mail" said what it costs; "Open mail" was the
+ *     firm's own word for it. It existed only to let a supplier's invoice out of the queue, so it
+ *     went with the queue -- and block 2 holds all three names off the screen.
  *
  *  3. A REPLY SAID IT HAD BEEN LOGGED AND WAS NOT. On a lead or a client the status read "Reply
  *     sent and logged on Acme" and nothing was written anywhere.
@@ -34,31 +38,66 @@ const mail = readFileSync(new URL('../../src/lib/userMail.ts', import.meta.url),
 const page = readFileSync(new URL('../../src/pages/mail/MailPage.tsx', import.meta.url), 'utf8')
 const schema = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
 const sync = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url), 'utf8')
+const rules = readFileSync(new URL('../../src/lib/emailRules.ts', import.meta.url), 'utf8')
 
-/* ---------- 1. one definition of waiting ---------- */
+/* ---------- 1. the queue is gone, and matching is an option ---------- */
 
 /*
- * The count goes THROUGH the clause builder rather than beside it. Asserted on the call and not
- * on the word "scope", which appears in this file a dozen times in prose: the body of
- * countNeedsFiling has to contain a scope(...) call whose filter is the same one the tab uses.
+ * THE FIRM ENDED THE QUEUE: "match automatically what you can match, but everything doesn't need
+ * to be matched. It's irritating having to match everybody. Just keep everyone in your main
+ * mailbox. If you want to match someone, match them. You don't have a match section any more or a
+ * needs match section or an open mail section, but there is just an option to say match to a
+ * record... Open mail falls away. Matched falls away. Needs matching falls away."
+ *
+ * WHAT THIS BLOCK USED TO HOLD was the opposite: that the count of mail still waiting went through
+ * the one clause builder, because a badge that wrote its own clauses had already drifted and said
+ * 3 over a list of 5. That was the right guard for a queue. With no queue there is no count, so
+ * what is asserted now is the ABSENCE -- and absence is exactly the kind of assertion that passes
+ * vacuously, so each one is paired with something positive that proves the file was read.
  */
 {
-  const body = mail.slice(
-    mail.indexOf('export async function countNeedsFiling'),
-    mail.indexOf('export async function markNoRecordNeeded'),
-  )
-  ok('the needs-filing count exists at all', body.length > 0)
-  ok('...and is counted in the database, not fetched and counted here',
-    /count: 'exact', head: true/.test(body))
-  ok('...through scope(), the same builder the tab uses', /await scope\(/.test(body))
-  ok('...asking for the tab’s own filter', /filter: 'needs-filing'/.test(body))
+  ok('the mailbox still has tabs', /const TABS: \{ id: Pane/.test(page))
+  ok('...and there are three of them plus the blocklist',
+    (page.match(/^  \{ id: '[a-z-]+', label:/gm) ?? []).length === 4)
+  /* THE THREE THAT WENT. Named one at a time, because a single "none of these" assertion would
+     pass the day somebody put one back under a new label. */
+  ok('...no Needs matching tab', !/id: 'needs-filing'/.test(page))
+  ok('...no Matched tab', !/id: 'filed', label:/.test(page))
+  ok('...no Open mail tab', !/id: 'no-record'/.test(page))
+  /* AND WHAT IS LEFT IS WHAT A MAIL SERVER ITSELF KEEPS. */
+  for (const tab of ['all', 'junk', 'sent']) {
+    ok(`...${tab} survives`, new RegExp(`id: '${tab}', label:`).test(page))
+  }
+
+  /* NOR IN THE CLAUSE BUILDER. A filter nothing can select but scope() still answers is a tab
+     waiting to be put back without anybody re-reading why it went. */
+  ok('the clause builder knows three filters', /input\.filter === 'all'/.test(mail))
+  ok("...and no longer one for mail that is not on a record",
+    !/filter === 'needs-filing'|filter === 'filed'|filter === 'no-record'/.test(mail))
+  ok('...nor a type that would let one be asked for',
+    /export type MailFilter = 'junk' \| 'sent' \| 'all'/.test(rules))
+
   /*
-   * The clauses must NOT be written out again here. This is the whole point: two lists of
-   * clauses over one question is how the badge and the list came to disagree. Read off the
-   * function body, not the file, or the builder's own clauses would match.
+   * AND NOTHING COUNTS WHAT IS NOT MATCHED.
+   *
+   * The gold badge on All was the queue drawn in one digit -- a number somebody was meant to work
+   * down to zero. Leaving it would have kept the obligation and removed only the place it was
+   * read.
    */
-  ok('...and does not write the clauses out a second time', !/\.eq\('is_junk'/.test(body))
-  ok('...nor invent a condition the list does not have', !/read_at/.test(body))
+  ok('there is no count of mail still waiting', !/countNeedsFiling/.test(mail) && !/countNeedsFiling/.test(page))
+  ok('...and no gold badge to put it in', !/bg-gold-500 text-navy-950'/.test(page.slice(page.indexOf('const TABS'), page.indexOf('function Empty'))))
+
+  /*
+   * MATCHING ITSELF IS UNTOUCHED, which is the other half of the firm's sentence -- "if you want
+   * to match someone, match them". The actions did not go away; they stopped being rationed.
+   */
+  ok('match is offered on every message', /label: mail\.isFiled \? 'Match to another record' : 'Match to a record'/.test(page))
+  ok('...and so is making a lead', /label: 'Create a lead'/.test(page))
+  ok('...and junk', /label: 'Move to junk'/.test(page))
+  ok('...and blocking', /label: 'Block sender'/.test(page))
+  /* NOT RATIONED BY STATE. The bar used to own these while a message was unmatched and the menu
+     once it was not, so where a button lived depended on what the message was. */
+  ok('...none of it gated on whether a bar is up', !/barIsUp|barHasDisposal/.test(page))
 }
 
 /*
@@ -94,32 +133,40 @@ const sync = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url
   }
 }
 
-/* ---------- 2. Free mail ---------- */
+/* ---------- 2. the words for it are gone from the screen ---------- */
 
 /*
- * The old name gone from everything a person can READ. Comments are exempt — the tab's own
- * comment explains why the name changed and quotes the old one, which is the point of it.
+ * THREE NAMES, AND ALL THREE HAVE NOW GONE. The shelf for mail that belongs on nobody's file was
+ * called "No record needed", then "Free mail", then -- at the firm's own word -- "Open mail". It
+ * has now gone entirely, because it only ever existed to let a message OUT of the queue: a shelf
+ * for mail that is not waiting is just the mailbox.
+ *
+ * Comments are exempt, and deliberately so: the tab's own note explains what was removed and
+ * quotes the firm, which is the thing a reader needs most when they wonder where it went.
  */
 {
   const readable = page
-    .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments, including the one that quotes the old name
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments, including the ones that quote the old names
     .replace(/^\s*\/\/.*$/gm, '')       // line comments
-  ok('nothing on screen still says "No record needed"', !/No record needed/.test(readable))
-  ok('...nor "needing no record"', !/needing no record/.test(readable))
-  /*
-   * THIRD NAME, AND THE LAST TWO ARE BOTH GONE FROM THE SCREEN. "No record needed" described what
-   * the database does with the row; "Free mail" described what it costs, which was true and still
-   * read as an adjective about the message rather than as a place it goes. The firm's word is
-   * "Open mail" -- open on the desk, dealt with, on nobody's file.
-   */
+  ok('the page still draws a mailbox', /function MailStatus/.test(readable))
+  ok('nothing on screen says "No record needed"', !/No record needed/.test(readable))
   ok('...nor "Free mail"', !/Free mail/.test(readable))
-  ok('the tab is called Open mail', /label: 'Open mail'/.test(page))
-  ok('...and its hint says what it costs', /nothing charged/.test(page))
-  ok('the chip reads Open mail', /tight \? 'Open' : 'Open mail'/.test(page))
-  ok('the action says what it does', /Mark as open/.test(page))
-  ok('an unmatched message is sent to the tab it lands in', /mail\.noRecordAt \? 'Open mail'/.test(page))
-  // The filter id is untouched. Renaming it would be a migration, and the label is not the key.
-  ok('the filter id is still no-record', /\{ id: 'no-record', label: 'Open mail'/.test(page))
+  ok('...nor "Open mail"', !/Open mail/.test(readable))
+  ok('...nor "Needs matching"', !/Needs matching/.test(readable))
+  ok('...nor "Mark as open"', !/Mark as open/.test(readable))
+
+  /*
+   * AND THE ROW SAYS NOTHING ABOUT AN ORDINARY MESSAGE.
+   *
+   * A gold "Needs matching" chip on four rows in five is the irritation printed on every line of
+   * the mailbox, and removing the tab while leaving the chip would have moved the nagging rather
+   * than ended it. What is left is two facts worth a glance: this one is on a record, or this one
+   * is junk.
+   */
+  const chip = page.slice(page.indexOf('function MailStatus'), page.indexOf('function MailRow'))
+  ok('a matched message still says what it is on', /On \$\{mail\.linkedTo\.label\}/.test(chip))
+  ok('...and junk still says junk', /Junk/.test(chip))
+  ok('...and an ordinary message says nothing at all', /\) : null\}/.test(chip))
 }
 
 /* The blocklist tab. "Senders" named the rows; "Blocked" names what the tab is for. */
@@ -412,26 +459,25 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
   ok('...through the one clause builder', /countUnread\(userId, \{ filter, search \}\)/.test(byTab))
   ok('...and scoped by the search too, so a badge cannot lie once somebody types',
     /countUnreadByTab\(\s*\n?\s*userId: string, search\?: string,/.test(mail))
-  /* All six, or a tab quietly has no badge and nobody notices which. */
-  for (const tab of ['all', "'needs-filing'", "'filed'", "'no-record'", 'junk', 'sent']) {
-    ok(`...counting ${tab.replace(/'/g, '')}`, byTab.includes(tab.replace(/'/g, '')))
+  /* All three, or a tab quietly has no badge and nobody notices which. */
+  for (const tab of ['all', 'junk', 'sent']) {
+    ok(`...counting ${tab}`, byTab.includes(tab))
   }
 
   /*
-   * THE PAGE DRAWS THE RIGHT ONE, and which one is right changed.
+   * AND EVERY BADGE NOW COUNTS THE SAME THING: UNREAD.
    *
-   * All used to carry work outstanding alongside Needs matching. The firm caught it on the
-   * screen: "I've got about four or five unread messages in my All mailbox, and it just shows
-   * that I have two." Both numbers were right; neither was the one being asked of a mailbox. So
-   * Needs matching carries work outstanding and every other tab -- All included -- carries unread.
-   *
-   * Pinned as the whole expression rather than as two loose mentions, because the failure this
-   * replaces was a tab quietly reading the other number while both names were still in the file.
+   * There were two numbers on this row. All carried work outstanding beside Needs matching's own,
+   * and the firm caught it on the screen: "I've got about four or five unread messages in my All
+   * mailbox, and it just shows that I have two." Both were right and neither was the question
+   * people ask of a mailbox. That was settled by giving work outstanding to one tab; it is settled
+   * for good now that the tab has gone -- unread is a fact about whether somebody has looked, and
+   * nobody has asked to stop seeing it.
    */
   ok('the tabs carry a badge', /unreadByTab\[t\.id\]/.test(page))
-  ok('...work outstanding on Needs matching, and nowhere else',
-    /t\.id === 'needs-filing' \? outstanding\s*\n?\s*: unreadByTab\[t\.id\]/.test(page))
-  ok('...so All counts what has not been read', /const isWork = t\.id === 'needs-filing'/.test(page))
+  ok('...and it is unread, on every one of them',
+    /const n = t\.id === 'blocked' \? 0 : unreadByTab\[t\.id\]/.test(page))
+  ok('...with nothing counting work left to do', !/outstanding/.test(page.replace(/\/\*[\s\S]*?\*\//g, '')))
   ok('...and nothing at zero, which is what teaches people to stop reading badges',
     /if \(n <= 0\) return null/.test(page))
 
@@ -448,8 +494,10 @@ ok('the blocklist tab is called Blocked', /\{ id: 'blocked', label: 'Blocked'/.t
     /input\.filter === 'all'\) out = out\.eq\('is_junk', false\)\.eq\('is_sent', false\)/.test(mail))
   ok('...with unread applied on top, which is what countUnread adds to whatever tab it is given',
     /\{ \.\.\.input, unreadOnly: true \}/.test(mail))
-  /* Told apart by colour: unread is brand, the same as the dot on a row and the unread filter. */
-  ok('...the two are told apart', /isWork \? 'bg-gold-500 text-navy-950' : 'bg-brand-500 text-white'/.test(page))
+  /* ONE COLOUR, because there is one kind of badge. It is brand, the same as the dot on a row and
+     the Unread only filter -- and gold, which this app uses for work outstanding, is now used by
+     nothing on this row, which is the point. */
+  ok('...drawn in the unread colour', /bg-brand-500 text-white/.test(page))
 
   /* AND MARKING UNREAD RELOADS NOTHING. */
   const unreadOne = page.slice(page.indexOf('async function unreadOne'), page.indexOf('\n  /*\n   * Whether the reading pane'))
@@ -604,12 +652,14 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
   for (const [what, needle] of [
     ['mark read', 'void readChosen()'],
     ['mark unread', 'void unreadChosen()'],
-    ['mark as open', 'void noRecordChosen()'],
     ['move to junk', 'void junkChosen(true)'],
     ['rescue from junk', 'void junkChosen(false)'],
   ]) {
     ok(`a selection can ${what}`, bulk.includes(needle))
   }
+  /* AND NO LONGER "mark as open". That cleared a morning's supplier mail out of the queue in one
+     press, and there is no queue to clear it out of. */
+  ok('...and cannot mark a selection as open', !bulk.includes('noRecordChosen'))
   /*
    * AND BLOCKING IS NOT ON IT. "Don't bulk block people. That's a very bad and dangerous idea."
    *
@@ -658,7 +708,7 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
     /const searching = !!input\.search\?\.trim\(\)/.test(mail))
   /* The tab clauses hang off the same condition, so there is one place that decides. */
   ok('...and the tab clauses hang off that one condition',
-    /if \(wholeMailbox\) \{[\s\S]{0,400}?\} else if \(input\.filter === 'needs-filing'\)/.test(mail))
+    /if \(wholeMailbox\) \{[\s\S]{0,400}?\}\s*\n\s*\/\*[\s\S]{0,800}?else if \(input\.filter === 'sent'\)/.test(mail))
 
   /* The page asks for it, and it is on by default because that is the common question. */
   ok('the mailbox searches everywhere by default', /useState\(true\)[\s\S]{0,80}?searchEverywhere|const \[searchEverywhere, setSearchEverywhere\] = useState\(true\)/.test(page))
@@ -728,7 +778,8 @@ ok('...as the same control the book uses', /aria-pressed=\{pageSize === n\}/.tes
      against it. It is not ours to delete. */
   ok('...and leaves matched mail alone', /\.eq\('is_filed', false\)/.test(emptyJunk))
 
-  const box = page.slice(page.indexOf('function EmptyJunkModal('), page.indexOf('\n/**\n * Senders whose mail never needs matching'))
+  const box = page.slice(page.indexOf('function EmptyJunkModal('), page.indexOf('\n/**\n * The blocklist, newest block first.'))
+  ok('the junk box is where it was expected', box.length > 0 && box.length < 9000)
   ok('the box has no tick box at all', !/type="checkbox"/.test(box))
   ok('...and says so out loud', /nobody is blocked/.test(box))
   /* Named for what it does. "Empty" is a tidy-up; this deletes. */
@@ -776,6 +827,7 @@ if (failures.length) {
 }
 console.log(`${pass} passed, 0 failed`)
 console.log(`
-The badge and the queue ask one question through one builder, the sidebar no longer counts our
-own sent mail, "Open mail" is the name everywhere a person can read it, and a reply is charged
-once on a debtor and written down on a lead.`)
+The queue is gone -- no Needs matching, no Matched, no Open mail, in the tabs, in the clause
+builder or in any word on the screen -- matching is offered on every message instead, the sidebar
+no longer counts our own sent mail, and a reply is charged once on a debtor and written down on a
+lead.`)

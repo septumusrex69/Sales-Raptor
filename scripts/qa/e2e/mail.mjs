@@ -15,9 +15,12 @@
  *     on the screen at the same time.
  *  2. THE PANE SCROLLS IN TWO COLUMNS. A flex child without min-h-0 grows past its parent instead
  *     of scrolling, which looks fine in the markup and wrong on the screen.
- *  3. THE RIGHT MESSAGES CARRY THE WARNING. "Not matched yet" must be on the unmatched enquiry and
- *     on neither the filed message nor the one settled as free mail -- a warning that fires when
- *     nothing is wrong is worse than no warning, because people stop reading it.
+ *  3. NOTHING NAGS ANYBODY TO MATCH A MESSAGE. "Not matched yet" was on every message that was
+ *     not on a record, and the firm removed it: "it's irritating having to match everybody." What
+ *     this now holds is the ABSENCE of that panel and the PRESENCE of every one of its actions
+ *     behind the dots. The principle it was written under is the one that removed it: a warning
+ *     that fires when nothing is wrong is worse than no warning, because people stop reading it --
+ *     and on this screen it fired on four messages in five.
  *
  * Run: node scripts/qa/e2e/mail.mjs
  * Screenshots land in .qa-screenshots/ so the result can be looked at, not just read.
@@ -452,26 +455,39 @@ try {
   t.ok('...and the icons say what they are',
     await page.getByRole('button', { name: 'Mark unread' }).isVisible())
 
-  /* ---------- the warning fires on the right message, and only there ---------- */
+  /* ---------- nothing nags anybody to match a message ---------- */
 
-  t.ok('an unmatched message says so', await page.getByText('Not matched yet').first().isVisible())
   /*
-   * EVERY ANSWER, ON THE MESSAGE THAT IS STILL ASKING. The firm: "move to junk, mark as free,
-   * block the sender -- it's down there at the three dots, but for a new email it should be up
-   * there." Checked on the screen, because whether a button is reachable without opening a menu is
-   * not something source-reading can tell you.
+   * THE FIRM ENDED THE NAGGING: "it's irritating having to match everybody. Just keep everyone in
+   * your main mailbox. If you want to match someone, match them."
+   *
+   * There was a gold panel on every message that was not on a record, headed "Not matched yet",
+   * with five buttons under it. This is the assertion the change turns on, and it has to be made
+   * in a browser: whether a panel is on the screen is exactly what source-reading cannot say.
    */
-  for (const label of ['Match to a record', 'Mark as open', 'Move to junk', 'Block sender', 'Create lead']) {
-    t.ok(`...and offers ${label} without opening anything`,
+  t.check('an ordinary message is not nagged to be matched',
+    await page.getByText('Not matched yet').count(), 0)
+
+  /*
+   * AND EVERY ANSWER IS STILL ONE PRESS AWAY, behind the dots, on every message whatever state it
+   * is in. The actions did not go; they stopped being rationed by what the message was.
+   */
+  const dotsHere = page.getByRole('button', { name: 'More things to do with this message' })
+  t.ok('...and the dots are there instead', await dotsHere.first().isVisible())
+  await dotsHere.first().click()
+  await page.waitForTimeout(250)
+  for (const label of ['Match to a record', 'Create a lead', 'Move to junk', 'Block sender']) {
+    t.ok(`...offering ${label}`,
       await page.getByRole('button', { name: label }).first().isVisible())
   }
-  /*
-   * AND THE DOTS ARE GONE, because the bar has taken everything that was behind them. A dots
-   * button opening a blank panel reads as a feature that has broken.
-   */
-  t.check('...with nothing left behind the dots',
-    await page.getByRole('button', { name: 'More things to do with this message' }).count(), 0)
-  /* Back to the top of the message, or the shot is of paragraph 17 rather than of the bar. */
+  /* AND NOT THE ONE THAT ONLY A QUEUE NEEDED. "Mark as open" settled a supplier's invoice out of
+     the Needs matching list; there is no list to settle it out of. */
+  t.check('...and nothing offering to mark it as open',
+    await page.getByRole('button', { name: 'Mark as open' }).count(), 0)
+  await page.keyboard.press('Escape')
+  await page.mouse.click(5, 5)
+  await page.waitForTimeout(300)
+  /* Back to the top of the message, or the shot is of paragraph 17 rather than of the header. */
   await page.getByRole('heading', { name: 'Debt collection enquiry' }).scrollIntoViewIfNeeded()
   await page.waitForTimeout(300)
   await t.shot(page, '22-mail-open-unmatched')
@@ -483,20 +499,18 @@ try {
   /* A message already on a debtor account is not a loose end and must not be nagged. */
   await page.getByText('Agreement and next steps').first().click()
   await page.waitForTimeout(700)
-  t.check('a matched message is not nagged', await page.getByText('Not matched yet').count(), 0)
-  t.ok('...it says where it went instead',
+  t.ok('a matched message says where it went',
     await page.getByText(/On Willem Bezuidenhout/).first().isVisible())
 
   /*
-   * "OTHERWISE IT SHOULD ALWAYS BE DOWN THERE." Once the question is answered the bar goes and the
-   * dots come back -- these are corrections now rather than decisions, so they cost a click.
+   * AND IT IS OFFERED REMATCHING RATHER THAN MATCHING, which is what pressing it actually does --
+   * the picker refiles a message rather than giving it a second home.
    */
-  t.check('...and blocking is no longer a loose button',
-    await page.getByRole('button', { name: 'Block sender' }).count(), 0)
   const dots = page.getByRole('button', { name: 'More things to do with this message' })
-  t.ok('...the dots are back', await dots.isVisible())
+  t.ok('...the dots are there on it too', await dots.isVisible())
   await dots.click()
   await page.waitForTimeout(250)
+  t.ok('...offering another record', await page.getByRole('button', { name: 'Match to another record' }).isVisible())
   t.ok('...and that is where blocking lives', await page.getByRole('button', { name: 'Block sender' }).isVisible())
   await page.keyboard.press('Escape')
   await page.mouse.click(5, 5)
@@ -507,10 +521,11 @@ try {
   await page.mouse.click(5, 5)
   await page.waitForTimeout(250)
 
-  /* Nor is one deliberately settled as free mail: somebody already answered the question. */
+  /* And a message the sync settled on arrival reads as an ordinary one: there is no shelf for it
+     to sit on any more, and nothing on it says there ever was. */
   await page.getByText('Follow up on outstanding account').first().click()
   await page.waitForTimeout(700)
-  t.check('open mail is not nagged either', await page.getByText('Not matched yet').count(), 0)
+  t.check('nothing calls a settled message open mail', await page.getByText('Open mail').count(), 0)
 
   /* ---------- what the numbers on the tabs are counting ---------- */
 
@@ -549,12 +564,16 @@ try {
   t.check('...and the sidebar says the same, because it is the same question', await navBadge(), 5)
 
   /*
-   * AND NEEDS MATCHING COUNTS SOMETHING ELSE, which is why the two must differ here. Reading a
-   * message is not matching it: a message a collector has read is still on nobody's file.
+   * AND THERE IS NO SECOND KIND OF NUMBER ON THIS ROW ANY MORE.
+   *
+   * Needs matching used to carry work outstanding beside these, in gold, and that was the number
+   * somebody was meant to work down to zero. It went with the tab: "it's irritating having to
+   * match everybody."
    */
-  t.check('Needs matching counts work still on nobody\u2019s file', await tabBadge('Needs matching'), 4)
-  t.ok('...which is not the same number as All, or one of them is answering the wrong question',
-    (await tabBadge('All')) !== (await tabBadge('Needs matching')))
+  t.check('there is no Needs matching tab to count',
+    await page.getByRole('button', { name: /^Needs matching/ }).count(), 0)
+  t.check('...nor a Matched one', await page.getByRole('button', { name: /^Matched/ }).count(), 0)
+  t.check('...nor an Open mail one', await page.getByRole('button', { name: /^Open mail/ }).count(), 0)
 
   /*
    * AND EVERY OTHER TAB ITS OWN UNREAD. The firm's earlier instruction: "the junk email doesn't
@@ -563,7 +582,7 @@ try {
    * a working badge, so these two are asserted exactly and the fixtures make them differ from All.
    */
   t.check('Junk says how many of ITS messages are unread', await tabBadge('Junk'), 1)
-  t.check('...and Open mail how many of its own', await tabBadge('Open mail'), 2)
+  t.check('...and Sent how many of its own', await tabBadge('Sent'), 0)
   /*
    * AND THEY DIFFER, the same pairwise test All and Needs matching already have two lines above.
    *
@@ -573,7 +592,7 @@ try {
    * badges working, for exactly as long as the numbers match.
    */
   t.ok('...which is not the same number as Junk, or the two are answering each other\u2019s question',
-    (await tabBadge('Junk')) !== (await tabBadge('Open mail')))
+    (await tabBadge('Junk')) !== (await tabBadge('All')))
 
   /*
    * READING ONE TAKES THE BADGE DOWN WITH IT, without a reload.
@@ -585,8 +604,8 @@ try {
   await page.getByText('Debt collection enquiry').first().click()
   await page.waitForTimeout(800)
   t.check('reading a message takes All down by one', await tabBadge('All'), 4)
-  t.check('...and leaves Needs matching alone, because reading is not matching',
-    await tabBadge('Needs matching'), 4)
+  t.check('...and leaves Junk alone, because it was not a junk message',
+    await tabBadge('Junk'), 1)
 
   /*
    * MARKING UNREAD RELOADS NOTHING. "When I mark an email as unread it kind of reloads everything
@@ -682,9 +701,13 @@ try {
   /* And it really selects them: the bulk bar counts what it holds. */
   t.ok('...and it selects the whole page',
     await page.getByText(/^\d+ selected$/).first().isVisible())
-  for (const action of ['Mark read', 'Mark as open', 'Move to junk']) {
+  for (const action of ['Mark read', 'Move to junk']) {
     t.ok(`...offering ${action}`, await page.getByRole('button', { name: action }).isVisible())
   }
+  /* AND NOT "Mark as open", which cleared a morning's supplier mail out of the Needs matching
+     queue in one press. There is no queue to clear it out of. */
+  t.check('...and no way to settle a selection out of a queue',
+    await page.getByRole('button', { name: 'Mark as open' }).count(), 0)
   /*
    * AND NOT BLOCKING. "Don't bulk block people. That's a very bad and dangerous idea." Checked on
    * the screen because that is where it was pressed: thirty addresses, the firm's own bank among
@@ -731,7 +754,12 @@ try {
 
   await page.getByText('Debt collection enquiry').first().click()
   await page.waitForTimeout(700)
-  await page.getByRole('button', { name: 'Create lead' }).first().click()
+  /* BEHIND THE DOTS NOW, on an ordinary sender. It used to be a button on the gold bar; the bar
+     went with the queue, and the action moved into the menu where it is offered on every message
+     rather than only on one nobody had filed yet. */
+  await page.getByRole('button', { name: 'More things to do with this message' }).first().click()
+  await page.waitForTimeout(250)
+  await page.getByRole('button', { name: 'Create a lead' }).first().click()
   await page.waitForTimeout(500)
   /*
    * THE REAL LEAD FORM, at the firm's instruction: "it should use the same lead form as adding an
@@ -770,7 +798,7 @@ try {
    * AND IT ASKS WHERE TO GO. "Once it says lead created, it should ask you -- go back to mail, or
    * go to the lead." Both are real answers and neither is right for everybody.
    */
-  /* Scoped to the modal: "Create lead" is also the button on the bar behind it. */
+  /* Scoped to the modal: "Create lead" is also the heading above it. */
   await box().getByRole('button', { name: 'Create lead' }).click()
   await page.waitForTimeout(900)
   t.ok('it says the lead was created',

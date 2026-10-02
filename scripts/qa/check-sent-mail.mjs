@@ -61,7 +61,14 @@ ok('...which is stored', /last_seen_uid_sent integer/.test(schema))
 ok('the mailbox row records that it was sent', /is_sent: message\.isSent/.test(sync))
 ok('sent mail arrives settled, not as work',
   /noRecordNeeded \|\| message\.isSent/.test(sync))
-ok('Needs matching excludes sent mail', /needs-filing'\) out = .*eq\('is_sent', false\)/.test(mail))
+/* THE WORK QUEUE THAT EXCLUDED IT HAS GONE. Needs matching used to carry `is_sent = false` so a
+   mailbox whose Sent folder syncs two thousand messages did not put two thousand on somebody's
+   pile; THE FIRM removed the queue itself -- "it's irritating having to match everybody" -- so
+   there is nothing left for sent mail to be excluded FROM except All, below. */
+/* Comments stripped: the clause builder's own note names the three filters that went, which is
+   the thing a reader needs when they wonder where the queue is. */
+ok('no queue is left to exclude it from',
+  !/needs-filing/.test(mail.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')))
 ok('All excludes sent mail', /'all'\) out = out\.eq\('is_junk', false\)\.eq\('is_sent', false\)/.test(mail))
 ok('Sent has its own tab', /'sent'\) out = out\.eq\('is_sent', true\)/.test(mail))
 // The recipient is the useful address on a sent message; From is always us.
@@ -206,7 +213,9 @@ ok('forwarding fetches the real message', /await fetchMailBody\(mail\.id, token\
  */
 ok('the unmatch names the tab it actually lands in', /You will find it under \$\{landsIn\}/.test(page))
 ok('...and knows junk goes to Junk', /mail\.isJunk \? 'Junk'/.test(page))
-ok('...and that open mail does not go to the queue either', /mail\.noRecordAt \? 'Open mail'/.test(page))
+/* AND THERE ARE ONLY TWO ANSWERS NOW. It once had to choose between three queues; with Needs
+   matching and Open mail gone, junk is the one place that is not the mailbox. */
+ok('...and everything else goes back to All', /mail\.isJunk \? 'Junk' : 'All'/.test(page))
 
 /* ---------- replying to everybody ---------- */
 

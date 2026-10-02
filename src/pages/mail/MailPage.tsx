@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, CircleCheck, ExternalLink,
+  AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
   Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
@@ -38,15 +38,14 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
-  addSenderRule, blockedBy, blockSender, clearNoRecordNeeded, countNeedsFiling,
-  countUnreadByTab, debtorFileFor, deleteMail, fetchSenderRules, markNoRecordNeeded, removeSenderRule,
-  ruledBy,
+  blockedBy, blockSender,
+  countUnreadByTab, debtorFileFor, deleteMail, fetchSenderRules,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   isSharedDomain,
   fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type DebtorFile, type InlineImage, type LinkedRecord,
-  type MailFilter, type MailItem, type SenderRule,
+  type MailFilter, type MailItem,
 } from '../../lib/userMail'
 import { useAppStore } from '../../store/AppStore'
 import { LeadForm } from '../../components/layout/QuickAdd'
@@ -82,24 +81,33 @@ type Pane = MailFilter | 'blocked'
  * somebody who came here to find a message. Every row carries its own state now — see
  * MailStatus — so nothing is lost by looking at the lot.
  */
+/*
+ * FOUR, AND THREE OF THEM WENT.
+ *
+ * THE FIRM: "match automatically what you can match, but everything doesn't need to be matched.
+ * It's irritating having to match everybody. Just keep everyone in your main mailbox. If you want
+ * to match someone, match them. You don't have a match section any more or a needs match section
+ * or an open mail section, but there is just an option to say match to a record... Open mail falls
+ * away. Matched falls away. Needs matching falls away."
+ *
+ * WHAT WAS WRONG WITH THEM WAS NOT THE TABS, IT WAS THE OBLIGATION BEHIND THEM. Needs matching was
+ * a QUEUE, and a queue has to be cleared -- so every newsletter, every colleague and every
+ * supplier was a thing somebody had to answer for, fifty to a hundred times a day across fifty
+ * agents. Matched was its scoreboard. Open mail existed only to let a message OUT of the queue
+ * without matching it, which is why it goes with the queue: a shelf for mail that is not waiting
+ * is just the mailbox.
+ *
+ * MATCHING ITSELF IS UNTOUCHED, and so is the automatic half -- the sync still files a debtor's
+ * reply onto their account off the reference, which is the firm's "match automatically what you
+ * can match". What changed is that NOT matching is no longer a loose end. Whether a message is on
+ * a record is still said on its row, because it is a useful fact; it is simply no longer a place
+ * mail goes and no longer something the screen asks anybody for.
+ *
+ * WHAT IS LEFT IS WHAT A MAIL SERVER ITSELF KEEPS: the mailbox, the junk folder and the sent
+ * folder. Blocked is not a filter at all -- it is the blocklist, shown in the same place.
+ */
 const TABS: { id: Pane; label: string; hint: string }[] = [
   { id: 'all', label: 'All', hint: 'Your whole mailbox, junk aside' },
-  { id: 'needs-filing', label: 'Needs matching', hint: 'Not on any record yet' },
-  { id: 'filed', label: 'Matched', hint: 'On an account, lead, deal or client' },
-  /*
-   * Suppliers, the accountant, the telephone provider.
-   *
-   * Real work mail that belongs on nobody's file: not junk, and the sender must not be blocked
-   * because you need their mail. Before this it lived in Needs matching for ever, and a work
-   * queue with permanent residents is a queue nobody reads.
-   *
-   * THE FIRM'S WORD, THIRD TIME OF ASKING. "No record needed" described what the database does
-   * with the row. "Free mail" described what it costs -- mail on an account raises Annexure B item
-   * 6 for receiving it and this raises nothing -- which was true and was still the wrong emphasis:
-   * "free" reads as an adjective about the message rather than as a place it goes. "Open mail" is
-   * the firm's own: mail that is open on the desk, dealt with, and on nobody's file.
-   */
-  { id: 'no-record', label: 'Open mail', hint: 'Suppliers and the like — dealt with, on nobody\u2019s file, and nothing charged' },
   { id: 'junk', label: 'Junk', hint: 'Your mail server thought this was spam' },
   /*
    * Read off the mailbox's own Sent folder rather than only what Raptor sent, so mail sent from
@@ -107,7 +115,7 @@ const TABS: { id: Pane; label: string; hint: string }[] = [
    * matched and is not part of the incoming working list.
    */
   { id: 'sent', label: 'Sent', hint: 'What you have sent, from anywhere' },
-  { id: 'blocked', label: 'Blocked', hint: 'Senders you have blocked, and senders whose mail always lands in Open mail' },
+  { id: 'blocked', label: 'Blocked', hint: 'Senders whose mail does not reach Raptor at all' },
 ]
 
 /**
@@ -172,7 +180,7 @@ export function MailPage() {
    * misfiled sat in Junk with nothing anywhere saying so.
    */
   const [unreadByTab, setUnreadByTab] = useState<Record<MailFilter, number>>(
-    { all: 0, 'needs-filing': 0, filed: 0, 'no-record': 0, junk: 0, sent: 0 },
+    { all: 0, junk: 0, sent: 0 },
   )
   const [unreadOnly, setUnreadOnly] = useState(false)
   /* The count for the tab you are standing on, which is what the Unread only option applies to. */
@@ -190,8 +198,6 @@ export function MailPage() {
   const [blocking, setBlocking] = useState<MailItem | null>(null)
   const [blocked, setBlocked] = useState<BlockedSender[]>([])
   /** The message being settled — the box that also offers to settle the sender for good. */
-  const [settling, setSettling] = useState<MailItem | null>(null)
-  const [senderRules, setSenderRules] = useState<SenderRule[]>([])
   /*
    * The senders already set to "always junk", held so the box that offers to make that rule can
    * say when it is already there rather than offering to make it twice. Loaded beside the
@@ -445,8 +451,6 @@ export function MailPage() {
       setPage(at)
       setChosen(new Set())
       setLoadFailed(false)
-      // Alongside the page, so the badges track whatever the last action did.
-      void countNeedsFiling(currentUser.id).then(setOutstanding).catch(() => {})
       /* Every tab, so each one can say whether anything on it is waiting to be read. */
       void countUnreadByTab(currentUser.id, asked).then(setUnreadByTab).catch(() => {})
     } catch (e) {
@@ -478,17 +482,17 @@ export function MailPage() {
    * reloads only when a block is added or removed, not on every page of mail.
    */
   /*
-   * How many messages are still waiting, shown on the All tab.
+   * THE "STILL WAITING" COUNT WENT WITH THE QUEUE.
    *
-   * The firm asked for "a small thing by the All if there is a message outstanding that needs to
-   * be attended to" — and it is needed precisely BECAUSE All is the landing view: a list that
-   * mixes filed mail into unfiled gives no sense of how much is left, and the answer is the one
-   * number somebody works down to zero.
+   * It was a gold badge on All answering the firm's earlier ask -- "a small thing by the All if
+   * there is a message outstanding that needs to be attended to" -- and it counted mail on nobody's
+   * file. That question has been withdrawn: "it's irritating having to match everybody. Just keep
+   * everyone in your main mailbox." A number somebody is meant to work down to zero IS the
+   * obligation, drawn in one digit, so leaving it would have kept the thing that was removed.
    *
-   * Counted in the database, not by filtering the page in hand: the page is 50 rows and the
-   * answer is usually larger than that.
+   * The unread badges stay. Unread is a fact about whether somebody has looked, which is what a
+   * mailbox has always counted and what nobody has asked to stop seeing.
    */
-  const [outstanding, setOutstanding] = useState(0)
 
 
   const [blocksVersion, setBlocksVersion] = useState(0)
@@ -501,11 +505,6 @@ export function MailPage() {
       .catch(() => {})
     // The other half of the same question — which senders never need matching. Loaded together
     // because the Blocked tab shows both and the same version counter refreshes them.
-    void fetchSenderRules(currentUser.id)
-      .then((list) => { if (!cancelled) setSenderRules(list) })
-      .catch(() => {})
-    /* And the other standing decision: whose mail always goes to Junk. Same table, same counter.
-       A list we could not read costs a sentence on the junk box, not the mailbox. */
     void fetchSenderRules(currentUser.id, 'always_junk')
       .then((list) => { if (!cancelled) setAlwaysJunked(new Set(list.map((r) => r.pattern))) })
       .catch(() => {})
@@ -817,34 +816,6 @@ export function MailPage() {
     }
   }
 
-  /** Back into the queue — the decision was wrong, or something changed. */
-  async function undoNoRecord(mail: MailItem) {
-    try {
-      await clearNoRecordNeeded([mail.id])
-      setStatus('Back under Needs matching.')
-      setOpen(null)
-      await load(page)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  async function noRecordChosen() {
-    const ids = [...chosen]
-    if (ids.length === 0) return
-    try {
-      const done = await markNoRecordNeeded(ids, currentUser?.id ?? null)
-      const refused = ids.length - done
-      setStatus(
-        `${done} ${done === 1 ? 'email' : 'emails'} marked as open mail.`
-        + (refused > 0 ? ` ${refused} left alone — already matched to a record.` : ''),
-      )
-      await afterBulk()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
   /** Put them back the way they were found. */
   async function unreadChosen() {
     const ids = [...chosen]
@@ -1077,18 +1048,15 @@ export function MailPage() {
                   teaches people to stop reading the others.
                 */}
                 {(() => {
-                  const n = t.id === 'blocked' ? 0
-                    : t.id === 'needs-filing' ? outstanding
-                      : unreadByTab[t.id]
+                  const n = t.id === 'blocked' ? 0 : unreadByTab[t.id]
                   if (n <= 0) return null
-                  const isWork = t.id === 'needs-filing'
                   return (
-                    <span title={isWork ? 'Still on nobody\u2019s file' : 'Unread'}
-                      className={`min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
-                        inline-flex items-center justify-center tabular-nums ${
-                        /* Unread is brand, matching the dot on a row and the Unread only filter;
-                           work outstanding keeps gold, which is what it has always been. */
-                        isWork ? 'bg-gold-500 text-navy-950' : 'bg-brand-500 text-white'}`}>
+                    /* Brand, matching the dot on a row and the Unread only filter. There used to be
+                       a gold one here too, for mail still on nobody's file; it went with the
+                       queue -- see the note on `outstanding`. */
+                    <span title="Unread"
+                      className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold
+                        inline-flex items-center justify-center tabular-nums bg-brand-500 text-white">
                       {n > 99 ? '99+' : n}
                     </span>
                   )
@@ -1158,13 +1126,6 @@ export function MailPage() {
               <button onClick={() => void unreadChosen()}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
                 <MailIcon size={14} /> Mark unread
-              </button>
-            )}
-            {/* A morning's worth of supplier mail, cleared in one go — which is how it arrives. */}
-            {items.some((m) => chosen.has(m.id) && !m.isSettled) && (
-              <button onClick={() => void noRecordChosen()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white">
-                <CircleCheck size={14} /> Mark as open
               </button>
             )}
             {/*
@@ -1256,24 +1217,17 @@ export function MailPage() {
         */}
         {filter === 'blocked' ? (
           /*
-           * One tab for every standing decision about a sender, because they are one question
-           * asked twice: what should happen to mail from this person, before anybody reads it?
-           * Splitting them across two tabs would have somebody hunting for a rule under Blocked.
+           * JUST THE BLOCKLIST NOW. It used to carry a second list beside it -- senders whose mail
+           * always landed in Open mail, so the queue would stop asking about them. With the queue
+           * gone there is nothing for such a rule to do, and a control that quietly does nothing
+           * is worse than one that is not there.
            */
-          <>
-            <BlockedList senders={blocked} onUnblock={async (id) => {
-              await unblockSender(id)
-              setBlocksVersion((v) => v + 1)
-              setStatus('Unblocked. Their mail appears again from the next sync — not retroactively.')
-              await load(0)
-            }} />
-            <SenderRulesList rules={senderRules} onRemove={async (id) => {
-              await removeSenderRule(id)
-              setBlocksVersion((v) => v + 1)
-              setStatus('Their mail will ask to be matched again. What is already settled stays settled.')
-              await load(0)
-            }} />
-          </>
+          <BlockedList senders={blocked} onUnblock={async (id) => {
+            await unblockSender(id)
+            setBlocksVersion((v) => v + 1)
+            setStatus('Unblocked. Their mail appears again from the next sync — not retroactively.')
+            await load(0)
+          }} />
         ) : loadFailed ? (
           <LoadFailed onRetry={() => void load(page)} />
         ) : paneShowing ? (
@@ -1413,8 +1367,6 @@ export function MailPage() {
                   onForward={() => startForward(m)} onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
                   onUnread={() => void unreadOne(m)}
-                  onNoRecord={() => setSettling(m)}
-                  onUndoNoRecord={() => void undoNoRecord(m)}
                   onLink={() => startLink(m)}
                   onCreateLead={() => setCreatingLead(m)}
                   sticky
@@ -1467,8 +1419,6 @@ export function MailPage() {
                   onJunk={(j) => void junkOne(m, j)}
                   onMove={mayRefile ? () => setMoving(m) : null}
                   onUnread={() => void unreadOne(m)}
-                  onNoRecord={() => setSettling(m)}
-                  onUndoNoRecord={() => void undoNoRecord(m)}
                   onCreateLead={() => setCreatingLead(m)}
                   onDownload={(f) => void download(m, f)}
                   downloading={downloading} downloadError={downloadError} />
@@ -1530,17 +1480,6 @@ export function MailPage() {
         />
       )}
 
-      {settling && (
-        <NoRecordModal
-          mail={settling}
-          userId={currentUser?.id ?? null}
-          rule={ruledBy(settling.fromAddress, senderRules)}
-          onClose={() => setSettling(null)}
-          onDone={(message) => {
-            setSettling(null); setStatus(message); setBlocksVersion((v) => v + 1); void load(0)
-          }}
-        />
-      )}
 
       {junking && junking.length > 0 && (
         <JunkModal
@@ -1797,9 +1736,6 @@ function LoadFailed({ onRetry }: { onRetry: () => void }) {
 function Empty({ filter, searching }: { filter: Exclude<Pane, 'blocked'>; searching: boolean }) {
   if (searching) return <p className="py-14 text-center text-sm text-slate-400">Nothing matches that.</p>
   const words: Record<MailFilter, string> = {
-    'needs-filing': 'Nothing waiting. Every email has been matched, settled or thrown away.',
-    filed: 'Nothing matched to a record yet.',
-    'no-record': 'Nothing here yet. Mark a supplier\u2019s email as open and it lands here.',
     all: 'Your mailbox is empty. Connect it under Settings → Integrations if you have not yet.',
     // Junk is a shelf, not a bin: nothing here has been deleted, it is just kept out of All.
     junk: 'Nothing in junk.',
@@ -1958,9 +1894,19 @@ function RowGutter({ mail, selecting, chosen, onChoose }: {
  * firm's request ("Make it smaller"), and a status line per row would have put every one of those
  * pixels straight back. Right-aligned opposite the subject costs nothing.
  *
- * Three filing states, and they are mutually exclusive, so one chip: filed (and on what), junk,
- * or waiting. Blocked is NOT one of them — it describes the sender, not the message — so it
- * rides alongside as its own chip where it applies.
+ * IT SAYS WHAT HAS HAPPENED, NOT WHAT IS OWED. There were four states and two of them were a
+ * queue's: a gold "Needs matching" on everything nobody had filed, and a grey "Open mail" on what
+ * somebody had excused from filing. THE FIRM: "it's irritating having to match everybody. Just
+ * keep everyone in your main mailbox."
+ *
+ * A chip on four rows in five, in the colour this app uses for work outstanding, is that
+ * irritation printed on every line of the mailbox -- and removing the tab while leaving the chip
+ * would have moved the nagging rather than ended it. What is left is two facts worth knowing at a
+ * glance: this one is ON a record, or this one is junk. An ordinary message says nothing, because
+ * there is nothing to say about it.
+ *
+ * Blocked is NOT one of them — it describes the sender, not the message — so it rides alongside as
+ * its own chip where it applies.
  */
 function MailStatus({ mail, blocked, tight }: {
   mail: MailItem
@@ -1979,24 +1925,11 @@ function MailStatus({ mail, blocked, tight }: {
           <Link2 size={10} className="shrink-0" />
           <span className="truncate">{tight ? 'Matched' : `On ${mail.linkedTo.label}`}</span>
         </span>
-      ) : mail.noRecordAt ? (
-        /* Settled, but on nobody's file — so it must not wear the green "Matched" chip, which
-           would have a supplier's invoice claiming to be on somebody's account. */
-        <span className={`${chip} bg-slate-100 text-slate-500`}
-          title="Dealt with — it belongs on nobody's file and nothing was charged">
-          <CircleCheck size={10} className="shrink-0" />
-          <span className="truncate">{tight ? 'Open' : 'Open mail'}</span>
-        </span>
       ) : mail.isJunk ? (
         <span className={`${chip} bg-slate-100 text-slate-500`}>
           <ShieldAlert size={10} /> Junk
         </span>
-      ) : (
-        /* Gold, because it is the only one of the three that is somebody's to act on. */
-        <span className={`${chip} bg-gold-100 text-gold-700`}>
-          <Inbox size={10} /> {tight ? 'Unmatched' : 'Needs matching'}
-        </span>
-      )}
+      ) : null}
 
       {block && (
         <span className={`${chip} bg-negative-50 text-negative-700`}
@@ -2334,8 +2267,8 @@ function EmailFrame({ html }: { html: string }) {
 function MailBody({
   mail, body, html, showPictures, onShowPictures,
   images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
-  bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread, onNoRecord,
-  onUndoNoRecord, onLink, onCreateLead, onDownload, downloading, downloadError, sticky,
+  bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread,
+  onLink, onCreateLead, onDownload, downloading, downloadError, sticky,
 }: {
   mail: MailItem
   body?: string
@@ -2379,10 +2312,6 @@ function MailBody({
   onMove: (() => void) | null
   /** Put it back on the pile, and close it. */
   onUnread: () => void
-  /** It belongs on nobody's file — a supplier, the accountant, a service provider. */
-  onNoRecord: () => void
-  /** Undo that, and put it back in the queue. */
-  onUndoNoRecord: () => void
   /** Put it on a record -- the picker, which searches leads, deals, clients and the book. */
   onLink: () => void
   /**
@@ -2408,41 +2337,46 @@ function MailBody({
   downloadError: string | null
 }) {
   /*
-   * The overflow menu's contents, decided here rather than in the markup.
+   * THE OVERFLOW MENU, AND IT NOW CARRIES EVERY ANSWER, ALWAYS.
    *
-   * Each entry carries its own reason for being offered at all:
+   * THE FIRM: "you don't have a match section any more or a needs match section or an open mail
+   * section, but there is just an option to say match to a record. So you can create a lead. Match
+   * to a record. Move to junk. Block sender."
    *
-   * - UNMATCH is only on mail filed on a DEBTOR account, and only where the caller may refile it —
+   * WHICH IS A LIST OF OPTIONS, NOT A SEQUENCE OF QUESTIONS, and that is the change. These used to
+   * be rationed by what the message was: the gold bar owned them while a message was unmatched and
+   * the menu owned them once it was not, so that the two were never offering the same thing at
+   * once. That rationing existed to serve a queue -- it made sure the loose end was answered -- and
+   * with the queue gone it only means a collector has to work out WHERE a button is before they
+   * can press it. Every one of them is here, on every message, in one place.
+   *
+   * Each entry still carries its own reason for the shape it takes:
+   *
+   * - MATCH is first and is offered on everything, matched or not. On a message already on a
+   *   record it says "Match to another record", because that is what pressing it does -- the
+   *   picker refiles rather than adding a second home.
+   * - UNMATCH is only on mail filed on a DEBTOR account, and only where the caller may refile it --
    *   the database refuses it for anybody else, so offering the button would be a lie. It is ONE
    *   item and it says Unmatch, because two items made the agent choose between "rematch" and
    *   "unmatch" before knowing which they could do, and the answer to "which account should this
    *   be on?" is frequently "I do not know yet". The box behind it offers rematching underneath.
+   * - CREATE LEAD is the other kind of yes, and the half the picker can never cover: an enquiry
+   *   from somebody the firm has never dealt with matches nothing by definition.
+   * - JUNK sits between "file it" and "block them": this message is not work, without claiming
+   *   anything about the sender. Hidden on filed mail -- a message on a record is neither junk nor
+   *   anybody's to reclassify, and junking clears the record link in the database anyway.
+   * - BLOCK is last and is the only one marked as damage. It is the one action you should have
+   *   read something before taking, which is why it is on the open message and not on every row --
+   *   and it is offered even on mail already filed, because blocking is about future noise and not
+   *   about the message in front of you.
+   *
    * MARK UNREAD IS NOT HERE. It is on the bar itself, where Spark puts it and where it belongs:
    * it is the one of these that gets pressed in a hurry -- "not yet", said while scanning -- and
    * it was in both places for one commit, which is one place too many.
- *
-   * - OPEN MAIL is the third answer to "what is this?" and the one the mailbox had no word for. A
-   *   telephone provider's invoice is not junk and belongs on no account. Hidden on matched mail:
-   *   that is on a record and a fee may have been raised against it, so calling it open would be a
-   *   contradiction the database refuses anyway.
-   * - JUNK sits between "file it" and "block them": this message is not work, without claiming
-   *   anything about the sender. Hidden on filed mail — a message on a record is neither junk nor
-   *   anybody's to reclassify.
-   * - BLOCK is last and is the only one marked as damage. It is the one action you should have
-   *   read something before taking, which is why it is on the open message and not on every row —
-   *   and it is offered even on mail already filed, because blocking is about future noise and not
-   *   about the message in front of you.
-   */
-  /*
-   * WHILE THE BAR IS UP, THE BAR OWNS THEM. The firm: "it's down there at the three dots, but for
-   * a new email, which is completely new, it should be up there -- otherwise it should always be
-   * down there." So this menu carries what the bar does not, and the two never offer the same
-   * action at once: the same button in two places on one screen is how somebody ends up pressing
-   * neither, and how two bugs get reported for one control.
    *
-   * The exception is a website enquiry, where the bar deliberately does not offer blocking --
-   * every enquiry comes from the one address, and blocking it would silence the contact form for
-   * good. There it stays here, behind a deliberate click. See NotMatchedBar.
+   * MARK AS OPEN IS GONE ENTIRELY. It was the third answer to "what is this?", and it existed to
+   * let a supplier's invoice out of the queue without matching it. Nothing is in a queue now, so
+   * it had nothing left to do.
    */
   /*
    * The message, made safe to show.
@@ -2468,28 +2402,24 @@ function MailBody({
     return (images ?? []).filter((img) => !placed.has(img.cid.replace(/^<|>$/g, '').toLowerCase()))
   }, [images, safe])
 
-  const barIsUp = !mail.isFiled && !mail.noRecordAt
-  const barHasDisposal = barIsUp && !isLeadIntake(mail.fromAddress)
-
   const moreActions: RowMenuItem[] = [
+    {
+      label: mail.isFiled ? 'Match to another record' : 'Match to a record',
+      icon: <Link2 size={15} />,
+      onClick: onLink,
+    },
     ...(mail.linkedTo?.kind === 'account' && onMove
       ? [{ label: 'Unmatch', icon: <Undo2 size={15} />, onClick: onMove }]
       : []),
-    ...(!mail.isFiled && !barIsUp
-      ? [mail.noRecordAt
-        ? { label: 'Put back in the queue', icon: <Undo2 size={15} />, onClick: onUndoNoRecord }
-        : { label: 'Mark as open', icon: <CircleCheck size={15} />, onClick: onNoRecord }]
-      : []),
-    ...(!mail.isFiled && !barIsUp
+    { label: 'Create a lead', icon: <UserPlus size={15} />, onClick: onCreateLead },
+    ...(!mail.isFiled
       ? [mail.isJunk
         ? { label: 'Not junk', icon: <Undo2 size={15} />, onClick: () => onJunk(false) }
         : { label: 'Move to junk', icon: <ShieldAlert size={15} />, onClick: () => onJunk(true) }]
       : []),
-    /* "Block", to match the Blocked tab. The long phrasing described the mechanism; this names
-       the thing, and the two now obviously belong together. */
-    ...(barHasDisposal
-      ? []
-      : [{ label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true }]),
+    /* "Block sender", to match the Blocked tab. The long phrasing described the mechanism; this
+       names the thing, and the two now obviously belong together. */
+    { label: 'Block sender', icon: <Ban size={15} />, onClick: onBlock, danger: true },
   ]
 
   /* Gathered once, because the bar renders in one of two places and a second argument list would
@@ -2515,15 +2445,19 @@ function MailBody({
       {!sticky && <MessageActions {...bar} />}
 
       {/*
-        WHERE THIS MESSAGE IS FILED, and both ways of fixing it when the answer is nowhere.
+        AN ENQUIRY OFF THE WEBSITE, AND ONLY THAT.
 
-        A "Match" button in the corner of the header said what to press and never said why, so an
-        unmatched message looked exactly like a matched one to anybody not already looking for the
-        difference. It is the state that costs money -- a reply sent from an unmatched message goes
-        out earning nothing -- so it states itself.
+        This bar used to appear on EVERY unmatched message, headed "Not matched yet" with five
+        buttons under it -- which was the whole of what the firm asked to be rid of: "it's
+        irritating having to match everybody." A gold panel on four messages in five, saying the
+        same thing each time, is a queue drawn on the message rather than in a tab.
+
+        It survives for the one case where there is genuinely something to prompt: mail from the
+        website's contact form. That address has exactly one answer -- somebody new wants something
+        -- and the honest action, Create lead, is one nobody would think to look for behind the
+        dots on what looks like an ordinary email. One address, one prompt, a real new thing to do.
       */}
-      <NotMatchedBar mail={mail} onLink={onLink} onCreateLead={onCreateLead}
-        onNoRecord={onNoRecord} onJunk={onJunk} onBlock={onBlock} />
+      <EnquiryBar mail={mail} onLink={onLink} onCreateLead={onCreateLead} />
       {mail.attachmentNames.length > 0 && (
         /*
           BETWEEN THE TWO RULES, not sitting on the lower one. The firm: "the NDA attachment is
@@ -2703,131 +2637,62 @@ function MailBody({
  * calendar they actually use. That is the honest answer until Raptor has one of its own.
  */
 /**
- * Where this message is filed, when the answer is nowhere.
+ * A NEW ENQUIRY OFF THE WEBSITE.
  *
- * SAID, not implied. An unmatched message used to look exactly like a matched one apart from a
- * small "Match" button in the corner of the header, and that is the state that costs money: item
- * 1(a) is R25 on every message we send and a fee can only be raised against an account, so a reply
- * typed on an unmatched message goes out earning nothing and leaves no trace on any statement.
+ * WHAT THIS WAS. It was NotMatchedBar, and it appeared on every message that was not on a record:
+ * a gold panel headed "Not matched yet" offering Match, Mark as open, Move to junk, Block sender
+ * and Create lead. It was built when matching was a queue somebody had to clear.
  *
- * TWO WAYS OUT, because there are two reasons a message matches nothing:
+ * THE FIRM ENDED THE QUEUE: "it's irritating having to match everybody. Just keep everyone in your
+ * main mailbox. If you want to match someone, match them." A panel saying "not matched yet" on
+ * four messages in five IS that irritation -- the tab was only where it was counted. So the panel
+ * went with the tabs, and all five actions moved into the overflow menu, where they are offered on
+ * every message whatever state it is in. See moreActions.
  *
- *  - It belongs to somebody already on the system and just has not been joined up yet. That is the
- *    picker, which searches leads, deals, clients and the whole book.
- *  - It is from somebody the firm has never dealt with. That is a new lead -- and it is the most
- *    valuable email of the day, so it should not be the one that sends you to another screen.
+ * WHAT IS LEFT IS THE ONE CASE THAT WAS NEVER A NAG. Mail from the website's contact form is not a
+ * message somebody has failed to file -- it is a stranger asking the firm for something, and the
+ * useful action is to make a lead out of them, which no amount of matching could do. One address,
+ * one prompt, and a new thing to do rather than a loose end to tidy.
+ *
+ * BLOCKING IS STILL NOT OFFERED HERE, which was always deliberate: every enquiry arrives from the
+ * one address, so blocking it from this bar would not silence a time-waster -- it would silence
+ * the contact form, permanently, for everybody, and the next fortnight's enquiries would simply
+ * never arrive. It stays behind the dots, where it costs a deliberate click and a box that says
+ * what it does.
  *
  * Nothing is charged either way. Annexure B is for debtor accounts; the sales side raises nothing.
  */
-function NotMatchedBar({ mail, onLink, onCreateLead, onNoRecord, onJunk, onBlock }: {
+function EnquiryBar({ mail, onLink, onCreateLead }: {
   mail: MailItem
   onLink: () => void
   onCreateLead: () => void
-  onNoRecord: () => void
-  onJunk: (junk: boolean) => void
-  onBlock: () => void
 }) {
-  /* Filed mail has its answer, and open mail has been given one deliberately -- neither is a
-     loose end, and a bar over both would be a warning that fires when nothing is wrong. */
-  if (mail.isFiled || mail.noRecordAt) return null
+  /* The one address this is for. Everything else gets no bar at all -- which is the change. */
+  if (!isLeadIntake(mail.fromAddress)) return null
+  /* And not once it has been dealt with: a lead made or a record matched is an answered enquiry,
+     and a prompt that stays up after it has been obeyed is the nag in miniature. */
+  if (mail.isFiled) return null
 
-  /*
-   * AN ENQUIRY OFF THE WEBSITE IS NOT A QUESTION. Every other unmatched message asks one -- debtor,
-   * client, nobody? -- and form@bredellferreira.co.za has exactly one answer, so Create lead leads
-   * and the wording stops hedging. Offering "Match to a record" first here would send somebody
-   * hunting the book for a stranger who by definition is not in it.
-   */
-  const fromForm = isLeadIntake(mail.fromAddress)
-
-  /* Sized down with the bar: five buttons at full size WERE the bulk. */
   const primary = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500'
   const secondary = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-  const danger = 'inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-negative-100 hover:bg-negative-50 hover:text-negative-700'
 
   return (
-    /*
-      ONE ROW, AND NO EXPLANATION. The firm: "this is very bulky, please make it smaller -- remove
-      that sentence that says this is an email, not a lead or a deal or blah blah blah. Just 'not
-      matched yet' is perfect."
-
-      They are right, and the sentence was wrong twice over. It explained a consequence ("replying
-      from here will not appear on any record") to somebody who is looking at five buttons offering
-      to fix it -- and it said it on every unmatched message, for ever, which is how a warning stops
-      being read. The label and the buttons say the same thing in a fifth of the height.
-    */
     <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2
       flex flex-wrap items-center gap-x-3 gap-y-2">
       <span className="inline-flex items-center gap-2 shrink-0">
         <Info size={14} className="text-slate-400" />
-        <span className="text-[13px] font-medium text-slate-700">
-          {fromForm ? 'A new enquiry off the website' : 'Not matched yet'}
-        </span>
+        <span className="text-[13px] font-medium text-slate-700">A new enquiry off the website</span>
       </span>
 
-      {/*
-        EVERY ANSWER TO "WHAT IS THIS?", ON THE MESSAGE THAT IS STILL ASKING.
-
-        The firm, on a bar that offered two of them: "here immediately -- move to junk, mark as
-        free, block the sender. It's down there at the three dots, but for a new email, which is
-        completely new, it should be up there. Otherwise it should always be down there."
-
-        Which is exactly the rule. A message nobody has decided about is the one moment all of
-        these are live, so the bar owns them while the question is open; once it is answered the
-        bar goes and they live behind the dots, where they are corrections rather than decisions.
-        They are taken OUT of that menu while the bar is up -- see moreActions -- because the same
-        action in two places on one screen is how somebody ends up pressing neither.
-
-        The firm's order, and it runs from "this is work" to "this is not": match it, file it as
-        open, bin it, stop the sender. Create lead sits at the end as the other kind of yes.
-      */}
       <span className="flex flex-wrap items-center gap-1.5">
-        {fromForm ? (
-          <button onClick={onCreateLead} className={primary}>
-            <UserPlus size={13} /> Create lead
-          </button>
-        ) : (
-          <button onClick={onLink} className={primary}>
-            <Link2 size={13} /> Match to a record
-          </button>
-        )}
-
-        <button onClick={fromForm ? onLink : onNoRecord} className={secondary}>
-          {fromForm
-            ? <><Link2 size={13} /> Match instead</>
-            : <><CircleCheck size={13} /> Mark as open</>}
+        <button onClick={onCreateLead} className={primary}>
+          <UserPlus size={13} /> Create lead
         </button>
-
-        {/*
-          Junk, both ways round. A message already in junk wants rescuing, not shelving -- and it
-          can be both unmatched and in junk at once, which is the case this would otherwise offer
-          "Move to junk" on.
-        */}
-        <button onClick={() => onJunk(!mail.isJunk)} className={secondary}>
-          {mail.isJunk
-            ? <><Undo2 size={13} /> Not junk</>
-            : <><ShieldAlert size={13} /> Move to junk</>}
+        {/* Because sometimes they are already on the books -- an existing client using the form
+            rather than the address they were given. */}
+        <button onClick={onLink} className={secondary}>
+          <Link2 size={13} /> Match instead
         </button>
-
-        {/*
-          BLOCKING IS NOT OFFERED ON A WEBSITE ENQUIRY, and this is the one place in this bar where
-          the firm's order is departed from deliberately.
-
-          Every enquiry off the site arrives from the same address. Blocking it from here would not
-          silence one time-waster -- it would silence the contact form, permanently, for everybody,
-          and the next fortnight's enquiries would simply never arrive. It stays behind the dots,
-          where it costs a deliberate click and a box that says what it does.
-        */}
-        {!fromForm && (
-          <button onClick={onBlock} className={danger}>
-            <Ban size={13} /> Block sender
-          </button>
-        )}
-
-        {!fromForm && (
-          <button onClick={onCreateLead} className={secondary}>
-            <UserPlus size={13} /> Create lead
-          </button>
-        )}
       </span>
     </div>
   )
@@ -3061,7 +2926,7 @@ function MailRow({
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
-  onUnread, onNoRecord, onUndoNoRecord, onDownload, downloading, downloadError,
+  onUnread, onDownload, downloading, downloadError,
 }: {
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
@@ -3099,8 +2964,6 @@ function MailRow({
   onJunk: (junk: boolean) => void
   onMove: (() => void) | null
   onUnread: () => void
-  onNoRecord: () => void
-  onUndoNoRecord: () => void
   onCreateLead: () => void
   /** This agent's own addresses, so a recipient line can say "you" instead of naming them. */
   mine: (string | null | undefined)[]
@@ -3165,7 +3028,6 @@ function MailRow({
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onJunk={onJunk}
             onMove={onMove} onUnread={onUnread}
-            onNoRecord={onNoRecord} onUndoNoRecord={onUndoNoRecord}
             onLink={onLink} onCreateLead={onCreateLead} onDownload={onDownload}
             downloading={downloading} downloadError={downloadError} />
         </div>
@@ -3251,70 +3113,7 @@ function EmptyJunkModal({ count, userId, onClose, onDone }: {
   )
 }
 
-/**
- * Senders whose mail never needs matching, newest first.
- *
- * Sits under the blocklist on the same tab, because they answer one question — what happens to
- * this sender's mail before anybody reads it — with opposite answers. Keeping them apart would
- * have somebody looking for a rule under "Blocked" and concluding it was never saved.
- *
- * The heading says what it does rather than naming the feature, because "rules" means nothing to
- * somebody who did not build it.
- */
-function SenderRulesList({ rules, onRemove }: {
-  rules: SenderRule[]
-  onRemove: (id: string) => Promise<void>
-}) {
-  const [busy, setBusy] = useState<string | null>(null)
-  return (
-    <div className="border-t border-slate-100">
-      <div className="px-5 py-3 bg-slate-50/70">
-        <p className="text-sm font-semibold text-slate-700">Always open mail</p>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Suppliers and the like. Their mail still arrives and is still searchable &mdash; it
-          simply lands already dealt with instead of joining the queue.
-        </p>
-      </div>
 
-      {rules.length === 0 ? (
-        <p className="px-5 py-6 text-center text-xs text-slate-400">
-          Nothing yet. Open a supplier&rsquo;s email, choose &ldquo;Mark as open&rdquo;, and
-          you can settle the sender for good from there.
-        </p>
-      ) : (
-        <ul className="divide-y divide-slate-100">
-          {rules.map((r) => (
-            <li key={r.id} className="px-5 py-3 flex items-center gap-3">
-              <span className="shrink-0 grid place-items-center w-7 h-7 rounded-full bg-slate-100 text-slate-400">
-                <CircleCheck size={13} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-slate-800 truncate">
-                  {r.kind === 'domain' ? `Anyone at ${r.pattern}` : r.pattern}
-                </p>
-                <p className="text-xs text-slate-400 truncate">
-                  Added {relativeDayLabel(r.createdAt).toLowerCase()}
-                  {r.label && <> &middot; {r.label}</>}
-                </p>
-              </div>
-              <button
-                disabled={busy === r.id}
-                onClick={async () => {
-                  setBusy(r.id)
-                  try { await onRemove(r.id) } finally { setBusy(null) }
-                }}
-                className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-                {busy === r.id ? <Loader2 size={12} className="animate-spin" /> : 'Remove'}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-/** The blocklist: what you have silenced, and the way back. */
 /**
  * The blocklist, newest block first.
  *
@@ -3372,128 +3171,6 @@ function BlockedList({ senders, onUnblock }: {
  * blocked sender never becomes a row, so a mistake here is invisible: the mail simply stops, and
  * an account quietly looks unworked.
  */
-/**
- * "This belongs on nobody's file", and optionally "nor does anything else from them".
- *
- * Deliberately the same shape as the Block box, because the two questions are neighbours and an
- * agent should not have to learn a second layout to answer one of them. What they MEAN is
- * opposite, and the copy says so plainly: blocking stops the mail existing in Raptor at all,
- * this lets it in and stops it asking for attention.
- *
- * The sender rule is the half that earns its keep. A supplier writes every week, and settling
- * the same address fifty times a year is the sort of chore that ends with somebody blocking them
- * instead — and then losing an invoice.
- */
-function NoRecordModal({ mail, userId, rule, onClose, onDone }: {
-  mail: MailItem
-  userId: string | null
-  /** A standing rule already covering this sender, if there is one. */
-  rule: SenderRule | null
-  onClose: () => void
-  onDone: (message: string) => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const domain = domainOf(mail.fromAddress)
-  const domainProblem = domainBlockProblem(mail.fromAddress)
-
-  async function settle(scope: 'address' | 'domain' | null) {
-    if (!userId) return
-    setBusy(true)
-    setError(null)
-    try {
-      const done = await markNoRecordNeeded([mail.id], userId)
-      if (done === 0) {
-        setError('That email is on a record already, so it stays matched.')
-        setBusy(false)
-        return
-      }
-      if (!scope) {
-        onDone('Marked as open mail. It is out of the queue and still in your mailbox.')
-        return
-      }
-      const { pattern, settled } = await addSenderRule({
-        userId, address: mail.fromAddress, scope, label: mail.fromName ?? null,
-      })
-      onDone(
-        `Nothing from ${pattern} will ask to be matched again.`
-        + (settled > 1 ? ` ${settled} of their messages settled.` : '')
-        + ' Their mail still arrives, and you can still match it later.',
-      )
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal title="Open mail" onClose={onClose} width={480}>
-      <p className="text-sm text-slate-500">
-        For mail that is real work but belongs on nobody&rsquo;s file &mdash; a supplier, the
-        accountant, a service provider. It leaves <strong className="font-medium text-slate-600">
-        Needs matching</strong>, stays in All, stays searchable, and stays in your real mailbox.
-        Nothing is deleted and no fee is raised.
-      </p>
-
-      {rule && (
-        /* Saying so up front, because otherwise the second and third buttons look like they do
-           nothing — the rule is already there and pressing them changes nothing. */
-        <p className="text-xs text-slate-500 mt-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
-          You already have a rule for <span className="font-medium">{rule.pattern}</span>, so their
-          mail arrives settled. This one predates it.
-        </p>
-      )}
-
-      <div className="mt-4 space-y-2">
-        <button disabled={busy} onClick={() => void settle(null)}
-          className="w-full text-left px-3.5 py-3 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-50">
-          <span className="block text-sm font-semibold">Just this message</span>
-          <span className="block text-xs text-navy-950/70 mt-0.5">
-            One decision, this once.
-          </span>
-        </button>
-
-        <button disabled={busy || !!rule} onClick={() => void settle('address')}
-          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
-          <span className="block text-sm font-medium text-slate-800">
-            And never ask about this address again
-          </span>
-          <span className="block text-xs text-slate-400 mt-0.5 truncate">{mail.fromAddress}</span>
-        </button>
-
-        <button disabled={busy || !!rule || !!domainProblem} onClick={() => void settle('domain')}
-          title={domainProblem ?? undefined}
-          className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent">
-          <span className="block text-sm font-medium text-slate-800">
-            Or anyone at {domain ?? 'this domain'}
-          </span>
-          <span className="block text-xs text-slate-400 mt-0.5">
-            {domainProblem ?? 'A whole firm — their accounts desk, their support desk, all of them.'}
-          </span>
-        </button>
-      </div>
-
-      {error && (
-        <p className="text-sm text-negative-700 mt-3 flex items-start gap-1.5">
-          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-          {error}
-        </p>
-      )}
-
-      {/* The distinction that matters, said where somebody is about to choose. */}
-      <p className="text-xs text-slate-400 mt-4">
-        This is not a block. Their mail still arrives and is still searchable, and you can still
-        match it to a record later if it turns out to belong on one. Rules are yours alone and
-        come off again under the Blocked tab.
-      </p>
-      {busy && (
-        <p className="text-xs text-slate-400 mt-2 inline-flex items-center gap-1.5">
-          <Loader2 size={12} className="animate-spin" /> Settling&hellip;
-        </p>
-      )}
-    </Modal>
-  )
-}
 
 /**
  * MOVING TO JUNK ASKS WHETHER IT IS ABOUT THE MESSAGE OR ABOUT THE SENDER.
@@ -4476,20 +4153,14 @@ function MoveModal({ mail, actor, onClose, onDone }: {
       const removeContact = alsoRemove && !!savedOnFile
       await unmatchMail({ mail, reason, actor, removeContact })
       /*
-       * WHERE IT ACTUALLY WENT, not where it usually goes.
+       * WHERE IT ACTUALLY WENT, and there are only two answers now.
        *
-       * This said "It is back under Needs matching" unconditionally, and for a junk message that
-       * is simply false — Needs matching excludes junk, so the agent unmatched a newsletter, was
-       * told where to find it, looked there, and found an empty list. Junk is the common case
-       * for an unmatch, too: matching a newsletter to a debtor by mistake is exactly the thing
-       * being undone.
-       *
-       * A message settled some other way (marked as open mail, or still on a lead or a
-       * deal) is not in Needs matching either, and saying so beats sending somebody hunting.
+       * This once had to choose between three queues and got it wrong for junk -- it said "back
+       * under Needs matching" unconditionally, so an agent who unmatched a newsletter was told
+       * where to look and found an empty list. With the queues gone the question is nearly
+       * trivial: junk is the one place that is not the mailbox.
        */
-      const landsIn = mail.isJunk ? 'Junk'
-        : mail.noRecordAt ? 'Open mail'
-          : 'Needs matching'
+      const landsIn = mail.isJunk ? 'Junk' : 'All'
       onDone(
         `Unmatched from ${was}. You will find it under ${landsIn}.`
         + (removeContact ? ` ${mail.fromAddress} is off their contacts, so it can be blocked now.` : ''),
@@ -4531,9 +4202,9 @@ function MoveModal({ mail, actor, onClose, onDone }: {
       <div className="mt-4 rounded-xl border border-gold-200 bg-gold-50/60 p-4">
         <p className="text-sm font-semibold text-navy-950">Take it off {was}</p>
         <p className="text-[13px] text-slate-500 mt-1">
-          It goes back to <strong className="font-medium text-slate-600">Needs matching</strong>,
-          where it waits with everything else. Match it to the right account whenever you work out
-          which one that is.
+          It stays in your mailbox under <strong className="font-medium text-slate-600">All</strong>,
+          on nobody&rsquo;s file. Match it to the right account whenever you work out which one that
+          is &mdash; or leave it, which is now a perfectly good answer.
         </p>
 
         <label className="block mt-3">

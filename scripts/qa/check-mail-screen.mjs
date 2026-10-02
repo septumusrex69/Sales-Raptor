@@ -122,97 +122,77 @@ ok('...and what kind of record that is', /CRM_OR_ACCOUNT\[m\.linkedTo\.kind\]/.t
 
 /* ---------- 3. an unmatched message says so ---------- */
 
-const bar = slice(page, 'function NotMatchedBar', '\n/**', 'NotMatchedBar')
-ok('it names the state', /'Not matched yet'/.test(bar))
 /*
- * AN ENQUIRY OFF THE WEBSITE IS NOT A QUESTION. Every other unmatched message asks one -- debtor,
- * client, nobody? -- and form@bredellferreira.co.za has exactly one answer, so the buttons swap
- * places. Offering "Match to a record" first there sends somebody hunting the book for a stranger
- * who by definition is not in it.
- */
-ok('...unless it came off the contact form', /isLeadIntake\(mail\.fromAddress\)/.test(bar))
-ok('...which says what it is instead', /A new enquiry off the website/.test(bar))
-/*
- * AND NOTHING ELSE. The firm: "remove that sentence that says this is an email, not a lead or a
- * deal or blah blah blah -- just 'not matched yet' is perfect."
+ * THE BAR THAT NAGGED EVERY MESSAGE IS NOW THE ONE THAT PROMPTS ONE ADDRESS.
  *
- * The sentence explained a consequence ("replying from here will not appear on any record") to
- * somebody looking at five buttons offering to fix it, on every unmatched message, for ever. That
- * is how a warning stops being read -- and the label and the buttons already say it.
+ * NotMatchedBar sat on every message that was not on a record: a panel headed "Not matched yet"
+ * with Match, Mark as open, Move to junk, Block sender and Create lead under it. THE FIRM: "it's
+ * irritating having to match everybody. Just keep everyone in your main mailbox. If you want to
+ * match someone, match them." A panel saying "not matched yet" on four messages in five IS that
+ * irritation; the tab was only where it was counted.
+ *
+ * So the panel went and all five actions moved into the overflow menu, where they are offered on
+ * every message whatever state it is in. What survives is the one case that was never a nag: mail
+ * from the website's contact form, where the useful action is to make a lead out of a stranger --
+ * something no amount of matching could do.
  */
+const bar = slice(page, 'function EnquiryBar', '\n/**', 'EnquiryBar')
+ok('the bar is for an enquiry off the website', /A new enquiry off the website/.test(bar))
+/* ONE ADDRESS, and the guard is that it draws nothing for anybody else. This is the assertion the
+   whole change turns on: without it the bar is back on every message under a new name. */
+ok('...and nothing at all for any other sender',
+  /if \(!isLeadIntake\(mail\.fromAddress\)\) return null/.test(bar))
+/* AND NOT ONCE IT HAS BEEN ANSWERED. A prompt that stays up after it has been obeyed is the nag
+   in miniature. */
+ok('...and nothing once a record has been made', /if \(mail\.isFiled\) return null/.test(bar))
+/* NO "NOT MATCHED YET" ANYWHERE. The words are the thing the firm objected to. */
 const barVisible = bar.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-ok('...and explains nothing further', !/appear on any record/.test(barVisible))
-ok('...nor on a website enquiry either', !/Their details are in the message/.test(barVisible))
-/* One row, which is where the height went. Five buttons and two sentences was a fifth of the pane. */
-ok('the whole bar is one row', /flex flex-wrap items-center gap-x-3 gap-y-2/.test(bar))
-/*
- * AND THE BUTTONS ARE SMALL. Five of them at full size WERE the bulk -- the sentence was only half
- * of it. Pinned because "make it smaller" is the one property here that nothing else protects: a
- * later hand bumping these back to text-sm would look like tidying.
- */
-ok('...and its buttons are the small ones', (bar.match(/text-xs font-medium px-2\.5 py-1\.5/g) ?? []).length === 3)
-/*
- * EVERY ANSWER TO "WHAT IS THIS?", ON THE MESSAGE THAT IS STILL ASKING. The firm, on a bar that
- * offered two of them: "move to junk, mark as free, block the sender -- it's down there at the
- * three dots, but for a new email, which is completely new, it should be up there."
- *
- * The order is theirs and it runs from "this is work" to "this is not".
- */
-/*
- * COUNTED, NOT MERELY PRESENT. The bar reads one way for a website enquiry and another for
- * everything else, and each branch writes its own buttons -- so "it exists somewhere in here" is
- * satisfied by the other branch, and one branch quietly losing a button passes. Matching and
- * making a lead are offered in BOTH, so both appear twice.
- */
-ok('the picker is offered', /onClick=\{onLink\} className=\{primary\}/.test(bar))
-/*
- * COUNTED, because each branch writes its own. "It exists somewhere in here" is satisfied by the
- * OTHER branch, so one branch quietly losing its lead button would pass.
- */
-check('...and a brand-new lead, in both readings of the bar',
-  (bar.match(/onClick=\{onCreateLead\}/g) ?? []).length, 2)
-/* One button, two jobs: file it as open mail, or -- on an enquiry -- match it after all. */
-ok('...filing it as open mail', /onClick=\{fromForm \? onLink : onNoRecord\}/.test(bar))
-ok('...binning it', /onClick=\{\(\) => onJunk\(!mail\.isJunk\)\}/.test(bar))
-ok('...stopping the sender', /onClick=\{onBlock\}/.test(bar))
-/*
- * JUNK BOTH WAYS ROUND. A message can be unmatched AND in junk at once, and offering "Move to
- * junk" on one that is already there is a button that does nothing.
- */
-ok('a message already in junk is offered the way back', /<Undo2 size=\{13\} \/> Not junk/.test(bar))
+ok('...and it never says a message is unmatched', !/Not matched yet/.test(barVisible))
+ok('...nor explains what that costs', !/appear on any record/.test(barVisible))
 
-/* And the order swaps: an enquiry off the form has one answer, so it leads with the lead. */
+/* TWO BUTTONS, AND THE LEAD LEADS. An enquiry off the form has exactly one likely answer, so
+   Create lead is the gold one; matching is there because an existing client sometimes uses the
+   form rather than the address they were given. */
 ok('the enquiry leads with the lead',
-  /fromForm \? \(\s*\n\s*<button onClick=\{onCreateLead\} className=\{primary\}>/.test(bar))
-
+  /<button onClick=\{onCreateLead\} className=\{primary\}>/.test(bar))
+ok('...with matching beside it', /<button onClick=\{onLink\} className=\{secondary\}>/.test(bar))
+check('...and nothing else on it', (bar.match(/<button /g) ?? []).length, 2)
 /*
- * BLOCKING IS NOT OFFERED ON A WEBSITE ENQUIRY, and this is the guard worth having. Every enquiry
- * off the site arrives from the SAME address, so blocking it from here would not silence one
+ * BLOCKING IS STILL NOT OFFERED HERE, which was always the point of singling this address out.
+ * Every enquiry arrives from the SAME address, so blocking it from this bar would not silence one
  * time-waster -- it would silence the contact form, permanently, and the next fortnight's
- * enquiries would simply never arrive.
+ * enquiries would simply never arrive. It stays behind the dots.
  */
-ok('blocking is kept off a website enquiry', /\{!fromForm && \(\s*\n\s*<button onClick=\{onBlock\}/.test(bar))
+ok('blocking is kept off the enquiry bar', !/onBlock/.test(bar))
+/* One row, which is where the height went when it had five buttons and two sentences on it. */
+ok('the whole bar is one row', /flex flex-wrap items-center gap-x-3 gap-y-2/.test(bar))
 
 /*
- * AND THE MENU GIVES THEM UP WHILE THE BAR HAS THEM. "Otherwise it should always be down there."
- * The same action in two places on one screen is how somebody ends up pressing neither.
+ * AND THE MENU NOW CARRIES EVERYTHING, ON EVERY MESSAGE.
+ *
+ * These used to be rationed: the bar owned them while a message was unmatched and the menu owned
+ * them once it was not, so that the two never offered the same thing at once. That rationing
+ * existed to serve the queue. With the queue gone it only means a collector has to work out WHERE
+ * a button is before they can press it.
  */
-ok('the menu stands down while the bar is up', /const barIsUp = !mail\.isFiled && !mail\.noRecordAt/.test(page))
-ok('...for filing as open', /!mail\.isFiled && !barIsUp/.test(page))
-ok('...and for blocking, except on a website enquiry',
-  /const barHasDisposal = barIsUp && !isLeadIntake\(mail\.fromAddress\)/.test(page))
-/* An empty menu is worse than no menu: it reads as a feature that has broken. */
+ok('matching is in the menu', /label: mail\.isFiled \? 'Match to another record' : 'Match to a record'/.test(page))
+ok('...and making a lead', /label: 'Create a lead'/.test(page))
+ok('...and junk', /label: 'Move to junk'/.test(page))
+ok('...and blocking', /label: 'Block sender'/.test(page))
+/* NOT GATED ON THE BAR. The two flags that did the rationing are gone, and so is the action that
+   only a queue needed. */
+ok('...and none of it waits for the bar to stand down', !/barIsUp|barHasDisposal/.test(page))
+/* COMMENTS STRIPPED: the menu's own note explains what was removed and names it, which is the
+   thing a reader needs most when they wonder where it went. */
+const pageVisible = page.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+ok('...and nothing offers to mark a message as open', !/Mark as open/.test(pageVisible))
+/* An empty menu is worse than no menu: it reads as a feature that has broken. Matching and
+   blocking are now unconditional, so it can never be empty -- asserted anyway, because the guard
+   is what makes adding a condition later safe. */
 ok('and the dots disappear when there is nothing behind them',
   /\{moreActions\.length > 0 && \(/.test(page))
-ok('matching is the one to press', /bg-gold-400/.test(bar))
-/*
- * SILENT ON ANYTHING ALREADY ANSWERED. Filed mail has its record and free mail was deliberately
- * given "none" as its answer -- neither is a loose end, and a warning that fires when nothing is
- * wrong is worse than no warning, because people stop reading it.
- */
-ok('filed mail is not nagged', /if \(mail\.isFiled \|\| mail\.noRecordAt\) return null/.test(bar))
-/* And it is on the open message, under the actions, not on every row in the list. */
-ok('it hangs off the open message', /<NotMatchedBar mail=\{mail\}/.test(page))
+/* And the bar is on the open message, under the actions, not on every row in the list. */
+ok('it hangs off the open message', /<EnquiryBar mail=\{mail\}/.test(page))
 
 /* ---------- 4. a lead, out of the sender ---------- */
 
@@ -551,5 +531,5 @@ if (failures.length) {
 console.log(`${pass} passed, 0 failed`)
 console.log(`
 The mailbox says which mailbox it is, a sender has the same face every time, an open message
-reads as a message, an unmatched one says so in one row, and the enquiry from somebody nobody
+reads as a message, nothing nags anybody to match it, and the enquiry from somebody nobody
 knows yet becomes a lead without leaving the page.`)
