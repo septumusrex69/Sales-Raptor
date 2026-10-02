@@ -3,6 +3,9 @@ import {
   Briefcase, Building2, Check, ChevronLeft, ChevronRight, FileText, Home, Info, Loader2, Mail, MapPin,
   Phone, Plus, Search, User, Users,
 } from 'lucide-react'
+import {
+  compareTraces, compareTraceReports, comparisonLine, previousTraceFor, traceKey,
+} from '../../lib/traceCompare.ts'
 import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
 import {
@@ -72,6 +75,44 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
   )
   const counts = useMemo(() => categoryCounts(items), [items])
   const category = categoryById(openCategory)
+
+  /*
+   * WHAT THIS REPORT FOUND THAT THE LAST ONE DID NOT.
+   *
+   * THE FIRM, looking at a second report on one subject: "if you upload a new trace, I see it
+   * shows the new trace, but it's kind of the same data as the other one. So it should kind of
+   * show you, oh, there's new information or there's not new information."
+   *
+   * EVERY PIECE OF THIS WAS ALREADY WRITTEN AND DRAWN ON THE OTHER SCREEN. traceCompare has done
+   * the comparison since the firm first asked for it; the account's trace panel renders a one-line
+   * summary of it, and this modal -- which is where somebody actually READS a trace -- showed
+   * nothing. So the library is unchanged and only the wiring is new.
+   *
+   * AGAINST THE SAME SUBJECT, never simply the report before it: a company account carries one for
+   * the company and one per director, so "the previous trace" by date is usually a different
+   * person, and every finding on both would come back as new. previousTraceFor handles it.
+   */
+  const earlier = useMemo(() => previousTraceFor(traces, trace), [traces, trace])
+  const since = useMemo(
+    () => (earlier ? compareTraceReports(trace.items, earlier.items) : null),
+    [earlier, trace.items],
+  )
+  /*
+   * WHICH FINDINGS ARE NEW, as a set of keys.
+   *
+   * THE COUNT IS NOT THE ANSWER, and this is the half that makes the feature worth having: a line
+   * saying "4 new findings" still leaves somebody reading thirty-eight rows to find them. Keyed on
+   * traceKey so the match is on the NUMBER and not its spelling -- 082 123 4567 and 0821234567 are
+   * one finding, and reported as two the feature would manufacture work on every re-trace.
+   */
+  const newKeys = useMemo(() => {
+    if (!earlier) return null
+    return new Set(
+      compareTraces(trace.items, earlier.items)
+        .filter((c) => c.state === 'new')
+        .map((c) => traceKey(c.kind, c.value)),
+    )
+  }, [earlier, trace.items])
 
   const rows = useMemo(
     () => workRows({ items, category, search, outcome: outcomeFilter, sort }),
@@ -217,11 +258,55 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
                     : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                 }`}>
                 {t.subjectName ?? 'Trace'}
+                {/*
+                  THE DATE, BECAUSE TWO REPORTS ON ONE SUBJECT WERE OTHERWISE IDENTICAL BUTTONS.
+                  That is the firm's complaint in its simplest form -- they had two tabs reading
+                  exactly the same words and no way to tell which was the new one.
+                  
+                  AND NOT "COMPANY" ON A PERSON. This read `subjectKind === 'director' ? 'Director'
+                  : 'Company'`, so EVERY trace of the debtor was labelled Company whoever the
+                  debtor was -- the firm's own screenshot shows "Stephan Ferreira · Company"
+                  against a thirteen-digit identity number. The report kind is the thing that knows:
+                  a commercial report is about a company, a consumer report is about a person.
+                */}
                 <span className="ml-1.5 text-slate-400 font-normal">
-                  {'·'} {t.subjectKind === 'director' ? 'Director' : 'Company'}
+                  {'·'} {t.subjectKind === 'director' ? 'Director'
+                    : t.reportKind === 'commercial' ? 'Company'
+                      : t.reportKind === 'consumer' ? 'Person' : 'Debtor'}
+                  {' · '}
+                  {formatDate(t.enquiredOn ?? t.createdAt)}
                 </span>
               </button>
             ))}
+          </div>
+        )}
+
+        {/*
+          WHAT THIS REPORT BOUGHT, said before anybody reads a row.
+          
+          NOTHING NEW IS STILL SAID OUT LOUD, and in the firm's words rather than as an empty
+          space: a second search the account has been charged for that found nothing is a fact
+          worth putting in front of whoever decides to run a third.
+          
+          AND NOTHING HERE CALLS A FINDING DEAD. A number on the earlier report and not on this one
+          is not a disconnected number -- bureaux age records out and a consumer profile and a
+          commercial one carry different columns. Only a collector who dialled it may say
+          otherwise, which is what an outcome is for. See traceCompare.
+        */}
+        {since && earlier && (
+          <div className={`mb-4 rounded-lg border px-3 py-2 ${
+            since.added > 0
+              ? 'border-[var(--c-green)]/30 bg-[var(--c-green)]/5'
+              : 'border-slate-200 bg-slate-50'}`}>
+            <p className="text-xs text-slate-600">
+              <span className={since.added > 0 ? 'font-medium text-[var(--c-green)]' : 'font-medium text-slate-500'}>
+                {comparisonLine(since)}
+              </span>
+              {' '}
+              <span className="text-slate-400">
+                Compared with the report of {formatDate(earlier.enquiredOn ?? earlier.createdAt)}.
+              </span>
+            </p>
           </div>
         )}
 
@@ -341,6 +426,7 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
                     <tbody className="divide-y divide-slate-100">
                       {shown.rows.map((row) => (
                         <Row key={row.key} row={row} category={category.id} worked={category.worked}
+                          isNew={newKeys?.has(traceKey(row.items[0].kind, row.items[0].value)) ?? false}
                           busy={busy === row.key}
                           onOutcome={(o) => void setOutcome(row, o)}
                           onPromote={(kin) => void promote(row, kin)} />
@@ -411,10 +497,18 @@ const KIND_WORD: Partial<Record<TraceItemKind, string>> = {
   phone: 'Home', work: 'Work', mobile: 'Mobile',
 }
 
-function Row({ row, category, worked, busy, onOutcome, onPromote }: {
+function Row({ row, category, worked, isNew, busy, onOutcome, onPromote }: {
   row: TraceRow
   category: TraceCategoryId
   worked: boolean
+  /**
+   * ON THIS REPORT AND NOT ON THE ONE BEFORE IT.
+   *
+   * THE COUNT IS NOT THE ANSWER. "4 new findings on this report" still leaves somebody reading
+   * thirty-eight rows to find the four, which is exactly the work the firm was complaining about:
+   * "it's kind of the same data as the other one." The badge is what turns a number into a glance.
+   */
+  isNew: boolean
   busy: boolean
   onOutcome: (outcome: TraceOutcome | null) => void
   onPromote: (asNextOfKin: boolean) => void
@@ -440,6 +534,14 @@ function Row({ row, category, worked, busy, onOutcome, onPromote }: {
         <div className="flex items-start gap-2.5">
           {dialable && <Phone size={14} className="mt-1 shrink-0 text-slate-400" />}
           <div className="min-w-0">
+            {/* BESIDE THE VALUE, not in a column of its own: a column would be empty on every row
+                of a first trace, and an empty column reads as something that failed to load. */}
+            {isNew && (
+              <span className="float-right ml-2 shrink-0 text-[10px] font-semibold uppercase tracking-wide
+                text-[var(--c-green)] bg-[var(--c-green)]/10 px-1.5 py-0.5 rounded">
+                New
+              </span>
+            )}
             <div className={`break-words ${ruledOut ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
               {/* Dialled from here, through the same button as everywhere else in the app. */}
               {dialable && !ruledOut ? <PhoneLink number={row.value} /> : row.value}
