@@ -4,10 +4,10 @@
  * The queries only; every rule lives in traceStore.ts, which imports nothing.
  */
 import { supabase } from './supabase'
-import { addContact, documentUrl } from './accountWorkspace'
+import { addContact, addNote, documentUrl } from './accountWorkspace'
 import { chargePerusal } from './accountCharges.ts'
 import {
-  contactKindFor, linkedHow, linkedNumber,
+  contactKindFor, linkedHow, linkedNumber, promotedNote, savesAs,
   type FiledTrace, type TraceItem, type TraceItemKind, type TraceOutcome,
 } from './traceStore.ts'
 
@@ -129,6 +129,23 @@ export async function promoteTraceItem(input: {
   subjectName: string | null
   /** The firm's "add a contact person from the next of kin as a next of kin". */
   asNextOfKin?: boolean
+  /**
+   * WHAT THIS PERSON IS TO THE CASE, in the collector's own words.
+   *
+   * THE FIRM: "if you save the person and their number as a next of kin, you should be able to
+   * make a note -- what is the relationship to the case, what is the relation of this person to
+   * the case."
+   *
+   * THE ONLY RELATIONSHIP A PROMOTED PERSON CARRIED WAS THE BUREAU'S. `linkedHow` reads whatever
+   * XDS printed about how two records touch -- a shared address, a shared surname -- which is not
+   * the same thing as "his sister, he stays there weekends, she takes messages". One is a data
+   * match and the other is why you would ring her.
+   *
+   * IT GOES ON THE TIMELINE RATHER THAN INTO person_role, which is a label on a list and has to
+   * stay short. A sentence belongs in the history.
+   */
+  relationship?: string | null
+  actor?: { id: string | null; name: string | null }
 }): Promise<void> {
   const { item, accountId, subjectName, asNextOfKin } = input
 
@@ -183,11 +200,45 @@ export async function promoteTraceItem(input: {
      * effect of promoting one finding out of a trace.
      */
     isPrimary: false,
+    /*
+     * SAVED IS CONFIRMED, at the firm's instruction: "if you save this person and their number,
+     * it's automatically verified... it goes into a verified state unless you remove it from a
+     * verified state." Going back to the account to tick it by hand was the step that got skipped.
+     *
+     * NOTHING KNOWN-BAD CAN GET HERE. canPromote already refuses a finding marked not theirs,
+     * moved on, or disowned by the person the bureau linked -- which is what stops this putting a
+     * dead detail on the contact list wearing a tick.
+     */
+    verified: true,
   })
 
   const { error } = await supabase.from('account_trace_items')
     .update({ promoted_contact_id: contact.id }).eq('id', item.id)
   if (error) throw new Error(error.message)
+
+  /*
+   * AND THE ACCOUNT'S OWN HISTORY GETS IT.
+   *
+   * LAST, AND IT CANNOT UNDO THE SAVE. The contact is on the account and the finding is marked
+   * promoted either way; a note that would not write must not take those with it. Same swallow as
+   * the main comment on a call and the bell on a ticket, and for the same reason.
+   */
+  try {
+    await addNote({
+      accountId,
+      body: promotedNote({
+        what: savesAs(item),
+        value: linkedTo ?? item.value,
+        personName: item.kind === 'link' ? item.value : (asNextOfKin ? item.value : null),
+        personRole: asNextOfKin ? 'Next of kin' : (item.kind === 'link' ? linkedHow(item.label) : null),
+        relationship: input.relationship ?? null,
+      }),
+      authorName: input.actor?.name ?? null,
+      createdBy: input.actor?.id ?? null,
+    })
+  } catch (e) {
+    console.error('[trace] the contact was saved but the timeline note was not:', e)
+  }
 }
 
 /**

@@ -845,3 +845,37 @@ export function propertyAcross(
   }
   return rows.sort((a, b) => (b.item.amount ?? 0) - (a.item.amount ?? 0))
 }
+
+/**
+ * WHAT THE TIMELINE SAYS WHEN SOMETHING IS SAVED OFF A TRACE.
+ *
+ * THE FIRM: "it should also go to the notes activity timeline -- this person was added to the
+ * trace and this is the situation."
+ *
+ * NOTHING WROTE ONE AT ALL. The only record that a finding had been promoted was the row quietly
+ * appearing in the contact list, so a collector reading the history saw a trace pulled and then
+ * nothing -- and six months later nobody could say where a number on the account had come from.
+ *
+ * IT NAMES THE SOURCE, which is the point: "from the trace" is what separates a number the bureau
+ * gave us from one a debtor read out on the telephone. Those are not equally good and the history
+ * is where that is settled.
+ *
+ * PURE, so the sentence can be held by a check without a database anywhere near it.
+ */
+export function promotedNote(input: {
+  what: string
+  value: string
+  personName?: string | null
+  personRole?: string | null
+  relationship?: string | null
+}): string {
+  const who = input.personName?.trim()
+  const role = input.personRole?.trim()
+  /* THE PERSON FIRST WHERE THERE IS ONE. "Nomsa Radebe (sister) added from the trace" is a
+     sentence; "a person and their number added from the trace" is a shrug. */
+  const head = who
+    ? `${who}${role ? ` (${role.toLowerCase()})` : ''} \u2014 ${input.value} \u2014 added from the trace`
+    : `${input.what} added from the trace: ${input.value}`
+  const why = input.relationship?.trim()
+  return why ? `${head}. ${why}` : `${head}.`
+}

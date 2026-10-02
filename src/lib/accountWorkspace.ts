@@ -313,6 +313,19 @@ export async function addContact(input: {
   personName?: string | null
   personRole?: string | null
   isPrimary?: boolean
+  /**
+   * WHETHER THIS LANDS ALREADY CONFIRMED.
+   *
+   * THE FIRM, of a number saved out of a trace: "if you save this person and their number, it's
+   * automatically verified... it goes into a verified state unless you remove it from a verified
+   * state." They had to go back to the account and tick it by hand every time, which is the step
+   * that gets skipped.
+   *
+   * THE CALLER DECIDES, not this function. Saving a finding off a trace is a decision somebody
+   * made about a specific row; typing a number into the contact form is not the same act, and a
+   * default of true here would quietly mark every hand-typed guess as confirmed.
+   */
+  verified?: boolean
 }): Promise<AccountContact> {
   const value = input.value.trim()
   /*
@@ -346,6 +359,9 @@ export async function addContact(input: {
       person_name: input.personName?.trim() || null,
       person_role: input.personRole?.trim() || null,
       is_primary: input.isPrimary ?? false,
+      /* NULL RATHER THAN false, because the column is a DATE: "nobody has confirmed it" and
+         "confirmed on this day" are the two states, and there is no third. */
+      verified_at: input.verified ? new Date().toISOString() : null,
     })
     .select('*')
     .single()

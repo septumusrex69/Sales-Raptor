@@ -158,7 +158,23 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
    * The same number under three columns is one contact. Promoting each finding would put it on
    * the account's contact list three times, which is the list the collector then has to read.
    */
-  async function promote(row: TraceRow, asNextOfKin: boolean) {
+  /*
+   * SAVING A PERSON ASKS WHAT THEY ARE TO THE CASE FIRST.
+   *
+   * THE FIRM: "if you save the person and their number as a next of kin, you should be able to
+   * make a note -- what is the relationship to the case."
+   *
+   * ASKED, NOT REQUIRED. A collector who already knows the row is their sister should not be made
+   * to type it, and a box that refuses would turn a one-press save into an argument. Pressing Save
+   * with it empty writes the same note without the sentence.
+   *
+   * ONLY ON A PERSON. "What is this number to the case" is not a question about a work landline
+   * off the debtor's own profile, and asking it there would be a field nobody can answer.
+   */
+  const [saying, setSaying] = useState<{ row: TraceRow; asNextOfKin: boolean } | null>(null)
+  const [relationship, setRelationship] = useState('')
+
+  async function promote(row: TraceRow, asNextOfKin: boolean, why?: string) {
     const item = row.items.find((i) => i.promotedContactId === null) ?? row.items[0]
     setBusy(row.key); setError(null)
     try {
@@ -167,6 +183,8 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
         /* Whose profile it came off. On a director's trace the contact is that director's. */
         subjectName: trace.subjectKind === 'director' ? trace.subjectName : null,
         asNextOfKin,
+        relationship: why?.trim() || null,
+        actor,
       })
       setLocal((s) => ({ ...s, [item.id]: { ...s[item.id], promotedContactId: 'done' } }))
       await onChanged()
@@ -429,7 +447,12 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
                           isNew={newKeys?.has(traceKey(row.items[0].kind, row.items[0].value)) ?? false}
                           busy={busy === row.key}
                           onOutcome={(o) => void setOutcome(row, o)}
-                          onPromote={(kin) => void promote(row, kin)} />
+                          onPromote={(kin) => {
+                            /* A PERSON IS ASKED ABOUT; A NUMBER IS JUST SAVED. */
+                            if (category.id === 'people') {
+                              setRelationship(''); setSaying({ row, asNextOfKin: kin })
+                            } else void promote(row, kin)
+                          }} />
                       ))}
                       {shown.rows.length === 0 && (
                         <tr>
@@ -472,6 +495,54 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
           </div>
         )}
       </div>
+      {/*
+        WHAT THIS PERSON IS TO THE CASE, asked once, where the saving happens.
+        
+        THE FIRM: "if you save the person and their number as a next of kin, you should be able to
+        make a note -- what is the relationship to the case, what is the relation of this person to
+        the case."
+        
+        THE BUREAU'S OWN ANSWER IS NOT THAT. linkedHow reads whatever XDS printed about how two
+        records touch -- a shared address, a shared surname -- which is a data match, not "his
+        sister, he stays there weekends, she takes messages". One of those tells you to ring her.
+        
+        OPTIONAL, AND SAVE IS THE DEFAULT PRESS. A collector who already knows should not be made
+        to type it; a box that refused would turn a one-press save into an argument.
+      */}
+      {saying && (
+        <Modal title={`Save ${saying.row.value}`} onClose={() => setSaying(null)} width={440}>
+          <p className="text-sm text-slate-500">
+            {saying.asNextOfKin
+              ? 'Goes on the account as a next of kin, so nobody opens a call to them as though they were the debtor.'
+              : 'Goes on the account as a person and their number.'}
+          </p>
+          <label className="block mt-3">
+            <span className="text-sm font-medium text-slate-700">What are they to the case?</span>
+            <textarea value={relationship} onChange={(e) => setRelationship(e.target.value)} rows={3}
+              autoFocus
+              placeholder="His sister. He stays there at weekends and she takes messages."
+              className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2 resize-none" />
+            <span className="block text-[11px] text-slate-400 mt-1">
+              Optional. Goes on the account&rsquo;s history with the number, not on the row.
+            </span>
+          </label>
+          <div className="flex justify-end gap-2 mt-4">
+            <button type="button" onClick={() => setSaying(null)}
+              className="text-sm px-3 py-2 rounded-lg text-slate-500 hover:bg-slate-100">
+              Cancel
+            </button>
+            <button type="button"
+              onClick={() => {
+                const { row, asNextOfKin } = saying
+                setSaying(null)
+                void promote(row, asNextOfKin, relationship)
+              }}
+              className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
+              Save it
+            </button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   )
 }
