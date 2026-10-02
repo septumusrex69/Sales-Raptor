@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Building2, Download, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { useAuth } from '../../store/AuthContext'
+import { useAppStore } from '../../store/AppStore'
 import { formatDate } from '../../data/mockData'
 import {
   ageInDays, closeQuery, fetchQuery, isStale,
@@ -21,11 +22,14 @@ import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
 import { TicketEmails } from '../../components/queries/TicketEmails'
+import { TicketWork } from '../../components/queries/TicketWork'
+import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
 import {
   fetchQueryEmails, recordSentEmail, type AccountEmail,
 } from '../../lib/accountEmails'
 import { forwardBody, forwardSubject } from '../../lib/emailRules.ts'
+import { ticketBody, ticketSubject } from '../../lib/ticketEmail.ts'
 import { canSendToClient } from '../../lib/disputeCategories.ts'
 import { canViewClients } from '../../lib/permissions.ts'
 import { fetchAccounts } from '../../lib/accountBook'
@@ -63,6 +67,9 @@ const label = (key: string) => HANDOVER_COLUMNS.find((c) => c.key === key)?.labe
 export function QueryDetail() {
   const { id } = useParams<{ id: string }>()
   const { currentUser, session } = useAuth()
+  /* Only to put a NAME on the owner. The ticket stores an id, and "With f1a187f8-…" is not a thing
+     to show somebody who wants to know whether it is still sitting with the liaison. */
+  const { users } = useAppStore()
   const [data, setData] = useState<Awaited<ReturnType<typeof fetchQuery>>>(null)
   const [draft, setDraft] = useState<JudgedDraft | null>(null)
   /**
@@ -94,6 +101,16 @@ export function QueryDetail() {
    */
   const [emails, setEmails] = useState<AccountEmail[]>([])
   const [forwarding, setForwarding] = useState<AccountEmail | null>(null)
+  /**
+   * THE TICKET'S OWN THREAD, and a fresh message to the client.
+   *
+   * `notes` is every account note carrying this query's id — which is what every stage change,
+   * every outcome and now every note written here already writes. `writing` is the compose box
+   * opened from scratch rather than onto an existing message; `forwarding` above is the other
+   * half, and they share one modal because they produce the same record.
+   */
+  const [notes, setNotes] = useState<AccountNote[]>([])
+  const [writing, setWriting] = useState(false)
   /* Whether the signed-in person has a mailbox at all. Mail goes out through their OWN, so the
      button says why it is disabled rather than failing on Send. Null while we are asking. */
   const [mailbox, setMailbox] = useState<string | null>(null)
@@ -110,6 +127,9 @@ export function QueryDetail() {
        * empty list simply hides the card.
        */
       setEmails(await fetchQueryEmails(id).catch(() => []))
+      /* NEVER FATAL, for the same reason as the mail above: a thread that will not load leaves a
+         ticket somebody can still work from the row itself. */
+      setNotes(await fetchQueryNotes(id).catch(() => []))
       /*
        * Only for a batch, and never fatal. A draft that has been tidied away leaves the query
        * readable rather than the page broken -- the query's own words still say what it is about.
@@ -249,6 +269,9 @@ export function QueryDetail() {
    * to be unable to press it, each with its own sentence — a button disabled without saying which
    * is a button people ask about rather than fix.
    */
+  const ownerName = data?.query.ownerId
+    ? (users.find((u) => u.id === data.query.ownerId)?.name ?? 'Somebody who has left')
+    : null
   const mayWriteToClient = canSendToClient(currentUser?.role)
   const forwardWhy = !mayWriteToClient
     ? 'Only a liaison or a manager writes to the client about a dispute.'
@@ -309,15 +332,17 @@ export function QueryDetail() {
 
         <p className="text-sm text-slate-700 whitespace-pre-wrap wrap-anywhere mt-3">{q.description}</p>
 
-        <dl className="grid gap-3 mt-4 sm:grid-cols-3">
-          <Fact label="Raised" value={`${formatDate(q.raisedAt)}${q.raisedByName ? ` by ${q.raisedByName}` : ''}`} />
-          <Fact label={q.status === 'closed' ? 'Closed' : 'Age'}
-            value={q.status === 'closed' ? formatDate(q.closedAt ?? q.raisedAt) : `${ageInDays(q)} days`} />
-          {/* The chase date is the only thing on this page that can be WRONG rather than merely
-              old, so it is the one that gets a colour. */}
-          <Fact label="Chase" tone={stale ? 'bad' : undefined}
-            value={q.chaseOn ? formatDate(q.chaseOn) : 'Not set'} />
-        </dl>
+        {/* ON A BATCH ONLY. An account ticket carries these in the rail beside it — see below;
+            drawn in both places they would be the same four figures twice on one screen. */}
+        {!q.accountId && (
+          <dl className="grid gap-3 mt-4 sm:grid-cols-3">
+            <Fact label="Raised" value={`${formatDate(q.raisedAt)}${q.raisedByName ? ` by ${q.raisedByName}` : ''}`} />
+            <Fact label={q.status === 'closed' ? 'Closed' : 'Age'}
+              value={q.status === 'closed' ? formatDate(q.closedAt ?? q.raisedAt) : `${ageInDays(q)} days`} />
+            <Fact label="Chase" tone={stale ? 'bad' : undefined}
+              value={q.chaseOn ? formatDate(q.chaseOn) : 'Not set'} />
+          </dl>
+        )}
 
         {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
 
@@ -336,6 +361,74 @@ export function QueryDetail() {
       </Card>
 
       {/*
+        THE PAGE HAS A SHAPE NOW, AND ONLY ON A TICKET ABOUT AN ACCOUNT.
+        ----------------------------------------------------------------
+        THE FIRM: "we need to design a ticket pane. It looks shit currently."
+
+        It was one narrow column of cards down the left of a wide screen, because every card was
+        full width whether it had a paragraph in it or three words. The work gets two thirds and
+        the facts about the ticket get one, which is the same proportion the account's own Wide
+        arrangement uses and for the same reason: the column you came to work in should look like
+        it.
+
+        NOT ON A BATCH TICKET. Those carry tables of every row a client's sheet could not open,
+        running to hundreds, and two thirds of the width is where a reference and seven columns
+        stop fitting. A batch keeps the full measure it has always had.
+      */}
+      <div className={q.accountId ? 'grid gap-4 items-start lg:grid-cols-3' : 'contents'}>
+      <div className={q.accountId ? 'space-y-4 lg:col-span-2' : 'contents'}>
+
+      {/*
+        THE WORK, DIRECTLY UNDER THE TICKET IT IS ABOUT.
+        ------------------------------------------------
+        THE FIRM: "there needs to be options... it should already be able to draft an email for the
+        client. There should also be an option to call the client just from the ticket. Make notes
+        on the ticket, and the notes should also live in the client section and on the ticket."
+
+        ONLY ON A TICKET ABOUT AN ACCOUNT. A batch ticket is about a client's own spreadsheet and
+        has no account to file a note against — `addNote` is per account and a sheet is not one.
+        Its record is the ticket itself and the rows below, which is why it has a page of its own.
+        Absent rather than disabled: a panel of controls that all refuse reads as a fault.
+      */}
+      {q.accountId && (
+        <TicketWork
+          notes={notes}
+          canEmail={forwardWhy === null}
+          emailWhy={forwardWhy}
+          busy={busy}
+          onEmail={() => setWriting(true)}
+          onNote={async (body) => {
+            await addNote({
+              accountId: q.accountId as string,
+              body,
+              authorName: currentUser?.name ?? null,
+              createdBy: currentUser?.id ?? null,
+              /* THE ONE FIELD THAT PUTS IT IN BOTH PLACES AT ONCE — the firm's "it should live in
+                 the client section and on the ticket" is this, and it has been here all along. */
+              queryId: q.id,
+              kind: 'note',
+            })
+            setNotes(await fetchQueryNotes(q.id).catch(() => notes))
+          }}
+          onCall={async (who, said) => {
+            await addNote({
+              accountId: q.accountId as string,
+              /* WHO WAS SPOKEN TO IS PART OF THE RECORD, not a separate column: six months later
+                 the question is "who at the client said that", and a note that cannot answer it is
+                 a note nobody can rely on. Folded into the sentence so it survives being read on
+                 the account's timeline, where there is no ticket around it to explain. */
+              body: who ? `Called ${who}. ${said}` : `Called the client. ${said}`,
+              authorName: currentUser?.name ?? null,
+              createdBy: currentUser?.id ?? null,
+              queryId: q.id,
+              kind: 'call',
+            })
+            setNotes(await fetchQueryNotes(q.id).catch(() => notes))
+          }}
+        />
+      )}
+
+      {/*
         DIRECTLY UNDER THE TICKET, above everything about the sheet. On a dispute this is the only
         other thing on the page, and on a batch ticket the rows below it run to hundreds — put the
         debtor's own words under those and nobody would ever reach them.
@@ -346,6 +439,32 @@ export function QueryDetail() {
         why={forwardWhy}
         onForward={setForwarding}
       />
+      </div>
+
+      {/*
+        WHO HAS IT, SINCE WHEN, AND WHEN IT COMES BACK — in a rail rather than in a row under the
+        description, which is where they were. Three labels across the foot of a card read as a
+        caption on the sentence above them; standing beside it they read as the state of the
+        ticket, which is what somebody opening it at nine in the morning is actually asking.
+      */}
+      {q.accountId && (
+        <Card>
+          <CardHeader title="Where it stands" />
+          <dl className="space-y-3 mt-1">
+            <Fact label="With" value={ownerName ?? 'Nobody yet'} />
+            <Fact label="Raised" value={`${formatDate(q.raisedAt)}${q.raisedByName ? ` by ${q.raisedByName}` : ''}`} />
+            <Fact label={q.status === 'closed' ? 'Closed' : 'Age'}
+              value={q.status === 'closed' ? formatDate(q.closedAt ?? q.raisedAt) : `${ageInDays(q)} days`} />
+            {/* The chase date is the only thing on this page that can be WRONG rather than merely
+                old, so it is the one that gets a colour. */}
+            <Fact label="Chase" tone={stale ? 'bad' : undefined}
+              value={q.chaseOn ? formatDate(q.chaseOn) : 'Not set'} />
+            {q.requestFor && <Fact label="Asking for" value={q.requestFor} />}
+            {data.clientName && <Fact label="Client" value={data.clientName} />}
+          </dl>
+        </Card>
+      )}
+      </div>
 
       {data.batch && !draft && (
         <Card><p className="text-sm text-slate-400">
@@ -467,34 +586,62 @@ export function QueryDetail() {
         html here to keep the shape of — and `forwardBody` says so on the message when only the
         stored preview was available, rather than sending a truncated forward that reads complete.
       */}
-      {forwarding && q.accountId && (
+      {/*
+        ONE COMPOSE BOX FOR BOTH, because they produce exactly the same record: a message to the
+        client, charged item 1(a), filed on the ticket and on the account. `forwarding` carries the
+        debtor's own words into it; "Email the client" opens it with the ticket's subject and the
+        question already written, which is the firm's "it should already be able to draft an email
+        for the client" — a liaison should not have to retype what the ticket already says.
+
+        Two modals would be two `onSent` handlers, and the one nobody was watching would be the one
+        that forgot to file it against the ticket.
+      */}
+      {(forwarding || writing) && q.accountId && (
         <ComposeEmailModal
           to={data.clientEmail ?? ''}
           recipients={data.clientEmail
             ? [{ email: data.clientEmail, label: data.clientContact ?? data.clientName ?? undefined }]
             : []}
-          initialSubject={forwardSubject(forwarding.subject)}
-          initialBody={forwardBody(
-            {
-              fromName: forwarding.direction === 'in'
-                ? forwarding.sentByName
-                : (currentUser?.name ?? null),
-              fromAddress: forwarding.direction === 'in'
-                ? forwarding.debtorAddress
-                : (forwarding.ourAddress ?? mailbox ?? ''),
-              subject: forwarding.subject,
-              occurredAt: forwarding.occurredAt,
-            },
-            forwarding.body ?? '',
-            /* The sync keeps a snippet, not the whole message. Saying so is the honest half:
-               a forward that silently ends mid-sentence reads to the client as all there was. */
-            false,
-          )}
+          initialSubject={forwarding
+            ? forwardSubject(forwarding.subject)
+            : ticketSubject({
+              kind: q.kind,
+              requestFor: q.requestFor,
+              description: q.description,
+              debtorName: data.account?.debtorName ?? null,
+              accountNumber: data.account?.accountNumber ?? null,
+            })}
+          initialBody={forwarding
+            ? forwardBody(
+              {
+                fromName: forwarding.direction === 'in'
+                  ? forwarding.sentByName
+                  : (currentUser?.name ?? null),
+                fromAddress: forwarding.direction === 'in'
+                  ? forwarding.debtorAddress
+                  : (forwarding.ourAddress ?? mailbox ?? ''),
+                subject: forwarding.subject,
+                occurredAt: forwarding.occurredAt,
+              },
+              forwarding.body ?? '',
+              /* The sync keeps a snippet, not the whole message. Saying so is the honest half:
+                 a forward that silently ends mid-sentence reads to the client as all there was. */
+              false,
+            )
+            : ticketBody({
+              kind: q.kind,
+              requestFor: q.requestFor,
+              description: q.description,
+              debtorName: data.account?.debtorName ?? null,
+              accountNumber: data.account?.accountNumber ?? null,
+              contact: data.clientContact,
+              from: currentUser?.name ?? null,
+            })}
           contextNote={`Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under `
             + 'item 1(a). It is filed against this dispute as well as the account.'}
-          onClose={() => setForwarding(null)}
+          onClose={() => { setForwarding(null); setWriting(false) }}
           onSent={(rawSubject, bodyText, messageId, from) => {
-            setForwarding(null)
+            setForwarding(null); setWriting(false)
             /*
              * CHARGED, RECORDED AND FILED ON THE TICKET. The firm's ruling: "raising the dispute
              * charges a charge. I think it should charge the debtor for it. And also
@@ -524,6 +671,10 @@ export function QueryDetail() {
               .then(() => fetchQueryEmails(q.id))
               .then(setEmails)
               .catch(() => { /* the message went; a list that did not refresh is not an error. */ })
+            /* AND THE THREAD, because recordSentEmail writes an account note for the send and the
+               panel above is what reads it back. Separately caught: a mail list that refreshed and
+               a thread that did not is still a message that went out. */
+            void fetchQueryNotes(q.id).then(setNotes).catch(() => { /* see above */ })
           }}
         />
       )}

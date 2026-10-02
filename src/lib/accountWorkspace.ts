@@ -280,6 +280,30 @@ export async function fetchWorkspace(accountId: string): Promise<Workspace> {
   }
 }
 
+/**
+ * THE NOTES THAT BELONG TO ONE TICKET, FETCHED ON THEIR OWN.
+ *
+ * THE FIRM, of the ticket screen: "make notes on the ticket, and the notes should also live in the
+ * client section and on the ticket."
+ *
+ * THEY ALREADY DID. `addNote` has taken a `queryId` since queries existed, every stage change
+ * writes one, and `notesForQuery` reads them back out of a list — but the only caller that ever
+ * HAD such a list was the account page, so a liaison working the ticket saw none of it. The ticket
+ * screen is not holding the account's workspace and should not have to load it: a dispute is one
+ * conversation, and pulling a debtor's contacts and promises to draw it would be a fetch for three
+ * panels nobody asked for.
+ *
+ * OLDEST FIRST, unlike the account's timeline, for the same reason TicketEmails is: a ticket is a
+ * short exchange read in order — what was asked, what was answered, what was done about it.
+ */
+export async function fetchQueryNotes(queryId: string): Promise<AccountNote[]> {
+  const { data, error } = await supabase
+    .from('account_notes').select('*').eq('query_id', queryId)
+    .order('created_at', { ascending: true })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map(toNote)
+}
+
 export async function addContact(input: {
   accountId: string
   kind: ContactKind
