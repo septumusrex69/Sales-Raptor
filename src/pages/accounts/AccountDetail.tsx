@@ -898,6 +898,22 @@ export function AccountDetail() {
       onTick={reload} />
   )
 
+  /*
+   * THE DEBTOR'S OWN TRACE, for the client line below.
+   *
+   * Grouped by subject here as well as in the panel, through the same function: a company account
+   * carries a report per director and those are other people. The first entry is the debtor, which
+   * is traceSubjects' own ordering.
+   *
+   * NOT A useMemo, AND THAT IS NOT LAZINESS. This sits BELOW the three early returns above --
+   * loading, error, no such account -- so a hook here is called on some renders and not others,
+   * which is the one thing React does not allow: it threw, and the whole account page rendered
+   * blank. (Found by the browser layer, which is exactly what it is for; every source check in
+   * the suite passed on it.) An account carries a handful of traces, so grouping them on each
+   * render costs nothing worth a hook in the wrong place.
+   */
+  const subjectsForClient = traceSubjects(traces)
+
   const clientLinePanel = (
     <ClientLinePanel
       line={clientLine({
@@ -928,6 +944,31 @@ export function AccountDetail() {
          * follow the account up on ...", which is true of every diary date whatever its kind.
          */
         next: account.diaryDate ? { kind: 'review', dueOn: account.diaryDate } : null,
+        /*
+         * WHAT THE TRACE CAME TO, which the client was never told.
+         *
+         * THE FIRM: "this information regarding the trace is very valuable information that we can
+         * possibly give to the client as well." The client line said "we lodged a trace on the
+         * 2nd" and nothing else -- the firm spending the client's money with no account of what it
+         * bought -- while the panel six inches away said twelve worked, none reaching the debtor,
+         * three still ringing.
+         *
+         * THE DEBTOR'S OWN REPORT, NOT A DIRECTOR'S. A company account carries a trace per
+         * director and those are other people; the sentence is about the debtor the client handed
+         * over. traceSubjects already groups them, and its first entry is the debtor.
+         *
+         * AND THE SAME READING THE PANEL DRAWS. traceRound is the one function that decides
+         * whether a trace has been worked through, so the client's copy and the collector's screen
+         * cannot come to different conclusions about it.
+         */
+        trace: (() => {
+          const debtor = subjectsForClient[0]
+          if (!debtor || debtor.kind !== 'debtor') return null
+          return {
+            lodgedOn: debtor.latest.enquiredOn ?? debtor.latest.createdAt.slice(0, 10),
+            round: traceRound(debtor.latest.items),
+          }
+        })(),
         frozenReason: account.frozenReason,
         frozenOn: account.frozenAt?.slice(0, 10) ?? null,
         /*

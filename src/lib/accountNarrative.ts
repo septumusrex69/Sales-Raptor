@@ -1,4 +1,5 @@
 import type { Arrangement } from './arrangements.ts'
+import type { TraceRound } from './traceRound.ts'
 import type { ClientPosition } from './clientPosition.ts'
 import type { DiaryKind } from './diaryPriority.ts'
 
@@ -83,6 +84,43 @@ export interface NarrativeInput {
   disputeRaisedOn?: string | null
   /** When a trace went to the bureaus. */
   traceLodgedOn?: string | null
+  /**
+   * WHAT THE TRACE CAME TO, which is the part a client has never been told.
+   *
+   * THE FIRM, looking at a worked-through trace on the account screen: "this information regarding
+   * the trace is very valuable information that we can possibly give to the client as well."
+   *
+   * They are right, and what the client got was one flat sentence -- "we lodged a trace on the
+   * 2nd" -- which says the firm spent the client's money and nothing about what it bought. The
+   * account screen beside it said twelve contact points worked, none of them reaching the debtor,
+   * three lines still ringing. That is the answer to the question a client is actually asking,
+   * which is "why has nothing happened on this account?"
+   *
+   * ------------------------------------------------------------------------------------------
+   * THE RESULT, NEVER THE FINDINGS
+   * ------------------------------------------------------------------------------------------
+   *
+   * THIS IS THE LINE AND IT IS NOT A STYLE CHOICE. The client is told HOW MUCH WORK the trace
+   * produced and WHAT CAME OF IT. They are never told the numbers, the addresses, the employer,
+   * or the names of relatives the bureau linked.
+   *
+   * Three reasons, and any one of them is enough. The data is a THIRD PARTY'S: a sister's mobile
+   * number is her information, not the debtor's and not the client's. It is also data the firm
+   * BOUGHT -- item 4(c) or item 3 against this debtor -- and a client handed the bureau's profile
+   * has no reason to instruct anybody for the next one. And it would be a list of raw findings
+   * with no outcome against them, which is the worst of both: it looks like the firm sharing
+   * everything while answering nothing.
+   *
+   * ------------------------------------------------------------------------------------------
+   * THE SAME READING THE COLLECTOR SEES
+   * ------------------------------------------------------------------------------------------
+   *
+   * A TraceRound, from the function the account screen draws its own line with -- not a count
+   * computed here. Written twice, the report and the screen would eventually disagree about
+   * whether a trace had been worked through, and the client's copy is the one nobody in the firm
+   * reads before it goes out.
+   */
+  trace?: { lodgedOn: string | null; round: TraceRound } | null
   /**
    * What is booked next, from the diary entry itself.
    *
@@ -232,6 +270,16 @@ function whatHappened(input: NarrativeInput): string {
   }
   if (input.position === 'under_administration') {
     return 'The debtor is under a formal process and the matter is being dealt with through the appointed practitioner.'
+  }
+  /*
+   * THE TRACE, AND WHAT IT CAME TO.
+   *
+   * ABOVE THE PLAIN "we lodged a trace" SENTENCE, which is what is left when nobody has recorded a
+   * result yet. The firm's complaint was that the lodging sentence was all a client ever got.
+   */
+  if (input.trace) {
+    const line = traceSentence(input.trace.lodgedOn, input.trace.round)
+    if (line) return line
   }
   if (input.traceLodgedOn) {
     return `We lodged a trace with the credit and information bureaus on ${onDate(input.traceLodgedOn)}.`
@@ -385,6 +433,76 @@ function whatNext(input: NarrativeInput): string {
     if (better) return better(on)
   }
   return NEXT_BY_KIND[input.next.kind](on)
+}
+
+/**
+ * WHAT A TRACE CAME TO, IN A SENTENCE A CLIENT READS.
+ *
+ * FOUR STATES, BECAUSE A TRACE HAS FOUR, and they are four genuinely different pieces of news:
+ * the search returned nothing workable, it is part way through, it found the debtor, or it was
+ * worked through and found nobody. The last is the one the firm was looking at and the one a
+ * client most needs: it is the difference between an account nobody has got to and an account
+ * nobody can find.
+ *
+ * COUNTS, NEVER CONTENTS. "Twelve numbers, email addresses and linked people" says the size of
+ * the job; which twelve is the bureau's data about third parties and is not the client's -- see
+ * NarrativeInput.trace.
+ *
+ * SPELLED OUT RATHER THAN CALLED "CONTACT POINTS". A creditor reading a monthly report should not
+ * have to learn a word this firm uses internally, and "leads" -- the obvious short one -- already
+ * means something else entirely in this app.
+ *
+ * AND IT NEVER SAYS "UNTRACEABLE". That is a decision a team leader makes about an account, not
+ * something arithmetic may conclude on their behalf: three lines still ringing are three lines
+ * somebody may yet answer, and a report that wrote the debtor off before the firm had would be
+ * telling a client to stop expecting a recovery the firm has not stopped pursuing.
+ */
+export function traceSentence(lodgedOn: string | null, round: TraceRound): string | null {
+  const when = lodgedOn ? ` on ${onDate(lodgedOn)}` : ''
+  const found = `${round.workable} numbers, email addresses and linked people`
+
+  /* NOTHING TO WORK IS A RESULT, and an expensive one: the search ran, the account was charged,
+     and it produced nothing anybody could ring. A client paying for the next one should know. */
+  if (round.workable === 0) {
+    return `We traced the debtor${when}. The search returned no contact details we were able to work.`
+  }
+
+  if (round.state === 'working') {
+    return `We traced the debtor${when}, and ${round.tried} of the ${found} it produced have been worked so far.`
+  }
+
+  if (round.state === 'worked_through') {
+    /*
+     * REACHED. The only outcome here that is good news, and it is said as plainly as the bad one.
+     *
+     * AND IT DOES NOT COUNT ANYTHING. "One of the twelve numbers, email addresses and linked
+     * people it produced" is the size of a job nobody needs told about once the job has worked;
+     * what the client wants from this sentence is that the debtor has been reached.
+     */
+    return `We traced the debtor${when} and made contact with them on one of the numbers it produced.`
+  }
+
+  /*
+   * SPENT. Every one tried and none of it reached the debtor.
+   *
+   * THE SECOND SENTENCE IS WHAT STOPS THIS READING AS A DEAD END. Somebody answering who is not
+   * the debtor is a live line and a person who knows them; a number that rang is an hour of
+   * somebody's day still worth spending. Both are reasons the firm has not finished, and a client
+   * told only "we worked twelve and found nothing" would reasonably ask why anybody is still on
+   * the account.
+   */
+  const bits: string[] = [
+    `We traced the debtor${when} and have worked all ${found} it produced without reaching them.`,
+  ]
+  if (round.reachedSomeone) {
+    bits.push('Somebody else answered on one of the numbers, but we were not able to speak to the debtor.')
+  }
+  if (round.liveUntried > 0) {
+    bits.push(round.liveUntried === 1
+      ? 'One line is still ringing and will be tried again.'
+      : `${round.liveUntried} lines are still ringing and will be tried again.`)
+  }
+  return bits.join(' ')
 }
 
 export function clientLine(input: NarrativeInput): ClientLine {

@@ -18,7 +18,7 @@ import {
   clientFlag, clientPosition, frozenByLabel, needsClient, positionReport,
   DESK_POSITIONS, deskPosition,
 } from '../../src/lib/clientPosition.ts'
-import { accountNarrative, clientLine } from '../../src/lib/accountNarrative.ts'
+import { accountNarrative, clientLine, traceSentence } from '../../src/lib/accountNarrative.ts'
 import { DIARY_KINDS, DIARY_KIND_ORDER } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
@@ -717,6 +717,89 @@ check('a dispute chase keeps its own words',
   clientLine({ position: 'negotiating', next: { kind: 'dispute_chase', dueOn: '2026-09-23' } }).next,
   'We will follow up the written dispute on 23 September 2026.')
 
+/* ---------------------------------------------------------------------------------------------
+ * WHAT A TRACE COMES TO, IN THE CLIENT'S COPY
+ *
+ * THE FIRM, looking at a worked-through trace on the account screen: "this information regarding
+ * the trace is very valuable information that we can possibly give to the client as well."
+ *
+ * What the client got was "we lodged a trace on the 2nd" -- the firm spending the client's money
+ * with no account of what it bought -- while the panel beside it said twelve worked, none of them
+ * reaching the debtor, three lines still ringing.
+ * ------------------------------------------------------------------------------------------- */
+
+const round = (over = {}) => ({
+  state: 'spent', workable: 12, tried: 12,
+  reachedDebtor: false, reachedSomeone: false, liveUntried: 0, ...over,
+})
+
+/*
+ * THE RESULT, NEVER THE FINDINGS, and this is the assertion the whole feature turns on.
+ *
+ * The numbers, the addresses, the employer and the names of linked relatives are a THIRD PARTY'S
+ * information, they are data the firm BOUGHT under item 4(c), and a client handed the bureau's
+ * profile has no reason to instruct anybody for the next one. So the sentence is fed a round that
+ * carries no values at all -- TraceRound is counts and flags and nothing else -- and the test is
+ * that nothing which looks like a finding can appear in the output.
+ */
+{
+  const said = traceSentence('2026-10-02', round({ reachedSomeone: true, liveUntried: 3 }))
+  ok('the client is told what the trace came to', /worked all 12/.test(said))
+  ok('...and is never given a telephone number', !/\d{9,}/.test(said))
+  ok('...and the shape it is given carries no findings to give',
+    Object.keys(round()).every((k) => ['state', 'workable', 'tried', 'reachedDebtor', 'reachedSomeone', 'liveUntried'].includes(k)))
+  /* AND THE SECOND SENTENCE IS WHAT STOPS IT READING AS A DEAD END. A line that rang is an hour
+     of somebody's day still worth spending, and a client told only "we found nothing" would
+     reasonably ask why anybody is still on the account. */
+  ok('...and says what is still worth trying', /3 lines are still ringing/.test(said))
+  ok('...and that somebody answered who was not the debtor',
+    /Somebody else answered/.test(said))
+}
+
+/* FOUR STATES, FOUR GENUINELY DIFFERENT PIECES OF NEWS. */
+ok('a part-worked trace says how far it has got',
+  /4 of the 12/.test(traceSentence('2026-10-02', round({ state: 'working', tried: 4 }))))
+ok('a trace that found them says so plainly',
+  /made contact with them/.test(traceSentence('2026-10-02', round({ state: 'worked_through', reachedDebtor: true }))))
+/* A SEARCH THAT RETURNED NOTHING IS A RESULT, and an expensive one: it ran, the account was
+   charged, and it produced nothing anybody could ring. */
+ok('a search that returned nothing workable says that',
+  /returned no contact details/.test(traceSentence('2026-10-02', round({ state: 'working', workable: 0, tried: 0 }))))
+/* ONE LINE, NOT "1 lines". */
+ok('one line left reads as one line',
+  /One line is still ringing/.test(traceSentence('2026-10-02', round({ liveUntried: 1 }))))
+
+/*
+ * AND IT NEVER CALLS THE DEBTOR UNTRACEABLE. That is a decision a team leader makes about an
+ * account, not something arithmetic may reach on their behalf -- and a report that wrote the
+ * debtor off before the firm had would tell a client to stop expecting a recovery the firm has
+ * not stopped pursuing.
+ */
+for (const r of [round(), round({ liveUntried: 3 }), round({ state: 'working', workable: 0 })]) {
+  ok('no sentence declares the debtor untraceable',
+    !/untraceable|cannot be found|gone away|written off/i.test(traceSentence('2026-10-02', r)))
+}
+
+/*
+ * AND IT BEATS THE OLD "we lodged a trace" LINE, which is what is left when nobody has recorded a
+ * result. Asserted through clientLine rather than on the sentence, because the ordering of those
+ * two clauses IS the fix: the lodging sentence was all a client ever got.
+ */
+check('the result wins over the bare lodging date',
+  clientLine({ traceLodgedOn: '2026-09-01', trace: { lodgedOn: '2026-10-02', round: round() } }).happened,
+  traceSentence('2026-10-02', round()))
+ok('...and the lodging date is still said where there is no result yet',
+  /lodged a trace/.test(clientLine({ traceLodgedOn: '2026-09-01' }).happened))
+/*
+ * AND A PROMISE BEATS BOTH. The rung is what a client reads first: an account where the debtor has
+ * agreed to pay is not a tracing story, however much work the trace was.
+ */
+ok('what the debtor said still comes first',
+  !/traced the debtor/.test(clientLine({
+    position: 'cannot_pay', lastAttemptOn: '2026-10-01',
+    trace: { lodgedOn: '2026-10-02', round: round() },
+  }).happened))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
@@ -725,5 +808,5 @@ if (failures.length) {
 console.log(`${pass} passed, 0 failed`)
 console.log(`
 Every status combination on the live book maps to exactly one client position, a structural
-state is never hidden by money, a freeze says who asked and why, and the movement history
-cannot be written by hand.`)
+state is never hidden by money, a freeze says who asked and why, the movement history cannot be
+written by hand, and a client is told what a trace came to without being given what it found.`)
