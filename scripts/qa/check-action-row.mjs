@@ -148,6 +148,49 @@ ok('...and one text size', /text-sm/.test(base))
 check('the account row hands that same class to the buttons that are not Actions',
   (account.match(/\$\{ACTION_BASE\} \$\{ACTION_ENABLED\}/g) ?? []).length, 2)
 
+/* ---------------------------------------------------------------------------------------------
+ * AND "ONE COLUMN" ENDS IN ONE COLUMN'S WORTH, NOT THREE.
+ *
+ * THE FIRM, of the three arrangements: "the one where everything is under one another — that one
+ * is weird, it doesn't work properly. But the other two work fine. The one with the three columns
+ * and the one with the two columns, that works fine."
+ *
+ * WHAT WAS WEIRD WAS MEASURABLE. The stacked arrangement is capped to a 64rem measure and ended
+ * with its short cards three across — about 320px a card, which is NARROWER than the right-hand
+ * rail of the three-column arrangement. So the card you came to work in, the promise and its
+ * simulation, was most cramped in the layout named after having only one column. A label that
+ * promises one thing and a foot that does another is a choice nobody can predict, and
+ * predictability is the entire reason this control exists.
+ *
+ * NOT ONE ACROSS EITHER: these are the SHORT cards, and a single column of them on a 27" screen is
+ * a page of mostly empty boxes with a scrollbar. Two is what the label can carry.
+ * ------------------------------------------------------------------------------------------- */
+
+const stacked = shell.slice(shell.indexOf("if (layout === 'stacked')"),
+  shell.indexOf("if (layout === 'wide')"))
+ok('the stacked arrangement was found', stacked.length > 200)
+/*
+ * READ OUT OF THE SHORT-CARD ROW ITSELF, not the whole arrangement -- the false positive this
+ * walked into first. The block OPENS with its own `lg:grid-cols-3`: the details card spanning two
+ * of three with the summary beside it, which is a different row and a deliberate one. A pattern
+ * loose enough to catch the foot caught that instead and reported a bug in correct code.
+ */
+const shortCards = stacked.slice(stacked.indexOf('{keyed(rest)}') - 160,
+  stacked.indexOf('{keyed(rest)}') + 20)
+ok('the short-card row was found', /keyed\(rest\)/.test(shortCards))
+ok('...and lays them two across', /md:grid-cols-2/.test(shortCards))
+ok('...not three', !/grid-cols-3/.test(shortCards))
+/* ITEMS-START SURVIVES, which is a different rule and the one that keeps a busy card from
+   stretching its neighbours into empty boxes of the same height. */
+ok('...without stretching them to one height', /items-start/.test(shortCards))
+/* AND THE MEASURE IS STILL CAPPED. A full-width timeline on a wide screen is a worse read than a
+   narrow one, which is why this arrangement has a maximum at all. */
+ok('...inside a readable measure', /max-w-5xl/.test(stacked))
+/* THE THREE-COLUMN ONE IS UNTOUCHED, which the firm said works fine. Held so that "fixing" the
+   stacked one never quietly reshapes the arrangement nobody complained about. */
+const columns = shell.slice(shell.indexOf("if (layout === 'wide')"))
+ok('the three-column arrangement still has three', /xl:grid-cols-\[minmax/.test(columns))
+
 console.log(`\ncheck-action-row: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

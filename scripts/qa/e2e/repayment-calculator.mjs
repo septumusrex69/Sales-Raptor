@@ -368,6 +368,89 @@ try {
     t.check('...and it is the whole schedule', rows, 31)
     await context.close()
   }
+
+  /* ---------- and somewhere with room to read it ---------- */
+
+  /*
+   * THE FIRM, on the three-column layout: "for the one with the three columns, it views very
+   * small... perhaps we can put it in the middle, so there's more space to see — or you click on
+   * something and it opens something else, you know, like it opens a better view."
+   *
+   * They were looking at a four-column ladder of rand amounts in a two-hundred-and-fifty pixel
+   * rail, drawn as "R 50,00R 1 608,60" — one figure touching the next, which is not a cramped
+   * table but a wrong number.
+   *
+   * ASSERTED IN A BROWSER BECAUSE THE WHOLE POINT IS WHERE THINGS ARE DRAWN. A unit check can see
+   * that a dialog exists in the source and cannot see that it opens, that it carries the figures,
+   * or — the one that matters most — that the panel kept its state on the way in.
+   */
+  {
+    const { context, page } = await openPromiseForm(browser)
+    await offer(page, { shape: 'monthly', amount: 500, dueOn: '2026-10-31' })
+
+    const bigger = page.getByRole('button', { name: /Bigger/ })
+    t.ok('the simulation offers somewhere bigger to read it', await bigger.count() > 0)
+    if (await bigger.count() > 0) {
+      await bigger.first().click()
+      await page.waitForTimeout(400)
+      const dialog = page.locator('[data-modal-open]')
+      t.ok('...which opens', await dialog.count() > 0)
+      const plain = await dialog.innerText().catch(() => '')
+      t.ok('...carrying the ladder', /Their offer \(\d+\)/.test(plain))
+      t.ok('...and the schedule', /Every payment|Owing/.test(plain))
+      /* NOTHING BIGGER TO OPEN FROM INSIDE IT, or the button is an invitation to a dialog that is
+         already on screen. */
+      t.check('...and offers no second Bigger inside itself',
+        await dialog.getByRole('button', { name: /Bigger/ }).count(), 0)
+      /*
+       * AND THE TITLE IS NOT SAID TWICE. The dialog is headed "If they pay this" and the panel's
+       * own eyebrow says the same four words an inch under it.
+       *
+       * READ WITH NOTHING TYPED INTO "try a different amount", which is the only state where the
+       * duplication can happen -- and the state this assertion was first written WITHOUT. With a
+       * figure typed the eyebrow reads "If they paid this instead", a different sentence that must
+       * keep drawing, so the check passed over the bug it was written for. Found by breaking it.
+       */
+      t.check('...and does not repeat its own title',
+        (plain.match(/If they pay this/gi) ?? []).length, 1)
+      await t.shot(page, '03-simulation-bigger')
+      /* ESCAPE, which Modal binds itself. The close button was reached by a `button:has(svg)`
+         selector that matched the wrong control and closed nothing -- and the guard below went on
+         to swallow the rest of the block in silence. */
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(400)
+    }
+
+    /*
+     * AND THE PANEL KEEPS ITS STATE ON THE WAY IN: ONE INSTANCE MOVED, NOT A SECOND ONE DRAWN
+     * BIGGER. The 800 is the proof -- a modal that mounted its own copy would open on the recorded
+     * 500 and quietly answer a different question from the one the collector was asked, mid-call.
+     */
+    await page.getByLabel('Try a different instalment').fill('800')
+    await page.waitForTimeout(600)
+    const again = page.getByRole('button', { name: /Bigger/ })
+    /*
+     * THE GUARD IS ASSERTED, NOT JUST OBEYED. `if (count > 0)` read defensively -- which this file
+     * is right to do, a bare click on a missing locator times out thirty seconds later and takes
+     * the run down -- but an unasserted guard SWALLOWS the block: when the dialog above failed to
+     * close, the panel was not on screen, the count was nought, and both assertions below simply
+     * never ran while the file reported all green. Break-tested by clearing the typed figure on
+     * open, which is the bug these two exist to catch, and watching the run stay green.
+     */
+    t.ok('the panel comes back when the dialog is closed', await again.count() > 0)
+    if (await again.count() > 0) {
+      await again.first().click()
+      await page.waitForTimeout(400)
+      const text = await page.locator('[data-modal-open]').innerText().catch(() => '')
+      t.ok('the figure typed before it opened is still the one being worked',
+        /Working on R\s?800/.test(text))
+      /* AND THE OTHER EYEBROW STILL DRAWS. It is a different sentence from the dialog's title and
+         it is the one a collector needs: the arrangement being RECORDED is still R500. */
+      t.ok('...and it still says the recorded arrangement differs',
+        /still R\s?500/.test(text))
+    }
+    await context.close()
+  }
 } catch (e) {
   /* A CRASH IS A FAILURE, REPORTED. Thrown out of the try the run prints a stack and no count at
      all -- and run-all reads the count, so a file that reports nothing is a file nobody sees. */

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ChevronDown, FileDown, Info, Loader2, Mail } from 'lucide-react'
+import { AlertTriangle, ChevronDown, FileDown, Info, Loader2, Mail, Maximize2 } from 'lucide-react'
+import { Modal } from '../ui/Modal'
 import { letterPdfBytes } from '../../lib/letterAttachment.ts'
 import { letterFilename, toBase64 } from '../../lib/letterPdf.ts'
 import { repaymentLetter, repaymentLetterRefusal } from '../../lib/repaymentLetter.ts'
@@ -116,6 +117,8 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
    * arithmetic and nothing else.
    */
   const [trying, setTrying] = useState('')
+  /* Where this panel is being read. See the note on `body`. */
+  const [big, setBig] = useState(false)
   const tried = Number(trying.replace(/[^\d.]/g, ''))
   const whatIf = trying.trim() !== '' && tried > 0 ? tried : null
   const shown = whatIf ?? amount
@@ -289,11 +292,45 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
     }
   }
 
-  return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
-      <p className="text-[11px] uppercase tracking-wide text-slate-400">
-        {whatIf === null ? 'If they pay this' : 'If they paid this instead'}
-      </p>
+  /*
+   * ----------------------------------------------------------------------------------------
+   * THE SAME PANEL, SOMEWHERE WITH ROOM IN IT.
+   * ----------------------------------------------------------------------------------------
+   * THE FIRM, on the three-column layout: "for the one with the three columns, it views very
+   * small... perhaps we can put it in the middle, so there's more space to see — or you click on
+   * something and it opens something else, you know, like it opens a better view."
+   *
+   * THIS IS THE SECOND OF THOSE, and it is the one that does not disturb the page. The rail is
+   * about two hundred and fifty pixels and this panel carries a four-column ladder of rand
+   * amounts and a five-column schedule under it; moving the whole promise panel into the middle
+   * would fix the simulation by taking the timeline's width away from it, on a page every
+   * collector uses all day, to help the one card that happens to be widest.
+   *
+   * ONE INSTANCE, MOVED — NOT A SECOND ONE DRAWN BIGGER. The body is built once and rendered
+   * either in the rail or in the dialog, so it keeps its place in the React tree and everything on
+   * it survives the move: the figure typed into "try a different amount", a schedule half
+   * expanded, a send in flight. A modal that mounted its own copy would open empty, and the
+   * collector would be mid-sentence on a call.
+   */
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        {/* THE DIALOG'S OWN TITLE SAYS IT, so the eyebrow would be the same four words twice an
+            inch apart. It still draws for the "paid this instead" case, which is a different
+            sentence and the one a collector needs to see mid-call. */}
+        <p className="text-[11px] uppercase tracking-wide text-slate-400">
+          {whatIf === null ? (big ? '' : 'If they pay this') : 'If they paid this instead'}
+        </p>
+        {/* ONLY WHERE IT IS CRAMPED. Inside the dialog there is nothing bigger to open. */}
+        {!big && (
+          <button type="button" onClick={() => setBig(true)}
+            title="Open the simulation where there is room to read it"
+            className="shrink-0 inline-flex items-center gap-1 text-[11px] text-slate-400
+              hover:text-slate-700">
+            <Maximize2 size={11} /> Bigger
+          </button>
+        )}
+      </div>
       {/*
         WHAT IF THEY PAID SOMETHING ELSE, on its own line under the heading.
 
@@ -448,8 +485,19 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
           <p className="text-[11px] text-slate-500">Their offer, and paying it off faster</p>
           {/* Named, so what it is survives being read out of context -- by a screen reader, and by
               the browser check that has to tell this table from the schedule below it. */}
+          {/*
+            AND IT SCROLLS RATHER THAN COLLIDES, which is what the firm was actually looking at:
+            "R 50,00R 1 608,60" in one cell, because four columns of rand amounts do not fit in a
+            two-hundred-and-fifty pixel rail and a table with no minimum simply overlaps them. A
+            figure touching the figure beside it is not a cramped table, it is a wrong number.
+
+            THE MINIMUM IS ON THE TABLE AND THE SCROLL ON ITS BOX -- the other way round does
+            nothing, because a table with no width of its own shrinks to whatever it is given and
+            never overflows anything. In the dialog there is room and neither applies.
+          */}
+          <div className="overflow-x-auto">
           <table aria-label="What paying it off faster would cost"
-            className="mt-1 w-full text-[11px] tabular-nums">
+            className={`mt-1 w-full tabular-nums ${big ? 'text-xs min-w-0' : 'text-[11px] min-w-[17rem]'}`}>
             <thead>
               <tr className="text-slate-400">
                 <th className="text-left font-normal">Payments</th>
@@ -486,6 +534,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -493,8 +542,10 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
           collector should not have to say "the system worked it out". */}
       {plan.rows.length > 0 && (
         <div className="mt-2 border-t border-slate-200 pt-2">
+          {/* Five columns here rather than four, so the floor is wider. Same reasoning as above. */}
+          <div className="overflow-x-auto">
           <table aria-label="Every payment of this arrangement"
-            className="w-full text-[11px] tabular-nums">
+            className={`w-full tabular-nums ${big ? 'text-xs min-w-0' : 'text-[11px] min-w-[21rem]'}`}>
             <thead>
               <tr className="text-slate-400">
                 <th className="text-left font-normal">Due</th>
@@ -516,6 +567,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
               ))}
             </tbody>
           </table>
+          </div>
           {plan.rows.length > 3 && (
             <button type="button" onClick={() => setShowAll((v) => !v)}
               className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800">
@@ -588,6 +640,26 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
         <Info size={11} className="mt-0.5 shrink-0" />
         <span>{plan.assumption}</span>
       </p>
+    </>
+  )
+
+  /*
+   * THE DIALOG IS WIDE BECAUSE THE TABLES ARE WIDE, and 820 is what the schedule's five columns
+   * need before anything wraps. The panel keeps its place in the rail underneath -- a modal over a
+   * gap where the card was reads as the card having been destroyed.
+   */
+  if (big) {
+    return (
+      <Modal title="If they pay this" width={820} onClose={() => setBig(false)}
+        subtitle="The same figures as the panel, with room to read them.">
+        {body}
+      </Modal>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+      {body}
     </div>
   )
 }

@@ -501,10 +501,25 @@ export function RecordLayout({ layout, details, main, side }: {
         </div>
         {main}
         {rest.length > 0 && (
-          /* The short cards share a row rather than each taking a full one. `items-start`
-             matters: without it the grid stretches them all to the height of the tallest, so one
-             busy card leaves the others as mostly empty boxes the same height. */
-          <div className="grid gap-4 items-start md:grid-cols-2 lg:grid-cols-3">{keyed(rest)}</div>
+          /*
+           * The short cards share a row rather than each taking a full one. `items-start` matters:
+           * without it the grid stretches them all to the height of the tallest, so one busy card
+           * leaves the others as mostly empty boxes the same height.
+           *
+           * TWO ACROSS, NOT THREE, and the layout's own name is the argument. THE FIRM: "the one
+           * where everything is under one another — that one is weird, it doesn't work properly.
+           * But the other two work fine."
+           *
+           * THREE ACROSS INSIDE A 64rem MEASURE IS ABOUT 320px A CARD, which is NARROWER than the
+           * right-hand rail of the three-column arrangement — so the card you came to work in,
+           * the promise and its simulation, was most cramped in the layout called "One column".
+           * A layout whose label promises one column and whose foot is three is not a layout
+           * somebody can predict, and predictability is the whole reason there is a choice here.
+           *
+           * Not one-across either: these ARE the short cards, and a column of them on a 27" screen
+           * is a page of mostly empty boxes with a scrollbar. Two is what the label can carry.
+           */
+          <div className="grid gap-4 items-start md:grid-cols-2">{keyed(rest)}</div>
         )}
       </div>
     )
