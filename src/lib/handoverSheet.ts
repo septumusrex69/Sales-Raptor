@@ -133,10 +133,32 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   },
 
   /* ---------------------------------------------------------------- the debtor */
+  /*
+   * ASKED FOR, NOT REQUIRED -- and it was required, which put a false sentence on the screen.
+   *
+   * THE FIRM imported eight accounts off their own Swordfish sheet and read "This sheet has no
+   * Person or business. Nothing can be imported from it." above eight accounts that had imported
+   * perfectly. Both halves were wrong: the old sheet has no such column and never will, and
+   * `Role` -- which is the column it carries -- says debtor or surety, a different fact entirely.
+   *
+   * A REQUIRED COLUMN NO OLD SHEET CAN SUPPLY REFUSES EVERY OLD SHEET, which is the opposite of
+   * the firm's instruction that "any import should work on the old import file from Swordfish".
+   * The flag was never enforced, so what it actually produced was a red line nobody could act on
+   * over an import that had worked -- a warning that fires when nothing is wrong, and those teach
+   * people to stop reading the line.
+   *
+   * AND THE ANSWER IS IN THE SHEET ANYWAY. A thirteen-digit South African ID that passes its
+   * checksum belongs to a person; a company registration number belongs to a business; a name
+   * ending "(Pty) Ltd" is a business whatever column it arrived in. `debtorKindFrom` reads those,
+   * says on the row how it decided, and falls back to a person -- which is what the database column
+   * has always defaulted to. The dropdown stays on the current sheet, because a client who KNOWS
+   * should not have us inferring it.
+   */
   {
     key: 'debtor_kind', label: 'Person or business', group: 'The debtor', kind: 'choice',
-    required: true, choices: ['Person', 'Business'],
-    note: 'A business is never addressed as "Mr", and it is traced differently. Pick one.',
+    choices: ['Person', 'Business'],
+    note: 'A business is never addressed as "Mr", and it is traced differently. Pick one. Left '
+      + 'empty, we read it off the ID or registration number.',
   },
   {
     key: 'name', label: 'Surname, or the business name', group: 'The debtor', kind: 'text',
@@ -240,6 +262,99 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   { key: 'other_email', label: 'Another email address', group: 'Anything else worth ringing', kind: 'text', note: 'e.g. j.vdwesthuizen@work.co.za.' },
   { key: 'other_contact_note', label: 'Whose numbers are these', group: 'Anything else worth ringing', kind: 'text', note: 'Say whose they are, e.g. "his employer\u2019s switchboard, ask for Sarah".' },
 ]
+
+/* ---------------------------------------------------------------------------------------------
+ * THE COLUMNS THE FIRM HAS DECIDED NOT TO ASK FOR.
+ *
+ * WHY THIS LIST EXISTS AT ALL, which is the firm reading their own import back: the screen said
+ * "Not recognised, so not imported: Role, Interest Rate, Interest Date, Percentage, Client
+ * Division, Home Phone 2, ... Capital on Default, Debtor Surname" over twenty-eight headings, and
+ * nearly none of that was true.
+ *
+ * THREE DIFFERENT THINGS WERE BEING SAID IN ONE SENTENCE, and only the smallest of them was what
+ * the sentence claimed:
+ *
+ *   1. A heading nobody has ever decided about. `Role`, `Client Division`. THIS is "not
+ *      recognised", it is a question for a person, and there turn out to be two of them.
+ *   2. A heading that LOST A CONTEST to its twin and whose data came in anyway. "Capital on
+ *      Default" sat beside "Amount" with the same figure in both; "Debtor Surname" was empty and
+ *      "Debtor Initials" held every surname. Both were read, correctly, through the other column
+ *      — and telling the firm the handover amount was "not imported" is the most alarming
+ *      possible way to describe an import that worked.
+ *   3. A heading the firm DELIBERATELY DOES NOT COLLECT. "Interest Rate" is not unrecognised;
+ *      Raptor knows exactly what it is and declines it, because the rate is in the agreement the
+ *      firm already holds. Filing a decision under "not recognised" invites somebody to undo it.
+ *
+ * So this list is the third kind, written down, with the reason beside each — and the importer
+ * reports the three apart. A warning that fires when nothing is wrong is worse than no warning,
+ * because people stop reading it, and twenty-six false alarms were burying the two real ones.
+ *
+ * IT IS NOT A WAY TO DROP A COLUMN QUIETLY. Every heading here is still REPORTED, and reported
+ * with a count: a `Home Phone 2` that is empty in every row is a line of housekeeping, and one
+ * with eight numbers in it is a client handing us telephone numbers we are throwing away. Those
+ * are different sentences and the importer writes whichever is true.
+ * ------------------------------------------------------------------------------------------- */
+
+export interface NotCollectedColumn {
+  /** Every heading that means this, as the old sheets write it. */
+  headings: string[]
+  /** Why it is not asked for, in the firm's terms. Shown beside the heading. */
+  why: string
+}
+
+export const NOT_COLLECTED: NotCollectedColumn[] = [
+  /*
+   * THE INTEREST BLOCK, at the firm's instruction: "remove the things about interest and the
+   * interruptor." The old sheet asked for the rate TWICE in two different units -- "Interest Rate"
+   * 24 and "Percentage" 0.25, a percent and a fraction with nothing saying which was which -- and
+   * `toDebtorInput` opens every account at 0% on purpose, because an account at nought is one
+   * somebody notices and an account at a guessed 24% is one nobody does.
+   */
+  {
+    headings: ['Interest Rate', 'Percentage', 'Interest Date'],
+    why: 'the rate is in the agreement you have already sent us, so the account opens at 0% and '
+      + 'the firm sets it from the agreement',
+  },
+  /*
+   * THE FOURTH COLUMN OF EVERY KIND. The old sheet carried four of each telephone, four emails,
+   * three faxes and three next of kin; thirty-one of its fifty-five columns were empty in every
+   * row. The current sheet asks for the ones that get used and gives everything else ONE place
+   * with a line saying whose it is -- see 'Anything else worth ringing' above. A number nobody can
+   * say whose it is gets rung once and never again.
+   */
+  {
+    headings: [
+      'Home Phone 2', 'Home Phone 3', 'Home Phone 4',
+      'Work Phone 2', 'Work Phone 3', 'Work Phone 4',
+      'Cell Phone 4', 'Email 4', 'Next of Kin Number 3',
+    ],
+    why: 'the sheet now asks for one spare number under "Another number", with a line saying '
+      + 'whose it is',
+  },
+  /* THE FIRM DOES NOT FAX, and has not for the life of this system. Listed rather than left
+     unrecognised so that nobody "fixes" it by adding a fax column. */
+  { headings: ['Fax Number 1', 'Fax Number 2', 'Fax Number 3'], why: 'the firm does not send faxes' },
+  /*
+   * AND THE DEBTOR'S CIRCUMSTANCES. The firm's own words on the group these came out of: nobody
+   * should think "they are being asked for a debtor's marital status before they can hand over an
+   * account". None of them changes how a debt is collected. The employer and the occupation DO --
+   * they are how somebody who has moved is traced -- and both are still asked for.
+   */
+  {
+    headings: ['Nationality', 'Gender', 'Marital Status', 'Number of Children', 'Passport number'],
+    why: 'none of it changes how the debt is collected, and the sheet asks for the employer and '
+      + 'occupation instead, which is what a trace runs on',
+  },
+]
+
+/** Heading, reduced, to the reason the firm does not collect it. */
+export function notCollectedIndex(): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const c of NOT_COLLECTED) {
+    for (const h of c.headings) out.set(headingKey(h), c.why)
+  }
+  return out
+}
 
 /** The order the groups appear in, taken from the columns so the two cannot disagree. */
 export const HANDOVER_GROUPS = [...new Set(HANDOVER_COLUMNS.map((c) => c.group))]

@@ -13,9 +13,10 @@ import { readFileSync } from 'node:fs'
  * debtor has to come out of both.
  */
 import {
-  checkPhone, dateFault, detectDateOrder, displayDate, looksLikeEmail, parseMoney, parseSheetDate,
-  planHandover, repairPhone, spellDate,
+  checkPhone, dateFault, debtorKindFrom, detectDateOrder, displayDate, looksLikeEmail, parseMoney,
+  parseSheetDate, planHandover, repairPhone, spellDate, toDebtorInput,
 } from '../../src/lib/handoverImport.ts'
+import { NOT_COLLECTED, aliasIndex, headingKey } from '../../src/lib/handoverSheet.ts'
 import { validateNewDebtor } from '../../src/lib/newDebtor.ts'
 import { suggestedDesk } from '../../src/lib/linkedAccount.ts'
 
@@ -324,9 +325,30 @@ check('the column with the surnames in it wins, not the one that is named after 
 check('...and the reference comes from the column that has references',
   decoy.ready[0]?.values.client_reference, 'GPS3/10103')
 check('...so nothing is refused', [decoy.refused.length, decoy.ready.length], [0, 2])
-/* The loser is NAMED. A column silently dropped is a column somebody spends an afternoon on. */
+/*
+ * THE LOSER IS NAMED, WITH THE WINNER BESIDE IT -- and it is NOT in `unrecognised`, which is the
+ * firm's own correction. It used to be, and the sentence on the screen read "Not recognised, so not
+ * imported: ... Debtor Surname". Both halves were untrue: Raptor recognised the heading perfectly
+ * and the surnames imported, through the column headed "Debtor Initials" one to the right.
+ *
+ * Asserted BOTH WAYS, because a check that only looked for the new list would pass while the old
+ * false sentence went on being drawn.
+ */
 ok('the empty heading that lost is reported rather than dropped',
-  decoy.unrecognised.includes('Debtor Surname') && decoy.unrecognised.includes('Client Prefix'))
+  decoy.superseded.some((x) => x.heading === 'Debtor Surname')
+  && decoy.superseded.some((x) => x.heading === 'Client Prefix'))
+ok('...and is not called unrecognised, because it was recognised',
+  !decoy.unrecognised.includes('Debtor Surname') && !decoy.unrecognised.includes('Client Prefix'))
+/* AND THE LINE SAYS WHERE THE DATA CAME FROM INSTEAD. "The surname came from Debtor Initials" is
+   the one fact worth a person's attention here, and it is the fact the old sentence left out. */
+check('...naming the heading that was read in its place',
+  decoy.superseded.find((x) => x.heading === 'Debtor Surname')?.insteadOf, 'Debtor Initials')
+check('...and what the firm calls the column',
+  decoy.superseded.find((x) => x.heading === 'Debtor Surname')?.label,
+  'Surname, or the business name')
+/* WITH THE COUNT, which is what proves the right one won rather than merely that one did. */
+check('...and that the loser was the empty one',
+  decoy.superseded.find((x) => x.heading === 'Debtor Surname')?.filled, 0)
 ok('...and the winner is the one in the mapping',
   decoy.matched.some((m) => m.heading === 'Debtor Initials' && m.key === 'name'))
 
@@ -343,7 +365,17 @@ const tied = planHandover({
   today: TODAY,
 })
 check('two equally full columns keep the first', tied.totalCapital, 48250)
-ok('...and the second is reported', tied.unrecognised.includes('Amount'))
+ok('...and the second is reported', tied.superseded.some((x) => x.heading === 'Amount'))
+/*
+ * AND THIS IS THE ONE THAT REACHED THE FIRM. Their sheet carries "Amount" and "Capital on Default"
+ * with the same figure in both, so one of them is always redundant -- and the screen told them
+ * "Capital on Default: not imported" over a handover whose amounts were perfect. Of all the columns
+ * to say that about, the capital is the one that empties a room.
+ */
+ok('...as a twin rather than as something that failed',
+  !tied.unrecognised.includes('Amount'))
+check('...and it says the figure came from the other heading',
+  tied.superseded.find((x) => x.heading === 'Amount')?.insteadOf, 'Capital on Default')
 
 /* ---------- 4. a heading nobody knows is reported, never guessed ---------- */
 
@@ -360,7 +392,45 @@ ok('...and does not take a column with it', odd.matched.length === 5)
 /* A sheet of nothing we know is not a sheet of nulls; it says so. */
 const nonsense = planHandover({ rows: [['Alpha', 'Beta'], ['1', '2']], today: TODAY })
 check('a file that is not a handover sheet is refused as one', nonsense.kind, 'unknown')
-check('...naming every required column it lacks', nonsense.missingRequired.length, 5)
+/*
+ * FOUR, NOT FIVE, AND THE ONE THAT LEFT IS THE POINT. `debtor_kind` was required and nothing
+ * enforced it, so the firm imported eight accounts off their Swordfish sheet and read "This sheet
+ * has no Person or business. Nothing can be imported from it." above eight accounts that had
+ * imported perfectly.
+ *
+ * NO OLD SHEET CAN EVER SUPPLY IT -- `Role` says debtor or surety, a different fact -- so requiring
+ * it refuses every old sheet, against the firm's instruction that one must still import. It is read
+ * off the ID or the registration number instead; see debtorKindFrom below.
+ *
+ * ASSERTED BY NAME as well as by count, because a count alone passes if some other required column
+ * is quietly dropped in its place.
+ */
+check('...naming every required column it lacks', nonsense.missingRequired.length, 4)
+ok('...and person-or-business is not one of them',
+  !nonsense.missingRequired.includes('Person or business'))
+for (const label of ['Your reference', 'Handover amount', 'Date of default',
+  'Surname, or the business name']) {
+  ok(`...${label} is still required`, nonsense.missingRequired.includes(label))
+}
+/*
+ * AND THE SHEET THE FIRM ACTUALLY SENT IMPORTS WITH NOTHING MISSING. The regression in one line:
+ * an old sheet with no Person or business column, carrying a valid ID, must report no missing
+ * required column at all.
+ */
+const swordfishShaped = planHandover({
+  rows: [
+    ['Client Reference', 'Amount', 'Date of Default', 'Debtor Initials', 'Debtor ID', 'Role'],
+    ['BF-026', '770.45', '2026/09/17', 'Kibido', '8403140043082', 'Debtor'],
+  ],
+  today: TODAY,
+})
+check('an old sheet is missing nothing it is required to have',
+  swordfishShaped.missingRequired, [])
+check('...and the row is accepted', swordfishShaped.ready.length, 1)
+/* AND `Role` IS STILL A QUESTION FOR A PERSON. It is the one heading on that sheet nobody has
+   decided about, and burying it under twenty-seven false alarms is how it stayed undecided. */
+check('...while the heading nobody has decided about is still named',
+  swordfishShaped.unrecognised, ['Role'])
 
 /* ---------- 5. refuse and warn are different things ---------- */
 
@@ -902,6 +972,230 @@ check('the blank rows the template carries are not read as debtors', padded.rows
 
 /* The line number is the one Excel shows, so "row 7" means row 7 on the person's screen. */
 check('a problem names the row as the spreadsheet numbers it', twice.rows[1]?.line, 3)
+
+/* ---------------------------------------------------------------------------------------------
+ * A COLUMN THE FIRM DECLINES IS NOT A COLUMN NOBODY RECOGNISED.
+ *
+ * THE FIRM'S SHEET PRODUCED TWENTY-EIGHT "not recognised, so not imported" headings, and two of
+ * them were. `Interest Rate` is not one of the two: Raptor knows exactly what it is and declines
+ * it, because the rate is in the agreement the firm already holds and `toDebtorInput` opens every
+ * account at 0% deliberately -- an account at nought is one somebody notices, an account at a
+ * guessed 24% is one nobody does.
+ *
+ * FILING A DECISION UNDER "not recognised" INVITES SOMEBODY TO UNDO IT, which is why the decision
+ * is now written down with its reason beside it, reported in its own sentence, and checked here.
+ * ------------------------------------------------------------------------------------------- */
+
+const declined = planHandover({
+  rows: [
+    ['Client Reference', 'Amount', 'Date of Default', 'Debtor Initials', 'Interest Rate',
+      'Percentage', 'Gender', 'Fax Number 1', 'Role'],
+    ['BF-026', '770.45', '2026/09/17', 'Kibido', '24', '0.25', '', '', 'Debtor'],
+  ],
+  today: TODAY,
+})
+ok('a declined column is reported as declined, not as unrecognised',
+  declined.notCollected.some((n) => n.heading === 'Interest Rate')
+  && !declined.unrecognised.includes('Interest Rate'))
+/* THE REASON TRAVELS WITH IT. "Not imported" with no reason is what somebody opens a ticket about. */
+ok('...with the reason beside it',
+  /agreement/i.test(declined.notCollected.find((n) => n.heading === 'Interest Rate')?.why ?? ''))
+/*
+ * AND THE COUNT, WHICH IS WHAT TURNS HOUSEKEEPING INTO A WARNING. An empty `Gender` is a column
+ * the client has not got round to deleting; an `Interest Rate` with a figure in every row is the
+ * client handing us something we are throwing away. The screen draws those as two different
+ * sentences in two different colours, so the planner has to tell them apart.
+ */
+check('a declined column with data in it says how much',
+  declined.notCollected.find((n) => n.heading === 'Interest Rate')?.filled, 1)
+check('...and an empty one says nought',
+  declined.notCollected.find((n) => n.heading === 'Gender')?.filled, 0)
+/* AND THE RATE IS STILL NOUGHT ON THE ACCOUNT, which is the decision the list is protecting. The
+   assertion that matters: a sheet that supplies 24% must not open an account at 24%. */
+check('a declined interest rate does not reach the account',
+  toDebtorInput(declined.ready[0].values, declined.ready[0].defaultDate).interestRateAnnual, '0')
+/*
+ * AND THE TWO LISTS MAY NEVER BOTH CLAIM A HEADING. `declined` is consulted BEFORE the alias table,
+ * so a heading added to both would be silently declined -- a column the sheet asks for, quietly not
+ * imported, with a reason on screen saying the firm meant it. Held over the whole table rather than
+ * over one heading, because the next collision will be somewhere else.
+ */
+const aliases = aliasIndex()
+for (const group of NOT_COLLECTED) {
+  for (const h of group.headings) {
+    ok(`"${h}" is declined and not also a column the sheet asks for`, !aliases.has(headingKey(h)))
+  }
+}
+/* AND EVERY ONE CARRIES A REASON. A declined column with an empty `why` draws a dangling dash. */
+for (const group of NOT_COLLECTED) {
+  ok(`a reason is given for ${group.headings[0]}`, group.why.trim().length > 20)
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * PERSON OR BUSINESS, READ OFF THE EVIDENCE.
+ *
+ * A business opened as a person is addressed as "Mr", traced through Home Affairs instead of CIPC,
+ * and carries a registration number in a field labelled ID. Every import in Raptor's history opened
+ * every account as a person, and the Swordfish sheet cannot say which is which at all -- so
+ * requiring the column refused the sheet and defaulting silently got it wrong.
+ *
+ * THE PRECEDENCE IS THE WHOLE CARE: what the client TYPED, then a fact, then a guess.
+ * ------------------------------------------------------------------------------------------- */
+
+check('what the client typed wins over anything derived',
+  debtorKindFrom({ debtor_kind: 'Business', id_number: '8403140043082' }),
+  { kind: 'company', from: 'stated' })
+check('...in both directions',
+  debtorKindFrom({ debtor_kind: 'Person', registration_number: '2019/940923/07' }),
+  { kind: 'individual', from: 'stated' })
+check('a registration number is only ever a company\u2019s',
+  debtorKindFrom({ registration_number: '2019/940923/07' }),
+  { kind: 'company', from: 'registration-number' })
+check('a valid ID is only ever a person\u2019s',
+  debtorKindFrom({ id_number: '8403140043082' }), { kind: 'individual', from: 'id-number' })
+/*
+ * THE CHECKSUM, NOT THE LENGTH, and this is the assertion the old sheet earns. All 45 of its rows
+ * had a cell phone in the ID column; nine numeric digits must not be allowed to decide what a
+ * debtor is.
+ */
+check('a cell phone in the ID column decides nothing',
+  debtorKindFrom({ id_number: '0635684927', name: 'Kibido' }),
+  { kind: 'individual', from: 'default' })
+/* THE NAME IS THE SOFT SIGNAL AND IS READ LAST, so it can never overturn an ID. */
+check('an ID outranks a business-looking name',
+  debtorKindFrom({ id_number: '8403140043082', name: 'Kibido Trust' }),
+  { kind: 'individual', from: 'id-number' })
+for (const name of ['Mielies en Meer (Pty) Ltd', 'Mielies en Meer Pty Ltd', 'Bosveld Transport CC',
+  'Bosveld Transport c.c.', 'Grootplaas Boerdery (Edms) Bpk', 'Die Van Wyk Familie Trust',
+  'Smit en Seun Inc', 'Hoop vir Almal NPC', 'Kalahari Mining Ltd']) {
+  check(`"${name}" is a business`, debtorKindFrom({ name }).kind, 'company')
+}
+/*
+ * AND A SURNAME IS NOT. The pattern is anchored to the END of the name for exactly this: a loose
+ * search for "inc" makes a debtor called Inez into a close corporation, and a statutory demand
+ * addressed to a company that is a person is a defective demand.
+ */
+for (const name of ['Kibido', 'Ncube', 'Inez', 'Limpopo', 'Van Der Westhuizen', 'Trustwell Dube']) {
+  check(`"${name}" is a person`, debtorKindFrom({ name }).kind, 'individual')
+}
+check('nothing at all is a person, and says it was a default',
+  debtorKindFrom({}), { kind: 'individual', from: 'default' })
+
+/*
+ * AND IT REACHES THE ACCOUNT, which is the half that was missing for the whole of Raptor's history:
+ * the planner can read it perfectly and the mapper can still open a person.
+ */
+const business = planHandover({
+  rows: [
+    ['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+      'Company registration number'],
+    ['A1', '100', '2026-01-01', 'Bosveld Transport CC', '2019/940923/07'],
+  ],
+  today: TODAY,
+})
+check('a business on the sheet opens as a business',
+  toDebtorInput(business.ready[0].values, business.ready[0].defaultDate).debtorKind, 'company')
+/* AND ITS IDENTITY IS THE REGISTRATION NUMBER, not an empty ID field. */
+check('...carrying its registration number as its identity',
+  toDebtorInput(business.ready[0].values, business.ready[0].defaultDate).idNumber, '2019/940923/07')
+
+/*
+ * A GUESS IS SAID ON THE ROW, A FACT IS NOT. A note per row on nineteen thousand accounts is how a
+ * screen becomes unreadable, so the two silent cases have to stay silent -- and the two decided
+ * cases have to speak.
+ */
+const guessed = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name'],
+    ['A1', '100', '2026-01-01', 'Bosveld Transport CC'],
+    ['A2', '100', '2026-01-01', 'Kibido']],
+  today: TODAY,
+})
+ok('a kind read off the name says so on the row',
+  problemsOf(guessed.rows[0]).some((p) => /registered name/i.test(p.message)))
+ok('...and a row with nothing to read it from says that instead',
+  problemsOf(guessed.rows[1]).some((p) => /does not say/i.test(p.message)))
+/* A NOTE, NEVER A WARNING. Neither blocks anything and neither is work for anybody: 97% of the book
+   has no ID number, so a warning here would be a warning on nearly every account the firm imports. */
+ok('...and neither of them blocks the row',
+  guessed.refused.length === 0
+  && guessed.rows.every((r) => problemsOf(r).filter((p) => /person|business|registered name/i
+    .test(p.message)).every((p) => p.level === 'note')))
+/* AND A STATED ANSWER SAYS NOTHING AT ALL. */
+const stated = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+    'Person or business'], ['A1', '100', '2026-01-01', 'Dube', 'Person']],
+  today: TODAY,
+})
+ok('a client who answered is not told about it',
+  !problemsOf(stated.rows[0]).some((p) => /person|business/i.test(p.message)))
+/* A WORD NEITHER LIST KNOWS IS STILL REPORTED. The client answered, just not in our vocabulary, and
+   "Sole proprietor" silently read as a person is the kind of thing nobody finds for a year. */
+const oddKind = planHandover({
+  rows: [['Your reference', 'Handover amount', 'Date of default', 'Surname, or the business name',
+    'Person or business'], ['A1', '100', '2026-01-01', 'Dube', 'Sole proprietor']],
+  today: TODAY,
+})
+ok('an answer in neither vocabulary is reported',
+  problemsOf(oddKind.rows[0]).some((p) => /Sole proprietor/.test(p.message)))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE SCREEN DRAWS THE THREE APART.
+ *
+ * The planner can sort them perfectly and the card can still print one sentence over all three,
+ * which is exactly the state this started in. Read off the source because the lists are only worth
+ * having if somebody sees them separately.
+ * ------------------------------------------------------------------------------------------- */
+
+/* `card` is read once at the top of this file and is ALREADY COMMENT-STRIPPED, which every
+   assertion here depends on: the card explains at length what it no longer says, so a search over
+   the raw source would find the old sentence quoted in the note above the new one. The trap this
+   codebase has walked into three times. */
+ok('the card source was stripped of its comments', !/Nothing can be imported from it\./
+  .test(card.slice(0, card.indexOf('PlanSummary'))))
+
+ok('the card draws each of the three lists', /plan\.unrecognised\.length > 0/.test(card)
+  && /plan\.superseded\.length > 0/.test(card)
+  && /plan\.notCollected\.some/.test(card))
+/*
+ * AND "not imported" IS SAID OF ONE LIST ONLY. The sentence is honest about a heading nobody knows
+ * and about a declined column with data in it; said over a twin it is false, because the data came
+ * in through the other heading. Held as the absence of that phrase anywhere near the twins.
+ */
+const twinLine = card.slice(card.indexOf('plan.superseded.length > 0'),
+  card.indexOf('plan.superseded.length > 0') + 600)
+ok('the twins block was found', twinLine.length > 200)
+ok('...and does not tell the firm a twin was not imported', !/not imported/.test(twinLine))
+/* IT NAMES THE WINNER INSTEAD, which is the one thing on that line worth reading. */
+ok('...naming where the column was read from', /insteadOf/.test(twinLine))
+/*
+ * AND A DECLINED COLUMN WITH DATA IS DRAWN APART FROM AN EMPTY ONE. Same list, two different facts:
+ * an empty `Gender` is housekeeping and an `Interest Rate` with a figure in every row is the client
+ * handing us something we are discarding. One sentence over both is the fault all of this fixes.
+ */
+ok('a declined column with data is drawn separately from an empty one',
+  /notCollected\.filter\(\(n\) => n\.filled > 0\)/.test(card)
+  && /notCollected\.filter\(\(n\) => n\.filled === 0\)/.test(card))
+ok('...and the one with data says how many values', /n\.filled\}/.test(card))
+ok('...and carries the firm s reason', /n\.why/.test(card))
+/*
+ * AND THE MISSING-COLUMN LINE READS THE OUTCOME, NOT THE FLAG. "Nothing can be imported from it"
+ * over eight ready accounts is the sentence the firm met, and it came of trusting
+ * `missingRequired` rather than asking whether anything had in fact been refused.
+ */
+ok('the missing-column sentence asks whether anything was actually refused',
+  /plan\.ready\.length === 0[\s\S]{0,120}Nothing can be imported/.test(card))
+/* NOT RED OVER A WORKING IMPORT. A red line somebody cannot act on is how they learn to skip it. */
+ok('...and is only red when nothing came through',
+  /plan\.ready\.length === 0 \? 'text-negative-700'/.test(card))
+/*
+ * EVERY COLOUR NAMES A TOKEN THAT EXISTS. index.css says it: a Tailwind utility naming a token
+ * that is not defined COMPILES TO NOTHING -- no warning, and the warning is drawn in the body
+ * colour on a white card. Written first as `text-warning-700`, which is not a token in this app.
+ */
+const css = readFileSync(new URL('../../src/index.css', import.meta.url), 'utf8')
+for (const token of [...card.matchAll(/text-\[var\((--[a-z0-9-]+)\)\]/g)].map((m) => m[1])) {
+  ok(`${token} is a real token`, css.includes(`${token}:`))
+}
 
 /* ---------------------------------------------------------------- report */
 

@@ -45,6 +45,40 @@ check('tracing is tracing', at('Active: Activated', 'Tracing'), 'tracing')
  * of the book, and reporting them as Legal would tell clients a third of their book was in court.
  */
 check('section 129 is ordinary collection, not legal', at('Active: Activated', 'Section 129'), 'in_progress')
+/*
+ * AND THE RUNG MUST NOT CLAIM THE DEMAND WENT OUT, which is the other half of the same rule and
+ * the half that reached the firm. The mapping above is about the CATEGORY: a served section 129
+ * still reports here rather than as Legal. The MEANING is read on one account, and it said
+ * "including where a Section 129 demand has been issued" on a handover made that morning.
+ *
+ * THE FIRM: "the section 129 has not been issued. The handover notice has been issued." 279
+ * accounts on the book carry a demand against nineteen thousand that do not, so for 97% of this
+ * rung the sentence described something that had not happened — a client told their debtor was
+ * served a statutory demand when nothing of the kind had gone out.
+ *
+ * HELD AS AN ABSENCE OVER EVERY MEANING, not only this one, because the fault is general: a rung's
+ * meaning is read against one account, so it may only say what is true of all of them. Naming a
+ * statutory step in any of these is the same mistake wherever it reappears.
+ */
+for (const p of CLIENT_POSITION_ORDER) {
+  ok(`the ${p} meaning does not assert a section 129`,
+    !/129/.test(CLIENT_POSITIONS[p].meaning))
+}
+/* AND SUMMONS IS THE ONE THAT MAY: `legal` is reached only by a summons or an attorney, so there
+   the step is what the rung means rather than a thing that might also be true. */
+ok('legal may name its own step', /summons|attorney/i.test(CLIENT_POSITIONS.legal.meaning))
+/*
+ * NOR MAY IT CLAIM THE DEBTOR ANSWERED. Reaching them is `negotiating` one rung up and is the
+ * distinction this rung exists for; "we are in talks" on the floor of the ladder would collapse
+ * the two and make the move off it invisible.
+ */
+ok('in progress does not claim the debtor has been reached',
+  !/in talks|reached|spoke|arrangement/i.test(CLIENT_POSITIONS.in_progress.meaning))
+/* AND IT STILL SAYS SOMETHING HAPPENED. The firm's complaint was two-sided — the sentence it
+   replaced an earlier one over was "no contact attempt has been made", which is worse. The notices
+   go out automatically on handover, so the rung with no conclusion yet is not a rung with nothing
+   done on it. */
+ok('...but does say the notices went out', /notice/i.test(CLIENT_POSITIONS.in_progress.meaning))
 check('summons is legal', at('Active: Activated', 'Summons issued'), 'legal')
 check('with attorneys is legal', at('Active: Activated', 'Attorney instructed'), 'legal')
 check('a payment default is a broken arrangement', at('Active: Activated', 'Payment Default'), 'broken_arrangement')

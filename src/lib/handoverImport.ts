@@ -20,7 +20,9 @@
  * NOTHING HERE WRITES. This plans; the screen shows the plan; writing is a separate, deliberate
  * act. That is the same shape as the Swordfish migration and for the same reason.
  */
-import { HANDOVER_COLUMNS, aliasIndex, headingKey, type HandoverColumn } from './handoverSheet.ts'
+import {
+  HANDOVER_COLUMNS, aliasIndex, headingKey, notCollectedIndex, type HandoverColumn,
+} from './handoverSheet.ts'
 /* The same ID check the by-hand form uses. Two implementations of a Luhn checksum eventually
    disagree, and the one that disagrees is whichever a person is not looking at. */
 import { isValidSaId, type NewDebtorInput } from './newDebtor.ts'
@@ -330,6 +332,31 @@ export interface PlannedRow {
   linkedTo: LinkedMatch | null
 }
 
+export interface SupersededColumn {
+  /** The heading that lost. */
+  heading: string
+  /** The heading that won, which is where this column's data actually came from. */
+  insteadOf: string
+  /** What the firm calls the column both of them claimed. */
+  label: string
+  /** Rows with something in the losing column. Nought on nearly every one of them. */
+  filled: number
+}
+
+export interface NotCollectedReport {
+  heading: string
+  /** The firm's reason, off NOT_COLLECTED. */
+  why: string
+  /**
+   * Rows with something in it, which is what turns housekeeping into a warning.
+   *
+   * An empty `Home Phone 2` is a column the client has not got round to deleting. One with eight
+   * numbers in it is a client handing the firm telephone numbers nobody is going to ring, and that
+   * is worth a different sentence and a different colour.
+   */
+  filled: number
+}
+
 export interface HandoverPlan {
   kind: SheetKind
   /** Which way round this file writes a text date, and whether it proved it. */
@@ -337,8 +364,27 @@ export interface HandoverPlan {
   /** One sentence for the screen, before anything is written. */
   note: string
   matched: ColumnMatch[]
-  /** Headings nobody claimed. Reported, never guessed at. */
+  /**
+   * Headings nobody has ever decided about. Reported, never guessed at.
+   *
+   * THIS LIST GOT MUCH SHORTER AND MUCH MORE USEFUL, which was the point. It used to carry three
+   * unalike things under one word -- a heading nobody knows, a heading that lost a contest to its
+   * twin and came in through it, and a column the firm deliberately declines -- and on the firm's
+   * own sheet it read twenty-eight long. Two of those twenty-eight were actually this. The other
+   * two lists below are where the rest went, and each says the true thing about its own members.
+   */
   unrecognised: string[]
+  /**
+   * A heading that lost a contest to its twin, and the twin that took it.
+   *
+   * NOT A FAILURE, AND IT WAS BEING REPORTED AS ONE. A sheet carrying both "Amount" and "Capital
+   * on Default" has one figure under two names; one of them is read and the other is redundant.
+   * Saying "Capital on Default: not imported" to somebody looking at a handover they have just
+   * done is a sentence about the most important column on the sheet, and it is false.
+   */
+  superseded: SupersededColumn[]
+  /** Columns the firm has decided not to collect, with the reason and whether anything was in it. */
+  notCollected: NotCollectedReport[]
   /** Required columns the sheet does not have at all. Any one of these refuses the whole file. */
   missingRequired: string[]
   rows: PlannedRow[]
@@ -520,15 +566,30 @@ export function planHandover(input: {
   today: string
 }): HandoverPlan {
   const index = aliasIndex()
+  const declined = notCollectedIndex()
   const header = (input.rows[0] ?? []).map((h) => (h ?? '').trim())
   const matched: ColumnMatch[] = []
   const unrecognised: string[] = []
+  const superseded: SupersededColumn[] = []
+  /* The column INDEX is carried rather than the heading looked up again later: two columns can
+     carry the same heading text, and `findIndex` on it would count the wrong one's cells. */
+  const notCollected: { i: number; heading: string; why: string }[] = []
   /** heading position -> column key, so a row is read by position and named by key. */
   const at = new Map<number, string>()
 
   const claims: { i: number; heading: string; col: HandoverColumn }[] = []
+  /*
+   * THREE OUTCOMES FOR A HEADING, AND THEY ARE SORTED HERE RATHER THAN ALL CALLED THE SAME THING.
+   *
+   * A column the firm has decided not to collect is checked BEFORE the alias table, which is the
+   * order that matters: were it the other way round, adding `Interest Rate` to the aliases one day
+   * would silently start importing a figure the firm instructed us not to use, and check-handover-
+   * sheet refuses the overlap outright so the two lists cannot both claim a heading.
+   */
   header.forEach((heading, i) => {
     if (!heading) return
+    const why = declined.get(headingKey(heading))
+    if (why) { notCollected.push({ i, heading, why }); return }
     const col = index.get(headingKey(heading))
     if (!col) { unrecognised.push(heading); return }
     claims.push({ i, heading, col })
@@ -562,7 +623,23 @@ export function planHandover(input: {
   }
 
   for (const { i, heading, col } of claims) {
-    if (!winners.has(i)) { unrecognised.push(heading); continue }
+    if (!winners.has(i)) {
+      /*
+       * THE LOSER IS NAMED WITH THE WINNER BESIDE IT, not filed under "not recognised". Both
+       * headings mean the same column and one of them was read; what the firm needs to know is
+       * WHICH, because on their own sheet the answer was startling -- every surname came out of a
+       * column headed "Debtor Initials" while "Debtor Surname" sat empty. That is a correction
+       * worth seeing, and it was being reported as a loss.
+       */
+      const winner = claims.find((c) => c.col.key === col.key && winners.has(c.i))
+      superseded.push({
+        heading,
+        insteadOf: winner?.heading ?? col.label,
+        label: col.label,
+        filled: filled(i),
+      })
+      continue
+    }
     at.set(i, col.key)
     const k = headingKey(heading)
     matched.push({
@@ -668,6 +745,10 @@ export function planHandover(input: {
       : note,
     matched,
     unrecognised,
+    superseded,
+    /* COUNTED OVER THE BODY, now that the body is in hand: the sentence changes depending on
+       whether the client actually put anything in a column we are declining. */
+    notCollected: notCollected.map((n) => ({ heading: n.heading, why: n.why, filled: filled(n.i) })),
     missingRequired,
     rows,
     ready,
@@ -839,9 +920,33 @@ function readRow(
     }
   }
 
-  if (values.debtor_kind && !/^(person|business)$/i.test(values.debtor_kind)) {
-    warn('debtor_kind',
-      `"${values.debtor_kind}" is neither Person nor Business; it will be read as a person.`)
+  /*
+   * PERSON OR BUSINESS, AND HOW WE KNOW -- said on the row, at the level the evidence deserves.
+   *
+   * It used to be one warning that fired only on a value that was neither word, which meant the
+   * commonest case by far said nothing at all: the Swordfish sheet has no such column, so every
+   * account came out a person in silence. A business opened as a person is addressed as "Mr",
+   * traced through Home Affairs instead of CIPC, and carries a registration number in a field
+   * labelled ID.
+   *
+   * A STATED ANSWER AND A DERIVED FACT SAY NOTHING -- there is nothing for anybody to do about
+   * either, and a line per row on nineteen thousand accounts is how a screen becomes unreadable.
+   * A GUESS IS A NOTE: something the import decided, which blocks nothing and asks nothing, but is
+   * there when somebody wonders why a close corporation is being written to as a person.
+   */
+  const kindRead = debtorKindFrom(values)
+  if (values.debtor_kind && kindRead.from !== 'stated') {
+    /* A WORD NEITHER LIST RECOGNISES. "Sole proprietor", "surety", "Debtor" -- the client answered,
+       just not in our vocabulary, so the answer is reported rather than quietly ignored. */
+    warn('debtor_kind', `"${values.debtor_kind}" is neither Person nor Business; read as `
+      + `${kindRead.kind === 'company' ? 'a business' : 'a person'} from the `
+      + `${kindRead.from === 'default' ? 'absence of anything else' : kindRead.from.replace('-', ' ')}.`)
+  } else if (kindRead.from === 'registered-name') {
+    note('debtor_kind', `Opened as a business — "${(values.name ?? '').trim()}" is a registered `
+      + 'name. Nothing on the sheet said which.')
+  } else if (kindRead.from === 'default') {
+    note('debtor_kind', 'Opened as a person — the sheet does not say, and there is no ID or '
+      + 'registration number to read it from.')
   }
 
   /*
@@ -965,6 +1070,73 @@ function readRow(
  * that imports it cannot run at all — which is how this ended up in the wrong file first. The
  * mapping is the interesting part and it is the part worth testing.
  */
+/* ---------------------------------------------------------------- person or business */
+
+/**
+ * A REGISTERED NAME, in the shapes South African companies actually carry.
+ *
+ * Anchored to the END of the name, because that is where a legal form goes -- and because a loose
+ * search would make a debtor called Inez into a business. "Ltd" alone is matched only at the end
+ * for the same reason; a `(Pty) Ltd` is caught by it too, and the brackets are not relied on
+ * because half the sheets in the building drop them.
+ */
+const BUSINESS_SUFFIX =
+  /\b(?:\(?\s*pty\s*\)?\s*(?:ltd|limited)|\(?\s*edms\s*\)?\s*bpk|c\.?c\.?|b\.?k\.?|inc(?:orporated)?|npc|soc\s+ltd|ltd|limited|bpk|trust|beperk)\s*\.?\s*$/i
+
+export type DebtorKind = 'individual' | 'company'
+
+export interface DebtorKindReading {
+  kind: DebtorKind
+  /** How it was decided, so the row can say so and nobody has to guess later. */
+  from: 'stated' | 'registration-number' | 'registered-name' | 'id-number' | 'default'
+}
+
+/**
+ * PERSON OR BUSINESS, read off whatever the sheet actually gives.
+ *
+ * WHY THIS IS NOT JUST A DEFAULT. A business is never addressed as "Mr", it is traced through CIPC
+ * rather than Home Affairs, and its identity number is a registration number -- three things that
+ * go wrong quietly on an account opened as the wrong kind. Every import in Raptor's history opened
+ * every account as a person, including the ones a client had plainly filled in as a company, and
+ * the Swordfish sheet cannot say which is which at all.
+ *
+ * PRECEDENCE IS THE CLIENT FIRST, THEN A FACT, THEN A GUESS, and the order is the whole care here.
+ * What the client TYPED beats anything derived -- they know their own debtor, and a dropdown that
+ * is overruled by an inference is a dropdown that lies. After that, two unambiguous facts: a
+ * registration number is only ever a company's, and a valid thirteen-digit ID is only ever a
+ * person's. The NAME is read last and is the only soft signal, so it can never overturn an ID.
+ *
+ * AND THE FALLBACK IS A PERSON, unchanged. 19 668 of the live book's 19 912 accounts have no ID
+ * number at all, so "no ID" cannot be allowed to mean anything; `individual` is what the column
+ * has always defaulted to, and the reading says it was a default rather than a finding.
+ *
+ * Pure, and it takes the values rather than a row: check-handover-import holds it on its own.
+ */
+export function debtorKindFrom(values: {
+  debtor_kind?: string | null
+  registration_number?: string | null
+  id_number?: string | null
+  name?: string | null
+}): DebtorKindReading {
+  const stated = (values.debtor_kind ?? '').trim()
+  if (/^business|^compan|^cc$|^pty/i.test(stated)) return { kind: 'company', from: 'stated' }
+  if (/^person|^individual|^natural/i.test(stated)) return { kind: 'individual', from: 'stated' }
+
+  if ((values.registration_number ?? '').trim()) {
+    return { kind: 'company', from: 'registration-number' }
+  }
+  /* THE CHECKSUM, NOT THE LENGTH. The old sheet put a cell phone in the ID column on all 45 rows,
+     and nine digits that happen to be numeric must not decide what a debtor is. Same isValidSaId
+     the by-hand form uses and the row warning above, so the three cannot drift. */
+  const id = (values.id_number ?? '').replace(/\s/g, '')
+  if (id && isValidSaId(id)) return { kind: 'individual', from: 'id-number' }
+
+  if (BUSINESS_SUFFIX.test((values.name ?? '').trim())) {
+    return { kind: 'company', from: 'registered-name' }
+  }
+  return { kind: 'individual', from: 'default' }
+}
+
 export function toDebtorInput(
   values: Record<string, string | null>,
   /**
@@ -995,10 +1167,13 @@ export function toDebtorInput(
     /*
      * PERSON OR COMPANY, which no import has ever written. Every account the sheet opened came
      * out as a person, including the ones a client filled in as a business -- the same state the
-     * Swordfish import left the book in. Anything that is not plainly "business" is a person,
-     * which is what the column defaults to and what the planner already warns about.
+     * Swordfish import left the book in.
+     *
+     * NOW READ OFF THE EVIDENCE rather than off this one column, because the Swordfish sheet has
+     * no such column and the firm's instruction is that an old sheet must still import. The
+     * precedence and the reasons are on debtorKindFrom; the row says how it was decided.
      */
-    debtorKind: /^business/i.test(v('debtor_kind')) ? 'company' : 'individual',
+    debtorKind: debtorKindFrom(values).kind,
     /*
      * ONE IDENTITY FIELD, TWO MEANINGS, told apart by debtorKind. The sheet asks a business for a
      * registration number in its own column and it was read by nothing, so a company handed over

@@ -979,9 +979,28 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
   return (
     <div className="mt-4 space-y-3">
       <p className="text-sm text-slate-600">{plan.note}</p>
+      {/*
+        A MISSING COLUMN IS NOT ALWAYS A DEAD FILE, AND THIS SAID IT WAS.
+        ----------------------------------------------------------------
+        "Nothing can be imported from it" was drawn off the flag rather than off the outcome, and
+        the two disagree on two of the four required columns. The firm met it with eight accounts
+        sitting ready underneath: "This sheet has no Person or business. Nothing can be imported
+        from it." A date of default does the same -- its absence is a warning and a three-month
+        substitute, at the firm's own instruction that "not having the date of default is not a
+        deal breaker for starting to work the account".
+
+        So the sentence reads the REAL answer, which the planner has already worked out. Nothing
+        ready means nothing can be imported and it says so in red; something ready means the rows
+        below say what was used instead, and a red line over a working import is how people learn
+        to ignore red lines.
+      */}
       {plan.missingRequired.length > 0 && (
-        <p className="text-sm text-negative-700">
-          This sheet has no {plan.missingRequired.join(', ')}. Nothing can be imported from it.
+        <p className={`text-sm ${plan.ready.length === 0 ? 'text-negative-700' : 'text-[var(--c-gold-deep)]'}`}>
+          This sheet has no {plan.missingRequired.join(', ')}.{' '}
+          {plan.ready.length === 0
+            ? 'Nothing can be imported from it.'
+            : `${plan.ready.length === 1 ? 'The row' : 'All ' + plan.ready.length + ' rows'} below `
+              + 'still came through — each one says what was used instead.'}
         </p>
       )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1001,12 +1020,61 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
         ))}
       </div>
       {/*
+        THREE SENTENCES WHERE THERE WAS ONE, AND ONLY ONE OF THEM IS A WARNING.
+        ---------------------------------------------------------------------
+        This said "Not recognised, so not imported: ..." over every heading the mapper did not use,
+        and on the firm's own sheet that was twenty-eight of them -- including "Capital on Default",
+        whose figure had imported perfectly through the "Amount" column beside it. Twenty-six false
+        alarms burying two real ones is how people learn to skip a line of a screen.
+
+        Each list now says the true thing about its own members, and they are drawn in descending
+        order of how much somebody should care.
+      */}
+      {/*
         A HEADING NOBODY RECOGNISED IS NAMED, never mapped by position. The cost of a wrong guess
-        is a telephone number in the ID field, which is what the old sheet did on its own.
+        is a telephone number in the ID field, which is what the old sheet did on its own. This is
+        the one that is actually a question for a person, so it keeps the strongest wording.
       */}
       {plan.unrecognised.length > 0 && (
-        <p className="text-xs text-slate-500">
-          Not recognised, so not imported: {plan.unrecognised.join(', ')}.
+        <p className="text-xs text-[var(--c-gold-deep)]">
+          Not recognised, so not imported: {plan.unrecognised.join(', ')}. Tell us what{' '}
+          {plan.unrecognised.length === 1 ? 'it holds' : 'they hold'} and we will map{' '}
+          {plan.unrecognised.length === 1 ? 'it' : 'them'}.
+        </p>
+      )}
+      {/*
+        A COLUMN THE FIRM DECLINES, AND IT ONLY RAISES ITS VOICE WHEN THERE IS SOMETHING IN IT.
+        An empty "Home Phone 2" is a column the client has not got round to deleting; one with eight
+        numbers in it is the client handing us telephone numbers nobody will ring. Same list, two
+        different facts, so the ones with data are drawn separately and in amber.
+      */}
+      {plan.notCollected.some((n) => n.filled > 0) && (
+        <div className="text-xs text-[var(--c-gold-deep)] space-y-0.5">
+          {plan.notCollected.filter((n) => n.filled > 0).map((n) => (
+            <p key={n.heading}>
+              <span className="font-medium">{n.heading}</span> has {n.filled}{' '}
+              {n.filled === 1 ? 'value' : 'values'} and is not imported — {n.why}.
+            </p>
+          ))}
+        </div>
+      )}
+      {plan.notCollected.some((n) => n.filled === 0) && (
+        <p className="text-xs text-slate-400">
+          Empty columns the sheet no longer asks for, so nothing is lost:{' '}
+          {plan.notCollected.filter((n) => n.filled === 0).map((n) => n.heading).join(', ')}.
+        </p>
+      )}
+      {/*
+        AND THE TWINS, WHICH ARE NOT A PROBLEM AT ALL -- but naming the winner is the whole value
+        of the line. On the firm's sheet every surname came out of a column headed "Debtor
+        Initials" while "Debtor Surname" sat empty in all forty-five rows. Somebody should see that
+        once, and then go and fix the client's sheet.
+      */}
+      {plan.superseded.length > 0 && (
+        <p className="text-xs text-slate-400">
+          Two headings for one column, so the fuller one was read:{' '}
+          {plan.superseded.map((x) => `${x.label} came from “${x.insteadOf}”, not “${x.heading}”`)
+            .join('; ')}.
         </p>
       )}
       {docs && (

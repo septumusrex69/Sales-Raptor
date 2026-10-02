@@ -158,9 +158,31 @@ export const CLIENT_POSITIONS: Record<ClientPosition, PositionMeta> = {
      * collection is under way and nothing has come of it. The moment something does -- a
      * promise, a refusal, a dispute, a dead number -- the account leaves for the position that
      * says so.
+     *
+     * AND THE SENTENCE NO LONGER NAMES THE SECTION 129, which is the firm's correction on reading
+     * it over a handover made that morning: "the section 129 has not been issued. The handover
+     * notice has been issued. And initial contact and initial negotiations is underway."
+     *
+     * They were describing the fault exactly. "including where a Section 129 demand has been
+     * issued" was written about the CATEGORY -- a reminder that a served demand still reports here
+     * rather than as Legal, which remains true and is argued at length in clientPosition() below.
+     * On a screen it reads as a description of THE ACCOUNT IN FRONT OF YOU, and 279 accounts carry
+     * a section 129 against a book of nineteen thousand that does not. A client told their debtor
+     * had been served a statutory demand when nothing of the kind had gone out is the most
+     * expensive possible version of showing somebody a column instead of an answer.
+     *
+     * So the meaning says what is true of every account on this rung and nothing more: the
+     * notices went out, somebody is working it, nothing has come back. WHICH notices, on what
+     * dates, is a fact about one account and belongs where the facts are -- the narrative sentence
+     * underneath it reads the workflow's own sends, so a served section 129 is still reported, by
+     * the only thing that knows whether it happened.
+     *
+     * NOT "we are in talks", which is `negotiating` one rung up and the distinction this rung
+     * exists for: reaching the debtor is what moves an account off here.
      */
     label: 'In progress',
-    meaning: 'Ordinary collection is under way, including where a Section 129 demand has been issued.',
+    meaning: 'Collection is under way \u2014 the handover notices have gone out and we are making '
+      + 'contact. Nothing has come of it yet.',
     inPlay: true,
     tone: 'progressing',
   },
