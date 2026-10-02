@@ -225,6 +225,13 @@ const EVERYWHERE: MergeField[] = [
   { key: 'firm_postal_address', label: 'Where post to the firm is sent, on its own lines', sample: 'PO Box 1234\nPolokwane, 0700' },
   /* "Telephone this office" is only useful with the hours attached. */
   { key: 'firm_hours', label: 'When the office is open', sample: 'Monday to Friday, 08:00 – 16:30' },
+  /*
+   * THE COUNCIL REGISTRATION, which an acknowledgement of debt names in its very first item:
+   * "Bredell Ferreira (Pty) Ltd (CFDC 0124875/20) as its duly authorised agent". It is how a debtor
+   * can check that the party asking them to sign is registered to collect at all. Already on
+   * firm_settings and already edited in Settings -- it simply had no way into a document.
+   */
+  { key: 'firm_council_number', label: "The firm's Council for Debt Collectors number", sample: 'CFDC 0124875/20' },
 ]
 
 /**
@@ -306,6 +313,26 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      * is lower -- so a debtor asking why a fee was charged at R3.00 is asking about this number.
      */
     { key: 'balance_handover', label: 'What the client handed over to us', sample: 'R 52,000.00' },
+    /*
+     * THE CAPITAL CALCULATION AN ACKNOWLEDGEMENT OF DEBT HAS TO SHOW ITS WORKING FOR.
+     *
+     * Item 6 of the AoD's Part A is a sum the debtor signs their name under: what was handed over,
+     * plus interest, plus fees and VAT, less payments, equals the capital amount. Every line has to
+     * be printed, because the clause above it has the debtor confirm they have CHECKED it and agree
+     * it is correct -- a figure they cannot see is one they cannot have checked, and that is the
+     * clause an attorney attacks first.
+     *
+     * OFF THE LEDGER, like {{balance}} and {{paid_to_date}}: the account row's own columns disagree
+     * with the ledger beneath them on thousands of accounts, and a document somebody signs is the
+     * last place to take the worse of two numbers.
+     */
+    { key: 'interest_accrued', label: 'Interest since handover', sample: 'R 3,284.10' },
+    { key: 'fees_total', label: 'Fees and expenses, including VAT', sample: 'R 1,116.50' },
+    { key: 'fees_vat', label: 'VAT contained in those fees', sample: 'R 145.63' },
+    /* The rate itself. A document that says interest runs and does not say at what is one the
+       debtor cannot check either. */
+    { key: 'interest_rate', label: 'The interest rate on this account', sample: '24% a year' },
+    { key: 'interest_from', label: 'The day interest starts running', sample: '17 September 2026' },
     /*
      * THE FIELDS A LETTER NEEDS AND AN SMS NEVER DID.
      *
@@ -549,6 +576,18 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
     'paid_to_date', 'listing_date', 'listing_reference', 'bureaus_listed', 'balance_handover',
     'balance', 'capital', 'position_as_at', 'respond_by'] },
+  /*
+   * THE WORKING BEHIND THE BALANCE, APART FROM IT, and the acknowledgement of debt is why the
+   * group exists: item 6 prints the whole sum -- handed over, plus interest, plus fees and VAT,
+   * less payments -- because the clause above it has the debtor confirm they have CHECKED it.
+   *
+   * ITS OWN HEADING RATHER THAN FIVE MORE ENTRIES UNDER "The account", for the reason the
+   * arrangement has one: somebody reaching for "the amount" should not be offered {{balance}} and
+   * {{interest_accrued}} side by side as if either would do. These are the parts; the balance is
+   * the answer.
+   */
+  { title: 'How the balance is made up', keys: ['interest_accrued', 'fees_total', 'fees_vat',
+    'interest_rate', 'interest_from'] },
   /* THE ARRANGEMENT IS ABOUT THE ARRANGEMENT, not about the account: the balance is what is owed
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
@@ -591,7 +630,7 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   {
     title: 'The firm',
     keys: ['firm_name', 'firm_phone', 'firm_email', 'firm_website', 'firm_address',
-      'firm_postal_address', 'firm_hours'],
+      'firm_postal_address', 'firm_hours', 'firm_council_number'],
   },
   /* Not the firm: these are facts about THIS piece of correspondence -- the day it carries and
      the person putting their name under it. */
@@ -1131,8 +1170,25 @@ export function mergeValuesFor(input: {
    * companies.banking_details is still deliberately not read: remittance goes OUT to a client,
    * which is the opposite direction from both accounts below.
    */
+  /**
+   * THE LEDGER'S OWN BREAKDOWN, for the documents that have to show their working.
+   *
+   * Optional, and null leaves the placeholders standing -- the right failure: an acknowledgement
+   * of debt whose capital calculation cannot be filled in is one that must not go out, and the
+   * template check catches it before anybody signs anything.
+   */
+  breakdown?: {
+    interest: number
+    fees: number
+    receiptFees: number
+    vat: number
+  } | null
+  /** What the account's interest is doing, for the same documents. */
+  interestRateAnnual?: number | null
+  interestFrom?: string | null
   firm: {
     firmName: string
+    councilNumber?: string | null
     phone?: string | null
     email?: string | null
     website?: string | null
@@ -1184,6 +1240,18 @@ export function mergeValuesFor(input: {
     /* Never derived from the balance: it is a fact about the day the account arrived, and the
        only figure on the summary of account that does not move. */
     balance_handover: input.money(a.capitalHandedOver),
+    /* FEES AND THE VAT INSIDE THEM, never added together: vat is a COMPONENT of fees -- which is
+       what BalanceBreakdown's own comment says -- and summing them would overstate what the debtor
+       is putting their name to. */
+    interest_accrued: input.breakdown ? input.money(input.breakdown.interest) : null,
+    fees_total: input.breakdown
+      ? input.money(input.breakdown.fees + input.breakdown.receiptFees) : null,
+    fees_vat: input.breakdown ? input.money(input.breakdown.vat) : null,
+    /* "24% a year", not "24" -- the document reads as a sentence, and a bare number would be a
+       rate with no unit on something somebody signs. */
+    interest_rate: input.interestRateAnnual === null || input.interestRateAnnual === undefined
+      ? null : `${input.interestRateAnnual}% a year`,
+    interest_from: input.interestFrom ? longDate(input.interestFrom) : null,
     agent_name: (input.agentName ?? '').trim() || null,
     /*
      * THE FIRM'S NUMBER WHERE THE PERSON HAS NONE. The firm, told that not one of the fifty live
@@ -1211,6 +1279,7 @@ export function mergeValuesFor(input: {
     liaison_email: some(input.liaison?.email),
     liaison_whatsapp: some(input.liaison?.whatsapp),
     firm_name: input.firm.firmName,
+    firm_council_number: some(input.firm.councilNumber),
     firm_phone: some(input.firm.phone),
     firm_email: some(input.firm.email),
     firm_website: some(input.firm.website),

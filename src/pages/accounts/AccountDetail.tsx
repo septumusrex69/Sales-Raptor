@@ -601,6 +601,26 @@ export function AccountDetail() {
           preferredLanguage: account.preferredLanguage,
         },
         balance: statement?.breakdown?.balance ?? null,
+        /*
+         * THE WORKING BEHIND THE BALANCE, for an acknowledgement of debt.
+         *
+         * Item 6 of an AoD is a sum the debtor signs their name under, and the clause above it has
+         * them confirm they have CHECKED it. So the lines of that sum come off the same ledger the
+         * balance above does -- never off the account row, whose own columns disagree with the
+         * ledger on thousands of accounts.
+         *
+         * Absent where the statement has not loaded, which leaves the placeholders standing and
+         * the document unsendable rather than signed against a blank.
+         */
+        breakdown: statement?.breakdown
+          ? {
+            interest: statement.breakdown.interest,
+            fees: statement.breakdown.fees,
+            receiptFees: statement.breakdown.receiptFees,
+            vat: statement.breakdown.vat,
+          }
+          : null,
+        interestRateAnnual: account.interestRateAnnual,
         clientName: client?.name ?? null,
         /*
          * THE THREE PEOPLE A LETTER CAN NAME. `agent` is whoever is composing -- here, the person

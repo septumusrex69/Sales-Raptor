@@ -1,4 +1,5 @@
 import { writeFileSync, readFileSync } from 'node:fs'
+import { aod } from './aod.mjs'
 import {
   t, p, h, cell, row, headerStrip, addressee, howToPay, signOff, whereItStands, paidSoFar,
 } from './blocks.mjs'
@@ -304,6 +305,13 @@ const summons = (who) => doc([
 ])
 out['letter-summons-individual'] = summons('individual')
 out['letter-summons-company'] = summons('company')
+
+/* ------------------------------------------------- the acknowledgements of debt
+ * Their own module: nine pages each, with a consent to judgment annexed, and almost no block in
+ * common with the eight notices above -- those are demands and this is an agreement somebody
+ * signs. See aod.mjs. */
+out['letter-aod-individual'] = aod('individual')
+out['letter-aod-company'] = aod('company')
 
 /* The section 129 was built and verified first. */
 out['letter-s129-individual'] = JSON.parse(readFileSync(new URL('./s129.json', import.meta.url), 'utf8'))

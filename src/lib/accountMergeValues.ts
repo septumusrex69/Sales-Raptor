@@ -113,6 +113,17 @@ export function accountMergeValues(input: {
    * placeholders then stand: an arrangement notice cannot be merged against an account that has no
    * arrangement to quote, which is what holds the step instead of sending a blank amount.
    */
+  /**
+   * THE LEDGER'S WORKING, for a document that has to show it.
+   *
+   * An acknowledgement of debt prints the sum its capital amount is made of, because the clause
+   * above it has the debtor confirm they have CHECKED it -- a figure they cannot see is one they
+   * cannot have checked. Carried down rather than computed here, exactly as the balance is.
+   */
+  breakdown?: { interest: number; fees: number; receiptFees: number; vat: number } | null
+  /** What interest is doing on this account, for the same documents. */
+  interestRateAnnual?: number | null
+  interestFrom?: string | null
   nextInstalment?: { amount: number; dueOn: string } | null
   /**
    * HOW OFTEN THAT INSTALMENT FALLS, off the same promise row. See `ptp_frequency`.
@@ -164,6 +175,9 @@ export function accountMergeValues(input: {
       arrangement: input.arrangement ?? null,
       paymentReceived: input.paymentReceived ?? null,
       dispute: input.dispute ?? null,
+      breakdown: input.breakdown ?? null,
+      interestRateAnnual: input.interestRateAnnual ?? null,
+      interestFrom: input.interestFrom ?? null,
       /* Passed whole. There is no list of the firm's fields here to fall behind the ones the
          library grew -- see mergeValuesFor, which takes FirmSettings' own shape. */
       firm: input.firm,

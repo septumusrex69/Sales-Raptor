@@ -49,8 +49,20 @@ const WANTED = [
   'letter-listing-individual', 'letter-listing-company',
   'letter-summons-individual', 'letter-summons-company',
 ]
+/*
+ * AND THE TWO THAT ARE NOT NOTICES. The acknowledgements of debt live in the same file and are a
+ * different animal: everything above DEMANDS payment and no workflow attaches these -- they are an
+ * agreement somebody signs, sent by hand when a debtor asks for terms. Named separately rather
+ * than folded into WANTED, so "the eight the workflow needs" keeps meaning exactly that.
+ */
+const BY_HAND = ['letter-aod-individual', 'letter-aod-company']
+
 check('the eight notices the workflow attaches are all there',
-  Object.keys(letters).sort(), [...WANTED].sort())
+  Object.keys(letters).filter((k) => !BY_HAND.includes(k)).sort(), [...WANTED].sort())
+/* AND BOTH AGREEMENTS ARE BUILT. Asserted here as well as in check-aod, because this is the file
+   that knows what letters.json is supposed to contain. */
+check('...and the two agreements are there too',
+  Object.keys(letters).filter((k) => BY_HAND.includes(k)).sort(), [...BY_HAND].sort())
 
 /** Every span of a document, wherever it is nested. The parse must be total, so this must be. */
 function spansOf(doc) {
