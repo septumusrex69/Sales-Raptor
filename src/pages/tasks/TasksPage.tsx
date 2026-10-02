@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { CalendarClock, MapPin, Plus, Search, Users } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { Card } from '../../components/ui/Card'
@@ -10,6 +10,8 @@ import { Modal, FormField, inputClass } from '../../components/ui/Modal'
 import { RescheduleTaskModal } from '../../components/ui/RescheduleTaskModal'
 import { formatDate, TODAY } from '../../data/mockData'
 import { readParam } from '../../lib/drilldown'
+import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
+import { dayHeadline, localDay, meetingTime, planDay, taskTime } from '../../lib/dayPlan.ts'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
 
@@ -20,11 +22,6 @@ function startOfDay(d: Date) {
   const x = new Date(d)
   x.setHours(0, 0, 0, 0)
   return x
-}
-
-/** Local YYYY-MM-DD, matching CalendarPage's ymd() — deliberately not toISOString(), which shifts to UTC. */
-function ymd(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function formatLongDate(dateParam: string) {
@@ -43,6 +40,22 @@ export function TasksPage() {
   const [dateFilter, setDateFilter] = useState<string | undefined>(() => readParam(searchParams, 'date'))
   const [search, setSearch] = useState('')
   const [addOpen, setAddOpen] = useState(false)
+  /*
+   * THE DAY'S MEETINGS, fetched here rather than taken from AppStore.
+   *
+   * A calendar event belongs to ONE person and RLS scopes it to them, where everything in the
+   * store is the firm's shared sales data -- CalendarPage says the same and for the same reason.
+   * A calendar that will not load costs the meetings, not the page.
+   */
+  const [meetings, setMeetings] = useState<CalendarEvent[]>([])
+  useEffect(() => {
+    if (!currentUser) return
+    let cancelled = false
+    void fetchCalendarEvents(currentUser.id)
+      .then((list) => { if (!cancelled) setMeetings(list) })
+      .catch(() => { /* the work still shows. */ })
+    return () => { cancelled = true }
+  }, [currentUser])
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
 
   const today = startOfDay(TODAY)
@@ -66,7 +79,7 @@ export function TasksPage() {
     if (dateFilter) {
       // Matches exactly what Calendar shows for this day (same status
       // exclusion), so clicking through gives a consistent picture.
-      list = list.filter((t) => t.status !== 'Cancelled' && ymd(new Date(t.dueDate)) === dateFilter)
+      list = list.filter((t) => t.status !== 'Cancelled' && localDay(new Date(t.dueDate)) === dateFilter)
     } else {
       switch (view) {
         case 'My Tasks':
@@ -98,6 +111,29 @@ export function TasksPage() {
     }
     return list.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
   }, [scopedTasks, tasks, view, dateFilter, search, today, tomorrow, weekEnd, currentUser])
+
+  /*
+   * WHICH ONE DAY THIS PAGE IS ABOUT, or null where it is about a range.
+   *
+   * Meetings are shown only where the answer is a single day. A week of tasks with meetings
+   * threaded through it is a calendar, and there is already a calendar; what the firm asked for
+   * is the other direction -- "what do you need to do for the day" -- which is a question about
+   * one square.
+   */
+  const dayShown = dateFilter
+    ?? (view === 'Today' ? localDay(today)
+      : view === 'Tomorrow' ? localDay(tomorrow)
+        : null)
+
+  /*
+   * THE DAY, ASSEMBLED IN ONE PLACE. planDay is the only thing that decides what a day holds --
+   * see dayPlan.ts on why a meeting stays in calendar_events and is merged at the read instead of
+   * being copied into `tasks`.
+   */
+  const plan = useMemo(
+    () => (dayShown ? planDay({ day: dayShown, meetings, tasks: scopedTasks }) : null),
+    [dayShown, meetings, scopedTasks],
+  )
 
   function selectView(v: View) {
     setView(v)
@@ -150,7 +186,11 @@ export function TasksPage() {
 
       {dateFilter ? (
         <div className="flex flex-wrap items-center gap-2.5">
-          <h2 className="text-sm font-semibold text-slate-700">Tasks — {formatLongDate(dateFilter)}</h2>
+          {/* THE DAY, AND WHAT IS IN IT. "Tasks — 14 October" named the filter; the firm asked
+              what you need to DO that day, and the count of meetings beside the count of tasks is
+              the one glance that answers it. */}
+          <h2 className="text-sm font-semibold text-slate-700">{formatLongDate(dateFilter)}</h2>
+          {plan && <span className="text-xs text-slate-400">{dayHeadline(plan)}</span>}
           <button onClick={clearDateFilter} className="text-xs font-medium text-brand-600 hover:underline">
             Clear date filter
           </button>
@@ -179,6 +219,63 @@ export function TasksPage() {
           <Plus size={15} /> Add Task
         </button>
       </div>
+
+      {/*
+        MEETINGS FIRST, BECAUSE THEY ARE THE PART OF THE DAY ALREADY SPENT.
+        
+        THE FIRM, after a client's Teams invitation reached the calendar and nothing else: "it
+        added it to my calendar, but it didn't add it to my tasks. I think it should add it to the
+        task as well."
+        
+        IT IS NOT A TASK AND IT IS NOT TICKABLE -- there is no checkbox on these rows. A meeting is
+        over when the hour has passed, not when somebody says so, and dayPlan.ts explains at length
+        why it stays in its own table rather than being copied into `tasks`. What it does have is a
+        way back to the event, because the thing you want at nine in the morning is the dial-in.
+        
+        ABSENT RATHER THAN EMPTY on a day with none: a card headed "Meetings" over a line saying
+        "none" is a row of furniture, and CLAUDE.md is clear that something which fires when
+        nothing is wrong teaches people to stop reading.
+      */}
+      {plan && plan.meetings.length > 0 && (
+        <Card padded={false}>
+          <div className="px-5 py-2.5 border-b border-slate-100 flex items-center gap-2">
+            <CalendarClock size={14} className="text-[var(--c-steel)]" />
+            <span className="text-xs font-medium text-slate-500">
+              {plan.meetings.length === 1 ? 'Meeting' : 'Meetings'} — where you have to be
+            </span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {plan.meetings.map((m) => (
+              <div key={m.id} className="flex items-center gap-3 px-5 py-3">
+                {/* The clock in its own column so the eye runs down the times, and a whole-day
+                    event says so rather than showing a 00:00 nobody meant. */}
+                <span className="w-14 shrink-0 text-xs font-semibold tabular-nums text-slate-600">
+                  {meetingTime(m) ?? 'All day'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-700 truncate">{m.title}</p>
+                  <p className="text-xs text-slate-400 flex items-center gap-2 truncate">
+                    {m.location && (
+                      <span className="inline-flex items-center gap-1 truncate">
+                        <MapPin size={11} className="shrink-0" /> {m.location}
+                      </span>
+                    )}
+                    {m.attendees.length > 0 && (
+                      <span className="inline-flex items-center gap-1 shrink-0">
+                        <Users size={11} /> {m.attendees.length}
+                      </span>
+                    )}
+                    {!m.location && m.attendees.length === 0 && m.organiserName}
+                  </p>
+                </div>
+                <Link to="/calendar" className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+                  Open
+                </Link>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card padded={false}>
         <div className="divide-y divide-slate-50">
@@ -210,7 +307,20 @@ export function TasksPage() {
                 </div>
                 <PriorityBadge priority={t.priority} />
                 <TaskStatusBadge status={t.status} />
-                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{formatDate(t.dueDate)}</span>
+                {/*
+                  THE TIME, WHERE SOMEBODY SET ONE. It has been on every task all along -- dueDate
+                  is a full timestamp -- and was shown nowhere, so a task booked for a nine
+                  o'clock call read the same as one due sometime that week.
+                  
+                  AND "ANY TIME" WHERE THEY DID NOT, said out loud rather than left blank: on a
+                  day's list a missing time next to three timed ones reads as something that
+                  failed to load. See dayPlan.taskTime for how a task with no time is told apart.
+                */}
+                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
+                  {dayShown
+                    ? (taskTime(t) ?? <span className="text-slate-300">Any time</span>)
+                    : formatDate(t.dueDate)}
+                </span>
                 <UserAvatar userId={t.ownerId} size={24} />
                 <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Reschedule
@@ -245,14 +355,24 @@ function AddTaskModal({
   onClose: () => void
   onSave: (input: Partial<Task> & { title: string; dueDate: string }) => void
 }) {
-  const [form, setForm] = useState({ title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority, ownerId: defaultOwnerId, date: '', time: '09:00' })
+  /*
+   * THE TIME OPENS BLANK, and that is what makes a time on a task mean anything.
+   *
+   * It defaulted to 09:00, so every task ever added carried a nine o'clock nobody chose -- and
+   * dayPlan.taskTime has no companion flag to read, only the timestamp, so a defaulted time is
+   * indistinguishable from a wanted one. Blank, a time is a decision; filled in for you, it is
+   * noise that the day's list would then print as fact.
+   */
+  const [form, setForm] = useState({ title: '', type: 'Follow-up' as TaskType, priority: 'Medium' as TaskPriority, ownerId: defaultOwnerId, date: '', time: '' })
   return (
     <Modal title="Add Task" onClose={onClose} width={420}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
           if (!form.title || !form.date) return
-          onSave({ title: form.title, type: form.type, priority: form.priority, ownerId: form.ownerId, dueDate: new Date(`${form.date}T${form.time}`).toISOString() })
+          /* Midnight where no time was given -- which is exactly what taskTime reads back as
+             "any time that day". An empty string here would make an Invalid Date. */
+          onSave({ title: form.title, type: form.type, priority: form.priority, ownerId: form.ownerId, dueDate: new Date(`${form.date}T${form.time || '00:00'}`).toISOString() })
           onClose()
         }}
       >
@@ -279,6 +399,11 @@ function AddTaskModal({
           </FormField>
           <FormField label="Time">
             <input type="time" className={inputClass} value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+            {/* SAID ON THE FIELD, because an empty box that is not marked optional reads as one
+                somebody forgot to fill in. Most work is "sometime today" and the firm said so. */}
+            <span className="block text-[11px] text-slate-400 mt-1">
+              Optional &mdash; leave it blank for any time that day.
+            </span>
           </FormField>
         </div>
         <FormField label="Owner">

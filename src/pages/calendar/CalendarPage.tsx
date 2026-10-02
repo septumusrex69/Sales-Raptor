@@ -9,6 +9,7 @@ import { UserAvatar } from '../../components/ui/Avatar'
 import { companyById, formatDate, TODAY } from '../../data/mockData'
 import { DEAL_CLOSE_EVENT_COLOR, TASK_TYPE_COLORS } from '../../lib/colors'
 import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvents.ts'
+import { localDay } from '../../lib/dayPlan.ts'
 
 /* A meeting is neither a task nor a deal date, so it does not borrow either one's colour. */
 const MEETING_EVENT_COLOR = 'var(--c-steel)'
@@ -36,13 +37,16 @@ function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
-/** Local YYYY-MM-DD — deliberately not toISOString(), which shifts to UTC and can land on the wrong day. */
-function ymd(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
+/*
+ * THE SAME LOCAL-DAY FUNCTION THE TASKS PAGE USES, imported rather than written again.
+ *
+ * This page and that one each had their own copy. They have to agree EXACTLY: the link below
+ * carries a day built here, and the task list filters on a day built there, so two
+ * implementations drifting by an hour means clicking a square opens a list that is empty for a
+ * reason nobody can see. See dayPlan.localDay.
+ */
 function tasksUrlForDate(d: Date) {
-  return buildDrilldownUrl('/tasks', { date: ymd(d) })
+  return buildDrilldownUrl('/tasks', { date: localDay(d) })
 }
 
 export function CalendarPage() {
@@ -257,14 +261,34 @@ function MonthView({ cursor, events }: { cursor: Date; events: CalEvent[] }) {
           const isToday = sameDay(d, TODAY)
           const dayEvents = events.filter((e) => sameDay(e.date, d))
           return (
-            <div key={i} className={`min-h-[100px] border-b border-r border-slate-50 p-1.5 ${inMonth ? '' : 'bg-slate-50/40'}`}>
+            /*
+              THE WHOLE SQUARE OPENS THE DAY, not the date in the corner of it.
+              
+              THE FIRM: "if you click on a specific day in the calendar, it should take you to the
+              tasks and have that filter for that entire day" -- and it already did. The link was
+              on the DATE NUMBER, a 24-pixel circle in one corner, so a feature that was built and
+              working read as one that did not exist. A target nobody can hit is not a feature.
+              
+              AN OVERLAY RATHER THAN A WRAPPER, and this is the part that is not optional: the
+              cell already contains a Link per event chip, and an anchor inside an anchor is
+              invalid markup that browsers silently un-nest -- the chips would stop opening what
+              they point at. So the day's link is a sibling stretched across the cell underneath
+              them, and the chips sit above it.
+            */
+            <div key={i} className={`relative min-h-[100px] border-b border-r border-slate-50 p-1.5 ${inMonth ? '' : 'bg-slate-50/40'}`}>
               <Link
                 to={tasksUrlForDate(d)}
-                className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full hover:ring-2 hover:ring-brand-200 ${isToday ? 'bg-brand-600 text-white font-semibold' : inMonth ? 'text-slate-600' : 'text-slate-300'}`}
+                aria-label={`What is on ${d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long' })}`}
+                className="absolute inset-0 rounded-sm hover:bg-brand-50/60 focus:outline-none
+                  focus-visible:ring-2 focus-visible:ring-brand-300"
+              />
+              {/* Above the overlay so it still reads as the date, and still a target of its own. */}
+              <span
+                className={`relative pointer-events-none inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${isToday ? 'bg-brand-600 text-white font-semibold' : inMonth ? 'text-slate-600' : 'text-slate-300'}`}
               >
                 {d.getDate()}
-              </Link>
-              <div className="mt-1 space-y-1">
+              </span>
+              <div className="relative mt-1 space-y-1">
                 {dayEvents.slice(0, 3).map((e) => (
                   <Link
                     key={e.id}
