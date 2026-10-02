@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { MERGE_FIELDS } from '../../src/lib/messageTemplates.ts'
 import { aod, covering } from '../letters/aod.mjs'
+import { BY_HAND_SEED_KEYS } from '../../src/lib/byHand.ts'
 
 let pass = 0
 const failures = []
@@ -138,6 +139,88 @@ for (const kind of ['individual', 'company']) {
   check(`letters.json holds the built ${kind} document`,
     JSON.stringify(letters[`letter-aod-${kind}`]), texts[kind])
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * AND WHAT GETS IT INTO A DATABASE
+ *
+ * Raptor reads its templates from `message_templates`, so a letter that is perfect in letters.json
+ * and absent from the table is a letter nobody can send. The seeding is therefore part of the
+ * deliverable rather than an afterthought, and it has already gone wrong once in the way that
+ * matters: a chunked insert over a connection that could read and not write left ONE row holding
+ * the first 5 604 characters of a nine-page agreement -- a template that merges, draws, attaches
+ * and ends mid-sentence.
+ *
+ * TWO ROUTES EXIST because of that, and seed-aod.sql is GENERATED from the same `rows` the REST
+ * path posts. A hand-maintained copy is the drift this whole section is here to refuse: the SQL in
+ * the repository must be the SQL the generator writes today, or pasting it loads a document nobody
+ * has reviewed.
+ * ------------------------------------------------------------------------------------------- */
+
+const sql = read('scripts/letters/seed-aod.sql')
+
+/*
+ * THE DOCUMENTS THEMSELVES, VERBATIM. This is the assertion that catches a stale file after
+ * somebody edits the firm's wording in aod.mjs -- and the one that would have caught the
+ * truncation, because half a document is not a substring match for the whole of one.
+ */
+for (const kind of ['individual', 'company']) {
+  ok(`seed-aod.sql carries the whole ${kind} agreement`, sql.includes(texts[kind]))
+  ok(`...and its covering email`, sql.includes(covering(kind)))
+}
+
+/*
+ * AND THE LETTER ROWS SAY `document`.
+ *
+ * THE ONE THAT WAS ACTUALLY WRONG. A letter's body is letterDocument JSON and `format` is how
+ * everything in the browser knows that: AttachLetter lists only letters whose format says
+ * document, the Library parses on it, the editor opens the page editor on it. The first draft of
+ * the seeder wrote 'text', copied from the twelve notices already in the database -- which carry
+ * 'text' as well, so the Attach control in a compose box lists NOTHING. It survived because the
+ * workflow runner parses the body whatever the column says: the automatic path does not read the
+ * value and the path a person uses does.
+ */
+const asDocument = sql.match(
+  /\$q\$letter\$q\$, \$q\$Acknowledgement of debt \((?:individual|company)\)\$q\$, null, \$q\$document\$q\$/g,
+)
+check('both letters are seeded as documents', asDocument?.length ?? 0, 2)
+/* AND THE EMAILS AS TEXT, which is the other half of the same column: an email holding letter JSON
+   would be drawn into an inbox as its own markup. */
+const asText = sql.match(
+  /\$q\$email\$q\$, \$q\$Acknowledgement of debt — covering email \((?:individual|company)\)\$q\$, \$q\$[^$]+\$q\$, \$q\$text\$q\$/g,
+)
+check('...and both covering emails as text', asText?.length ?? 0, 2)
+/* AND THE CORRECTION FOR THE TWELVE ALREADY THERE rides with it, narrowed to a letter whose body
+   really is a document -- a letter somebody typed as plain words must be left alone. */
+ok('...and the notices already seeded as text are corrected',
+  /set format = 'document'[\s\S]*?where kind = 'letter' and format = 'text' and body like '\{"defaults":%'/
+    .test(sql))
+
+/*
+ * AND THE KEYS ARE THE KEYS THE COMPOSE BOX IS WRITTEN AGAINST.
+ *
+ * BY_HAND_SEED_KEYS decides what a collector may pick by hand, and it names these two. A seeder
+ * that wrote a different key would give the firm two templates they can read in the Library and
+ * cannot choose -- which is a failure with no error message anywhere.
+ */
+for (const kind of ['individual', 'company']) {
+  ok(`the ${kind} covering email is seeded under the key the picker names`,
+    BY_HAND_SEED_KEYS.includes(`email-aod-${kind}`) && sql.includes(`$q$email-aod-${kind}$q$`))
+  /* AND THE AGREEMENT IS ATTACHED TO IT, for the same audience on both sides. A covering note
+     written to a person that posts the company agreement hands a pensioner a document to be
+     signed by a duly authorised representative. */
+  ok(`...and posts the ${kind} agreement`,
+    sql.includes(`e.seed_key = 'email-aod-${kind}' and l.seed_key = 'letter-aod-${kind}'`))
+}
+
+/* OUT BEFORE IN, or a second run duplicates and a half-written row from the first survives. The
+   presence of each is asserted before their order, because indexOf returns -1 and an order-only
+   assertion passes vacuously the day somebody deletes the delete. */
+const del = sql.indexOf('delete from public.message_templates')
+const ins = sql.indexOf('insert into public.message_templates')
+ok('it deletes before it inserts', del !== -1 && ins !== -1 && del < ins)
+/* ONE TRANSACTION, so a paste that fails half way leaves the table as it was rather than holding
+   half an agreement -- which is the exact state this script was written after. */
+ok('...inside one transaction', /^begin;$/m.test(sql) && /^commit;$/m.test(sql))
 
 console.log(`\ncheck-aod: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
