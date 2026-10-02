@@ -116,6 +116,20 @@ export interface AccountQuery {
   stage: QueryStage
   sentToClientAt: string | null
   ownerId: string | null
+  /**
+   * WHO RAISED IT, which is not the same person as who owns it and is why this field exists.
+   *
+   * THE OWNER IS WHOEVER HAS TO ANSWER IT. A collector raising a request sends it to the liaison,
+   * so from the moment it is saved the ticket belongs to somebody else — and the disputes board
+   * scopes on owner. THE FIRM: "the ticket was created and then it doesn't display in the debt
+   * collector's situation." It was on the board; it was on the LIAISON'S board.
+   *
+   * THE COLUMN WAS ALWAYS WRITTEN AND NEVER READ BACK. `raised_by` has been set on every ticket
+   * since requests existed, and the mapper below listed `raised_by_name` and not this — the
+   * silent-column fault CLAUDE.md names, under a comment on the very next line warning about it.
+   * A value in the database that nothing can read is a value that does not exist.
+   */
+  raisedBy: string | null
   raisedByName: string | null
   raisedAt: string
   chaseOn: string | null
@@ -161,6 +175,7 @@ const toQuery = (r: any): AccountQuery => ({
   stage: (r.stage ?? 'agent') as QueryStage,
   sentToClientAt: r.sent_to_client_at ?? null,
   ownerId: r.owner_id,
+  raisedBy: r.raised_by ?? null,
   raisedByName: r.raised_by_name,
   raisedAt: r.raised_at,
   chaseOn: r.chase_on,

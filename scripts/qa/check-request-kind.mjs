@@ -220,6 +220,70 @@ ok('...and says what it holds', /Disputes &amp; requests/.test(panel))
 ok('a card says what kind it is', /q\.kind !== 'dispute' && \(/.test(panel))
 ok('...and a request says what it wants', /q\.requestFor && <span/.test(panel))
 
+/* ---------------------------------------------------------------------------------------------
+ * A TICKET YOU RAISED IS STILL YOURS TO FOLLOW.
+ *
+ * THE FIRM, having raised a request from an account: "the ticket was created and then it doesn't
+ * display in the debt collector's situation."
+ *
+ * IT WAS ON THE BOARD. IT WAS ON SOMEBODY ELSE'S. A request is raised by a collector and GIVEN to
+ * the liaison who has to answer it, so `owner_id` is the liaison from the moment it saves — and
+ * the disputes board scopes on owner and opens on the signed-in person. The collector pressed
+ * Raise a ticket, watched it save, went to look, and found an empty board.
+ *
+ * AN OWNER IS WHO MUST ACT; A RAISER IS WHO IS WAITING ON IT. Both are working the same ticket.
+ * ------------------------------------------------------------------------------------------- */
+
+/* `lib` and `sql` are read at the top of this file; `code` strips comments, which every assertion
+   below about an ABSENCE depends on — both of these files explain at length what they no longer do. */
+const board = code('src/pages/accounts/DisputesBoard.tsx')
+
+/*
+ * THE COLUMN WAS ALWAYS WRITTEN AND NEVER READ BACK, which is the whole reason this could not be
+ * fixed in the board alone. CLAUDE.md's own warning, and it had happened again: a column present in
+ * the table, written on every insert, and missing from the hand-written mapper reads as `undefined`
+ * for ever and nothing fails.
+ */
+ok('a ticket records who raised it', /raised_by: input\.raisedBy/.test(lib))
+ok('...and the mapper reads it back', /raisedBy: r\.raised_by \?\? null/.test(lib))
+ok('...and it is on the type, not only in the row', /^\s*raisedBy: string \| null$/m.test(lib))
+/* THE NAME IS NOT THE ID. `raised_by_name` was already read, which is why the absence looked like
+   presence to anybody scanning the mapper -- a name cannot be compared to a signed-in user. */
+ok('...which is the id, not just the name', /raisedByName: r\.raised_by_name/.test(lib))
+
+/*
+ * AND THE BOARD'S "MINE" MEANS EITHER. Held as the one predicate rather than as two comparisons
+ * written out twice: the cards and the counter strip both scope, and a board whose figures
+ * disagree with the cards under them is worse than one that shows too little.
+ */
+ok('the board scopes on owned OR raised',
+  /r\.ownerId === who \|\| r\.raisedBy === who/.test(board))
+ok('...through one predicate both the cards and the totals use',
+  (board.match(/isMine\(r, scope\)/g) ?? []).length >= 2)
+ok('...and no longer compares the owner by hand', !/r\.ownerId !== scope/.test(board))
+ok('...nor in the totals', !/r\.ownerId === scope/.test(board))
+/* AND THE PICKER SAYS SO. A name that now selects more than that person owns would read as a leak
+   if the control went on claiming to filter by owner alone. */
+ok('the picker says what it selects', /owned or raised/.test(board))
+
+/*
+ * THE SIDEBAR BADGE IS DELIBERATELY NOT CHANGED, and this is an absence worth holding. A badge
+ * counts work waiting on YOU; a ticket sitting with the liaison is not that, and a badge you
+ * cannot clear by doing your own work is a badge people stop reading — the argument is written
+ * beside the query itself. Looking is the board's job, nagging is the badge's, and widening the
+ * badge to match the board would quietly undo it.
+ */
+/* THE LAST DEFINITION IS THE LIVE ONE — schema.sql is append-only, and reading with indexOf lands
+   on a copy a later migration replaced. CLAUDE.md names this exact trap. */
+const navCounts = sql.slice(
+  Math.max(sql.lastIndexOf('create or replace function public.nav_counts('),
+    sql.lastIndexOf('create function public.nav_counts(')))
+ok('the nav badge was found', navCounts.includes('account_queries'))
+const disputesCount = navCounts.slice(navCounts.indexOf('from public.account_queries'),
+  navCounts.indexOf('from public.account_queries') + 200)
+ok('...and still counts only what is waiting on you', /owner_id = auth\.uid\(\)/.test(disputesCount))
+ok('...not what you raised and gave away', !/raised_by/.test(disputesCount))
+
 console.log(`\ncheck-request-kind: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

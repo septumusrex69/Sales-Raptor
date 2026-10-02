@@ -829,11 +829,27 @@ export function EscalateModal({
             */}
             <DictateButton size="small" value={description} onChange={setDescription} />
           </span>
+          {/*
+            NO autoFocus, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+            -----------------------------------------------------------
+            THE FIRM, opening this box: "the first thing it does, it automatically takes you to
+            where you should dictate or you should write the note. It should go up first. The
+            screen that you see should be like, what are you doing? Is it raising a dispute or are
+            you requesting information or whatever? And then you can scroll down."
+
+            A browser scrolls a focused element into view, so an autoFocus on a field this far down
+            opened the dialog already past its own question — asking "what is it?" off-screen while
+            showing the answer box for a question nobody had read. THIS box is the one dialog in
+            Raptor with a real decision above its one text field; a compose box or a rename has
+            nothing to read first and keeps its own autoFocus.
+
+            Focus still moves INTO the dialog — Modal puts it on the card when nothing inside has
+            claimed it, which is where a keyboard user needs it and is also the top of the scroll.
+          */}
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
-            autoFocus
             placeholder={category === CATEGORY_NEEDING_EXPLANATION
               ? 'Required for "Other" — say what the debtor is actually disputing.'
               : fromEmail

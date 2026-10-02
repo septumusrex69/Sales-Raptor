@@ -119,13 +119,31 @@ ok('...offering "All Owners" only to somebody who may pool', /\{mayPool && <opti
  */
 ok('a filter value outside the permitted list falls back to the person themselves',
   /owners\.some\(\(u\) => u\.id === owner\) \? owner : \(currentUser\?\.id \?\? 'All'\)/.test(board))
-ok('...and the rows are filtered by that, not by the raw dropdown', /if \(scope !== 'All' && r\.ownerId !== scope\)/.test(board))
+ok('...and the rows are filtered by that, not by the raw dropdown',
+  /if \(scope !== 'All' && !isMine\(r, scope\)\)/.test(board))
+/*
+ * AND "MINE" MEANS OWNED **OR RAISED**, which is a widening of this scope rather than a hole in it.
+ *
+ * THE FIRM, having raised a request from an account: "the ticket was created and then it doesn't
+ * display in the debt collector's situation." A request is GIVEN to the liaison who must answer it,
+ * so `owner_id` is the liaison from the moment it saves — and a board that scoped on owner alone
+ * showed the collector who raised it an empty screen.
+ *
+ * STILL A RULE AND NOT A DROPDOWN: the fallback above is unchanged, so an ?owner= outside the
+ * permitted list still collapses to the person themselves. What widened is what "the person
+ * themselves" covers, not who may be looked at.
+ */
+ok('...where mine means owned or raised', /r\.ownerId === who \|\| r\.raisedBy === who/.test(board))
+/* ONE PREDICATE, used by the cards and by the counter strip. Written out twice they drift, and a
+   board whose figures disagree with the cards under them is one nobody believes. */
+ok('...through one predicate rather than two comparisons',
+  (board.match(/isMine\(r, scope\)/g) ?? []).length >= 2)
 /* It starts on the person, which is the firm's sentence. */
 ok('the board opens on the person themselves', /setOwner\(currentUser\.id\)/.test(board))
 ok('...once, so it never stomps a filter somebody has changed', /if \(defaulted\.current \|\| !currentUser\) return/.test(board))
 /* And the strip describes the board being shown rather than the firm. */
 ok('the totals count only the board being shown',
-  /\(rows \?\? \[\]\)\.filter\(\(r\) => scope === 'All' \|\| r\.ownerId === scope\)/.test(board))
+  /\(rows \?\? \[\]\)\.filter\(\(r\) => scope === 'All' \|\| isMine\(r, scope\)\)/.test(board))
 
 /* ------------------------------------------------ */
 

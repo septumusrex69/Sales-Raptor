@@ -120,11 +120,37 @@ export function DisputesBoard() {
     return owners.some((u) => u.id === owner) ? owner : (currentUser?.id ?? 'All')
   }, [owner, owners, mayPool, currentUser])
 
+  /*
+   * WHOSE IT IS: TO ANSWER, OR TO FOLLOW.
+   *
+   * THE FIRM, having raised a request from an account: "the ticket was created and then it doesn't
+   * display in the debt collector's situation."
+   *
+   * IT WAS ON THE BOARD. IT WAS ON SOMEBODY ELSE'S. A request is raised by a collector and GIVEN to
+   * the liaison who has to answer it, so `owner_id` is the liaison from the moment it is saved —
+   * and this board scopes on owner and opens on the signed-in person. The collector pressed Raise
+   * a ticket, watched it save, went to look for it, and found an empty board.
+   *
+   * AN OWNER IS WHO MUST ACT; A RAISER IS WHO IS WAITING ON IT. Both are still working the same
+   * ticket, and the second has every reason to come back to it — it is their account, their call,
+   * and the thing holding up their collection. So "mine" means either.
+   *
+   * THE SIDEBAR BADGE IS DELIBERATELY NOT CHANGED. nav_counts stays `owner_id = auth.uid()`,
+   * because a badge counts work waiting on YOU and a ticket sitting with the liaison is not that.
+   * A badge you cannot clear by doing your own work is a badge people stop reading — which is the
+   * argument written beside that very query. Looking is this board's job; the badge's job is
+   * nagging, and they are not the same job.
+   */
+  const isMine = useCallback(
+    (r: QueueRow, who: string) => r.ownerId === who || r.raisedBy === who,
+    [],
+  )
+
   const filtered = useMemo(() => {
     if (!rows) return []
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
-      if (scope !== 'All' && r.ownerId !== scope) return false
+      if (scope !== 'All' && !isMine(r, scope)) return false
       if (stage && columnOf(r) !== stage) return false
       if (q) {
         const haystack = `${r.debtorName} ${r.accountNumber ?? ''} ${r.description} ${r.category ?? ''} ${r.kind}`.toLowerCase()
@@ -132,7 +158,7 @@ export function DisputesBoard() {
       }
       return true
     })
-  }, [rows, scope, stage, search])
+  }, [rows, scope, stage, search, isMine])
 
   /*
    * Three numbers, and none of them is money.
@@ -151,7 +177,7 @@ export function DisputesBoard() {
      * at, and "how much is open, how much has gone quiet, how old is the oldest" is a fact about
      * the work you carry, not about the box you just typed in.
      */
-    const all = (rows ?? []).filter((r) => scope === 'All' || r.ownerId === scope)
+    const all = (rows ?? []).filter((r) => scope === 'All' || isMine(r, scope))
     const open = all.filter((r) => r.status !== 'closed')
     return {
       count: all.length,
@@ -159,7 +185,7 @@ export function DisputesBoard() {
       stale: open.filter((r) => isStale(r, TODAY)).length,
       oldest: open.reduce((m, r) => Math.max(m, ageInDays(r)), 0),
     }
-  }, [rows, scope])
+  }, [rows, scope, isMine])
 
   async function moveTo(id: string, to: Column) {
     const row = rows?.find((r) => r.id === id)
@@ -217,12 +243,19 @@ export function DisputesBoard() {
           * to click. Hidden entirely rather than disabled: a control that refuses reads as a fault.
           *
           * A person with nobody else to look at gets no picker, not a picker with one name in it.
+          *
+          * AND THE PICKER IS LABELLED BY WHAT IT ACTUALLY DOES. A name on it now selects tickets
+          * that person OWNS OR RAISED — see isMine — and a dropdown reading only a name would make
+          * the extra rows look like a leak. "(mine — owned or raised)" is four words and it is the
+          * difference between a filter somebody trusts and one they work around.
         */}
         {owners.length > 1 && (
           <select value={scope} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
             {mayPool && <option value="All">All Owners</option>}
             {owners.map((u) => (
-              <option key={u.id} value={u.id}>{u.id === currentUser?.id ? `${u.name} (me)` : u.name}</option>
+              <option key={u.id} value={u.id}>
+                {u.id === currentUser?.id ? `${u.name} (mine — owned or raised)` : `${u.name} (owned or raised)`}
+              </option>
             ))}
           </select>
         )}

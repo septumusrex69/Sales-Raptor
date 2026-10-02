@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -30,13 +30,52 @@ export function Modal({ title, subtitle, onClose, children, width = 480, headerR
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  /*
+   * A DIALOG OPENS AT ITS TOP, SHOWING WHAT IT IS ASKING.
+   *
+   * THE FIRM, opening the Raise a ticket box: "the first thing it does, it automatically takes you
+   * to where you should dictate or you should write the note. It should go up first. The screen
+   * that you see should be like, what are you doing? Is it raising a dispute or are you requesting
+   * information or whatever? And then you can scroll down."
+   *
+   * WHAT DID THAT WAS A FIELD ASKING FOR FOCUS HALFWAY DOWN. A browser scrolls a focused element
+   * into view, so an `autoFocus` below the fold opens the dialog already past its own question --
+   * the box asks "what is it?" and shows you the answer box for a question you have not read.
+   *
+   * SO FOCUS LANDS ON THE CARD unless something inside has already claimed it. That ordering is
+   * the whole of the care here: React fires a child's `autoFocus` during mount and this effect
+   * runs after, so focusing unconditionally would steal focus back from every OTHER dialog in
+   * Raptor that deliberately puts the cursor in its one field -- a compose box, a rename, an
+   * amount. Those are dialogs with one thing to type and nothing to read first; this is not.
+   *
+   * `preventScroll` because the point is the scroll position, and focusing the card without it
+   * would reintroduce the jump this exists to remove.
+   *
+   * AND IT IS NOT ONLY ABOUT THE VIEW. Nothing moved focus into a dialog at all, so somebody on a
+   * keyboard who opened one was still tabbing through the page behind it.
+   */
+  const card = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = card.current
+    if (!el || el.contains(document.activeElement)) return
+    el.focus({ preventScroll: true })
+  }, [])
+
   return createPortal(
     // data-modal-open marks that someone is mid-task in a form: the new-version check
     // refuses to auto-reload while this is in the DOM, so an update can't wipe a
     // half-written email out from under them.
     <div data-modal-open className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-slate-900/40 p-4 overflow-y-auto" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl w-full mt-10 sm:mt-0 max-h-[90vh] overflow-y-auto"
+        ref={card}
+        /* -1 so it can be focused programmatically without joining the tab order: the card itself
+           is not a control, it is where focus rests until somebody tabs to the first one. */
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="bg-white rounded-2xl shadow-xl w-full mt-10 sm:mt-0 max-h-[90vh] overflow-y-auto
+          outline-none"
         style={{ maxWidth: width }}
         onClick={(e) => e.stopPropagation()}
       >
