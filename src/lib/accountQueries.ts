@@ -451,6 +451,14 @@ export async function raiseQuery(input: {
   raisedBy?: string | null
   raisedByName?: string | null
   /**
+   * WHO THE TICKET IS ABOUT, for the sentence in the owner's notification only.
+   *
+   * Passed rather than looked up: this function is already holding an account id, and a second
+   * round trip to name the debtor would be a fetch on the critical path of saving a dispute to
+   * make a bell read better. Absent, the notice simply does not name them.
+   */
+  debtorName?: string | null
+  /**
    * Whether to charge the debtor item 3.
    *
    * Defaults to true, because the ordinary case is a debtor query that Communications will take
@@ -609,7 +617,66 @@ export async function raiseQuery(input: {
    */
   if (isDispute && input.accountId) void nudgeWorkflowsForAccount(input.accountId)
 
+  /* AND WHOEVER IT WAS GIVEN TO IS TOLD. See tellTheOwner: nothing did, and the liaison's only
+     signal was a badge on a menu item. */
+  await tellTheOwner({
+    ownerId: input.ownerId,
+    actorId: input.raisedBy,
+    queryId: q.id,
+    kind: input.kind ?? 'dispute',
+    requestFor: q.requestFor,
+    debtorName: input.debtorName ?? null,
+    raisedByName: input.raisedByName ?? null,
+  })
+
   return { query: q, charge }
+}
+
+/**
+ * TELL THE PERSON A TICKET HAS BECOME THEIRS.
+ *
+ * THE FIRM, signed in as the liaison a request had just been given to: "just check if it went to
+ * the notifications." IT HAD NOT. Nicole's bell held fourteen notifications and every one of them
+ * was an email; nothing anywhere told her a ticket was now hers to answer. The only signal was the
+ * Disputes badge quietly moving from nought to one — a number on a menu item, which is not a thing
+ * that reaches somebody who is looking at a different screen.
+ *
+ * THE BELL IS FOR WORK THAT HAS BECOME YOURS, which is exactly what this is: somebody has handed
+ * you a question about a debtor and is waiting on your answer.
+ *
+ * IT NEVER FAILS THE THING IT IS ANNOUNCING. A ticket that saved and did not ring is a small
+ * problem; a ticket that failed to save because a bell did not ring is a debtor's dispute lost.
+ * The same reasoning handOutWrite applies to its own notices, and the same swallow.
+ *
+ * AND IT NEVER TELLS YOU ABOUT YOUR OWN PRESS. Giving a ticket to yourself — which a liaison
+ * raising their own does — would otherwise ring your own bell for something you just did.
+ */
+async function tellTheOwner(input: {
+  ownerId: string | null | undefined
+  actorId: string | null | undefined
+  queryId: string
+  kind: EscalationKind
+  requestFor?: string | null
+  debtorName?: string | null
+  raisedByName?: string | null
+}): Promise<void> {
+  const owner = input.ownerId
+  if (!owner || owner === input.actorId) return
+  const what = input.kind === 'request'
+    ? (input.requestFor?.trim() || 'Information needed')
+    : input.kind === 'dispute' ? 'A dispute' : 'A ticket'
+  const about = input.debtorName?.trim() ? ` on ${input.debtorName.trim()}` : ''
+  const from = input.raisedByName?.trim() ? ` from ${input.raisedByName.trim()}` : ''
+  try {
+    await supabase.rpc('notify_user', {
+      p_user_id: owner,
+      p_type: 'query.assigned',
+      p_message: `${what}${about}${from} is waiting for you.`,
+      /* STRAIGHT TO THE TICKET, because that is where every one of these is answered. A link to
+         the board would make the reader find it again among everybody else's. */
+      p_link: `/queries/${input.queryId}`,
+    })
+  } catch { /* see above: a bell that did not ring must not undo work that did happen. */ }
 }
 
 /**
@@ -653,7 +720,14 @@ export async function updateQuery(
     description?: string
   },
   /** `accountId` is null on a sheet-level query: there is no timeline and nobody to charge. */
-  context: { accountId: string | null; actorId: string | null; actorName: string | null; note?: string },
+  context: {
+    accountId: string | null
+    actorId: string | null
+    actorName: string | null
+    note?: string
+    /** Who it is about, for the new owner's notification only. See tellTheOwner. */
+    debtorName?: string | null
+  },
 ): Promise<AccountQuery> {
   const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (patch.stage !== undefined) {
@@ -698,7 +772,31 @@ export async function updateQuery(
       kind: 'query',
     })
   }
-  return toQuery(data)
+
+  /*
+   * AND A TICKET HANDED ON TELLS WHOEVER IT WAS HANDED TO.
+   *
+   * The same gap as on raiseQuery, in the other place an owner changes: a liaison passing a
+   * request to the liaison manager moved it off their own board and onto somebody else's, and the
+   * somebody else was told nothing at all.
+   *
+   * ONLY WHERE THE OWNER ACTUALLY MOVED. `updateQuery` is also how a chase date, a stage and a
+   * description are saved, and ringing a bell every time somebody edits a sentence is how a bell
+   * stops being read. `patch.ownerId !== undefined` is the press that reassigned it.
+   */
+  const q = toQuery(data)
+  if (patch.ownerId !== undefined && patch.ownerId) {
+    await tellTheOwner({
+      ownerId: patch.ownerId,
+      actorId: context.actorId,
+      queryId: id,
+      kind: q.kind,
+      requestFor: q.requestFor,
+      debtorName: context.debtorName ?? null,
+      raisedByName: context.actorName,
+    })
+  }
+  return q
 }
 
 /**

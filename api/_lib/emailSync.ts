@@ -1568,23 +1568,28 @@ async function syncMailbox(
         // "Needs filing" for somebody to file a second time onto a debtor. See
         // markUserEmailOnRecord.
         if (mailboxRowId) await markUserEmailOnRecord(admin, mailboxRowId, filed)
-        if (match?.notifyUserId) {
-          // Straight to the deal when the reply threaded onto one — that is the page the
-          // person reading the notification actually needs to be on.
-          const link = filed.dealId
-            ? `/deals/${filed.dealId}`
-            : filed.companyId
-              ? `/companies/${filed.companyId}`
-              : filed.leadId
-                ? `/leads/${filed.leadId}`
-                : `/contacts/${filed.contactId}`
-          await admin.from('notifications').insert({
-            user_id: match.notifyUserId,
-            type: 'Email received',
-            message: `New email from ${parsed.from?.text || fromAddress}: ${parsed.subject || '(no subject)'}`,
-            link,
-          })
-        }
+        /*
+         * AN EMAIL IS NOT A NOTIFICATION. IT IS AN EMAIL.
+         *
+         * THE FIRM, looking at a liaison's bell: "all of the notifications are emails. An email is
+         * an email and it goes to the mail thing at the top, but the mails didn't go to the
+         * notifications."
+         *
+         * THEY WERE RIGHT, AND THE COST WAS A BELL NOBODY COULD READ. Every matched inbound message
+         * inserted one of these, so the liaison's fourteen notifications were fourteen emails — and
+         * on the morning a request was handed to her, the one thing that WAS worth a bell had
+         * nowhere visible to appear. The same message was already counted twice over: the Mail
+         * badge counts it unread, and the mailbox files it on the record it matched.
+         *
+         * SO THE BELL IS FOR WORK THAT HAS BECOME YOURS — a ticket handed to you, a workflow step
+         * that could not go out. A badge you cannot clear by doing your own work is a badge people
+         * stop reading, and this one was a second copy of a badge that already existed.
+         *
+         * REMOVING IT IS A DECISION AND NOT A TIDY-UP. It also ends the "a reply came in on your
+         * deal" notice, which is a real thing somebody may want back — the Mail badge and the
+         * deal's own activity list both still carry it, which is why this is the right trade, but
+         * it is a trade. Put it back here if the firm asks for it.
+         */
       } else {
         console.log(`[emailSync] ${path} UID ${uid}: upsert reported a duplicate (already logged), skipped`)
       }

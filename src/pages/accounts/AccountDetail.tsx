@@ -1533,6 +1533,8 @@ export function AccountDetail() {
       {classifying && (
         <EscalateModal
           accountId={account.id}
+          /* Only so the owner's notification can name whose account it is. See tellTheOwner. */
+          debtorName={name}
           users={users}
           clientLiaison={clientLiaison}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
@@ -1553,6 +1555,8 @@ export function AccountDetail() {
       {disputing && (
         <EscalateModal
           accountId={account.id}
+          /* Only so the owner's notification can name whose account it is. See tellTheOwner. */
+          debtorName={name}
           users={users}
           clientLiaison={clientLiaison}
           /* teamId is what makes "your team leader" answerable rather than "every team leader in

@@ -42,10 +42,12 @@ const TODAY = new Date().toISOString().slice(0, 10)
  * offer the box.
  */
 export function EscalateModal({
-  accountId, users, clientLiaison, actor, alreadyDisputed, fromEmail, initialKind, openQueries = [],
-  onClose, onDone,
+  accountId, debtorName, users, clientLiaison, actor, alreadyDisputed, fromEmail, initialKind,
+  openQueries = [], onClose, onDone,
 }: {
   accountId: string
+  /** Who the ticket is about, for the sentence in the owner's notification. Nothing else reads it. */
+  debtorName?: string | null
   users: User[]
   /** The liaison on this debtor's client, which is who a client query goes to by default. */
   clientLiaison: User | undefined
@@ -384,6 +386,8 @@ export function EscalateModal({
         chaseOn: chaseOn || null,
         raisedBy: actor.id,
         raisedByName: actor.name,
+        /* Only so the owner's notification can say whose account it is. */
+        debtorName,
         charge: chargeDebtor,
         /* Only a dispute has a stage. raiseQuery ignores it on the other two and the database
            refuses the dates there anyway -- nobody alleges an agent asking for help. */
