@@ -832,6 +832,9 @@ export function AccountDetail() {
         traceAction={(
           <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
             debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
+            /* For the sources searched on a name rather than a number -- a web search, SARS's VAT
+               vendor search. `name` is the same string the hero draws, so the two cannot differ. */
+            debtorName={name}
             label="Do the trace"
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
             onDone={reload} onUpload={() => setTracing(true)} />
@@ -1323,6 +1326,7 @@ export function AccountDetail() {
         /* 'new' is a DESK rung and not one of the thirteen a client is reported on, so it is not
            something the call box can mark or leave an account on. Everything else passes through. */
         standing={position === 'new' ? null : position}
+        debtorName={name}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
         /* SO THE CALL BOX DOES NOT ASK FOR A PROMISE THAT ALREADY STANDS -- the firm's objection,
            made about the diary and just as true on a call: "there's already a PTP in place, why do
@@ -1852,7 +1856,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, onTraced, onUpload, startable, onStartWorkflow }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, onTraced, onUpload, startable, onStartWorkflow }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -1880,6 +1884,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   /* WHERE THE ACCOUNT STANDS, for the call box to say so rather than ask blind -- the rail has
      already derived it and two derivations of one position drift. See OutcomePicker.current. */
   standing: ClientPosition | null
+  /** What they are called, for the trace sources searched on a name. See TraceButton.debtorName. */
+  debtorName: string | null
   onTraced: () => Promise<void>
   /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
   onUpload: () => void
@@ -1980,6 +1986,7 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
           title={`${startable.length} sequences can be started on this account`} />
       )}
       <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
+        debtorName={debtorName}
         className={`${ACTION_BASE} ${ACTION_ENABLED}`}
         onDone={onTraced} onUpload={onUpload} />
       {/*

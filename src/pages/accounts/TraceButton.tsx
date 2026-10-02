@@ -4,7 +4,7 @@ import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
 import { recordTrace } from '../../lib/accountTrace'
 import {
-  bureauSearchCounts, TRACE_SOURCES, traceSourceById, type TraceSource,
+  bureauSearchCounts, TRACE_SOURCES, traceSourceById, traceSourceUrl, type TraceSource,
 } from '../../lib/traceSources.ts'
 import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
 import { isValidSaId } from '../../lib/newDebtor'
@@ -45,7 +45,7 @@ function chargeWords(
  * Closing without answering charges nothing, which is the right outcome for a portal opened by
  * mistake and for a search that turned out not to be needed.
  */
-export function TraceButton({ accountId, actor, debtorKind, idNumber, label, className, onDone, onUpload }: {
+export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName, label, className, onDone, onUpload }: {
   accountId: string
   actor: { id: string | null; name: string | null }
   /** Which number is expected: an ID for a person, a registration number for a company. */
@@ -59,6 +59,16 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
    * somebody else entirely.
    */
   idNumber: string | null
+  /**
+   * WHAT THEY ARE CALLED, for the sources searched on a NAME rather than on a number.
+   *
+   * THE FIRM: "if you go to Google AI, you want to copy anything about the data that you could
+   * find -- name, surname, or company." Every source used to get the ID number, because the button
+   * was written when XDS was the only one; SARS's VAT vendor search says on its own page that it
+   * needs "a valid VAT Number or an Exact VAT Trading Name", and an ID number is the one thing it
+   * cannot use. See TraceSource.searchOn.
+   */
+  debtorName: string | null
   /** What to call the button. The panel's empty box wants a fuller phrase than the action row. */
   label?: string
   /** The action row's styling, so this matches the buttons beside it. */
@@ -89,6 +99,8 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
   const [source, setSource] = useState<TraceSource>(() => traceSourceById('xds'))
   /* Where they looked, when it is somewhere this list does not name. */
   const [named, setNamed] = useState('')
+  /* What came back. See traceSourceNote.found for why this is typed rather than screenshotted. */
+  const [found, setFound] = useState('')
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ charge: ChargeResult | null; count: number } | null>(null)
@@ -126,8 +138,26 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
    * never captured. Pasting it into XDS is a search the firm pays for, run against something that
    * is not a person. So an unusable number is not copied at all, and is named so it gets fixed.
    */
-  const key = traceSearchKey(debtorKind, idNumber, isValidSaId)
-  const problem = searchKeyProblem(key, debtorKind)
+  const identity = traceSearchKey(debtorKind, idNumber, isValidSaId)
+  /*
+   * WHICH KEY THIS SOURCE WANTS.
+   *
+   * A NAME IS NEVER REFUSED THE WAY A NUMBER IS. `traceSearchKey` Luhn-checks an ID because a
+   * transposed pair traces somebody else and is thirteen digits either way -- there is no such
+   * check to make on "Promise Sikelele", and a name that turns out to be spelt wrong costs a
+   * search that finds nothing rather than a search about a different person. So the only failure a
+   * name has is being absent.
+   */
+  const nameKey = (debtorName ?? '').trim()
+  const key = source.searchOn === 'name'
+    ? (nameKey
+      ? { ok: true as const, value: nameKey, what: 'name' as const }
+      : { ok: false as const, found: null, why: 'missing' as const })
+    : identity
+  /* The sentence for a bad ID is written for an ID; a missing name needs its own. */
+  const problem = source.searchOn === 'name'
+    ? (key.ok ? null : `This source is searched on a name and the account has none recorded.`)
+    : searchKeyProblem(identity, debtorKind)
 
   /*
    * THE PICKER OPENS ON THE TAP AND NOTHING ELSE HAPPENS YET.
@@ -152,10 +182,13 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
      * resolves asynchronously, so what is shown in the modal waits for the real answer rather
      * than claiming success the moment it was asked for.
      */
-    setCopied(key.ok ? 'asking' : 'nothing')
-    if (key.ok) {
+    /* THE KEY FOR THE SOURCE BEING PICKED, for the same reason the address is -- `key` above is
+       derived from `source`, which is still the previous one until setSource runs. */
+    const copying = s.searchOn === 'name' ? nameKey : (identity.ok ? identity.value : '')
+    setCopied(copying ? 'asking' : 'nothing')
+    if (copying) {
       try {
-        const write = navigator.clipboard?.writeText(key.value)
+        const write = navigator.clipboard?.writeText(copying)
         if (write) write.then(() => setCopied('yes')).catch(() => setCopied('no'))
         else setCopied('no')
       } catch {
@@ -163,13 +196,30 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
         setCopied('no')
       }
     }
-    /* A source with no portal is searched some other way: there is nothing to open, and opening
-       a blank tab would be the app pretending to do something. */
-    if (s.url) window.open(s.url, '_blank', 'noopener,noreferrer')
+    /*
+     * A source with no portal is searched some other way: there is nothing to open, and opening
+     * a blank tab would be the app pretending to do something.
+     *
+     * THE KEY GOES INTO THE ADDRESS WHERE THE SITE TAKES ONE. A web search carries its query in
+     * the URL, so the press lands on the results instead of an empty box -- which is the firm's
+     * "it would open the link so the data would be traced appropriately", done as far as each site
+     * allows. Everything else here posts a form and still has to be pasted into, which is what the
+     * clipboard write above is for.
+     *
+     * BUILT FROM `s` AND NOT FROM `source`, because setSource below has not run yet: reading the
+     * state here would open the PREVIOUS source's address, which is the kind of bug that sends a
+     * collector to the right site for the wrong debtor.
+     */
+    const wanted = s.searchOn === 'name' ? nameKey : (identity.ok ? identity.value : '')
+    const href = traceSourceUrl(s, wanted)
+    if (href) window.open(href, '_blank', 'noopener,noreferrer')
     setSource(s)
     setChoosing(false)
     setResult(null)
     setError(null)
+    /* Cleared with the source, or a finding typed against SASSA follows the collector on to the
+       voters' roll and lands on the wrong note. */
+    setFound('')
     setAsking(true)
   }
 
@@ -178,7 +228,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
     setError(null)
     try {
       const c = await recordTrace({
-        accountId, actor, count, sourceId: source.id, named,
+        accountId, actor, count, sourceId: source.id, named, found,
         /*
          * ONCE PER SUBJECT, and the account answers it. Passed as false here: the panel knows
          * which subjects have been traced, this button does not, and a guess either way is a fee
@@ -342,6 +392,20 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
             other needs correcting, and a collector told only "no ID" would go and type the
             telephone number sitting in that field straight into the portal.
           */}
+          {/*
+            WHAT THE SITE WILL ALSO ASK FOR AND RAPTOR CANNOT GIVE IT.
+
+            SASSA's status page wants the phone number the grant was applied on, and the firm does
+            not hold it -- a mobile on our contact list is not necessarily the one they applied
+            with. Said here rather than discovered on the site, because a collector who opens a
+            form they cannot complete has spent the trip for nothing.
+          */}
+          {!result && source.alsoNeeds && (
+            <p className="text-xs text-slate-500 mt-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+              {source.name} also asks for {source.alsoNeeds}.
+            </p>
+          )}
+
           {!result && problem !== null && (
             <p className="text-xs text-negative-700 mt-3 rounded-lg bg-negative-50 border border-negative-100 px-3 py-2">
               {problem}
@@ -368,6 +432,41 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
               ))}
             </div>
           )}
+          {/*
+            WHAT CAME BACK, TYPED.
+
+            THE FIRM, having worked four of these sites by hand: "how do we capture the data? They
+            should either capture it or the screenshots should be uploaded. I believe maybe things
+            should just be typed in. That might be better." They are right, and traceSourceNote
+            says why at length: a bureau hands back a PDF Raptor can parse, these hand back a web
+            PAGE, and a screenshot of one cannot be asked "which debtors draw a grant".
+
+            ONLY ON THE SOURCES THAT NEED IT. A bureau search has a whole workspace behind it --
+            every number, address and linked person as its own row -- so a free-text box there
+            would be a second, worse place to put the same findings.
+
+            OPTIONAL, because a search that found nothing is still worth recording: the next
+            collector needs to know where has already been tried.
+          */}
+          {!result && !counted && (
+            <label className="block mt-3">
+              <span className="text-xs font-medium text-slate-600">What did you find?</span>
+              <textarea value={found} onChange={(e) => setFound(e.target.value)} rows={2}
+                placeholder={source.id === 'sassa'
+                  ? 'Drawing an SRD grant since March 2026.'
+                  : source.id === 'iec'
+                    ? 'Registered in ward 79900090, Soshanguve — voting station Thorntree View Primary.'
+                    : source.id === 'sars_vat'
+                      ? 'Not a registered VAT vendor under that trading name.'
+                      : 'Nothing came back.'}
+                className="mt-1 w-full text-sm rounded-lg border border-slate-200 px-3 py-2 resize-none" />
+              <span className="block text-[11px] text-slate-400 mt-1">
+                Goes on the account&rsquo;s timeline. Leave it empty if nothing came back &mdash;
+                that is worth recording too.
+              </span>
+            </label>
+          )}
+
           {/* AND WHERE THERE IS NOTHING TO COUNT, ONE BUTTON. Item 3 is once per person whatever
               was searched, so a row of numbers here would be asking a question whose answer the
               charge ignores. */}

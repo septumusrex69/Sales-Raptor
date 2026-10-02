@@ -57,6 +57,8 @@ export async function recordTrace(input: {
   sourceId?: string
   /** Where the source is "Somewhere else", what the collector typed. Timeline only. */
   named?: string | null
+  /** What came back, typed by the collector. See traceSourceNote.found. */
+  found?: string | null
   /**
    * TRUE WHERE A NON-BUREAU SEARCH HAS ALREADY BEEN CHARGED FOR THIS SAME PERSON.
    *
@@ -99,7 +101,7 @@ export async function recordTrace(input: {
     : null
   await addNote({
     accountId: input.accountId,
-    body: traceSourceNote({ source, named: input.named, count }),
+    body: traceSourceNote({ source, named: input.named, found: input.found, count }),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',

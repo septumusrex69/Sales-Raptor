@@ -54,16 +54,55 @@ export type TraceSourceKind =
   /** Anything else somebody is looked for in. Item 3. */
   | 'other'
 
+/**
+ * WHAT THIS SOURCE IS SEARCHED ON.
+ *
+ * THE FIRM, sending four screenshots of the sites they actually use: "it's the links that you would
+ * put in here. It would open the link so the data would be traced appropriately. For example, if
+ * you go to Google AI, you want to copy anything about the data that you could find -- name,
+ * surname, or company. Or if you go to the SASSA grant, you'd want an ID number, whatever is
+ * required for that."
+ *
+ * THEY ARE DESCRIBING A BUG. Every source copied the ID number, because the button was written
+ * when XDS was the only one -- so pressing Google put thirteen digits on the clipboard for a search
+ * that wants a person's name, and SARS's VAT vendor search, which asks for a VAT number or an exact
+ * trading name, got an ID number too. A key that is wrong for the site is worse than no key: it is
+ * pasted, it returns nothing, and the collector concludes the person is not there.
+ */
+export type TraceSearchOn =
+  /** The ID number for a person, the registration number for a company. */
+  | 'identity'
+  /** What they are called. A person's full name, or the company's. */
+  | 'name'
+
 export interface TraceSource {
   /** Stable key. Stored, so it may not be renamed when the label changes. */
   id: string
   /** What the firm calls it. */
   name: string
   kind: TraceSourceKind
-  /** Opened in a tab where there is a portal; null where the search is made some other way. */
+  /**
+   * Opened in a tab where there is a portal; null where the search is made some other way.
+   *
+   * MAY CARRY `{key}`, which is substituted with whatever this source is searched on, URL-encoded.
+   * Google takes its query in the address, so there the press lands on the results rather than on
+   * an empty box -- and the clipboard copy is then a convenience rather than the whole mechanism.
+   * Every other one of these sites posts a form, so the key has to be pasted and `{key}` is absent.
+   */
   url: string | null
   /** One line in the picker: what it is searched on, or what it comes back with. */
   what: string
+  /** Which key to copy, and to substitute into `{key}`. See TraceSearchOn. */
+  searchOn: TraceSearchOn
+  /**
+   * A SECOND THING THE SITE ASKS FOR THAT RAPTOR CANNOT GIVE IT.
+   *
+   * SASSA's status page wants the ID number AND the phone number the grant was applied on, and
+   * that is not a number the firm holds -- a debtor's mobile on our contact list is not necessarily
+   * the one they used. Said on the screen rather than discovered on the site, because a collector
+   * who opens a form they cannot complete has spent the trip for nothing.
+   */
+  alsoNeeds?: string
 }
 
 export const TRACE_SOURCES: readonly TraceSource[] = [
@@ -73,26 +112,92 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     kind: 'credit_bureau',
     url: 'https://www.online.xds.co.za/Portal/Account/Login?ReturnUrl=%2FPortal%2F',
     what: 'Numbers, addresses, employment, deeds and linked people. Searched on an ID or a registration number.',
+    searchOn: 'identity',
   },
   {
-    /* THE FIRM'S OWN WORD. SASSA is the social grants agency: what it answers is whether somebody
-       draws a grant, which is the difference between "refusing to pay" and "cannot pay" -- and
-       those two must never be on one list. It is not a credit bureau. */
+    /*
+     * SASSA, AND IT IS THE ONE THAT DECIDES A RUNG. The social grants agency: what it answers is
+     * whether somebody draws a grant, which is the difference between "refusing to pay" and
+     * "cannot pay" -- and CLAUDE.md says in as many words that those two must never be on one
+     * list. A grant is the evidence behind cannot_pay rather than a collector's impression of a
+     * phone call.
+     *
+     * THE SECOND FIELD IS WHY alsoNeeds EXISTS. The status page asks for the phone number the
+     * application was submitted on, which the firm does not hold -- the mobile on our contact list
+     * is not necessarily the one they applied with.
+     */
     id: 'sassa',
     name: 'SASSA',
     kind: 'other',
-    url: null,
-    what: 'Whether they draw a grant — which is the difference between cannot pay and will not pay.',
+    url: 'https://srd.sassa.gov.za/sc19/status',
+    what: 'Whether they draw an SRD grant \u2014 the difference between cannot pay and will not pay.',
+    searchOn: 'identity',
+    alsoNeeds: 'the phone number they applied on, which Raptor does not hold \u2014 ask them for it',
   },
   {
-    /* NAMED AS THE FIRM NAMED IT, and flagged: "CSA" is their shorthand and the full name has not
-       been confirmed. The label is internal -- the debtor's statement says "ONE" -- so correcting
-       it later is one line here and changes nothing already charged. */
+    /*
+     * THE VOTERS' ROLL IS A LOCATOR, and the firm sent the screenshot that shows why: it comes back
+     * with a ward, a voting district and the voting station's ADDRESS. That is not where the debtor
+     * lives, and it must never be written down as though it were -- it is where they registered,
+     * which is a suburb and a municipality to look in. On a book where 97% of accounts carry no ID
+     * number this will often refuse, and that is the honest answer rather than a failure.
+     */
+    id: 'iec',
+    name: 'IEC voters\u2019 roll',
+    kind: 'other',
+    url: 'https://www.elections.org.za/pw/Voter/My-ID-Information-Details',
+    what: 'Ward, voting district and voting station \u2014 the area they registered in, not an address.',
+    searchOn: 'identity',
+  },
+  {
+    /*
+     * CIPC THROUGH BIZPORTAL: who the directors are and whether the company still trades. For a
+     * company debtor it is the route to the people behind it, which is what a surety claim needs.
+     */
+    id: 'cipc',
+    name: 'CIPC \u00b7 BizPortal',
+    kind: 'other',
+    url: 'https://www.bizportal.gov.za/',
+    what: 'Directors and company status, on a registration number. For a company debtor.',
+    searchOn: 'identity',
+  },
+  {
+    /*
+     * SARS'S VAT VENDOR SEARCH, AND IT IS THE ONE THAT PROVED THE searchOn FIELD WAS NEEDED. Its
+     * own note reads "You need a valid VAT Number or an Exact VAT Trading Name" -- so an ID number
+     * on the clipboard, which is what every source used to get, is the one thing it cannot use.
+     * The firm holds no VAT number for a debtor, so the trading name is what goes across.
+     */
+    id: 'sars_vat',
+    name: 'SARS VAT vendor search',
+    kind: 'other',
+    url: 'https://secure.sarsefiling.co.za/vatvendorsearch.aspx',
+    what: 'Whether a company is a registered VAT vendor. Searched on the exact trading name.',
+    searchOn: 'name',
+  },
+  {
+    /*
+     * AND AN ORDINARY WEB SEARCH, WHICH IS THE ONE THE LINK CAN ACTUALLY CARRY. Google takes its
+     * query in the address, so `{key}` lands the press on the results rather than on an empty box.
+     * Every other site here posts a form and has to be pasted into.
+     */
+    id: 'google',
+    name: 'Web search',
+    kind: 'other',
+    url: 'https://www.google.com/search?q={key}',
+    what: 'Name, surname or company \u2014 an employer, a trading name, a death notice, a new town.',
+    searchOn: 'name',
+  },
+  {
+    /* NAMED AS THE FIRM NAMED IT, and still flagged: "CSA" is their shorthand and the full name has
+       not been confirmed. The label is internal -- the debtor's statement says "ONE" -- so
+       correcting it later is one line here and changes nothing already charged. */
     id: 'csa',
     name: 'CSA',
     kind: 'other',
     url: null,
-    what: 'The firm’s own shorthand — confirm the full name before this goes live.',
+    what: 'The firm\u2019s own shorthand \u2014 confirm the full name and the link before this goes live.',
+    searchOn: 'identity',
   },
   {
     /*
@@ -107,8 +212,26 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     kind: 'other',
     url: null,
     what: 'Any other search. Say where, and it goes on the timeline.',
+    searchOn: 'identity',
   },
 ]
+
+/**
+ * THE ADDRESS TO OPEN, WITH THE KEY IN IT WHERE THE SITE TAKES ONE.
+ *
+ * Null where there is nothing to open -- a source with no portal is searched some other way, and
+ * opening a blank tab would be the app pretending to have done something.
+ *
+ * THE KEY IS URL-ENCODED, which is not a formality: a web search on a company is "Rinda Roo
+ * Company" with spaces in it, and an unencoded space ends the URL at the first word.
+ */
+export function traceSourceUrl(source: TraceSource, key: string | null): string | null {
+  if (!source.url) return null
+  if (!source.url.includes('{key}')) return source.url
+  /* A templated URL with nothing to put in it would open a search for the literal "{key}". */
+  if (!key || !key.trim()) return null
+  return source.url.replace('{key}', encodeURIComponent(key.trim()))
+}
 
 export const traceSourceById = (id: string): TraceSource =>
   TRACE_SOURCES.find((s) => s.id === id) ?? TRACE_SOURCES[0]
@@ -199,13 +322,39 @@ export function traceSourceNote(input: {
   /** Where the source is "Somewhere else", what the collector typed. */
   named?: string | null
   count?: number
+  /**
+   * WHAT CAME BACK, in the collector's own words.
+   *
+   * THE FIRM, having opened four of these sites by hand: "how do we capture the data? ... they
+   * should either capture it or the screenshots should be uploaded. I believe maybe things should
+   * just be typed in. That might be better."
+   *
+   * TYPED, AND THEY TALKED THEMSELVES INTO THE RIGHT ANSWER. A bureau hands back a PDF that
+   * Raptor parses into numbers, addresses and linked people; these sites hand back a WEB PAGE and
+   * there is no file to read. The two candidates were a screenshot and a sentence, and a
+   * screenshot is unsearchable -- nobody can ask "which debtors draw a grant" of an image, which
+   * is this codebase's standing complaint about showing somebody a column instead of an answer.
+   *
+   * SO THE SENTENCE IS THE RECORD and the screenshot is evidence to attach beside it. It is also
+   * the only half that survives the one question that matters: SASSA answering yes is the
+   * difference between "refusing to pay" and "cannot pay", and CLAUDE.md says those two may never
+   * be on one list.
+   *
+   * OPTIONAL. A search that found nothing is still worth recording -- the next collector needs to
+   * know where has already been tried -- and a required box with nothing to put in it is how
+   * people learn to type a full stop.
+   */
+  found?: string | null
 }): string {
   const where = input.source.id === 'other'
     ? (input.named?.trim() || 'another source')
     : input.source.name
   const n = Math.max(1, Math.floor(input.count ?? 1))
+  const said = (input.found ?? '').trim()
   if (input.source.kind === 'credit_bureau') {
     return `Trace done — ${n > 1 ? `${n} credit bureau searches` : 'credit bureau search'} (${where}).`
   }
-  return `Trace done — searched ${where}.`
+  /* THE FINDING IS THE SENTENCE WHERE THERE IS ONE. "Searched SASSA." says the work happened;
+     "Searched SASSA — drawing an SRD grant since March" is the reason the work was worth doing. */
+  return said ? `Trace done — searched ${where} — ${said}` : `Trace done — searched ${where}.`
 }

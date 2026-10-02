@@ -524,20 +524,29 @@ ok('...with how they are linked said beside it', /linkedHow\(row\.label\)/.test(
 /* ---------- starting the search ---------- */
 
 /*
- * THE ID NUMBER GOES WITH YOU. The firm's instruction: "you would click on the trace, it would
+ * THE KEY GOES WITH YOU. The firm's instruction: "you would click on the trace, it would
  * automatically copy the ID number to paste into the tracing system." Thirteen digits have to
  * arrive in somebody else's search box exactly right, and a digit retyped wrong is a search about
  * a different person that the firm still pays for.
+ *
+ * WHICH KEY DEPENDS ON THE SITE NOW, and that is the firm again: "if you go to Google AI, you want
+ * to copy name, surname, or company. Or if you go to the SASSA grant, you'd want an ID number."
+ * Every source used to get the ID number. See check-trace-sources, which holds the mapping itself;
+ * this only asserts that whatever was chosen is what reaches the clipboard.
  */
 const button = readFileSync(new URL('../../src/pages/accounts/TraceButton.tsx', import.meta.url), 'utf8')
-ok('the trace click copies what XDS is searched on', /navigator\.clipboard\?\.writeText\(key\.value\)/.test(button))
+ok('the trace click copies what this source is searched on',
+  /navigator\.clipboard\?\.writeText\(copying\)/.test(button))
 /*
  * AND ONLY WHEN IT COULD BE ONE. It copied the raw ID field, and on a real account that field
  * held a telephone number -- pasted into XDS that is an enquiry the firm pays for, run against
  * something that is not a person.
  */
-ok('...checked before it is copied', /const key = traceSearchKey\(debtorKind, idNumber, isValidSaId\)/.test(button))
-ok('...and an unusable number is not copied at all', /if \(key\.ok\) \{/.test(button))
+ok('...checked before it is copied',
+  /const identity = traceSearchKey\(debtorKind, idNumber, isValidSaId\)/.test(button))
+/* NOTHING UNUSABLE IS COPIED, whichever key the source wants: `copying` is empty for a refused ID
+   and for a missing name alike, and the write is behind it. */
+ok('...and an unusable key is not copied at all', /if \(copying\) \{/.test(button))
 ok('...but is named, so it gets corrected', /\{problem\}/.test(button))
 /*
  * BOTH INSIDE THE TAP. Safari allows a new tab, and a clipboard write, only while it can still
@@ -545,12 +554,21 @@ ok('...but is named, so it gets corrected', /\{problem\}/.test(button))
  * broken. Asserted as presence first — indexOf returns -1 for something deleted, and -1 beats
  * everything, so an order-only check passes the moment its subject is gone.
  */
-ok('...and opens the portal in the same click', button.includes('window.open(s.url'))
+ok('...and opens the portal in the same click', button.includes('window.open(href'))
 ok('...with the copy started before the tab steals the gesture',
-  button.indexOf('navigator.clipboard') < button.indexOf('window.open(s.url'))
-/* AND A SOURCE WITH NO PORTAL OPENS NOTHING. SASSA is not a website Raptor can hand a debtor to,
-   and a blank tab would be the app pretending to have done something. */
-ok('...and a source with no portal opens no tab', /if \(s\.url\) window\.open/.test(button))
+  button.indexOf('navigator.clipboard') > 0
+  && button.indexOf('navigator.clipboard') < button.indexOf('window.open(href'))
+/*
+ * AND A SOURCE WITH NO PORTAL OPENS NOTHING -- a blank tab would be the app pretending to have
+ * done something.
+ *
+ * THE LIST OF THOSE HAS SHRUNK, which is the firm's doing: "it's the links that you would put in
+ * here." SASSA, the voters' roll, CIPC and SARS all have one now, so the sources this protects are
+ * the ones still being confirmed. The decision moved into traceSourceUrl, which returns null both
+ * for a source with no address and for a templated one with no key to put in it.
+ */
+ok('...and a source with no portal opens no tab', /const href = traceSourceUrl\(s, wanted\)/.test(button)
+  && /if \(href\) window\.open/.test(button))
 /*
  * A CLIPBOARD WRITE CAN BE REFUSED AFTER IT IS ACCEPTED — writeText resolves asynchronously. So
  * what the modal claims waits for the real answer, and where it was refused the number is shown
@@ -565,7 +583,7 @@ ok('...and a refused copy shows the number instead', /copied === 'no' \|\| copie
  * telephone number sitting in that field straight into the portal.
  */
 ok('...and an account with nothing usable says which of the two it is',
-  /problem !== null &&/.test(button) && /searchKeyProblem\(key, debtorKind\)/.test(button))
+  /problem !== null &&/.test(button) && /searchKeyProblem\(identity, debtorKind\)/.test(button))
 
 /*
  * ASKED AFTERWARDS, which is the only moment the answer exists — an account can carry a company

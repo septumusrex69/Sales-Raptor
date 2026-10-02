@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import {
   BUREAU_ITEM, OTHER_ITEM, TRACE_SOURCES, bureauSearchCounts, chargeForSource, chargesForThisSearch,
-  traceSourceById, traceSourceNote,
+  traceSourceById, traceSourceNote, traceSourceUrl,
 } from '../../src/lib/traceSources.ts'
 import { ANNEXURE_B_2026, scheduleFor } from '../../src/lib/annexureB.ts'
 
@@ -224,6 +224,142 @@ ok('...without the word Cancel beside a charge already raised',
    to believe a charge was raised that was not. */
 ok('what it cost is said by one function', /function chargeWords\(/.test(button))
 ok('...and both places call it', (button.match(/chargeWords\(result, source\)/g) ?? []).length === 2)
+
+/* ---------------------------------------------------------------------------------------------
+ * THE LINKS, AND THE KEY EACH SITE ACTUALLY TAKES
+ *
+ * THE FIRM, sending screenshots of the four sites they work by hand: "the CSA and those other
+ * things is only this stuff, so it's the links that you would put in here. It would open the link
+ * so the data would be traced appropriately. If you go to Google AI, you want to copy name,
+ * surname, or company. Or if you go to the SASSA grant, you'd want an ID number."
+ *
+ * EVERY SOURCE COPIED THE ID NUMBER, because the button was written when XDS was the only one. A
+ * key that is wrong for the site is worse than no key: it gets pasted, it returns nothing, and the
+ * collector concludes the person is not there.
+ * ------------------------------------------------------------------------------------------- */
+
+/* THE ONES THE FIRM SENT A SCREENSHOT OF ARE ALL REACHABLE. A source with no link is one somebody
+   has to go and find, which is how a feature ships and is never used. */
+for (const id of ['sassa', 'iec', 'sars_vat', 'cipc', 'google']) {
+  const source = traceSourceById(id)
+  check(`${id} is a source Raptor knows`, source.id, id)
+  ok(`...and it has a link`, typeof source.url === 'string' && source.url.startsWith('https://'))
+}
+
+/* AND EACH IS SEARCHED ON WHAT IT ASKS FOR. SARS's own page says "a valid VAT Number or an Exact
+   VAT Trading Name", so an ID number is the one thing it cannot use. */
+check('SASSA is searched on the ID number', traceSourceById('sassa').searchOn, 'identity')
+check('the voters\u2019 roll too', traceSourceById('iec').searchOn, 'identity')
+check('CIPC on the registration number', traceSourceById('cipc').searchOn, 'identity')
+check('SARS VAT on the trading name', traceSourceById('sars_vat').searchOn, 'name')
+check('and a web search on the name', traceSourceById('google').searchOn, 'name')
+/* EVERY SOURCE SAYS WHICH, or one added later silently inherits whatever the caller defaults to --
+   and the default is the ID number, which is the bug this field exists to end. */
+ok('every source says what it is searched on',
+  TRACE_SOURCES.every((s) => s.searchOn === 'identity' || s.searchOn === 'name'))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE KEY GOES INTO THE ADDRESS WHERE THE SITE TAKES ONE
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * CALLED DEFENSIVELY, because the thing being guarded here is a NULL.
+ *
+ * Breaking the guard in traceSourceUrl -- which is the only way to prove this check works -- makes
+ * it throw on a null key rather than return one, and an uncaught throw kills the run two lines
+ * below the assertion that should have reported it. CLAUDE.md names this exact trap. So the throw
+ * is caught and reported as the failure it is.
+ */
+const url = (source, key) => {
+  try { return traceSourceUrl(source, key) } catch (e) { return `threw: ${e.message}` }
+}
+
+check('a web search carries the name in the link',
+  url(traceSourceById('google'), 'Promise Sikelele'),
+  'https://www.google.com/search?q=Promise%20Sikelele')
+/* ENCODED, WHICH IS NOT A FORMALITY: a company is "Rinda Roo Company" with spaces in it, and an
+   unencoded space ends the URL at the first word. */
+ok('...with the spaces encoded',
+  !(url(traceSourceById('google'), 'Rinda Roo Company') ?? '').includes(' '))
+/* A TEMPLATED LINK WITH NOTHING TO PUT IN IT OPENS NOTHING, rather than searching for the literal
+   "{key}" -- which is a tab the collector has to read before realising it is nonsense. */
+check('...and nothing to search opens nothing',
+  url(traceSourceById('google'), ''), null)
+check('...including a null', url(traceSourceById('google'), null), null)
+/* A PLAIN LINK IS UNTOUCHED whether or not a key is to hand: these post a form, and the key is
+   pasted rather than carried. */
+check('a form site opens the same either way',
+  url(traceSourceById('sassa'), null), 'https://srd.sassa.gov.za/sc19/status')
+check('a source with no portal opens nothing',
+  url(traceSourceById('csa'), '8806045286087'), null)
+/* NO '{key}' SURVIVES INTO ANY ADDRESS, which is the one failure that would reach the debtor's
+   screen as a search for a placeholder. */
+ok('no link is left holding the placeholder',
+  TRACE_SOURCES.every((s) => !(url(s, 'x') ?? '').includes('{key}')))
+
+/* SASSA SAYS WHAT IT WILL ALSO ASK FOR. Its status page wants the phone number the grant was
+   applied on, which the firm does not hold -- said before the trip rather than after it. */
+ok('SASSA warns about the second field it asks for',
+  /phone number/i.test(traceSourceById('sassa').alsoNeeds ?? ''))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND WHAT CAME BACK IS TYPED, NOT SCREENSHOTTED
+ *
+ * THE FIRM: "how do we capture the data? They should either capture it or the screenshots should
+ * be uploaded. I believe maybe things should just be typed in. That might be better."
+ * ------------------------------------------------------------------------------------------- */
+
+const grants = traceSourceById('sassa')
+check('the finding is what the note says',
+  traceSourceNote({ source: grants, found: 'Drawing an SRD grant since March.' }),
+  'Trace done — searched SASSA — Drawing an SRD grant since March.')
+/* NOTHING FOUND IS STILL A RECORD. The next collector needs to know where has already been tried,
+   so an empty finding leaves the sentence that says the work happened. */
+check('...and nothing found still records the search',
+  traceSourceNote({ source: grants, found: '' }), 'Trace done — searched SASSA.')
+check('...as does a finding of only spaces',
+  traceSourceNote({ source: grants, found: '   ' }), 'Trace done — searched SASSA.')
+/* A BUREAU SEARCH IS NOT CAPTURED THIS WAY. It has a whole workspace behind it -- every number,
+   address and linked person as its own row -- so a free-text box would be a second, worse place
+   to put the same findings. */
+ok('a bureau search ignores the typed finding',
+  !traceSourceNote({ source: traceSourceById('xds'), found: 'something', count: 2 })
+    .includes('something'))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE BUTTON USES THE RIGHT ONE OF THE TWO
+ * ------------------------------------------------------------------------------------------- */
+
+ok('the button picks the key off the source', /source\.searchOn === 'name'/.test(button))
+ok('...and the account supplies a name for it', /debtorName: string \| null/.test(button))
+/*
+ * READ OFF THE SOURCE BEING PICKED, NOT OFF THE ONE IN STATE, and this is the bug that would have
+ * been invisible. setSource has not run when pick() opens the tab, so reading `source` there copies
+ * and opens for the PREVIOUS source -- the right site for the wrong debtor, or the wrong key for
+ * the right site, on every press after the first.
+ */
+ok('...for the source being picked rather than the last one',
+  /const copying = s\.searchOn === 'name'/.test(button)
+  && /const wanted = s\.searchOn === 'name'/.test(button))
+ok('...and the address is built from it too', /traceSourceUrl\(s, wanted\)/.test(button))
+ok('...never from the one in state', !/traceSourceUrl\(source,/.test(button))
+
+/* AN ID IS LUHN-CHECKED AND A NAME IS NOT, which is not laxness: a transposed pair traces somebody
+   ELSE and is thirteen digits either way, while a misspelt name costs a search that finds nothing.
+   So the only way a name fails is by being absent. */
+ok('a missing name is the only way a name fails',
+  /This source is searched on a name and the account has none recorded/.test(button))
+
+/* WHAT CAME BACK IS TYPED, AND ONLY WHERE THERE IS NO WORKSPACE BEHIND IT. */
+ok('the box asks what was found', /What did you find\?/.test(button))
+ok('...only on the sources with no workspace', /!result && !counted && \(\s*<label/.test(button))
+ok('...and it reaches the record', /sourceId: source\.id, named, found,/.test(button))
+/* CLEARED WITH THE SOURCE, or a finding typed against SASSA follows the collector on to the
+   voters' roll and lands on the wrong note. */
+ok('...and is cleared when the source changes', /setFound\(''\)/.test(button))
+
+/* AND THE SITE'S SECOND FIELD IS SAID BEFORE THE TRIP, not discovered on arrival. */
+ok('the box warns what else the site asks for', /source\.alsoNeeds &&/.test(button))
 
 console.log(`\ncheck-trace-sources: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
