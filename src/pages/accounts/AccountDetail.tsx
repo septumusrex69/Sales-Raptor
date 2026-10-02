@@ -2093,6 +2093,11 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
    * A timeline that quietly hides rows the first time you open it is a timeline you cannot trust
    * to be complete, and "why is the trace not showing" is a worse afternoon than a long list.
    * The choice is remembered per browser, because whoever turns it off means it.
+   *
+   * AND IT IS NOT WHERE THE CHARGE LINES WENT. The firm asked for those off the timeline -- "still
+   * showing the charges on the notes is not necessary" -- and buildTimeline no longer puts a fee
+   * Raptor raised on the list at all. Turning this on instead would have hidden the sentences
+   * Raptor composes along with them, the trace's own note among them. See accountTimeline.
    */
   const [showAutomated, setShowAutomated] = useState(() => {
     try { return window.localStorage.getItem(AUTOMATED_KEY) !== 'hide' } catch { return true }
@@ -2155,7 +2160,7 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
           Just what people wrote{' '}
           <span className="text-slate-400">
             {showAutomated
-              ? '— hides fee lines and the notes Raptor writes itself'
+              ? '— hides the notes Raptor writes itself and the actions logged on the old system'
               : hidden > 0
                 ? `— ${hidden.toLocaleString('en-ZA')} automatic ${hidden === 1 ? 'entry' : 'entries'} hidden`
                 : '— nothing automatic on this account'}

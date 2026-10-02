@@ -2,15 +2,20 @@
  * One account's story, in one stream.
  *
  * A collector picking up an account needs to know what happened, not which table it happened in.
- * So the fee ledger (every letter, call, SMS and trace), the payment ledger, the notes and the
- * promises are merged here into a single chronological list.
+ * So the payment ledger, the notes, the promises and the IMPORTED half of the fee ledger are
+ * merged here into a single chronological list.
+ *
+ * The imported half, because a fee Raptor raised is already on this list in words -- the function
+ * that charges a call writes "Called 011 592 0520" in the same breath, and the firm asked for the
+ * charge row under it to go. An imported fee has no such note and is all the history there is.
+ * See feeIsTheOnlyRecord in accountBalance.
  *
  * Interest accruals are deliberately left out. There are 29 to 56 of them on a typical migrated
  * account, they are computed rather than done, and they would bury the human events under a
  * monthly drumbeat nobody needs to read. Interest belongs on the Statement, which is the record
  * of money; this is the record of contact.
  */
-import { feeStands } from './accountBalance.ts'
+import { feeIsTheOnlyRecord, feeStands } from './accountBalance.ts'
 import type { AccountLedgers } from './accountBook'
 import type { AccountContact, AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
@@ -44,11 +49,12 @@ export interface TimelineEntry {
    * The split the firm asked for: "all of the actions, and then you can just hide the automated
    * actions ... so it only shows the writings, the comments, that type of important stuff."
    *
-   * It is a fact recorded at the source, never guessed from the text. A fee line is automatic
-   * because raising it is the machine's half of an action somebody else took; a note is automatic
-   * when Raptor composed it ("Trace done — 4 credit bureau searches"), and is not when a person
-   * typed the words. Payments, promises and a dispute's own history stay: money arriving and
-   * decisions being taken are the story, not bookkeeping about it.
+   * It is a fact recorded at the source, never guessed from the text. An imported fee line is
+   * automatic because it is an ACTION rather than a writing -- "Letter sent", logged by the old
+   * system -- and the firm asked for the switch in those terms; a note is automatic when Raptor
+   * composed it ("Trace done — 4 credit bureau searches"), and is not when a person typed the
+   * words. Payments, promises and a dispute's own history stay: money arriving and decisions being
+   * taken are the story, not bookkeeping about it.
    */
   automated: boolean
 }
@@ -163,9 +169,9 @@ export function buildTimeline(
    * Dated at the import it would jump to the top of a book brought across from Swordfish and
    * bury six years of history under a row saying the account exists.
    *
-   * NOT AUTOMATED, although Raptor wrote it. The flag hides bookkeeping about actions somebody
-   * else took -- a fee line beside the call that caused it. This is not bookkeeping; it is the
-   * account's first fact, and hidden it would take the answer with it.
+   * NOT AUTOMATED, although Raptor wrote it. The flag is for the logged actions and the sentences
+   * Raptor composes. This is neither; it is the account's first fact, and hidden it would take the
+   * answer with it.
    */
   if (opening && (opening.handoverDate || opening.importedAt)) {
     const at = opening.handoverDate ?? opening.importedAt as string
@@ -197,9 +203,9 @@ export function buildTimeline(
    * already on it, and one entry per imported contact would bury six years of history under a
    * list of telephone numbers on the day of the import.
    *
-   * NOT AUTOMATED, because the "just what people wrote" filter exists to hide bookkeeping about
-   * actions somebody else took. This IS the action: a person looked at a number, rang it, and
-   * decided.
+   * NOT AUTOMATED, because the "just what people wrote" filter exists to thin the logged actions
+   * down to the writings. This is a DECISION, not a logged action: a person looked at a number,
+   * rang it, and chose.
    */
   for (const c of contacts) {
     if (c.verifiedAt) {
@@ -228,7 +234,25 @@ export function buildTimeline(
     }
   }
 
-  for (const f of ledgers?.fees ?? []) {
+  /*
+   * ---- THE FEES, AND ONLY THE ONES NOTHING ELSE SAYS ----
+   *
+   * THE FIRM, reading an account where "Called 011 592 0520" had "Telephone call  R 28,75" under
+   * it: "still showing the charges on the notes is not necessary."
+   *
+   * AND THEY ARE NOT, FOR A FEE WE RAISED. Every charge Raptor makes is written beside a note in
+   * the same function, in words -- so the fee row repeats, in money, a line the collector has just
+   * read. Three rows for one telephone call is what that produced.
+   *
+   * THE IMPORTED ONES STAY, AND THAT IS NOT A HEDGE. On a migrated account the fee ledger is the
+   * only contact history there is: 59 215 fees came across against 1 523 notes. See
+   * feeIsTheOnlyRecord, which is where the reasoning and the list of systems live.
+   *
+   * NOT DONE WITH THE `automated` SWITCH, although it would have hidden these too. That switch
+   * also hides the notes Raptor composes -- "Trace done, 4 credit bureau searches" -- and the firm
+   * reads those. Defaulting it on to lose the fee lines would have taken the trace note with it.
+   */
+  for (const f of (ledgers?.fees ?? []).filter(feeIsTheOnlyRecord)) {
     entries.push({
       id: `fee:${f.id}`,
       kind: 'action',
@@ -255,8 +279,19 @@ export function buildTimeline(
       amount: f.billed ? f.amountExclVat + f.vatAmount : null,
       free: !f.billed,
       actionCode: f.actionCode,
-      // Always. A fee line is Raptor charging for something a person did; the doing is already
-      // on the timeline as its own entry, written in words.
+      /*
+       * STILL AUTOMATIC, even though it is now the only record of the action.
+       *
+       * The firm's own words for the switch: "all of the actions, and then you can just hide the
+       * automated actions, so it only shows the writings, the comments, that type of important
+       * stuff." An imported "Letter sent" is an action, not a writing, so it belongs on the side
+       * of the switch they put it on -- and the busiest migrated account carries 822 of them.
+       *
+       * WHICH IS WHY THE FIRM'S COMPLAINT COULD NOT BE ANSWERED WITH THIS FLAG. Defaulting the
+       * switch on would have hidden the fee rows and the notes Raptor composes in the same motion,
+       * and the trace note is one a collector reads. The charge rows are gone from the list
+       * itself; this only decides where the surviving ones sit.
+       */
       automated: true,
     })
   }

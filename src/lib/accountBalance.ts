@@ -217,6 +217,49 @@ export function feeStands(fee: { cancelledAt?: string | null; legacyName?: strin
   return (fee.legacyName ?? '').trim().toLowerCase() === 'promise to pay'
 }
 
+/**
+ * THE SYSTEMS WHOSE FEES ARE THE ONLY RECORD OF THE WORK.
+ *
+ * THE FIRM, looking at an account where every call had a charge line under it: "still showing the
+ * charges on the notes is not necessary." They had said it once before, of the workflow notes --
+ * "don't have to say about the charges in the notes", quoted in accountSms -- and this is the
+ * other half of the same instruction.
+ *
+ * WHY IT IS A LIST OF SYSTEMS AND NOT A FLAG ON THE SCREEN. Every place Raptor charges something
+ * writes a note in the same function, in the firm's words: accountCalls writes "Called 011 592
+ * 0520", accountSms writes the message, accountPromises writes the arrangement, accountTrace
+ * writes what came back. The fee beside those is the machine's half of an action already on the
+ * timeline, so the row says nothing a collector did not just read one line up -- which is what the
+ * firm is looking at and what they are right about.
+ *
+ * AN IMPORTED FEE HAS NO SUCH NOTE. The export carried 59 215 fees and 1 523 notes, so on a
+ * migrated account the fee ledger IS the contact history: "Letter sent, 12/03/2021" exists as a
+ * fee row and nowhere else. Dropped, six years of work would leave the timeline and the account
+ * would read as though nothing had ever been done on it.
+ *
+ * SO IT IS NOT A MATTER OF TASTE, IT IS WHETHER ANYTHING ELSE SAYS IT HAPPENED. `source` already
+ * answers that -- it is written by the importer and by chargeEngine, and the finance health report
+ * already leans on it to tell an inherited fault from ours. A second legacy system is one entry
+ * here; check-timeline holds the list against the importer.
+ *
+ * UNATTRIBUTED COUNTS AS OURS. The column's table default is 'action' and nothing writes it
+ * deliberately. A row we cannot vouch for is still on the statement and still under the Annexure B
+ * ceiling, where money belongs; drawing it here on the chance it might be history is how the
+ * firm's complaint comes back.
+ */
+export const IMPORTED_FEE_SOURCES: readonly string[] = ['swordfish']
+
+/**
+ * Is this fee the account's only record of the action behind it?
+ *
+ * The timeline draws a fee line only where the answer is yes. Nothing else uses it: the statement,
+ * the transaction list and the fee ceiling show every fee regardless, because they are about money
+ * and this one question is about the story.
+ */
+export function feeIsTheOnlyRecord(fee: { source?: string | null }): boolean {
+  return IMPORTED_FEE_SOURCES.includes(fee.source ?? '')
+}
+
 function splitFeeLedger(ledgers: LedgerLines) {
   /*
    * FILTERED HERE AND NOWHERE ELSE, because computeBalance and buildStatement both read this and

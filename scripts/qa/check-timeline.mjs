@@ -10,6 +10,7 @@
  *   node --experimental-strip-types scripts/qa/check-timeline.mjs
  */
 import { buildTimeline, filterTimeline, groupByDay } from '../../src/lib/accountTimeline.ts'
+import { feeIsTheOnlyRecord, IMPORTED_FEE_SOURCES } from '../../src/lib/accountBalance.ts'
 import { styleFor } from '../../src/pages/accounts/timelineStyle.ts'
 
 let failed = 0
@@ -27,9 +28,15 @@ const ledgers = {
     { id: 'p1', receivedAt: '2026-08-05T00:00:00+00:00', amount: 1500, method: 'Direct', reference: 'EFT 1', details: null, paidToClient: false, reversedAt: null },
     { id: 'p2', receivedAt: '2026-04-05', amount: 1500, method: 'Direct', reference: 'EFT 2', details: null, paidToClient: false, reversedAt: '2026-04-12' },
   ],
+  /*
+   * IMPORTED, AND THAT IS NOW LOAD-BEARING RATHER THAN SCENERY. The midnight timestamps above
+   * already said these two came across from Swordfish; `source` is what the timeline reads, and
+   * without it they are fees Raptor raised and do not reach the list at all. See
+   * feeIsTheOnlyRecord.
+   */
   fees: [
-    { id: 'f1', incurredAt: '2026-08-05T00:00:00+00:00', description: 'Letter of Demand', amountExclVat: 96, vatAmount: 14.4, billed: true, actionCode: 'LOD', segments: 1, cancelledAt: null, performedBy: 'Amanda' },
-    { id: 'f2', incurredAt: '2026-08-05T00:00:00+00:00', description: 'SMS', amountExclVat: 0, vatAmount: 0, billed: false, actionCode: 'SMS', segments: 1, cancelledAt: null, performedBy: 'Amanda' },
+    { id: 'f1', incurredAt: '2026-08-05T00:00:00+00:00', description: 'Letter of Demand', amountExclVat: 96, vatAmount: 14.4, billed: true, actionCode: 'LOD', segments: 1, cancelledAt: null, performedBy: 'Amanda', source: 'swordfish' },
+    { id: 'f2', incurredAt: '2026-08-05T00:00:00+00:00', description: 'SMS', amountExclVat: 0, vatAmount: 0, billed: false, actionCode: 'SMS', segments: 1, cancelledAt: null, performedBy: 'Amanda', source: 'swordfish' },
   ],
   accruals: [{ id: 'i1', accruedOn: '2026-08-05', days: 30, amountAccrued: 370, amountRecoverable: 370 }],
   totals: { paid: 0, feesExclVat: 0, feesInclVat: 0, interest: 0, feeCount: 2 },
@@ -93,6 +100,67 @@ check('interest accruals stay out', !t.some((e) => /interest/i.test(e.title)))
   check('unbilled action carries no amount', sms?.amount == null && sms?.free === true)
   const lod = t.find((e) => e.title === 'Letter of Demand')
   check('billed action carries VAT-inclusive amount', Math.abs((lod?.amount ?? 0) - 110.4) < 0.005)
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * THE CHARGE LINES, AND THE ONE KIND THAT STAYS
+ *
+ * THE FIRM, reading RRC00005 where three rows stood for one telephone call -- "Called 011 592
+ * 0520", "No answer on 011 592 0520", "Telephone call  R 28,75": "still showing the charges on the
+ * notes is not necessary." They had said it once already of the workflow notes.
+ *
+ * IT IS NOT "HIDE EVERY FEE", AND THAT IS THE WHOLE DIFFICULTY. On a migrated account the fee
+ * ledger IS the contact history -- 59 215 fees came across against 1 523 notes -- so hiding all of
+ * them empties six years of work off the timeline, and the account reads as one nobody ever
+ * worked. The question is whether anything ELSE on the list says the action happened, and `source`
+ * is what answers it.
+ * ------------------------------------------------------------------------------------------- */
+
+{
+  const ours = { payments: [], accruals: [], totals: { paid: 0, feesExclVat: 0, feesInclVat: 0, interest: 0, feeCount: 1 } }
+  const fee = (over) => ({
+    id: 'f', incurredAt: '2026-10-02T11:00:00Z', description: 'Telephone call', amountExclVat: 25,
+    vatAmount: 3.75, billed: true, actionCode: 'phone_call', segments: 1, cancelledAt: null,
+    performedBy: 'Stephan', ...over,
+  })
+  const drawn = (over) => buildTimeline({ ...ours, fees: [fee(over)] }, [], [])
+
+  /* THE COMPLAINT, AS AN ABSENCE. The charge beside a call Raptor logged is gone from the list. */
+  check('a fee Raptor raised is not on the timeline', drawn({ source: 'raptor' }).length === 0)
+  /* AND THE WORKFLOW'S, which is the same fee raised by the runner rather than by a collector --
+     #14 took these out of the notes' WORDS and left the row standing underneath. */
+  check('...nor one the workflow raised', drawn({ source: 'workflow' }).length === 0)
+  /* UNATTRIBUTED COUNTS AS OURS. account_fees defaults source to 'action' and nothing writes it
+     deliberately; a row we cannot vouch for is still on the statement, where money belongs. */
+  check('...nor one whose source is the table default', drawn({ source: 'action' }).length === 0)
+  check('...nor one with no source at all', drawn({ source: null }).length === 0)
+
+  /* AND THE IMPORTED ONE IS STILL THERE, which is the half that stops this being a deletion. */
+  const imported = drawn({ source: 'swordfish' })
+  check('an imported fee is the only record, so it stays', imported.length === 1)
+  check('...and still says what it was', imported[0]?.title === 'Telephone call')
+  check('...and still carries the money', Math.abs((imported[0]?.amount ?? 0) - 28.75) < 0.005)
+
+  /* THE PREDICATE ITSELF, both ways, because the timeline is not the only thing that may ever
+     ask it and a list with 'raptor' quietly added to it would empty the migrated book's story. */
+  check('the predicate agrees', feeIsTheOnlyRecord({ source: 'swordfish' }) === true)
+  check('...and refuses ours', ['raptor', 'workflow', 'action', null, undefined]
+    .every((source) => !feeIsTheOnlyRecord({ source })))
+  check('...and the list of systems is exactly the old one',
+    IMPORTED_FEE_SOURCES.join(',') === 'swordfish', `got ${IMPORTED_FEE_SOURCES.join(',')}`)
+
+  /*
+   * AND A NOTE RAPTOR WROTE IS NOT TOUCHED BY ANY OF THIS, which is why the firm's complaint could
+   * not be answered by defaulting the "just what people wrote" switch on. The two travel together
+   * under that switch and only one of them was asked about: a collector reads "Trace done".
+   */
+  const alongside = buildTimeline(
+    { ...ours, fees: [fee({ source: 'raptor' })] },
+    [{ id: 'sys', accountId: 'a', body: 'Trace done — 4 credit bureau searches.', pinned: false, authorName: 'Stephan', createdBy: null, createdAt: '2026-10-02T11:00:00Z', source: 'system' }],
+    [],
+  )
+  check('the note Raptor composed survives the fee going',
+    alongside.map((e) => e.id).join(',') === 'note:sys', `got ${alongside.map((e) => e.id).join(',')}`)
 }
 
 /* A reversed payment still appears -- it happened -- but is marked. */
