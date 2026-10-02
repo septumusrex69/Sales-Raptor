@@ -1,5 +1,6 @@
 import type { ClientPosition } from './clientPosition.ts'
 import type { DiaryKind } from './diaryPriority.ts'
+import { classificationMissing, explanationMissing } from './disputeCategories.ts'
 
 /**
  * What came of working an account.
@@ -164,4 +165,51 @@ export function needsPromise(outcome: CallOutcome | null): boolean {
  */
 export function needsWords(outcome: CallOutcome | null): boolean {
   return outcome === 'cannot_pay' || outcome === 'disputed' || outcome === 'under_administration'
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * WHAT A PERSON HAS ANSWERED, AND WHETHER IT IS ENOUGH TO SAVE
+ *
+ * IT LIVES BESIDE THE VOCABULARY RATHER THAN IN THE CONTROL THAT DRAWS IT, for two reasons that
+ * are the same reason. `outcomeReady` is the composition of `needsPromise`, `needsWords` and the
+ * two dispute rules -- every one of which is already here -- and it is the GUARANTEE behind three
+ * different boxes: the diary's, the work bar's and now the call box's. In a .tsx file the QA layer
+ * cannot import it at all (`scripts/qa` resolves .ts and not .tsx), so the only thing a check
+ * could do was match the source of the rule and hope. Held as a function, a rule that stops
+ * holding fails a check rather than a client's dispute report.
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface OutcomeChoice {
+  outcome: CallOutcome | null
+  /** Set when the debtor made a NEW commitment, so the existing one is not simply reused. */
+  repromise?: boolean
+  /** Only when they agreed to pay. */
+  amount: string
+  dueOn: string
+  /** The words, where the answer needs them. */
+  words: string
+  /**
+   * ONLY ON 'disputed', AND REQUIRED THERE. The firm: "you should be able to say about what is a
+   * dispute about." A dispute taken on a call is a dispute like any other, and this is the one
+   * moment anybody knows the answer -- the debtor is still on the line. Without it the diary could
+   * not finish an account at all: raiseQuery refuses an unclassified dispute, recordOutcome reports
+   * the failure, and the sub-status is deliberately not written when anything above it failed.
+   */
+  category: string
+}
+
+export const EMPTY_OUTCOME: OutcomeChoice = { outcome: null, amount: '', dueOn: '', words: '', category: '' }
+
+/** Is there enough here to save? Null outcome is allowed — recording nothing stays possible. */
+export function outcomeReady(c: OutcomeChoice, hasLivePromise = false): boolean {
+  if (!c.outcome) return true
+  /* A promise already on the account is the amount and the date — see OutcomePicker. */
+  if (needsPromise(c.outcome) && hasLivePromise && !c.repromise) return true
+  if (needsPromise(c.outcome)) return c.amount.trim() !== '' && c.dueOn !== ''
+  if (needsWords(c.outcome) && c.words.trim().length < 3) return false
+  /* A DISPUTE SAYS WHAT IT IS ABOUT, here as everywhere. Asked through the same two functions the
+     Escalate box asks, so the diary and the box cannot come to different answers. */
+  if (classificationMissing(c.outcome === 'disputed' ? 'dispute' : 'help', c.category)) return false
+  if (c.outcome === 'disputed' && explanationMissing(c.category, c.words)) return false
+  return true
 }

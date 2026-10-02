@@ -1,187 +1,205 @@
 /**
- * What came of working an account, and what it writes.
+ * ONE NOTE, NOT TWO: THE CALL BOX RECORDS WHAT CAME OF THE CALL.
  *
- * THE CLERK PICKS THE POSITION, AND THE RECORD IS WRITTEN ANYWAY. The choices read as the firm's
- * own rungs now, at their instruction — one vocabulary, not two — but every one of them still
- * writes the promise, the dispute or the trace that stands behind it. These checks are what stops
- * that half collapsing into a bare status dropdown, which is how the imported book ended up with
- * 58 accounts claiming a promise to pay and only 43 promises.
+ * THE FIRM, having run their first afternoon of calls: "I think we can as well add to this thing
+ * immediately -- add a question. As you raise a ticket, or you can raise a PTP immediately from the
+ * screen. Either way, it records. And it's then accepted as spoken to the debtor, so it charges the
+ * consultation and the other thing, the phone call."
+ *
+ * AND THE FAULT UNDERNEATH IT: "the big thing and the big problem was the note. So now you make a
+ * note of the telephone call, and then you make another note of, for example, the dispute. Right?
+ * So you're double making notes. So notes should be made only at one place."
+ *
+ * They were typing the same sentence twice. A call that ended in a dispute was written up in "What
+ * was said?", then written again in the Escalate box, and the two were different by the time they
+ * were both saved -- so the account's timeline and the client's dispute report disagreed about what
+ * the debtor had actually said.
+ *
+ * THREE THINGS THIS FILE HOLDS, AND THE FIRST IS A FEE:
+ *
+ *  1. ONLY THE FIVE OUTCOMES THAT MEAN SOMEBODY WAS REACHED are offered on the call box, because
+ *     choosing one is now the press that charges the R60 consultation. "Arranged" and "nobody
+ *     picked up" on one press is a promise with a voicemail behind it. R60 charged for a voicemail
+ *     is the exact bug this box was built to end -- see CallButton's own note.
+ *  2. THE WORDS ARE ASKED FOR ONCE. The picker draws no second box where the caller already holds
+ *     the sentence, and the call's note is what reaches the promise and the dispute.
+ *  3. THE CONSULTATION IS WRITTEN FIRST AND CANNOT BE LOST. A promise that will not save must not
+ *     take the record of the call, or its fee's evidence, with it.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-call-outcome.mjs
  */
 import { readFileSync } from 'node:fs'
 import {
-  CALL_OUTCOMES, CALL_OUTCOME_ORDER, needsPromise, needsWords,
+  CALL_OUTCOMES, CALL_OUTCOME_ORDER, EMPTY_OUTCOME, needsWords, outcomeReady,
 } from '../../src/lib/callOutcome.ts'
-import { CLIENT_POSITIONS, clientPosition } from '../../src/lib/clientPosition.ts'
-import { DIARY_KINDS } from '../../src/lib/diaryPriority.ts'
 
 let pass = 0
 const failures = []
-function check(name, actual, expected) {
-  if (Object.is(actual, expected)) { pass += 1; return }
-  failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    got      ${JSON.stringify(actual)}`)
+const check = (name, actual, expected) => {
+  const a = JSON.stringify(actual); const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
 }
 const ok = (name, actual) => check(name, actual, true)
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+/* Comments stripped. Several assertions below are about what is ABSENT, and both of these files
+   explain at length what they no longer do -- the trap this codebase has walked into three times. */
+const code = (p) => read(p)
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/^[ \t]*\/\/.*$/gm, ' ')
 
-/* ---------- the vocabulary holds together ---------- */
+const box = code('src/pages/accounts/CallButton.tsx')
+const picker = code('src/components/diary/OutcomePicker.tsx')
+const page = code('src/pages/accounts/AccountDetail.tsx')
 
-ok('every outcome is offered', CALL_OUTCOME_ORDER.length === Object.keys(CALL_OUTCOMES).length)
-ok('no outcome is offered twice', new Set(CALL_OUTCOME_ORDER).size === CALL_OUTCOME_ORDER.length)
-ok('every outcome lands on a real position',
-  CALL_OUTCOME_ORDER.every((k) => CALL_OUTCOMES[k].position in CLIENT_POSITIONS))
-
-/*
- * THE ROUND TRIP, which is the only version of this that is worth anything.
- *
- * An outcome carries a `position` AND the sub-status recordOutcome writes to the account. Nothing
- * downstream ever reads `position` again: the account screen, the client report and every count
- * derive the rung from the SUB-STATUS. So the two can disagree, silently, for as long as nobody
- * opens one of these accounts and reads the tile.
- *
- * Two of them did. "Under administration" and "Cannot pay" both derived to 'in_progress' — an
- * agent who ended a call by saying the debtor was in liquidation, or that a pensioner had
- * nothing, produced an account that reported to the client as though nobody had rung it yet. The
- * second one broke the firm's own rule that refusing to pay and cannot pay never share a list.
- *
- * Asserting `position` against itself would have passed throughout.
- */
-for (const key of CALL_OUTCOME_ORDER) {
-  const outcome = CALL_OUTCOMES[key]
-  check(`'${outcome.label}' reports as the rung it claims`,
-    clientPosition({ status: 'Active', subStatus: outcome.subStatus }),
-    outcome.position)
-}
-ok('every outcome suggests a real diary kind',
-  CALL_OUTCOME_ORDER.every((k) => CALL_OUTCOMES[k].suggests in DIARY_KINDS))
-ok('no two outcomes read the same to an agent',
-  new Set(CALL_OUTCOME_ORDER.map((k) => CALL_OUTCOMES[k].label)).size === CALL_OUTCOME_ORDER.length)
-
-/* ---------- the three that no machine can observe ---------- */
+/* ---------------------------------------------------------------------------------------------
+ * 1. THE FIVE THAT MEAN SOMEBODY WAS REACHED
+ * ------------------------------------------------------------------------------------------- */
 
 /*
- * Negotiating, Refusing and Cannot pay exist only because somebody was on a telephone. If any of
- * them stopped being reachable from this control they would become unreachable entirely — nothing
- * else in Raptor can produce them.
+ * DERIVED FROM `reached`, NOT LISTED. A ninth outcome then lands on the right side of this line by
+ * saying what it is, rather than by somebody remembering a file in pages/accounts.
  */
-for (const position of ['negotiating', 'refusing', 'cannot_pay']) {
-  ok(`${CLIENT_POSITIONS[position].label} is reachable from an outcome`,
-    CALL_OUTCOME_ORDER.some((k) => CALL_OUTCOMES[k].position === position))
-}
-ok('reaching the debtor is what separates negotiating from in progress',
-  CALL_OUTCOMES.negotiating.reached && !CALL_OUTCOMES.no_answer.reached)
-ok('a refusal requires having reached them', CALL_OUTCOMES.refused.reached)
-// Somebody who did not answer the telephone has not refused anything.
-ok('no answer is never read as a refusal', CALL_OUTCOMES.no_answer.position !== 'refusing')
-ok('...nor as an inability to pay', CALL_OUTCOMES.no_answer.position !== 'cannot_pay')
+ok('the call box offers only what it offers by asking `reached`',
+  /CALL_OUTCOME_ORDER\.filter\(\(k\) => CALL_OUTCOMES\[k\]\.reached\)/.test(box))
+ok('...and passes exactly that list to the picker', /offer=\{SPOKE_TO_THEM\}/.test(box))
 
-/* ---------- a promise must carry its amount and date ---------- */
+/* AND THE LIST IT PRODUCES IS THE FIVE, asserted on the data rather than the regex above, so a
+   `reached` flipped on one outcome fails here and not in a screenshot three weeks later. */
+const spoke = CALL_OUTCOME_ORDER.filter((k) => CALL_OUTCOMES[k].reached)
+check('which is the five an answered call can land on', spoke,
+  ['promised', 'negotiating', 'cannot_pay', 'refused', 'disputed'])
+/*
+ * AND NO ANSWER IS NOT AMONG THEM, which is the one that matters: it is the OTHER button on the
+ * same box, and two controls for one fact is how they come to disagree.
+ */
+ok('no answer is not offered beside the button that means it', !spoke.includes('no_answer'))
+/* NOR A TRACE NOR A PRACTITIONER. Both mean the debtor was not reached, so neither can sit on a
+   press that raises R60 for a conversation. They stay on the diary's box, which charges nothing. */
+ok('...nor a trace', !spoke.includes('wrong_number'))
+ok('...nor under administration', !spoke.includes('under_administration'))
+/* THE DIARY STILL OFFERS ALL EIGHT. The narrowing is the call box's, and the picker's default is
+   untouched -- a diary entry being finished at a desk can have landed anywhere. */
+ok('the picker still offers all eight by default',
+  /const offered = offer \?\? CALL_OUTCOME_ORDER/.test(picker))
+ok('...and the diary passes no list', !/offer=\{/.test(code('src/components/diary/CompleteDiaryModal.tsx')))
 
 /*
- * The whole design in one assertion. A promise with no figure and no date cannot be diarised,
- * cannot fall due, cannot break and cannot be reported — it is a status with nothing behind it,
- * which is the fault this replaces.
+ * AND THE VOICEMAIL BUTTON GOES OFF ONCE ONE IS CHOSEN. Without this the two halves of the box
+ * contradict each other on one press: a promise recorded, a consultation not charged, and an
+ * account reporting Arranged with "no answer" on its timeline.
  */
-ok('agreeing to pay demands an amount and a date', needsPromise('promised'))
-ok('nothing else does', CALL_OUTCOME_ORDER.filter((k) => needsPromise(k)).length === 1)
-check('...and it is checked before saving', CALL_OUTCOMES.promised.position, 'arranged')
-check('...and the diary is told to confirm it', CALL_OUTCOMES.promised.suggests, 'promise_due')
+ok('a chosen outcome turns the voicemail button off',
+  /answered\(false\)\} disabled=\{busy \|\| !!came\.outcome\}/.test(box))
+ok('...saying why, because the way back is to clear the choice',
+  /that is somebody you spoke to/.test(box))
 
-/* ---------- the ones that need words ---------- */
-
-// "Cannot pay" with no reason is exactly the gap that had hardship reported as refusal.
-ok('an inability to pay needs the reason', needsWords('cannot_pay'))
-ok('a dispute needs its substance', needsWords('disputed'))
-ok('an administration needs naming', needsWords('under_administration'))
-ok('no answer needs nothing', !needsWords('no_answer'))
-
-/* ---------- it writes records, not just a label ---------- */
-
-const rec = readFileSync(new URL('../../src/lib/recordOutcome.ts', import.meta.url), 'utf8')
-ok('a promise is written as a promise', /addPromise\(/.test(rec))
-ok('a dispute is raised as a dispute', /raiseQuery\(/.test(rec))
-/*
- * NOT CHARGED. Item 3 is for a dispute taken up with somebody else; one an agent writes down at
- * their own desk mid-call is the job, not a necessary expense recoverable from the debtor.
- */
-ok('a dispute raised mid-call does not charge the debtor', /charge: false/.test(rec))
-/*
- * THE STATUS LAST. If the promise could not be written, the account must not be left claiming an
- * arrangement that no record supports.
- */
-/*
- * Asserted as PRESENCE first, then order. indexOf returns -1 for a string that is gone, and -1 is
- * less than everything — so an order-only check passes vacuously the moment the guard is deleted,
- * which is exactly the change it exists to catch.
- */
-ok('the status write is guarded at all', rec.includes('failed.length === 0'))
-ok('...and the guard comes before it', rec.indexOf('failed.length === 0') < rec.indexOf('sub_status'))
-
-/* ---------- the firm's own words on the buttons ---------- */
+/* ---------------------------------------------------------------------------------------------
+ * 2. THE WORDS ARE TYPED ONCE
+ * ------------------------------------------------------------------------------------------- */
 
 /*
- * EACH CHOICE LEADS WITH THE RUNG IT PRODUCES. It read as eight events — "they agreed to pay",
- * "no answer" — and the firm asked for their own vocabulary instead: one list, the rungs an
- * account is reported on, no second set of words to learn. The event is still there, underneath,
- * because it is what a clerk can answer in a tap with the debtor on the line.
- *
- * Checked against CLIENT_POSITIONS rather than a list written out here, so the two cannot drift.
+ * THE ASSERTION THE FIRM'S COMPLAINT ACTUALLY ASKS FOR. `words: comment` is the whole fix: the
+ * promise's note, the dispute's description and the call's own note are one sentence, written in
+ * the box the collector is already looking at.
  */
-for (const [key, meta] of Object.entries(CALL_OUTCOMES)) {
-  ok(`${key} is labelled as the position it produces`,
-    meta.label === CLIENT_POSITIONS[meta.position].label)
-  ok(`...and still says what happened`, (meta.hint ?? '').length > 0)
-}
-
-/* ---------- and it is wired where the work happens ---------- */
-
-for (const file of ['CompleteDiaryModal', 'DiaryWorkBar']) {
-  const src = readFileSync(new URL(`../../src/components/diary/${file}.tsx`, import.meta.url), 'utf8')
-  ok(`${file} asks what came of it`, /<OutcomePicker/.test(src))
-  /*
-   * PRESENCE BEFORE ORDER. indexOf returns -1 for something that is not there, so an order-only
-   * assertion goes green the day the thing it orders is deleted: -1 is less than everything.
-   * Deleting the whole outcome-recording block from CompleteDiaryModal left this line passing.
-   */
-  ok(`${file} records it at all`, src.includes('recordOutcome({'))
-  ok(`${file} books the next date at all`, src.includes('await workEntry({'))
-  ok(`${file} records it before booking the next date`,
-    src.indexOf('recordOutcome({') < src.indexOf('await workEntry({'))
-  ok(`${file} will not save a half-answered outcome`, /!outcomeReady\(came, /.test(src))
-  /*
-   * AND IT IS TOLD WHETHER A PROMISE ALREADY STANDS. Without that argument outcomeReady goes on
-   * demanding an amount and a date the account already has — which is the firm's objection,
-   * "there's already a PTP in place, why do you need to redo this?" — and the box cannot be
-   * finished without retyping it.
-   */
-  ok(`${file} knows a promise already stands`, /outcomeReady\(came, !!livePromise\)/.test(src))
-  /*
-   * THE WRITE MUST NOT MAKE A SECOND PROMISE. Keeping the existing one and writing a new row for
-   * it anyway would leave two due dates on one account and a client report that cannot say which
-   * arrangement is the arrangement.
-   */
-  ok(`${file} does not re-record a promise it is keeping`,
-    /promise: came\.outcome === 'promised' && \(!livePromise \|\| came\.repromise\)/.test(src))
-  /* Only an OPEN promise stands: one already kept or broken is history. */
-  ok(`${file} only reuses a promise that is still open`,
-    /entry\.promise\.status === 'open'/.test(src))
-  ok(`${file} lets the answer choose the next diary kind`, /CALL_OUTCOMES\[next\.outcome/.test(src))
-}
-
-const picker = readFileSync(new URL('../../src/components/diary/OutcomePicker.tsx', import.meta.url), 'utf8')
+ok('the outcome is recorded off the call s own note', /words: comment,/.test(box))
+/* AND THE PICKER DRAWS NO SECOND BOX FOR THEM. */
+ok('the call box tells the picker the words are already asked for',
+  /wordsAskedAs="What was said\?"/.test(box))
+ok('...and the picker draws its own field only where they are not',
+  /needsWords\(chosen\) && !wordsAskedAs && \(/.test(picker))
 /*
- * OPTIONAL. An agent who did something the list does not cover must still be able to finish the
- * account — a required field with no honest option is how "Review" came to mean nothing.
+ * AND IT KEEPS NO SECOND COPY. Stored on `came` as well, the two would drift the moment somebody
+ * edited the note after choosing -- and the one that reached the client would be the stale one.
  */
-ok('recording nothing stays possible', /outcome: on \? null : k/.test(picker))
-ok('...and an empty answer still saves', /if \(!c\.outcome\) return true/.test(picker))
+ok('the sentence is folded in at the point of use, not kept twice',
+  /const choice: OutcomeChoice = \{ \.\.\.came, words: comment \}/.test(box))
+ok('...and nothing writes words back onto the choice',
+  /onChange=\{\(next\) => setCame\(\{ \.\.\.next, words: '' \}\)\}/.test(box))
 
-if (failures.length) {
-  console.log(`\n${failures.length} FAILED:\n`)
-  for (const f of failures) console.log('  ✗ ' + f + '\n')
-  process.exit(1)
-}
-console.log(`${pass} passed, 0 failed`)
-console.log(`
-One question at the moment of work produces eight of the thirteen statuses, a promise cannot be
-recorded without an amount and a date, and no status is written that a record does not support.`)
+/*
+ * VALIDATION DID NOT MOVE. outcomeReady reads `words`, so a dispute still cannot be saved with
+ * nothing behind it -- the words simply arrive from a different box. Held on the function rather
+ * than the source, because this is the guarantee and the regexes above are only the plumbing.
+ */
+const disputed = { ...EMPTY_OUTCOME, outcome: 'disputed', category: 'Amount in dispute' }
+ok('a dispute with no words is still refused', !outcomeReady(disputed))
+ok('...and allowed once the call s note is folded in',
+  outcomeReady({ ...disputed, words: 'Says the last two invoices were never delivered.' }))
+ok('a dispute with no classification is still refused',
+  !outcomeReady({ ...disputed, category: '', words: 'Says it was paid in March.' }))
+/* AND "OTHER" STILL NEEDS A REAL EXPLANATION, which on this box means the call note has to carry
+   it -- a three-word note is not a dispute a client can answer. */
+ok('“Other” still needs more than a few words',
+  !outcomeReady({ ...disputed, category: 'Other', words: 'He disputes.' }))
+ok('a promise with no amount or date is still refused',
+  !outcomeReady({ ...EMPTY_OUTCOME, outcome: 'promised' }))
+/* AND RECORDING NOTHING STAYS POSSIBLE. A collector who did something the five do not cover must
+   still be able to put the call on the account; a required field with no honest answer is how
+   "Review" came to mean nothing. */
+ok('and no outcome at all is still allowed', outcomeReady(EMPTY_OUTCOME))
+
+/* THE FIVE THE BOX OFFERS, AGAINST WHAT THEY NEED. Two of them want words and both get the note. */
+check('two of the five need the words', spoke.filter((k) => needsWords(k)),
+  ['cannot_pay', 'disputed'])
+
+/* WHY THE BUTTON IS OFF, ON THE BUTTON. It refused on an empty note before and said so; a promise
+   with no date can refuse it now too, and "nothing happens when I press it" is how a collector
+   decides the screen is broken. */
+ok('the button says why it will not save', /const whyNot = !comment\.trim\(\)/.test(box))
+ok('...and carries it as its own title', /title=\{whyNot \?\? undefined\}/.test(box))
+
+/* ---------------------------------------------------------------------------------------------
+ * 3. THE CONSULTATION IS WRITTEN FIRST AND IS NEVER LOST
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * ORDER, AND IT IS THE SAME REASONING THE MAIN COMMENT ALREADY CARRIES. The fee and the note behind
+ * it are the thing that must not be lost -- a fee with no evidence is the one kind nobody can
+ * defend when a client queries it. Written after recordConsultation, so a promise that will not
+ * save costs the collector the promise and not the call.
+ */
+const consultAt = box.indexOf('recordConsultation({')
+const outcomeAt = box.indexOf('recordOutcome({')
+ok('both writes are there', consultAt > 0 && outcomeAt > 0)
+ok('...and the consultation is written first', consultAt < outcomeAt)
+/*
+ * AND THE OUTCOME CANNOT CLAIM THE CALL FAILED. recordOutcome reports rather than throws, so the
+ * failure is a line naming which half is missing over a call that is on the timeline either way.
+ */
+ok('a failed outcome says the call is still recorded',
+  /The call is recorded\. \$\{CALL_OUTCOMES\[chosen\]\.label\} is not/.test(box))
+ok('...and is not thrown, so the box still closes', !/throw new Error\(`Could not record/.test(box))
+
+/*
+ * AND THE OUTCOME RAISES NO FEE OF ITS OWN. Item 3 recovers a dispute taken up with somebody else;
+ * one a collector writes down mid-call is the job. recordOutcome passes charge: false, and the box
+ * says so where the choice is made -- held as an ABSENCE plus a sentence, because adding the fee
+ * here would read like consistency.
+ */
+ok('the box says the outcome costs the debtor nothing',
+  /Saying where the account stands adds nothing at all/.test(box))
+ok('...and the recorder keeps item 3 off it', /charge: false,/.test(code('src/lib/recordOutcome.ts')))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND IT DOES NOT ASK FOR A PROMISE THAT ALREADY STANDS
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM'S OBJECTION, MADE ABOUT THE DIARY AND JUST AS TRUE ON A CALL: "there's already a PTP in
+ * place, why do you need to redo this?" A retyped promise is a SECOND promise -- two rows, two due
+ * dates, and a client report that cannot say which arrangement is the arrangement.
+ */
+ok('the account hands the call box the promise that stands',
+  /livePromise=\{due \? \{ amount: due\.amount, dueOn: due\.dueOn \} : null\}/.test(page))
+ok('...and the picker is told about it', /livePromise=\{livePromise \?\? null\}/.test(box))
+/* AND NOTHING IS WRITTEN WHERE IT IS BEING KEPT. */
+ok('a standing promise is not written again',
+  /promise: chosen === 'promised' && \(!livePromise \|\| came\.repromise\)/.test(box))
+ok('...and outcomeReady asks for nothing either',
+  outcomeReady({ ...EMPTY_OUTCOME, outcome: 'promised' }, true))
+
+console.log(`\ncheck-call-outcome: ${pass} passed, ${failures.length} failed`)
+for (const f of failures) console.log(`  ✗ ${f}`)
+process.exit(failures.length ? 1 : 0)

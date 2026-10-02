@@ -1,45 +1,9 @@
 import { FormField, inputClass } from '../ui/Modal'
 import {
   CALL_OUTCOMES, CALL_OUTCOME_ORDER, needsPromise, needsWords, type CallOutcome,
+  type OutcomeChoice,
 } from '../../lib/callOutcome.ts'
-import {
-  QUERY_CATEGORIES, classificationMissing, explanationMissing,
-} from '../../lib/disputeCategories.ts'
-
-export interface OutcomeChoice {
-  outcome: CallOutcome | null
-  /** Set when the debtor made a NEW commitment, so the existing one is not simply reused. */
-  repromise?: boolean
-  /** Only when they agreed to pay. */
-  amount: string
-  dueOn: string
-  /** The words, where the answer needs them. */
-  words: string
-  /**
-   * ONLY ON 'disputed', AND REQUIRED THERE. The firm: "you should be able to say about what is a
-   * dispute about." A dispute taken on a call is a dispute like any other, and this is the one
-   * moment anybody knows the answer -- the debtor is still on the line. Without it the diary could
-   * not finish an account at all: raiseQuery refuses an unclassified dispute, recordOutcome reports
-   * the failure, and the sub-status is deliberately not written when anything above it failed.
-   */
-  category: string
-}
-
-export const EMPTY_OUTCOME: OutcomeChoice = { outcome: null, amount: '', dueOn: '', words: '', category: '' }
-
-/** Is there enough here to save? Null outcome is allowed — recording nothing stays possible. */
-export function outcomeReady(c: OutcomeChoice, hasLivePromise = false): boolean {
-  if (!c.outcome) return true
-  /* A promise already on the account is the amount and the date — see OutcomePicker. */
-  if (needsPromise(c.outcome) && hasLivePromise && !c.repromise) return true
-  if (needsPromise(c.outcome)) return c.amount.trim() !== '' && c.dueOn !== ''
-  if (needsWords(c.outcome) && c.words.trim().length < 3) return false
-  /* A DISPUTE SAYS WHAT IT IS ABOUT, here as everywhere. Asked through the same two functions the
-     Escalate box asks, so the diary and the box cannot come to different answers. */
-  if (classificationMissing(c.outcome === 'disputed' ? 'dispute' : 'help', c.category)) return false
-  if (c.outcome === 'disputed' && explanationMissing(c.category, c.words)) return false
-  return true
-}
+import { QUERY_CATEGORIES, explanationMissing } from '../../lib/disputeCategories.ts'
 
 /**
  * What came of working this account.
@@ -56,14 +20,45 @@ export function outcomeReady(c: OutcomeChoice, hasLivePromise = false): boolean 
  * Skipping it is itself recorded — the account reads "worked, no outcome recorded", which is a
  * data-quality signal for a team leader and never reaches a client.
  */
-export function OutcomePicker({ value, onChange, livePromise }: {
+export function OutcomePicker({ value, onChange, livePromise, offer, wordsAskedAs }: {
   value: OutcomeChoice
   onChange: (next: OutcomeChoice) => void
   /** A promise already on this account, where the entry is here to check one. */
   livePromise?: { amount: number; dueOn: string } | null
+  /**
+   * WHICH OF THE EIGHT TO OFFER. All of them by default, which is the diary's case: an account
+   * being finished at a desk can have landed anywhere.
+   *
+   * THE CALL BOX OFFERS FIVE, and the reason is a fee. That box's own question is "did you speak
+   * to them?", and the firm's instruction for this control there was that choosing an outcome
+   * answers it: "either way, it records, and it's then accepted as spoken to the debtor, so it
+   * charges the consultation". An outcome whose own meaning is that nobody was reached — no
+   * answer, a trace, a practitioner answering for the debtor — cannot sit on a press that raises
+   * R60 for a conversation. Those are `reached: false` in CALL_OUTCOMES and the call box leaves
+   * them out; the diary, which charges nothing, keeps all eight.
+   */
+  offer?: CallOutcome[]
+  /**
+   * THE WORDS ARE ALREADY BEING ASKED FOR, AND THIS IS THE NAME OF THE BOX ASKING.
+   *
+   * THE FIRM, of a call that ended in a dispute: "so now you make a note of the telephone call,
+   * and then you make another note of, for example, the dispute. Right? So you're double making
+   * notes. So notes should be made only at one place."
+   *
+   * They are right, and `words` is the field that was being asked for twice. Where the caller
+   * already has the sentence — the call box has it in "What was said?" — it passes the label here,
+   * this control draws no second box, and the caller keeps `value.words` fed from its own field.
+   * Nothing about validation changes: `outcomeReady` still reads `words`, so a dispute still
+   * cannot be saved with nothing behind it. What changes is that the collector types it once.
+   */
+  wordsAskedAs?: string | null
 }) {
   const set = (patch: Partial<OutcomeChoice>) => onChange({ ...value, ...patch })
   const chosen = value.outcome
+  const offered = offer ?? CALL_OUTCOME_ORDER
+  /* Eight reads as two rows of four; five as one row of five. A four-wide grid holding five puts
+     a lone button on a second row, which reads as a category of its own. */
+  const cols = offered.length === 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
   /*
    * ALREADY PROMISED, SO DO NOT ASK AGAIN. The firm's objection and it was right: "there's
    * already a PTP in place, why do you need to redo this?" A box that demands an amount and a
@@ -91,8 +86,8 @@ export function OutcomePicker({ value, onChange, livePromise }: {
         A person who wants all eight explanations hovers, and one who has already chosen does not
         need seven descriptions of the choices they did not make.
       */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-        {CALL_OUTCOME_ORDER.map((k) => {
+      <div className={`grid grid-cols-2 ${cols} gap-1.5`}>
+        {offered.map((k) => {
           const meta = CALL_OUTCOMES[k]
           const on = chosen === k
           return (
@@ -173,7 +168,29 @@ export function OutcomePicker({ value, onChange, livePromise }: {
         </FormField>
       )}
 
-      {needsWords(chosen) && (
+      {/*
+        AND WHERE THE CALLER IS ALREADY HOLDING THE SENTENCE, THE SECOND BOX IS NOT DRAWN.
+        See wordsAskedAs. It still SAYS what those words are now carrying, because they are about
+        to go to the client and somebody who wrote them as a note for themselves should know that.
+      */}
+      {chosen && needsWords(chosen) && wordsAskedAs && (
+        <p className="text-[11px] text-slate-500">
+          {value.words.trim().length < 3
+            ? <span className="text-[var(--c-gold-deep)]">
+              Write &ldquo;{wordsAskedAs}&rdquo; above &mdash; on this one it is what the client is
+              told.
+            </span>
+            : chosen === 'disputed' && explanationMissing(value.category, value.words)
+              ? <span className="text-[var(--c-gold-deep)]">
+                &ldquo;Other&rdquo; needs more than that &mdash; say what they actually dispute in
+                &ldquo;{wordsAskedAs}&rdquo; above.
+              </span>
+              : <>&ldquo;{wordsAskedAs}&rdquo; above is what goes to the client on this &mdash;
+                written once, here and on the call.</>}
+        </p>
+      )}
+
+      {needsWords(chosen) && !wordsAskedAs && (
         <FormField label={chosen === 'disputed' ? 'What do they dispute' : 'Say what they told you'}>
           <input value={value.words} onChange={(e) => set({ words: e.target.value })}
             placeholder={chosen === 'cannot_pay'

@@ -14,8 +14,10 @@ import { addWorkingDays } from '../../lib/workingDays.ts'
 import { refreshNavCounts } from '../../lib/navCounts'
 import { DictateButton } from '../ui/Dictate'
 import { ClientLinePreview } from './ClientLinePreview'
-import { OutcomePicker, EMPTY_OUTCOME, outcomeReady, type OutcomeChoice } from './OutcomePicker'
-import { CALL_OUTCOMES, type CallOutcome } from '../../lib/callOutcome.ts'
+import { OutcomePicker } from './OutcomePicker'
+import {
+  CALL_OUTCOMES, EMPTY_OUTCOME, outcomeReady, type CallOutcome, type OutcomeChoice,
+} from '../../lib/callOutcome.ts'
 import { recordOutcome } from '../../lib/recordOutcome.ts'
 
 /**

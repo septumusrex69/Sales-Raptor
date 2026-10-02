@@ -48,6 +48,10 @@ import {
   classificationMissing, explanationMissing, CLASSIFICATION_REQUIRED,
   QUERY_CATEGORIES, CATEGORY_NEEDING_EXPLANATION, ESCALATION_KINDS,
 } from '../../src/lib/disputeCategories.ts'
+/* outcomeReady moved out of OutcomePicker.tsx and into the vocabulary it composes, which is what
+   lets the three assertions below hold the RULE rather than its source -- scripts/qa cannot resolve
+   a .tsx at all. See the note above it in callOutcome.ts. */
+import { EMPTY_OUTCOME, outcomeReady } from '../../src/lib/callOutcome.ts'
 
 let pass = 0
 const failures = []
@@ -174,18 +178,28 @@ ok('the call box asks what kind of dispute', /chosen === 'disputed' &&[\s\S]{0,4
 ok('...with a placeholder that cannot be chosen', /<option value="" disabled>/.test(picker))
 /* AND THE SAVE BUTTON WAITS FOR IT. outcomeReady is what the two boxes disable on, so a rule that
    is drawn but not required is a rule the collector discovers as a failure after the call. */
+/*
+ * AND THE SAVE BUTTON WAITS FOR IT, held on the function the two boxes disable on rather than on
+ * its source. A dispute with words and no classification is the exact row this whole file exists
+ * to prevent, so it is asked of the rule itself.
+ */
+const said = 'Says the last two invoices were for work never delivered.'
 ok('...and the account cannot be finished without it',
-  /classificationMissing\(c\.outcome === 'disputed'/.test(picker))
+  !outcomeReady({ ...EMPTY_OUTCOME, outcome: 'disputed', category: '', words: said }))
 ok('...nor with "Other" and nothing behind it',
-  /c\.outcome === 'disputed' && explanationMissing\(c\.category, c\.words\)/.test(picker))
+  !outcomeReady({
+    ...EMPTY_OUTCOME, outcome: 'disputed', category: CATEGORY_NEEDING_EXPLANATION, words: 'Disputes.',
+  }))
 /*
  * AND `outcomeReady` STILL ANSWERS THE QUESTIONS IT ANSWERED BEFORE. It used to end
  * `if (needsWords(...)) return ...` -- an early RETURN, not a guard -- so adding a rule after it
  * would have been unreachable on every outcome that needs words, which includes 'disputed' itself.
- * This is the assertion that catches that: the words test must fall THROUGH.
+ * This is the assertion that catches that: a dispute with PLENTY of words and no classification
+ * must still be refused, which only happens if the words test falls THROUGH.
  */
-ok('...and the words rule became a guard rather than a return',
-  /if \(needsWords\(c\.outcome\) && c\.words\.trim\(\)\.length < 3\) return false/.test(picker))
+ok('...and the words rule is a guard rather than a return',
+  !outcomeReady({ ...EMPTY_OUTCOME, outcome: 'disputed', category: '', words: said })
+  && outcomeReady({ ...EMPTY_OUTCOME, outcome: 'disputed', category: 'Amount in dispute', words: said }))
 
 ok('recordOutcome carries the classification', /category: input\.category \?\? null,/.test(outcome))
 /* NOT DEFAULTED THERE. A fallback -- 'Other', or the words -- is how a required field becomes a

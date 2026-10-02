@@ -1257,6 +1257,10 @@ export function AccountDetail() {
         onDiarise={() => setDiariseOpen(true)}
         accountId={account.id}
         actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+        /* SO THE CALL BOX DOES NOT ASK FOR A PROMISE THAT ALREADY STANDS -- the firm's objection,
+           made about the diary and just as true on a call: "there's already a PTP in place, why do
+           you need to redo this?" `due` is the open one, soonest first. */
+        livePromise={due ? { amount: due.amount, dueOn: due.dueOn } : null}
         idNumber={account.debtorIdNumber}
         debtorKind={account.debtorKind}
         onTraced={reload}
@@ -1778,7 +1782,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, idNumber, debtorKind, onTraced, onUpload, startable, onStartWorkflow }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, idNumber, debtorKind, onTraced, onUpload, startable, onStartWorkflow }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -1801,6 +1805,8 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   accountId: string
   actor: { id: string | null; name: string | null }
   /** Reload after anything that writes a note or a fee — a trace, a call. */
+  /** Passed straight to CallButton, which asks nothing where one already stands. */
+  livePromise: { amount: number; dueOn: string } | null
   onTraced: () => Promise<void>
   /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
   onUpload: () => void
@@ -1829,6 +1835,7 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       {callNumber
         ? (
           <CallButton accountId={accountId} numbers={callNumbers} actor={actor}
+            livePromise={livePromise}
             className={`${ACTION_BASE} ${ACTION_ENABLED}`} onDone={onTraced} />
         )
         : <Action icon={Phone} label="Call" title="No phone number on this account yet" />}

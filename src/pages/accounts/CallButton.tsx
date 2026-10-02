@@ -7,7 +7,28 @@ import { callOutcome, recordConsultation, recordDial, recordNoAnswer } from '../
 import { saveMainComment } from '../../lib/accountWorkspace'
 import { DictateButton } from '../../components/ui/Dictate'
 import { scheduleFor } from '../../lib/annexureB'
+import { OutcomePicker } from '../../components/diary/OutcomePicker'
+import {
+  CALL_OUTCOMES, CALL_OUTCOME_ORDER, EMPTY_OUTCOME, outcomeReady, type OutcomeChoice,
+} from '../../lib/callOutcome'
+import { recordOutcome } from '../../lib/recordOutcome'
 import type { ChargeResult } from '../../lib/accountCharges'
+
+/**
+ * THE FIVE OUTCOMES A CALL SOMEBODY ANSWERED CAN HAVE.
+ *
+ * `reached` is the whole test, and it is a test about a FEE. Pressing "I spoke to them" raises the
+ * R60 consultation; the firm's instruction for this control was that choosing an outcome here is
+ * the same press -- "either way, it records, and it's then accepted as spoken to the debtor, so it
+ * charges the consultation and the other thing, the phone call". So an outcome that means nobody
+ * was reached cannot live on it. No answer is the OTHER button on this box, and a trace or a
+ * practitioner answering for the debtor is something to record from the diary or the account's own
+ * controls, where nothing is charged for it.
+ *
+ * Derived from CALL_OUTCOMES rather than listed, so a ninth outcome lands on the right side of
+ * this line by saying what it is rather than by somebody remembering this file.
+ */
+const SPOKE_TO_THEM = CALL_OUTCOME_ORDER.filter((k) => CALL_OUTCOMES[k].reached)
 
 /**
  * Call a debtor, and put the call on the account.
@@ -30,7 +51,7 @@ import type { ChargeResult } from '../../lib/accountCharges'
  * "No answer" by a machine that had merely failed to see it. Ask every time; let the person
  * disagree with the PABX.
  */
-export function CallButton({ accountId, numbers, actor, className, onDone }: {
+export function CallButton({ accountId, numbers, actor, livePromise, className, onDone }: {
   accountId: string
   /**
    * Every number that could reach this debtor, primary first. More than one and the button asks
@@ -38,6 +59,14 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
    */
   numbers: { label: string; value: string }[]
   actor: { id: string | null; name: string | null }
+  /**
+   * A PROMISE ALREADY STANDING ON THIS ACCOUNT, so the box does not ask for one that exists.
+   *
+   * THE FIRM'S OBJECTION, made about the diary and true here as well: "there's already a PTP in
+   * place, why do you need to redo this?" A retyped promise is a SECOND promise -- two rows, two
+   * due dates, and a client told about an arrangement that is now ambiguous.
+   */
+  livePromise?: { amount: number; dueOn: string } | null
   /** The action row's styling, so this matches the buttons beside it. */
   className: string
   onDone: () => Promise<void>
@@ -59,6 +88,19 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
    * have no idea why.
    */
   const [alsoMain, setAlsoMain] = useState(false)
+  /**
+   * WHERE THE CALL LEAVES THE ACCOUNT, answered on the same box and saved by the same press.
+   *
+   * THE FIRM, having run their first afternoon of calls: "I think we can as well add to this thing
+   * immediately -- add a question. As you raise a ticket, or you can raise a PTP immediately from
+   * the screen. Either way, it records." What they were describing is the thing that already
+   * existed on the diary's own box and was unreachable from a call: a promise taken with an amount
+   * and a date, or a dispute raised, instead of a note that says one happened.
+   *
+   * THE WORDS ARE NOT KEPT HERE. `comment` is the only place a sentence is typed -- see the choice
+   * below -- which is the half of this the firm actually complained about.
+   */
+  const [came, setCame] = useState<OutcomeChoice>(EMPTY_OUTCOME)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -74,6 +116,7 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
     setError(null)
     setComment('')
     setAlsoMain(false)
+    setCame(EMPTY_OUTCOME)
     setChoosing(false)
     setStatus(null)
 
@@ -142,6 +185,47 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
         setStatus('Voicemail or no answer · no consultation')
       }
       /*
+       * AND WHERE THE ACCOUNT NOW STANDS, OFF THE SAME WORDS AND THE SAME PRESS.
+       *
+       * ONE TYPING. `words: comment` is the whole point: the promise's note, the dispute's
+       * description and the call's own note are the sentence the collector wrote once, in the box
+       * above. Before this, a call that ended in a dispute was written up here and then written
+       * again in the Escalate box, and the firm said so -- "you're double making notes, notes
+       * should be made only at one place".
+       *
+       * AFTER THE CONSULTATION, NEVER INSTEAD OF IT, for the same reason the main comment is: the
+       * fee and the note behind it are the thing that must not be lost. A promise that would not
+       * write must not take the record of the call with it.
+       *
+       * IT DOES NOT THROW, SO IT CANNOT CLAIM THE CALL FAILED. recordOutcome reports what it could
+       * not write and writes the status only when everything above it landed -- so a red line here
+       * says exactly which half is missing, over a call that is on the timeline either way. The
+       * box closes regardless: re-pressing it would charge a second consultation for one
+       * conversation, which is worse than a promise the collector has to take again.
+       */
+      if (yes && came.outcome) {
+        const chosen = came.outcome
+        const r = await recordOutcome({
+          accountId,
+          outcome: chosen,
+          /* NULL WHERE THE STANDING PROMISE IS BEING KEPT -- the picker asked for nothing, so
+             there is nothing to write and a row here would be a second arrangement. */
+          promise: chosen === 'promised' && (!livePromise || came.repromise)
+            ? { amount: Number(came.amount.replace(/[^\d.]/g, '')), dueOn: came.dueOn }
+            : null,
+          words: comment,
+          /* Only a dispute carries one, and raiseQuery refuses one without it. */
+          category: chosen === 'disputed' ? came.category : null,
+          actor,
+        })
+        if (r.failed.length) {
+          setError(`The call is recorded. ${CALL_OUTCOMES[chosen].label} is not — could not write `
+            + `${r.failed.join(' or ')}.`)
+        } else {
+          setStatus((prev) => `${prev ?? 'Call recorded'} · ${CALL_OUTCOMES[chosen].label}`)
+        }
+      }
+      /*
        * AND THE SAME WORDS AS THE MAIN COMMENT, where the collector ticked the box.
        *
        * THE FIRM ASKED FOR IT HERE because this is where the sentence gets written. The main
@@ -170,6 +254,7 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       setConnected(null)
       setComment('')
       setAlsoMain(false)
+      setCame(EMPTY_OUTCOME)
       await onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -177,6 +262,25 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       setBusy(false)
     }
   }
+
+  /*
+   * ONE SENTENCE, TWO USES. The picker needs `words` to decide whether it has enough to save, and
+   * the only place a sentence is typed on this box is the note. Folded in HERE rather than kept on
+   * `came`, so there is no second copy that can fall out of step with the box somebody is typing
+   * in -- and `onChange` writes '' back for the same reason.
+   */
+  const choice: OutcomeChoice = { ...came, words: comment }
+  /*
+   * WHY THE BUTTON IS OFF, SAID ON THE BUTTON. It refused on an empty note before and said so;
+   * now it can also be refused by a promise with no date or a dispute with no classification, and
+   * "nothing happens when I press it" is how a collector decides the screen is broken.
+   */
+  const whyNot = !comment.trim()
+    ? 'Write what was said first'
+    : !outcomeReady(choice, !!livePromise)
+      ? `Finish ${came.outcome ? CALL_OUTCOMES[came.outcome].label.toLowerCase() : 'the outcome'} below`
+        + ' — it still needs the rest of its details'
+      : null
 
   return (
     /*
@@ -236,7 +340,9 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
       )}
 
       {asking && (
-        <Modal title="Did you speak to them?" onClose={() => { setAsking(null); setAnsweredCallId(null) }} width={460}>
+        <Modal title="Did you speak to them?"
+          onClose={() => { setAsking(null); setAnsweredCallId(null); setCame(EMPTY_OUTCOME) }}
+          width={560}>
           {/*
             What the PABX saw, said plainly, and never as the final word. It can see that a line
             connected; it cannot see who was on it, and it can miss a call entirely. The person who
@@ -287,6 +393,34 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
             />
           </div>
           {/*
+            AND WHERE THE CALL LEAVES THE ACCOUNT.
+            
+            UNDER THE NOTE, NOT ABOVE IT, and the firm asked which way round: "I don't know if you
+            click on that first and then make the note, or make the note first and then click on
+            the PTP. What do you think should be done?"
+            
+            THE NOTE FIRST. The words are in somebody's head the second the receiver goes down and
+            they leave it fast; the rung the account lands on is still true in a minute. Asking for
+            the classification first also makes people commit to "Arranged" before writing why,
+            and what they then write is shorter -- which is how a R60 consultation ends up with
+            four words behind it. So the box reads in the order the call happened: what was said,
+            then what it means.
+            
+            OPTIONAL, like it is on the diary's box. A collector who did something the five choices
+            do not cover must still be able to record the call; a required field with no honest
+            answer is how "Review" came to mean nothing.
+          */}
+          <div className="mt-3.5 pt-3.5 border-t border-slate-100">
+            <OutcomePicker
+              value={choice}
+              offer={SPOKE_TO_THEM}
+              livePromise={livePromise ?? null}
+              /* THE NOTE ABOVE IS THE WORDS. One sentence, typed once -- see wordsAskedAs. */
+              wordsAskedAs="What was said?"
+              onChange={(next) => setCame({ ...next, words: '' })} />
+          </div>
+
+          {/*
             AND THE SAME WORDS AT THE TOP OF THE ACCOUNT, if they are worth it.
             
             THE MAIN COMMENT IS "the two lines the next person needs" and the last call is usually
@@ -314,20 +448,38 @@ export function CallButton({ accountId, numbers, actor, className, onDone }: {
             {consultationRate > 0 && <>Speaking to them adds R{consultationRate.toFixed(2)} plus VAT
               under item 7. </>}
             A voicemail adds nothing &mdash; the call itself is already charged either way.
+            {/* AND THE OUTCOME IS FREE, SAID WHERE THE CHOICE IS MADE. Item 3 is for a dispute
+                taken up with somebody else; one a collector writes down mid-call is the job, not
+                an expense recoverable from the debtor. See raiseQuery's `charge`. */}
+            {' '}Saying where the account stands adds nothing at all.
           </p>
           <div className="flex items-center justify-end gap-2 mt-5">
             {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
-            <button onClick={() => void answered(false)} disabled={busy}
+            {/*
+              OFF ONCE AN OUTCOME IS CHOSEN, because all five of them mean somebody was reached.
+              "Arranged" and "nobody picked up" on one press is an account claiming a promise with
+              a voicemail behind it, and the fee would be wrong in whichever direction it landed.
+              Disabled with the reason rather than hidden: the voicemail path is still the right
+              one, and the way back to it is to clear the choice.
+            */}
+            <button onClick={() => void answered(false)} disabled={busy || !!came.outcome}
+              title={came.outcome
+                ? `You have said the account is ${CALL_OUTCOMES[came.outcome].label.toLowerCase()}`
+                  + ' — that is somebody you spoke to. Press the choice again to clear it.'
+                : undefined}
               className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
               Voicemail or no answer
             </button>
             <button
               onClick={() => void answered(true)}
-              disabled={busy || !comment.trim()}
-              title={comment.trim() ? undefined : 'Write what was said first'}
+              disabled={busy || !!whyNot}
+              title={whyNot ?? undefined}
               className="text-sm font-medium px-3.5 py-2 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 disabled:opacity-40"
             >
-              I spoke to them
+              {/* THE BUTTON SAYS WHAT IT IS ABOUT TO DO. Pressed with "Arranged" chosen it takes a
+                  promise as well as the consultation, and a label that still read "I spoke to
+                  them" would hide the half that writes a record. */}
+              {came.outcome ? `I spoke to them · ${CALL_OUTCOMES[came.outcome].label}` : 'I spoke to them'}
             </button>
           </div>
         </Modal>
