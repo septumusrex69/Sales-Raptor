@@ -217,6 +217,15 @@ export interface FiledTrace {
 const PHONE_KINDS: TraceItemKind[] = ['mobile', 'phone', 'work']
 
 /**
+ * THE SAME THREE, EXPORTED, so traceRound counts exactly what traceSummary counts.
+ *
+ * Written out again in that file they would eventually disagree about whether a trace is finished
+ * -- one saying every finding is tried and the other still counting one. `untried` and a round's
+ * `workable` are two readings of one list and have to stay one list.
+ */
+export const PHONE_KINDS_FOR_ROUND: readonly TraceItemKind[] = PHONE_KINDS
+
+/**
  * The best number on the trace, and the reasoning is a hierarchy rather than a sort.
  *
  * WHAT WE KNOW BEATS WHAT THE BUREAU SAID. A number somebody has actually reached the debtor on

@@ -95,6 +95,7 @@ import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
 import { useTitleSlot } from '../../components/layout/TitleSlot'
 import { compareTraceReports, comparisonLine, previousTraceFor } from '../../lib/traceCompare.ts'
+import { roundLine, traceRound } from '../../lib/traceRound.ts'
 import {
   hasProgress, instalmentProgress, moneyProgress, progressPercent, type PaymentProgress,
 } from '../../lib/paymentProgress.ts'
@@ -1615,6 +1616,9 @@ export function AccountDetail() {
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
           onClose={() => setOpenTrace(null)}
           onChanged={reload}
+          /* A SPENT ROUND OFFERS A FRESH SEARCH, from inside the trace that is spent -- which is
+             where somebody is standing when they find out. See traceRound. */
+          onUploadNew={() => { setOpenTrace(null); setTracing(true) }}
         />
       )}
 
@@ -3341,6 +3345,8 @@ function StandingPanel({
  */
 function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }) {
   const found = traceSummary(trace.items)
+  /* WHERE THIS ATTEMPT STANDS. Derived, never stored -- see traceRound. */
+  const round = traceRound(trace.items)
   const who = trace.subjectKind === 'director' ? trace.subjectName : null
   const kin = found.relatives[0] ?? null
 
@@ -3440,14 +3446,28 @@ function TraceFound({ trace, onOpen }: { trace: FiledTrace; onOpen: () => void }
       )}
 
       {/*
-        WHAT NOBODY HAS TRIED YET, which is the only measure of whether the search was worth
-        buying. Silent at nought: a line reading "0 untried" has nothing to say and still takes
-        a row.
+        WHERE THIS ATTEMPT STANDS, AND IT NO LONGER GOES QUIET WHEN IT IS FINISHED.
+        
+        THE FIRM: "if we've worked through an entire trace, it should mention that the entire trace
+        has been worked through."
+        
+        WHAT WAS HERE WAS A COUNT THAT DISAPPEARED. "12 findings nobody has tried yet" vanished the
+        moment the last one was answered, so finished and never-started read identically -- silence
+        -- and the fact a team leader most needs was the one the panel stopped showing.
+        
+        AND SPENT IS LOUD. A trace worked through that reached nobody is the firm's money gone and
+        a debtor still missing; drawn in the same grey as "4 of 11 tried" it would be a sentence
+        nobody reads.
       */}
-      {found.untried > 0 && (
+      {round.workable > 0 && (
         <button type="button" onClick={onOpen}
-          className="w-full text-left px-2.5 py-1.5 border-t border-slate-100 bg-slate-50/70 text-[11px] font-medium text-[var(--c-steel)] hover:bg-gold-50">
-          {found.untried} finding{found.untried === 1 ? '' : 's'} nobody has tried yet &rarr;
+          className={`w-full text-left px-2.5 py-1.5 border-t border-slate-100 text-[11px] font-medium hover:brightness-95 ${
+            round.state === 'spent'
+              ? 'bg-[var(--tint-rust)] text-[var(--c-rust-deep)]'
+              : round.state === 'worked_through'
+                ? 'bg-[var(--c-green)]/10 text-[var(--c-green)]'
+                : 'bg-slate-50/70 text-[var(--c-steel)]'}`}>
+          {roundLine(round)} &rarr;
         </button>
       )}
     </div>

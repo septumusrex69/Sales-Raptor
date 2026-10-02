@@ -6,6 +6,7 @@ import {
 import {
   compareTraces, compareTraceReports, comparisonLine, previousTraceFor, traceKey,
 } from '../../lib/traceCompare.ts'
+import { canRework, roundLine, traceRound } from '../../lib/traceRound.ts'
 import { Modal } from '../../components/ui/Modal'
 import { PhoneLink } from '../../components/PhoneLink'
 import {
@@ -48,7 +49,9 @@ const ICONS: Record<TraceCategoryId, typeof Phone> = {
 /** How many rows fit under the table before it needs a page. */
 const PAGE = 6
 
-export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, onChanged }: {
+export function TraceWorkspaceModal({
+  traces, openId, onOpen, actor, onClose, onChanged, onUploadNew,
+}: {
   /** Every trace on the account, so a collector can move between them without closing this. */
   traces: FiledTrace[]
   openId: string
@@ -56,6 +59,8 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
   actor: { id: string | null; name: string | null }
   onClose: () => void
   onChanged: () => Promise<void>
+  /** Offered where this round is spent: a fresh bureau search, which is a new round. */
+  onUploadNew?: () => void
 }) {
   const trace = traces.find((t) => t.id === openId) ?? traces[0]
   const [busy, setBusy] = useState<string | null>(null)
@@ -92,6 +97,10 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
    * the company and one per director, so "the previous trace" by date is usually a different
    * person, and every finding on both would come back as new. previousTraceFor handles it.
    */
+  /* WHERE THIS ATTEMPT STANDS. Derived off the live rows, so a picked outcome moves it at once. */
+  const round = useMemo(() => traceRound(items), [items])
+  const reworkable = useMemo(() => canRework(items), [items])
+
   const earlier = useMemo(() => previousTraceFor(traces, trace), [traces, trace])
   const since = useMemo(
     () => (earlier ? compareTraceReports(trace.items, earlier.items) : null),
@@ -296,6 +305,49 @@ export function TraceWorkspaceModal({ traces, openId, onOpen, actor, onClose, on
                 </span>
               </button>
             ))}
+          </div>
+        )}
+
+        {/*
+          WHERE THIS ATTEMPT STANDS, AND WHAT TO DO IF IT IS SPENT.
+          
+          THE FIRM: "if we've worked through an entire trace, it should mention that the entire
+          trace has been worked through. There should be an option to upload a new trace or to
+          rework the trace -- you've worked once through the entire trace, now trying again."
+          
+          TWO DIFFERENT JOBS, AND ONLY ONE COSTS THE DEBTOR. A new trace is a fresh bureau search
+          under item 4(c); ringing a number that rang out before is not a search at all and the
+          calls are already charged under item 2. So they are two buttons, worded as what they are.
+          
+          RE-WORK IS OFFERED ONLY WHERE SOMETHING RANG. A spent round of disconnected lines and
+          wrong numbers has nothing to try again, and a button that re-opens a list of dead numbers
+          teaches people the feature is pointless. See canRework.
+        */}
+        {round.workable > 0 && (
+          <div className={`mb-4 rounded-lg border px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 ${
+            round.state === 'spent'
+              ? 'border-[var(--c-rust)]/40 bg-[var(--tint-rust)]'
+              : round.state === 'worked_through'
+                ? 'border-[var(--c-green)]/30 bg-[var(--c-green)]/5'
+                : 'border-slate-200 bg-slate-50'}`}>
+            <p className={`text-xs mr-auto ${
+              round.state === 'spent' ? 'text-[var(--c-rust-deep)] font-medium' : 'text-slate-600'}`}>
+              {roundLine(round)}
+            </p>
+            {round.state === 'spent' && reworkable && (
+              <button type="button" onClick={() => { setOutcomeFilter('no_answer'); setOpenCategory('phones'); setPage(1) }}
+                title="The numbers that rang. Try them at a different hour — this costs nothing extra."
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
+                Work the ones that rang
+              </button>
+            )}
+            {round.state === 'spent' && onUploadNew && (
+              <button type="button" onClick={onUploadNew}
+                title="A fresh bureau search — Annexure B item 4(c)"
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
+                Upload a new trace
+              </button>
+            )}
           </div>
         )}
 
