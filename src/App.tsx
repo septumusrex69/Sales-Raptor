@@ -7,6 +7,9 @@ import { BuzzBoxProvider } from './store/BuzzBoxContext'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { NewVersionWatcher } from './components/NewVersionWatcher'
 import { LoginPage } from './pages/auth/LoginPage'
+/* LAZY, because it is the one page nobody signed in ever opens: a debtor's chunk has no business
+   in the bundle a collector downloads every morning. */
+const SignPage = lazy(() => import('./pages/sign/SignPage'))
 import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
@@ -82,6 +85,18 @@ function App() {
           <Suspense fallback={null}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {/*
+              THE ONE ROUTE OUTSIDE THE FIRM.
+              
+              A debtor signing an acknowledgement of debt has no Raptor login and never will -- the
+              firm's instruction was "anyone with a link can open it" -- so this sits ABOVE
+              RequireAuth and outside AppLayout. Inside either, an outsider would be bounced to a
+              login page they cannot pass, or shown the firm's own navigation on the way through.
+              
+              The token in the path is the whole of the authority; signing_open is the only door it
+              opens, and it reaches exactly one row. See src/lib/signing.ts.
+            */}
+            <Route path="/sign/:token" element={<SignPage />} />
             <Route
               element={
                 <RequireAuth>

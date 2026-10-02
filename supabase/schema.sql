@@ -19672,3 +19672,175 @@ comment on function public.workflow_test_advance(uuid, integer) is
 
 revoke all on function public.workflow_test_advance(uuid, integer) from public;
 revoke all on function public.workflow_test_advance(uuid, integer) from authenticated;
+
+
+-- ============================================================================
+-- SIGNING A DOCUMENT ONLINE.
+--
+-- THE FIRM: "building the online signature for the AOD... make space for where there can be
+-- signatures like at the bottom of the pages for initials and stuff. For that you can basically
+-- build in an online signature platform. Forget about the OTP for now. Just anyone with a link can
+-- open it, for testing."
+--
+-- WHAT SOMEBODY SIGNED IS COPIED HERE, AS BLOCKS, AT THE MOMENT THE LINK WAS MADE. It is the same
+-- rule the section 129 is built on and it matters more on this one: an acknowledgement of debt is
+-- the instrument the firm would sue on, and "we changed the template afterwards" is the whole of a
+-- defence. A foreign key to the live letter would mean the signed copy silently followed every
+-- later edit of it.
+--
+-- THE TOKEN IS THE AUTHORITY, which is what "anyone with a link" means. So it is unguessable, it
+-- is the only way a row can be found, and the anon role is granted nothing on the table at all --
+-- only the two functions below, each of which takes a token and touches exactly one row. A
+-- readable policy plus a table grant would have let anybody list every acknowledgement of debt the
+-- firm has ever sent, which is the opposite of what the firm asked for.
+--
+-- NO OTP, AT THE FIRM'S INSTRUCTION AND FOR NOW ONLY. `expires_at` is here unused for the same
+-- reason: turning either on later should be a policy change rather than a migration.
+create table if not exists public.signing_requests (
+  id uuid primary key default gen_random_uuid(),
+  token text not null unique,
+  account_id uuid references public.debtor_accounts (id) on delete cascade,
+  title text not null,
+  body jsonb not null,
+  signer_name text,
+  signer_email text,
+  -- 'sent' | 'signed' | 'declined' | 'cancelled'
+  state text not null default 'sent',
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz,
+  signed_at timestamptz,
+  -- The drawn marks, as data URLs. A signature is a picture; nothing is parsed out of it.
+  signature_png text,
+  initials_png text,
+  -- WHAT THEY TYPED THEIR NAME AS, which is the part a court reads. The drawing is the mark and
+  -- this is the identification; they answer different questions and are kept apart.
+  signed_name text,
+  -- The ordinary evidence of an electronic signature under ECTA s13: when, from where, as what.
+  signed_ip text,
+  signed_agent text,
+  declined_reason text
+);
+
+create index if not exists signing_requests_account_idx on public.signing_requests (account_id);
+create index if not exists signing_requests_state_idx on public.signing_requests (state);
+
+comment on table public.signing_requests is
+  'A document sent out to be signed online. The token is the authority: anyone holding the link '
+  'may open and sign it. The body is frozen at send time so what was signed cannot follow a later '
+  'edit of the template.';
+
+alter table public.signing_requests enable row level security;
+
+-- CREATED, NEVER DROPPED-AND-RECREATED. A `drop policy` in the session that wrote this hung
+-- exactly as a DELETE does, so the guard is a catalogue lookup. It also makes re-running safe,
+-- which a bare `create policy` is not.
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public'
+                 and tablename='signing_requests' and policyname='signing_requests_read') then
+    create policy signing_requests_read on public.signing_requests
+      for select to authenticated using (true);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public'
+                 and tablename='signing_requests' and policyname='signing_requests_insert') then
+    create policy signing_requests_insert on public.signing_requests
+      for insert to authenticated with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public'
+                 and tablename='signing_requests' and policyname='signing_requests_update') then
+    create policy signing_requests_update on public.signing_requests
+      for update to authenticated using (true);
+  end if;
+end $$;
+
+revoke all on table public.signing_requests from anon;
+
+-- OPENING A SIGNING LINK.
+--
+-- SECURITY DEFINER, WHICH IS THE WHOLE DESIGN. The anon role has no rights on the table, so this
+-- is the only door, and it takes a token and returns exactly one row. There is no query a visitor
+-- can write that lists anything.
+--
+-- IT RETURNS WHAT THE SIGNER MAY SEE AND NOTHING ELSE -- not created_by, not the account id. A
+-- debtor opening their own acknowledgement of debt has no business holding Raptor's internal keys,
+-- and a link forwarded to a third party should hand over the document and no more.
+create or replace function public.signing_open(p_token text)
+returns table (
+  title text,
+  body jsonb,
+  signer_name text,
+  state text,
+  signed_at timestamptz,
+  signature_png text,
+  initials_png text,
+  signed_name text
+)
+language sql
+security definer
+set search_path to 'public'
+as $$
+  select r.title, r.body, r.signer_name, r.state, r.signed_at,
+         r.signature_png, r.initials_png, r.signed_name
+    from public.signing_requests r
+   where r.token = p_token
+     and (r.expires_at is null or r.expires_at > now())
+$$;
+
+comment on function public.signing_open(text) is
+  'Open one signing request by its token. The only way the anon role may read the table.';
+
+-- SIGNING IT.
+--
+-- ONCE, AND THE DATABASE IS WHAT ENFORCES THAT. The update matches on state = 'sent', so a second
+-- submission -- a double tap, a retried request, a forwarded link opened twice -- changes no rows
+-- and is told so. A check in the browser is one the browser can be talked past, and the thing
+-- being protected is the only copy of somebody's signature on an instrument the firm sues on.
+--
+-- A SIGNATURE AND A NAME ARE BOTH REQUIRED. The drawing is the mark; the typed name is the
+-- identification, and ECTA s13 wants a method that identifies the person AND indicates their
+-- approval. A drawn squiggle alone identifies nobody.
+create or replace function public.signing_sign(
+  p_token text,
+  p_signature text,
+  p_initials text,
+  p_name text,
+  p_agent text
+) returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_done integer;
+begin
+  if coalesce(trim(p_signature), '') = '' then
+    raise exception 'Sign in the box before submitting.' using errcode = '22023';
+  end if;
+  if coalesce(trim(p_name), '') = '' then
+    raise exception 'Type your full name before submitting.' using errcode = '22023';
+  end if;
+
+  update public.signing_requests
+     set state = 'signed',
+         signed_at = now(),
+         signature_png = p_signature,
+         initials_png = nullif(trim(p_initials), ''),
+         signed_name = trim(p_name),
+         signed_agent = left(coalesce(p_agent, ''), 400)
+   where token = p_token
+     and state = 'sent'
+     and (expires_at is null or expires_at > now());
+  get diagnostics v_done = row_count;
+
+  /* NOT AN EXCEPTION. A link already signed, cancelled or expired is an ordinary thing for a
+     debtor to meet -- they pressed twice, or a colleague signed it first -- and the page says so
+     in a sentence. An error here would read as a fault. */
+  return v_done > 0;
+end $$;
+
+comment on function public.signing_sign(text, text, text, text, text) is
+  'Record a signature against one signing request. Refuses a second signature on the same token: '
+  'the update matches only while the state is still sent.';
+
+grant execute on function public.signing_open(text) to anon, authenticated;
+grant execute on function public.signing_sign(text, text, text, text, text) to anon, authenticated;

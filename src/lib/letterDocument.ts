@@ -551,6 +551,56 @@ export function documentWithoutOptional(
   return { ...doc, blocks }
 }
 
+/**
+ * THE SAME DOCUMENT WITH THE MERGE FIELDS ALREADY ANSWERED.
+ *
+ * WHY IT IS A SEPARATE FUNCTION AND NOT JUST `letterToHtml(..., { filled: true })`. Everywhere else
+ * in Raptor the merging happens at DRAW time -- the blocks stay a template, the values arrive
+ * beside them, and the notice is resolved as it is painted. That is right for a letter the firm
+ * prints, because the balance should be today's.
+ *
+ * IT IS WRONG FOR SOMETHING SOMEBODY SIGNS. An acknowledgement of debt is the instrument the firm
+ * would sue on; what the signer agreed to has to be a fixed set of words, and a document that
+ * re-merged itself would quietly show a different balance to the court than to the debtor. So the
+ * signing link stores the ANSWERED blocks, and the signing page renders them with no values at
+ * all -- there is nothing left in them to resolve.
+ *
+ * THE OPTIONAL LINES GO FIRST, exactly as letterToHtml does it and for the same reason: 97% of the
+ * book has no ID number, and a block that is nothing but an unanswerable field has to leave rather
+ * than stand on a signed instrument with braces in it. Running the two in the other order would
+ * resolve the field to empty and leave the blank line behind.
+ */
+export function fillLetter(doc: LetterDocument, values: Record<string, string>): LetterDocument {
+  const thinned = documentWithoutOptional(doc, values)
+  const fill = (spans: Span[]): Span[] =>
+    spans.map((span) => ({ ...span, text: renderTemplate(span.text, values).text }))
+  return {
+    ...thinned,
+    blocks: thinned.blocks.map((block): Block => {
+      switch (block.kind) {
+        case 'heading':
+        case 'paragraph':
+        case 'signature':
+          return { ...block, spans: fill(block.spans) }
+        case 'list':
+          return { ...block, items: block.items.map((item) => fill(item)) }
+        case 'table':
+          return {
+            ...block,
+            rows: block.rows.map((row) => row.map((cell) => ({ ...cell, spans: fill(cell.spans) }))),
+          }
+        /* A spacer, a page break and a progress bar carry no text to answer. Listed rather than
+           defaulted, so a block kind added later is a type error here instead of a merge field
+           that silently survives onto something somebody signs. */
+        case 'spacer':
+        case 'pagebreak':
+        case 'progress':
+          return block
+      }
+    }),
+  }
+}
+
 export function letterToHtml(doc: LetterDocument, input: {
   filled: boolean
   values: Record<string, string>

@@ -81,6 +81,7 @@ import { WorkflowRunPanel, StartWorkflowAsk } from '../../components/collections
 import { Modal } from '../../components/ui/Modal'
 import { WorkflowNowPanel } from '../../components/collections/WorkflowNowPanel'
 import { TestClockPanel } from '../../components/collections/TestClockPanel'
+import { SigningPanel } from './SigningPanel'
 import {
   fetchAccountRuns, fetchStartableWorkflows, handoverNoticesSentOn,
   type AccountRun, type StartableWorkflow,
@@ -856,6 +857,10 @@ export function AccountDetail() {
         */}
       <MoneyPanel accountId={account.id} />
       <LedgerPanel accountId={account.id} />
+      {/* SENDING SOMETHING OUT TO BE SIGNED. With the money because that is what the firm is
+          signing ABOUT -- an acknowledgement of debt is an admission of a balance, and whoever
+          sends one has just been looking at it. */}
+      <SigningPanel accountId={account.id} values={letterContext.values} debtorName={name} />
     </div>
   )
   const timelinePanel = (
