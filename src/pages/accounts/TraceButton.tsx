@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
-import { recordTrace, XDS_PORTAL_URL } from '../../lib/accountTrace'
+import { recordTrace } from '../../lib/accountTrace'
+import { TRACE_SOURCES, traceSourceById, type TraceSource } from '../../lib/traceSources.ts'
 import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
 import { isValidSaId } from '../../lib/newDebtor'
 import { scheduleFor } from '../../lib/annexureB'
@@ -51,9 +52,24 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
    */
   onUpload: () => void
 }) {
+  /*
+   * WHICH SOURCE, ASKED FIRST.
+   *
+   * THE FIRM: "where do I do the other traces, like for example CSA and stuff." The button went
+   * straight to XDS, so the only search Raptor could record was the one it had a portal for --
+   * every other one the firm runs was done, and charged to nobody, and written down nowhere.
+   *
+   * ONE MORE PRESS ON THE COMMON PATH, which is the honest trade: a bureau search is still two
+   * clicks and every other source becomes reachable at all. Hiding the rest behind a menu on a
+   * screen a collector uses fifty times a day is how a feature ships and is never found.
+   */
+  const [choosing, setChoosing] = useState(false)
+  const [source, setSource] = useState<TraceSource>(() => traceSourceById('xds'))
+  /* Where they looked, when it is somewhere this list does not name. */
+  const [named, setNamed] = useState('')
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ charge: ChargeResult; count: number } | null>(null)
+  const [result, setResult] = useState<{ charge: ChargeResult | null; count: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   /* 'asking' until the clipboard answers, because a write can be refused after it is accepted. */
   const [copied, setCopied] = useState<'asking' | 'yes' | 'no' | 'nothing'>('nothing')
@@ -73,7 +89,20 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
   const key = traceSearchKey(debtorKind, idNumber, isValidSaId)
   const problem = searchKeyProblem(key, debtorKind)
 
+  /*
+   * THE PICKER OPENS ON THE TAP AND NOTHING ELSE HAPPENS YET.
+   *
+   * The clipboard write and the new tab both have to start inside the tap that asked for them --
+   * see pick() -- so this does not try to do either. Choosing the source IS the tap that opens
+   * the portal.
+   */
   function open() {
+    setResult(null)
+    setError(null)
+    setChoosing(true)
+  }
+
+  function pick(s: TraceSource) {
     /*
      * BOTH OF THESE HAVE TO START INSIDE THE TAP.
      *
@@ -94,7 +123,11 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
         setCopied('no')
       }
     }
-    window.open(XDS_PORTAL_URL, '_blank', 'noopener,noreferrer')
+    /* A source with no portal is searched some other way: there is nothing to open, and opening
+       a blank tab would be the app pretending to do something. */
+    if (s.url) window.open(s.url, '_blank', 'noopener,noreferrer')
+    setSource(s)
+    setChoosing(false)
     setResult(null)
     setError(null)
     setAsking(true)
@@ -104,7 +137,16 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
     setBusy(true)
     setError(null)
     try {
-      const c = await recordTrace({ accountId, actor, count })
+      const c = await recordTrace({
+        accountId, actor, count, sourceId: source.id, named,
+        /*
+         * ONCE PER SUBJECT, and the account answers it. Passed as false here: the panel knows
+         * which subjects have been traced, this button does not, and a guess either way is a fee
+         * raised twice or a fee never raised. Wired through when the panel's own trace button
+         * lands -- see traceSources.chargesForThisSearch.
+         */
+        alreadyChargedForSubject: false,
+      })
       setResult({ charge: c, count })
       setAsking(false)
       await onDone()
@@ -136,25 +178,98 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, label, cla
           className="text-[11px] font-medium text-[var(--c-steel)] hover:underline text-left">
           Upload what it found
         </button>
-        <span className={`text-[11px] ${result.charge.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
-          {result.charge.reason === 'charged'
-            ? `XDS opened · ${result.count > 1 ? `${result.count} searches · ` : ''}charged R${result.charge.exclVat.toFixed(2)} + VAT`
-            : result.charge.reason === 'written-off'
-              ? 'Recorded · no charge (account written off)'
-              : 'Recorded · no charge (fee ceiling)'}
+        {/*
+          WHAT IT COST, AND WHY WHERE IT COST NOTHING. A null charge is not a refusal: it is one
+          necessary expense already raised for this person, which is a different sentence from the
+          ceiling and must not borrow its words.
+        */}
+        <span className={`text-[11px] ${result.charge?.reason === 'charged' ? 'text-[var(--c-green)]' : 'text-slate-500'}`}>
+          {result.charge === null
+            ? `Recorded · no charge (already charged for this person)`
+            : result.charge.reason === 'charged'
+              ? `${source.name} · ${result.count > 1 && source.kind === 'credit_bureau' ? `${result.count} searches · ` : ''}charged R${result.charge.exclVat.toFixed(2)} + VAT`
+              : result.charge.reason === 'written-off'
+                ? 'Recorded · no charge (account written off)'
+                : 'Recorded · no charge (fee ceiling)'}
         </span>
       </>
     )}>
-      <button type="button" onClick={open} title="Open XDS and record a credit bureau search — Annexure B item 4(c)" className={className}>
+      <button type="button" onClick={open} title="Record a trace — a credit bureau search is Annexure B item 4(c), anything else is item 3" className={className}>
         <Search size={14} /> {label ?? 'Trace'}
       </button>
+
+      {/*
+        WHERE ARE YOU LOOKING?
+
+        THE FIRM: "where do I do the other traces, like for example CSA and stuff." Every source
+        the firm uses, in one list, with what each one answers under it -- because the choice is
+        not the vendor, it is the question. SASSA tells you whether somebody draws a grant, which
+        is the difference between "refusing to pay" and "cannot pay", and those two must never be
+        on one list.
+
+        AND WHAT IT COSTS THE DEBTOR IS ON THE ROW. A collector pressing one of these raises a fee
+        against a person; the gazette's item is the one fact that decides whether that is lawful,
+        and it is not something to find out afterwards on a statement.
+      */}
+      {choosing && (
+        <Modal title="Where are you looking?" onClose={() => setChoosing(false)} width={520}>
+          <div className="space-y-2">
+            {TRACE_SOURCES.map((s) => (
+              <button key={s.id} type="button" onClick={() => pick(s)}
+                className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200
+                  hover:border-[#c9a052] hover:bg-gold-50">
+                <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                  <span className="text-sm font-semibold text-slate-800">{s.name}</span>
+                  <span className="text-[11px] text-slate-400">
+                    {s.kind === 'credit_bureau'
+                      ? `Credit bureau · item 4(c) · R${rate.toFixed(2)}`
+                      : 'Item 3 · R25.00 · once per person'}
+                  </span>
+                </span>
+                <span className="block text-xs text-slate-500 mt-0.5">{s.what}</span>
+              </button>
+            ))}
+          </div>
+          {/*
+            THE LIST IS NOT FINISHED AND SAYS SO. XDS is the one this app was built around; the
+            others are the firm's own words and want confirming. Said here rather than left for
+            somebody to discover, because a name on this screen decides which line of the gazette
+            a debtor is charged under.
+          */}
+          <p className="text-[11px] text-slate-400 mt-3">
+            Is one missing, or named wrong? Say so and it is one line to add.
+          </p>
+        </Modal>
+      )}
 
       {asking && (
         <Modal title="How many traces did you do?" onClose={() => setAsking(false)} width={460}>
           <p className="text-sm text-slate-500">
-            XDS is open in a new tab. One account can carry a company and its sureties, so tell us how many
+            {source.url
+              ? `${source.name} is open in a new tab. `
+              : `${source.name} is not a portal Raptor can open, so search it the way you normally do. `}
+            One account can carry a company and its sureties, so tell us how many
             searches you ran and they go on the statement as a single line.
           </p>
+
+          {/*
+            WHERE, IN THEIR OWN WORDS, for a source this list does not name. It goes on the
+            TIMELINE and nowhere else -- the debtor's statement says "ONE" whatever was searched,
+            which is the firm's own rule about not naming a supplier on a document that leaves the
+            building.
+          */}
+          {source.id === 'other' && (
+            <label className="block mt-3">
+              <span className="text-xs font-medium text-slate-600">Where did you look?</span>
+              <input value={named} onChange={(e) => setNamed(e.target.value)}
+                placeholder="Deeds office"
+                className="mt-1 w-full text-sm rounded-lg border border-slate-200 px-3 py-2" />
+              <span className="block text-[11px] text-slate-400 mt-1">
+                Goes on the account&rsquo;s own timeline, so the next collector knows where has
+                already been tried. It is not on the debtor&rsquo;s statement.
+              </span>
+            </label>
+          )}
 
           {/*
             THE NUMBER, EITHER WAY. On the clipboard where the browser allowed it, and on the

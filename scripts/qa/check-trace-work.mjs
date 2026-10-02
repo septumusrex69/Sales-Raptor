@@ -541,9 +541,12 @@ ok('...but is named, so it gets corrected', /\{problem\}/.test(button))
  * broken. Asserted as presence first — indexOf returns -1 for something deleted, and -1 beats
  * everything, so an order-only check passes the moment its subject is gone.
  */
-ok('...and opens the portal in the same click', button.includes("window.open(XDS_PORTAL_URL"))
+ok('...and opens the portal in the same click', button.includes('window.open(s.url'))
 ok('...with the copy started before the tab steals the gesture',
-  button.indexOf('navigator.clipboard') < button.indexOf('window.open(XDS_PORTAL_URL'))
+  button.indexOf('navigator.clipboard') < button.indexOf('window.open(s.url'))
+/* AND A SOURCE WITH NO PORTAL OPENS NOTHING. SASSA is not a website Raptor can hand a debtor to,
+   and a blank tab would be the app pretending to have done something. */
+ok('...and a source with no portal opens no tab', /if \(s\.url\) window\.open/.test(button))
 /*
  * A CLIPBOARD WRITE CAN BE REFUSED AFTER IT IS ACCEPTED — writeText resolves asynchronously. So
  * what the modal claims waits for the real answer, and where it was refused the number is shown
@@ -565,7 +568,18 @@ ok('...and an account with nothing usable says which of the two it is',
  * and three sureties and nobody knows before opening the portal how many they will look for.
  */
 ok('it asks how many searches were run', /How many traces did you do\?/.test(button))
-ok('...and charges item 4\u00a0(c) on the answer', /recordTrace\(\{ accountId, actor, count \}\)/.test(button))
+/*
+ * AND THE SOURCE GOES WITH IT. THE FIRM: "where do I do the other traces, like for example CSA and
+ * stuff." The button went straight to XDS, so the only search Raptor could record was the one it
+ * had a portal for -- every other one was done, charged to nobody, and written down nowhere.
+ */
+ok('...and charges on the answer, naming where they looked',
+  /recordTrace\(\{\s*\n\s*accountId, actor, count, sourceId: source\.id, named,/.test(button))
+ok('...choosing the source before anything opens', /TRACE_SOURCES\.map\(\(s\) => \(/.test(button))
+/* WHAT IT COSTS THE DEBTOR IS ON THE ROW. The gazette's item is the one fact that decides whether
+   a fee is lawful, and it is not something to find out afterwards on a statement. */
+ok('...with the item it is charged under beside each one',
+  /Credit bureau \u00b7 item 4\(c\)/.test(button) && /Item 3 \u00b7 R25\.00 \u00b7 once per person/.test(button))
 /* Closing without answering is a portal opened by mistake, and charges nothing. */
 ok('...and closing without answering charges nothing', /Didn&apos;t trace/.test(button))
 
