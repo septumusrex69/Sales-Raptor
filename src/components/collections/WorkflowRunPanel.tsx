@@ -735,6 +735,24 @@ function StepDetail({ step, run, live, onSent }: {
         attempts -- hiding the first would make it look like one notice went out a week later,
         which is worse for the firm than the mistake.
       */}
+      {/*
+        WHERE IT WENT, ON A NOTICE THAT WENT SOMEWHERE.
+
+        THE FIRM, on a sequence re-issued because the address was wrong: "it still shows that the
+        previous workflow went out to the wrong email address." Without this the file reads as two
+        identical demands a week apart and nothing explains the second one -- the address as SENT is
+        the only thing that does, and it is not the address the account carries today.
+
+        ON EVERY SENT EMAIL, not only the failed ones. "Which address did we serve this on" is a
+        question an attorney asks of the good ones too, and a line that appears only when something
+        has gone wrong teaches people that its absence means nothing happened.
+      */}
+      {step.sentTo && step.state === 'sent' && (
+        <p className="text-[11px] text-slate-500 mt-1 leading-snug break-words">
+          Sent to {step.sentTo}
+        </p>
+      )}
+
       {step.notServedAt && (
         <p className="text-[11px] text-negative-700 mt-1 leading-snug">
           <AlertTriangle size={11} className="inline mr-1 -mt-0.5" />

@@ -53,6 +53,8 @@ export interface AccountRun {
    * "Handover" would be a rule the firm could break by renaming a workflow in the library.
    */
   triggerKind: string | null
+  /** The version this run is of, so a defective one can be issued again on the same sequence. */
+  versionId: string | null
   steps: RunStep[]
   /**
    * Every hold this run has had, oldest first.
@@ -75,11 +77,12 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
   const { data, error } = await supabase
     .from('workflow_runs')
     .select(`
-      id, state, left_reason, started_on,
+      id, state, left_reason, started_on, version_id,
       workflow_versions!inner(day_unit, trigger_kind, workflows!inner(name)),
       workflow_run_holds(id, cause, reason, started_on, ended_on, ended_reason),
       workflow_run_steps(id, due_on, state, note, sent_at, instalment_no,
         not_served_at, not_served_reason,
+        account_emails(debtor_address),
         workflow_nodes!inner(label, channel, day, ordinal, needs_release, after_minutes))
     `)
     .eq('account_id', accountId)
@@ -98,6 +101,9 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
        silently. Present in the select above and in the interface, or it reads undefined for ever
        and the handover sentence never appears. */
     triggerKind: r.workflow_versions?.trigger_kind ?? null,
+    /* THE VERSION TO START AGAIN, where a notice turns out never to have been served. Named by
+       hand like every field here -- see CLAUDE.md on mappers that drop a column silently. */
+    versionId: r.version_id ?? null,
     /*
      * ORDERED BY THE DATE IT LANDS ON, THEN BY THE DAY NUMBER, THEN BY THE NODE'S OWN ORDINAL.
      *
@@ -137,6 +143,14 @@ export async function fetchAccountRuns(accountId: string): Promise<AccountRun[]>
            have arrived reads on the screen exactly like one that did. */
         notServedAt: s.not_served_at ?? null,
         notServedReason: s.not_served_reason ?? null,
+        /*
+         * WHERE IT WENT, off the email row that carries this step's id.
+         *
+         * A LIST BECAUSE THE LINK IS ONE-TO-MANY in the schema and nothing stops a step having
+         * two rows against it -- the first is the one that was sent. Null on an SMS or a letter,
+         * which carry no address this can be matched against.
+         */
+        sentTo: (Array.isArray(s.account_emails) ? s.account_emails[0]?.debtor_address : null) ?? null,
       }))
       /* AND THE DAY NUMBER IS NO LONGER A TIE-BREAK WORTH HAVING ON AN INSTALMENT STEP, where it
          is a position on the chart rather than a date -- so the date leads, then the node's own

@@ -60,7 +60,7 @@ const SLOT_ICON = {
   consent: ShieldCheck,
 } as const
 
-export function DebtorDetailsPanel({ account, name, workspace, properties, onChange, userId, onEmail, onOpenTrace }: {
+export function DebtorDetailsPanel({ account, name, workspace, properties, onChange, userId, onEmail, onEmailChanged, onOpenTrace }: {
   account: DebtorAccount
   name: string
   workspace: Workspace | null
@@ -76,6 +76,19 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
   onChange: () => Promise<void>
   userId: string | null
   onEmail: (address: string) => void
+  /**
+   * THE EMAIL ADDRESS WAS CORRECTED, AND SOMETHING MAY HAVE BEEN SERVED ON THE OLD ONE.
+   *
+   * THE FIRM: "when you've changed the primary email address, it should ask you, do you want to
+   * restart the Section 129 process?" The page decides whether to ask -- it is the one holding the
+   * account's runs -- and this is the panel saying what changed. See reissueNotice.ts.
+   *
+   * ONLY THE EMAIL SLOT, and not because the other rows matter less. A section 129 is served by
+   * EMAIL; the SMS behind it tells the debtor to go and read it, so a wrong mobile costs the
+   * nudge and not the service. Offering to re-serve a statutory demand because somebody fixed a
+   * telephone number would be the warning that fires when nothing is wrong.
+   */
+  onEmailChanged?: (before: string, after: string) => void
   /** Where the property and the next of kin came from, so the evidence is one click away. */
   onOpenTrace: (() => void) | null
 }) {
@@ -234,7 +247,8 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
               onAdd={() => setAddKind('phone')} userId={userId} busy={busy} run={run} />
             <ContactSlot icon="email" label="Email address" contact={email}
               onAdd={() => setAddKind('email')} userId={userId} busy={busy} run={run}
-              onOpen={email ? () => onEmail(email.value) : undefined} />
+              onOpen={email ? () => onEmail(email.value) : undefined}
+              onValueChanged={onEmailChanged} />
             <ContactSlot icon="address" label="Residential address" contact={address}
               onAdd={() => setAddKind('address')} userId={userId} busy={busy} run={run} />
             <ContactSlot icon="employer" label="Employer" contact={employer}
@@ -622,7 +636,7 @@ function NameSlot({ account, name, isCompany, onSave, busy }: {
   )
 }
 
-function ContactSlot({ icon, label, contact, onAdd, userId, busy, run, onOpen }: {
+function ContactSlot({ icon, label, contact, onAdd, userId, busy, run, onOpen, onValueChanged }: {
   icon: keyof typeof SLOT_ICON
   label: string
   contact?: AccountContact
@@ -631,22 +645,27 @@ function ContactSlot({ icon, label, contact, onAdd, userId, busy, run, onOpen }:
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   onOpen?: () => void
+  /** Told after a save that actually changed the value. See DebtorDetailsPanel.onEmailChanged. */
+  onValueChanged?: (before: string, after: string) => void
 }) {
   return (
     <SlotShell icon={icon} label={label}>
       {contact
-        ? <ContactValue contact={contact} userId={userId} busy={busy} run={run} onOpen={onOpen} />
+        ? <ContactValue contact={contact} userId={userId} busy={busy} run={run} onOpen={onOpen}
+            onValueChanged={onValueChanged} />
         : <Blank onAdd={onAdd} />}
     </SlotShell>
   )
 }
 
-function ContactValue({ contact, userId, busy, run, onOpen }: {
+function ContactValue({ contact, userId, busy, run, onOpen, onValueChanged }: {
   contact: AccountContact
   userId: string | null
   busy: boolean
   run: (fn: () => Promise<unknown>) => Promise<boolean>
   onOpen?: () => void
+  /** Told after a save that actually changed the value. See DebtorDetailsPanel.onEmailChanged. */
+  onValueChanged?: (before: string, after: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(contact.value)
@@ -663,8 +682,16 @@ function ContactValue({ contact, userId, busy, run, onOpen }: {
         <div className="flex items-center gap-2 mt-1.5">
           <button disabled={busy || !draft.trim()}
             onClick={async () => {
+              /* READ BEFORE THE SAVE, because `contact` is re-rendered from the reloaded workspace
+                 the moment `run` resolves -- taken afterwards this is the NEW value twice and
+                 nothing ever looks changed. */
+              const before = contact.value
               const ok = await run(() => updateContact(contact.id, { value: draft, label }))
-              if (ok) setEditing(false)
+              if (!ok) return
+              setEditing(false)
+              /* AND ONLY WHERE THE VALUE REALLY MOVED. Saving a label, or re-saving the same
+                 address, is not a finding that anything failed to arrive. */
+              if (before.trim() !== draft.trim()) onValueChanged?.(before, draft)
             }}
             className="text-[11px] font-medium px-2 py-1 rounded bg-brand-600 text-white disabled:opacity-50">Save</button>
           <button onClick={() => { setDraft(contact.value); setLabel(contact.label ?? ''); setEditing(false) }}

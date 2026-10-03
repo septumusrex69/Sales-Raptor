@@ -36,6 +36,19 @@ export interface RunStep {
    */
   notServedAt: string | null
   notServedReason: string | null
+  /**
+   * THE ADDRESS THIS NOTICE ACTUALLY WENT TO, or null where it was not an email.
+   *
+   * THE FIRM, on correcting a wrong address mid-sequence: "it still shows that the previous
+   * workflow went out to the wrong email address." Without it a re-issued sequence reads as two
+   * identical notices a week apart, and the thing that explains the second one -- that the first
+   * went somewhere the debtor does not read -- is nowhere on the file.
+   *
+   * OFF `account_emails.workflow_step_id`, which is the link a bounce already travels back along,
+   * so this is the address as SENT rather than the address the account carries today. Those are
+   * different the moment somebody corrects one, which is the entire case this exists for.
+   */
+  sentTo: string | null
   /** The day number off the firm's own chart. The unit it is counted in is on the run. */
   day: number
   /**

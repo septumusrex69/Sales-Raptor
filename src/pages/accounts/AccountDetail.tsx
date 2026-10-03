@@ -44,6 +44,8 @@ import {
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import { TRACE_REQUEST_FOR, traceNeeds, traceableMobile } from '../../lib/traceAttempt.ts'
+import { noticeToReissue, type Reissue } from '../../lib/reissueNotice.ts'
+import { ReissueNoticeModal } from './ReissueNoticeModal'
 import { tracingThisMonth, type TracingMonth } from '../../lib/traceSources.ts'
 import { MONTHLY_LIMIT, TRACING_ACTION_CODE } from '../../lib/actionTariff.ts'
 import {
@@ -426,6 +428,17 @@ export function AccountDetail() {
    */
   const [startNow, setStartNow] = useState<StartableWorkflow | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
+  /*
+   * THE EMAIL ADDRESS WAS CORRECTED AND SOMETHING MAY HAVE BEEN SERVED ON THE OLD ONE.
+   *
+   * THE FIRM: "when you've changed the primary email address, it should ask you, do you want to
+   * restart the Section 129 process?" Held here rather than in the panel because the question can
+   * only be answered by something holding the account's RUNS, and the panel holds contacts. Both
+   * addresses travel with it: the old one is what the notice went to and what goes on the record,
+   * the new one is where the fresh sequence goes.
+   */
+  const [reissuing, setReissuing] = useState<
+    { offer: Reissue; before: string; after: string } | null>(null)
   /*
    * WHEN A MESSAGE WENT OUT AND THE RECORDING OF IT DID NOT.
    *
@@ -891,7 +904,19 @@ export function AccountDetail() {
         /* Only what they still own, across every trace on the account — see heldProperty. */
         properties={heldProperty(traces.flatMap((t) => t.items))}
         onOpenTrace={traces.length > 0 ? () => setOpenTrace(traces[0].id) : null}
-        userId={currentUser?.id ?? null} onEmail={setComposeTo} />
+        userId={currentUser?.id ?? null} onEmail={setComposeTo}
+        /*
+         * AND THE ONE QUESTION A CORRECTED ADDRESS RAISES.
+         *
+         * noticeToReissue answers null on nearly every edit -- a typo, a second address, an
+         * account with no sequence on it -- which is what keeps this from being a box people
+         * learn to dismiss. It says yes only where a notice actually WENT to the address that
+         * has just been replaced.
+         */
+        onEmailChanged={(before, after) => {
+          const offer = noticeToReissue({ before, after, runs })
+          if (offer) setReissuing({ offer, before, after })
+        }} />
       <StandingPanel account={account} standing={standing} position={position}
         traces={traces}
         /* OFF THE LEDGER THE PAGE ALREADY HOLDS, so saying what tracing cost needs no request of
@@ -1787,6 +1812,19 @@ export function AccountDetail() {
           initialRequestFor={TRACE_REQUEST_FOR}
           initialDescription={askingTrace}
           onClose={() => setAskingTrace(null)}
+          onDone={reload}
+        />
+      )}
+
+      {reissuing && (
+        <ReissueNoticeModal
+          accountId={account.id}
+          offer={reissuing.offer}
+          before={reissuing.before}
+          after={reissuing.after}
+          onClose={() => setReissuing(null)}
+          /* The whole page, not only the runs: marking a notice unserved and starting a fresh
+             sequence sends today's steps, which writes notes, fees and emails. */
           onDone={reload}
         />
       )}
