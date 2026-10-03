@@ -496,17 +496,46 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
             OPTIONAL, because a search that found nothing is still worth recording: the next
             collector needs to know where has already been tried.
           */}
-          {!result && !counted && (
+          {/*
+            EACH SOURCE ASKS ITS OWN QUESTION.
+
+            THE FIRM: "there are different things that you need to record when you go to the other
+            things and what your findings are. So for SASSA, for example, you'd say, can you
+            confirm that they're receiving the grant? Yes or no?"
+
+            ONE FREE-TEXT BOX WAS THE WRONG SHAPE FOR THE SOURCE THAT MATTERS MOST. "Drawing a
+            grant" typed into a note is a sentence nobody can group on, and the fact itself is the
+            difference between REFUSING to pay and CANNOT pay -- which CLAUDE.md says must never be
+            on one list. Two buttons answer it in a tap, and what lands on the account is the
+            SENTENCE rather than the box that was ticked: "Yes" alone, read six months later, says
+            nothing about what was asked.
+          */}
+          {!result && !counted && source.asks.kind === 'yes_no' && (
+            <div className="mt-3">
+              <span className="text-xs font-medium text-slate-600">{source.asks.prompt}</span>
+              <div className="flex gap-2 mt-1.5">
+                {([['yes', source.asks.yes], ['no', source.asks.no]] as const).map(([k, sentence]) => (
+                  <button key={k} type="button"
+                    /* Pressing the chosen one again clears it: recording nothing stays reachable,
+                       because a portal that would not load is not a yes and not a no. */
+                    onClick={() => setFound(found === sentence ? '' : sentence)}
+                    className={`text-sm font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                      found === sentence
+                        ? 'border-gold-500 bg-gold-400 text-navy-950'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                    {k === 'yes' ? 'Yes' : 'No'}
+                  </button>
+                ))}
+              </div>
+              {found && <p className="text-[11px] text-slate-500 mt-1.5">{found}</p>}
+            </div>
+          )}
+
+          {!result && !counted && source.asks.kind === 'text' && (
             <label className="block mt-3">
-              <span className="text-xs font-medium text-slate-600">What did you find?</span>
+              <span className="text-xs font-medium text-slate-600">{source.asks.prompt}</span>
               <textarea value={found} onChange={(e) => setFound(e.target.value)} rows={2}
-                placeholder={source.id === 'sassa'
-                  ? 'Drawing an SRD grant since March 2026.'
-                  : source.id === 'iec'
-                    ? 'Registered in ward 79900090, Soshanguve — voting station Thorntree View Primary.'
-                    : source.id === 'sars_vat'
-                      ? 'Not a registered VAT vendor under that trading name.'
-                      : 'Nothing came back.'}
+                placeholder={source.asks.placeholder}
                 className="mt-1 w-full text-sm rounded-lg border border-slate-200 px-3 py-2 resize-none" />
               <span className="block text-[11px] text-slate-400 mt-1">
                 Goes on the account&rsquo;s timeline. Leave it empty if nothing came back &mdash;

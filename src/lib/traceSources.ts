@@ -70,6 +70,16 @@ export type TraceSourceKind =
  * trading name, got an ID number too. A key that is wrong for the site is worse than no key: it is
  * pasted, it returns nothing, and the collector concludes the person is not there.
  */
+/**
+ * WHAT A SOURCE ASKS WHEN THE COLLECTOR COMES BACK.
+ *
+ * `yes_no` carries its own words for each answer, because "Yes" alone on a timeline six months
+ * later says nothing: what goes on the account is the SENTENCE, not the box that was ticked.
+ */
+export type TraceQuestion =
+  | { kind: 'text'; prompt: string; placeholder: string }
+  | { kind: 'yes_no'; prompt: string; yes: string; no: string }
+
 export type TraceSearchOn =
   /** The ID number for a person, the registration number for a company. */
   | 'identity'
@@ -96,6 +106,24 @@ export interface TraceSource {
   /** Which key to copy, and to substitute into `{key}`. See TraceSearchOn. */
   searchOn: TraceSearchOn
   /**
+   * THE QUESTION THIS SOURCE ANSWERS, ASKED IN ITS OWN WORDS.
+   *
+   * THE FIRM: "there are different things that you need to record when you go to the other things
+   * and what your findings are. So for SASSA, for example, you'd say, can you confirm that they're
+   * receiving the grant? Yes or no?"
+   *
+   * ONE FREE-TEXT BOX WAS THE WRONG SHAPE FOR THE ONE SOURCE THAT MATTERS MOST. "Drawing a grant"
+   * typed into a note is a sentence nobody can group on; the fact itself is the difference between
+   * REFUSING to pay and CANNOT pay, which CLAUDE.md says must never be on one list. A yes or a no
+   * is answerable in a tap by somebody looking at the screen, and it is the thing a client report
+   * can count.
+   *
+   * TEXT WHERE A YES OR NO WOULD BE A LIE. A web search does not answer a question; it comes back
+   * with whatever it comes back with, and forcing that into two boxes would be the same fault as
+   * the trace outcome picker that offered "Disconnected" against an address.
+   */
+  asks: TraceQuestion
+  /**
    * A SECOND THING THE SITE ASKS FOR THAT RAPTOR CANNOT GIVE IT.
    *
    * SASSA's status page wants the ID number AND the phone number the grant was applied on, and
@@ -114,6 +142,8 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://www.online.xds.co.za/Portal/Account/Login?ReturnUrl=%2FPortal%2F',
     what: 'Numbers, addresses, employment, deeds and linked people. Searched on an ID or a registration number.',
     searchOn: 'identity',
+    asks: { kind: 'text', prompt: 'Anything to note about this search?',
+      placeholder: 'Usually nothing \u2014 the findings are in the report you upload.' },
   },
   {
     /*
@@ -133,6 +163,12 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://srd.sassa.gov.za/sc19/status',
     what: 'Whether they draw an SRD grant \u2014 the difference between cannot pay and will not pay.',
     searchOn: 'identity',
+    /* THE FIRM'S OWN QUESTION, in their own words: "can you confirm that they're receiving the
+       grant? Yes or no?" A yes is the evidence behind `cannot pay` rather than a collector's
+       impression of a telephone call. */
+    asks: { kind: 'yes_no', prompt: 'Are they receiving a grant?',
+      yes: 'Confirmed on SASSA that they draw an SRD grant.',
+      no: 'SASSA shows no SRD grant for this ID number.' },
     alsoNeeds: 'the phone number they applied on, which Raptor does not hold \u2014 ask them for it',
   },
   {
@@ -149,6 +185,8 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://www.elections.org.za/pw/Voter/My-ID-Information-Details',
     what: 'Ward, voting district and voting station \u2014 the area they registered in, not an address.',
     searchOn: 'identity',
+    asks: { kind: 'text', prompt: 'Which ward and voting station?',
+      placeholder: 'Ward 79900090, Soshanguve \u2014 Thorntree View Primary. Area only, not an address.' },
   },
   {
     /*
@@ -161,6 +199,8 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://www.bizportal.gov.za/',
     what: 'Directors and company status, on a registration number. For a company debtor.',
     searchOn: 'identity',
+    asks: { kind: 'text', prompt: 'What does CIPC show?',
+      placeholder: 'In business. Directors: M Dlamini, P Naidoo.' },
   },
   {
     /*
@@ -175,6 +215,9 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://secure.sarsefiling.co.za/vatvendorsearch.aspx',
     what: 'Whether a company is a registered VAT vendor. Searched on the exact trading name.',
     searchOn: 'name',
+    asks: { kind: 'yes_no', prompt: 'Is it a registered VAT vendor?',
+      yes: 'SARS confirms it is a registered VAT vendor under that trading name.',
+      no: 'SARS shows no VAT registration under that trading name.' },
   },
   {
     /*
@@ -188,18 +231,20 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://www.google.com/search?q={key}',
     what: 'Name, surname or company \u2014 an employer, a trading name, a death notice, a new town.',
     searchOn: 'name',
+    asks: { kind: 'text', prompt: 'What did you find?',
+      placeholder: 'A new employer, a trading name, a death notice, a new town \u2014 or nothing.' },
   },
-  {
-    /* NAMED AS THE FIRM NAMED IT, and still flagged: "CSA" is their shorthand and the full name has
-       not been confirmed. The label is internal -- the debtor's statement says "ONE" -- so
-       correcting it later is one line here and changes nothing already charged. */
-    id: 'csa',
-    name: 'CSA',
-    kind: 'other',
-    url: null,
-    what: 'The firm\u2019s own shorthand \u2014 confirm the full name and the link before this goes live.',
-    searchOn: 'identity',
-  },
+  /*
+   * CSA IS GONE, AND THE FIRM RETIRED IT BY NOT KNOWING WHAT IT WAS.
+   *
+   * It was carried here as their own shorthand with the full name unconfirmed, flagged twice as
+   * needing confirmation before go-live. Asked a third time: "I don't know what CSA is."
+   *
+   * SAFE TO REMOVE BECAUSE NOTHING STORES IT. `sourceId` is read once, to pick the item and the
+   * words, and is never written to a row -- the fee carries its Annexure B item and the timeline
+   * note carries the source's NAME. So no record points at this entry, and "Somewhere else" below
+   * covers anything it might have been.
+   */
   {
     /*
      * ANYTHING ELSE, BY NAME.
@@ -214,6 +259,8 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: null,
     what: 'Any other search. Say where, and it goes on the timeline.',
     searchOn: 'identity',
+    asks: { kind: 'text', prompt: 'What did you find?',
+      placeholder: 'Nothing came back.' },
   },
 ]
 

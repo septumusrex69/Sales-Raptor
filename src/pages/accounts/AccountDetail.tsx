@@ -43,6 +43,8 @@ import {
   type ClientFlag, type ClientPosition, type DeskPosition,
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
+import { tracingThisMonth, type TracingMonth } from '../../lib/traceSources.ts'
+import { MONTHLY_LIMIT, TRACING_ACTION_CODE } from '../../lib/actionTariff.ts'
 import {
   directorshipSummary, judgmentSummary, practitionerLabel, practitionerMeaning, splitJudgments,
   type AccountDirector, type AccountJudgment, type AccountStanding, type DirectorCompany,
@@ -858,6 +860,12 @@ export function AccountDetail() {
         userId={currentUser?.id ?? null} onEmail={setComposeTo} />
       <StandingPanel account={account} standing={standing} position={position}
         traces={traces}
+        /* OFF THE LEDGER THE PAGE ALREADY HOLDS, so saying what tracing cost needs no request of
+           its own. Counted exactly as the engine counts -- see tracingThisMonth. */
+        tracingMonth={ledgers
+          ? tracingThisMonth(ledgers.fees, new Date().toISOString(),
+              MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)
+          : null}
         traceAction={(
           <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
             debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
@@ -866,6 +874,16 @@ export function AccountDetail() {
             debtorName={name}
             label="Do the trace"
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
+            onDone={reload} onUpload={() => setTracing(true)} />
+        )}
+        traceActionCompact={(
+          /* THE SAME CONTROL, HEADER-SIZED. A second instance rather than a style prop: they are
+             independent controls in independent places, and the picker each opens is its own. */
+          <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+            debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
+            debtorName={name}
+            label="Do another"
+            className="text-[11px] font-medium px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:border-[#c9a052] hover:bg-gold-50 inline-flex items-center gap-1"
             onDone={reload} onUpload={() => setTracing(true)} />
         )}
         onUpload={() => setTracing(true)}
@@ -3063,7 +3081,8 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
  * Absent on nearly every account, and silent when absent.
  */
 function StandingPanel({
-  account, standing, position, traces, traceAction, onUpload, onOpenTrace, onPractitioner,
+  account, standing, position, traces, traceAction, traceActionCompact, tracingMonth,
+  onUpload, onOpenTrace, onPractitioner,
   onAddDirector, onEditDirector,
 }: {
   account: DebtorAccount
@@ -3080,6 +3099,10 @@ function StandingPanel({
    * would be a second place for the charge to drift.
    */
   traceAction: React.ReactNode
+  /** The same control at header size, for the row beside "Upload a trace". */
+  traceActionCompact: React.ReactNode
+  /** What tracing has cost on this account this month, or null while it is unknown. */
+  tracingMonth: TracingMonth | null
   /** Read a bureau PDF onto the account. See TraceUploadModal. */
   onUpload: () => void
   /** Open one for working: ring its numbers, record what happened, promote the real ones. */
@@ -3205,6 +3228,24 @@ function StandingPanel({
               Upload a trace
             </button>
           )}
+          {/*
+            AND ANOTHER SEARCH, WHICH WAS UNREACHABLE THE MOMENT THE FIRST ONE LANDED.
+
+            THE FIRM: "I still don't see where the other traces are... you should always have an
+            option. Now you've done one trace, and now you can't upload other traces or get other
+            information."
+
+            THE BUTTON WAS INSIDE THE EMPTY STATE. `bare` is false once a single trace exists, so
+            the whole block went -- and with it the ONLY door to the source picker, which is where
+            SASSA, the voters' roll, CIPC, the VAT vendor search and a web search live. Both halves
+            of what the firm is describing are this one bug: the second search was gone, and so was
+            every source that is not XDS.
+
+            IT BELONGS IN THE HEADER FOR THE SAME REASON "Upload a trace" DOES -- it is what is
+            left once the empty state has been replaced by results, and a trace panel is exactly
+            where somebody stands when they decide to look somewhere else.
+          */}
+          {!bare && traceActionCompact}
           {traces.length > 0 && (
             <button type="button" onClick={() => onOpenTrace(traces[0].id)}
               className="text-[11px] font-medium px-2 py-1 rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 inline-flex items-center gap-1">
@@ -3213,6 +3254,32 @@ function StandingPanel({
           )}
         </span>
       }>Trace information</PanelTitle>
+
+      {/*
+        WHAT THE TRACING ON THIS ACCOUNT HAS COST.
+
+        THE FIRM, having run three searches: "I don't see any charges that were run for the traces
+        that I've done. It wasn't charged."
+
+        IT WAS CHARGED. Three fees, all billed -- R16, R16 and R32. What they could not find was
+        where it says so, and that is of my own making: the firm asked for the charge lines off the
+        account timeline ("still showing the charges on the notes is not necessary"), and the trace
+        fee went with the rest. Correct for a call, where the note beside it already says a call
+        happened; wrong for a trace, where the panel is the only place the work lives.
+
+        SO THE TOTAL GOES WHERE THE TRACES ARE, not back on the timeline. It is also the running
+        count against the firm's own four a month -- see MONTHLY_LIMIT -- so the panel answers "has
+        it been charged" and "how many are left" with one line instead of neither.
+      */}
+      {tracingMonth !== null && tracingMonth.used > 0 && (
+        <p className="mb-3 text-[11px] text-slate-500">
+          <span className="font-medium text-slate-700">
+            {tracingMonth.used} of {tracingMonth.limit} tracing charges
+          </span>
+          {' '}used this month &middot; R{tracingMonth.charges
+            .reduce((t, c) => t + c.exclVat, 0).toFixed(2)} plus VAT
+        </p>
+      )}
 
       {bare && (
         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center">

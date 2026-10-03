@@ -350,8 +350,23 @@ ok('...and the upload beside it', /Upload a trace I already have/.test(detail))
  * ONE Trace button, handed in rather than rebuilt. A second copy in the panel would be a second
  * place for item 4(c) to drift from the one in the action row.
  */
-ok('the panel does not build its own trace button',
-  (detail.match(/<TraceButton/g) ?? []).length === 2 && /traceAction: React\.ReactNode/.test(detail))
+/*
+ * ASSERTED ON THE PANEL'S OWN BODY, NOT ON A COUNT OF THE FILE.
+ *
+ * This counted exactly two <TraceButton> in AccountDetail and broke when the page grew a THIRD --
+ * a compact one for the panel's header, because the firm could not reach a second search once a
+ * trace existed. The count was never the invariant: two instances of one component cannot drift,
+ * since the item 4(c) arithmetic lives inside TraceButton. What matters is that the PANEL receives
+ * its controls and does not construct one, so the page stays the single place that decides how a
+ * trace is charged.
+ */
+const panelBody = detail.slice(detail.indexOf('function StandingPanel'))
+  .slice(0, detail.slice(detail.indexOf('function StandingPanel')).indexOf('\nfunction '))
+ok('the panel does not build its own trace button', !/<TraceButton/.test(panelBody))
+ok('...it is handed one', /traceAction: React\.ReactNode/.test(detail))
+/* AND A SECOND, HEADER-SIZED, for the row beside "Upload a trace" -- which is the one that was
+   missing entirely once a trace existed. */
+ok('...and a compact one for the header', /traceActionCompact: React\.ReactNode/.test(detail))
 
 /*
  * The firm's own heading, off the design they drew. "TRACE" in small grey capitals named a
@@ -364,8 +379,11 @@ ok('the panel is called Trace information', /}>Trace information<\/PanelTitle>/.
  * "super bulky". PanelTitle is the house heading -- 11px, uppercase, grey -- and using it is what
  * makes this card look like the ones above and below it rather than a poster.
  */
+/* ASSERTED WITHOUT A LENGTH BOUND. This capped the gap at 1800 characters, which is a fact about
+   how much commentary sits in the header rather than about the heading -- and it broke the day the
+   header grew a button. The heading is what is being guarded. */
 ok('...through the same heading component as the panels beside it',
-  /<PanelTitle action=\{[\s\S]{0,1800}}>Trace information<\/PanelTitle>/.test(detail))
+  /}>Trace information<\/PanelTitle>/.test(detail) && /<PanelTitle action=\{/.test(detail))
 /*
  * The panel is its own @container, so the blocks inside lay out on THIS CARD'S width. In the
  * three-column layout it is about 19rem wide on a big monitor, and a screen-width breakpoint

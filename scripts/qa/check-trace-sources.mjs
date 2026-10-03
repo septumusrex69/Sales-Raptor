@@ -292,8 +292,17 @@ check('...including a null', url(traceSourceById('google'), null), null)
    pasted rather than carried. */
 check('a form site opens the same either way',
   url(traceSourceById('sassa'), null), 'https://srd.sassa.gov.za/sc19/status')
+/* "Somewhere else" is the one left with no portal, now that CSA has gone. A source searched some
+   other way opens nothing -- a blank tab would be the app pretending to have done something. */
 check('a source with no portal opens nothing',
-  url(traceSourceById('csa'), '8806045286087'), null)
+  url(traceSourceById('other'), '8806045286087'), null)
+/*
+ * AND AN UNKNOWN ID FALLS BACK TO THE FIRST SOURCE, which is why the line above had to change
+ * rather than be deleted: traceSourceById('csa') now returns XDS, so the old assertion was
+ * quietly testing that XDS has no portal. It has one. A lookup that cannot fail is a lookup that
+ * hides a typo, so the fallback is asserted rather than left to be discovered.
+ */
+check('an unknown source falls back to the first', traceSourceById('nonsense').id, 'xds')
 /* NO '{key}' SURVIVES INTO ANY ADDRESS, which is the one failure that would reach the debtor's
    screen as a search for a placeholder. */
 ok('no link is left holding the placeholder',
@@ -353,8 +362,18 @@ ok('a missing name is the only way a name fails',
   /This source is searched on a name and the account has none recorded/.test(button))
 
 /* WHAT CAME BACK IS TYPED, AND ONLY WHERE THERE IS NO WORKSPACE BEHIND IT. */
-ok('the box asks what was found', /What did you find\?/.test(button))
-ok('...only on the sources with no workspace', /!result && !counted && \(\s*<label/.test(button))
+/*
+ * ASKED IN THE SOURCE'S OWN WORDS NOW, not one hardcoded question.
+ *
+ * This held the literal "What did you find?", which was right while every source was asked the
+ * same thing. The firm then asked for SASSA to be a yes or a no -- "can you confirm that they're
+ * receiving the grant?" -- so the prompt comes off the source. What the assertion was really
+ * guarding is that the box asks at all, and only where there is no workspace behind it.
+ */
+ok('the box asks the source s own question', /\{source\.asks\.prompt\}/.test(button))
+ok('...only on the sources with no workspace',
+  /!result && !counted && source\.asks\.kind === 'text'/.test(button)
+  && /!result && !counted && source\.asks\.kind === 'yes_no'/.test(button))
 ok('...and it reaches the record', /sourceId: source\.id, named, found,/.test(button))
 /* CLEARED WITH THE SOURCE, or a finding typed against SASSA follows the collector on to the
    voters' roll and lands on the wrong note. */
@@ -481,6 +500,87 @@ ok('the box shows the month before you spend one', /tracing charges used on this
 ok('...and lists what they went on', /tracing\.charges\.map/.test(button))
 ok('...and says the search is still recorded when the four are gone',
   /it just earns nothing until next month/.test(button))
+
+/* ---------------------------------------------------------------------------------------------
+ * A SECOND SEARCH IS ALWAYS REACHABLE, AND SO IS EVERY SOURCE THAT IS NOT XDS
+ *
+ * THE FIRM: "I still don't see where the other traces are... you should always have an option. Now
+ * you've done one trace, and now you can't upload other traces or get other information."
+ *
+ * BOTH HALVES WERE ONE BUG. The Trace button lived inside the panel's EMPTY state, and `bare` goes
+ * false the moment a single trace exists -- so the button went, and with it the only door to the
+ * source picker, which is where SASSA, the voters' roll, CIPC, the VAT vendor search and a web
+ * search live. The firm could not find the other traces because there was no way in.
+ * ------------------------------------------------------------------------------------------- */
+
+const detail = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')
+ok('the trace control survives the first trace', /\{!bare && traceActionCompact\}/.test(detail))
+/* AND IT IS STILL IN THE EMPTY STATE, which is where somebody with nothing starts. Asserted so a
+   fix to one does not quietly become a move rather than an addition. */
+ok('...and is still offered on an empty panel', /\{traceAction\}/.test(detail))
+ok('...at header size rather than as a second big button',
+  /label="Do another"/.test(detail))
+
+/* ---------------------------------------------------------------------------------------------
+ * EACH SOURCE ASKS ITS OWN QUESTION
+ *
+ * THE FIRM: "there are different things that you need to record when you go to the other things
+ * and what your findings are. So for SASSA, for example, you'd say, can you confirm that they're
+ * receiving the grant? Yes or no?"
+ * ------------------------------------------------------------------------------------------- */
+
+/* EVERY SOURCE ASKS SOMETHING, so one added later cannot inherit a blank. */
+ok('every source asks something', TRACE_SOURCES.every((x) => !!x.asks?.prompt))
+check('SASSA asks the firm s own question',
+  traceSourceById('sassa').asks.prompt, 'Are they receiving a grant?')
+check('...as a yes or a no', traceSourceById('sassa').asks.kind, 'yes_no')
+/*
+ * AND THE ANSWER IS A SENTENCE, NOT A TICK. "Yes" alone on a timeline six months later says
+ * nothing about what was asked; the fact itself is the difference between REFUSING to pay and
+ * CANNOT pay, which CLAUDE.md says must never be on one list.
+ */
+ok('...and a yes records what it means',
+  /draw an SRD grant/.test(traceSourceById('sassa').asks.yes ?? ''))
+ok('...and so does a no', /no SRD grant/.test(traceSourceById('sassa').asks.no ?? ''))
+check('the VAT vendor search asks a yes or no too', traceSourceById('sars_vat').asks.kind, 'yes_no')
+/*
+ * AND TEXT WHERE A YES OR NO WOULD BE A LIE. A web search does not answer a question -- forcing it
+ * into two boxes is the same fault as the outcome picker that offered "Disconnected" against an
+ * address.
+ */
+check('a web search is not a yes or a no', traceSourceById('google').asks.kind, 'text')
+check('...nor is the voters roll', traceSourceById('iec').asks.kind, 'text')
+ok('the box draws both shapes',
+  /source\.asks\.kind === 'yes_no'/.test(button) && /source\.asks\.kind === 'text'/.test(button))
+/* PRESSING THE CHOSEN ONE AGAIN CLEARS IT: a portal that would not load is not a yes and not a no,
+   and recording nothing has to stay reachable. */
+ok('...and an answer can be taken back', /setFound\(found === sentence \? '' : sentence\)/.test(button))
+
+/* CSA IS GONE. Carried as the firm's shorthand with the full name unconfirmed and flagged twice;
+   asked a third time they said "I don't know what CSA is". Nothing stores sourceId, so no record
+   points at it. */
+ok('the unidentified source is removed', !TRACE_SOURCES.some((x) => x.id === 'csa'))
+check('...and the list is the ones the firm named',
+  TRACE_SOURCES.map((x) => x.id), ['xds', 'sassa', 'iec', 'cipc', 'sars_vat', 'google', 'other'])
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE PANEL SAYS WHAT THE TRACING COST
+ *
+ * THE FIRM, having run three searches: "I don't see any charges that were run for the traces that
+ * I've done. It wasn't charged." It WAS charged -- three billed fees. What they could not find was
+ * where it says so, because the charge lines came off the timeline at their own earlier request.
+ * Correct for a call, where the note beside it already says a call happened; wrong for a trace,
+ * where the panel is the only place the work lives.
+ * ------------------------------------------------------------------------------------------- */
+
+ok('the trace panel says what tracing has cost', /tracingMonth !== null && tracingMonth\.used > 0/.test(detail))
+ok('...as a total in rands', /c\.exclVat, 0\)\.toFixed\(2\)/.test(detail))
+/* AND AS THE RUNNING COUNT AGAINST THE FOUR, so one line answers "was it charged" and "how many
+   are left" rather than neither. */
+ok('...and against the month s allowance', /of \{tracingMonth\.limit\} tracing charges/.test(detail))
+/* OFF THE LEDGER THE PAGE ALREADY HOLDS: a second request for a number that is already in memory
+   is a slower page for nothing. */
+ok('...off the ledger already loaded', /tracingThisMonth\(ledgers\.fees/.test(detail))
 
 console.log(`\ncheck-trace-sources: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
