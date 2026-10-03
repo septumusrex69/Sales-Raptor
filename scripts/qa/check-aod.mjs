@@ -212,12 +212,34 @@ for (const kind of ['individual', 'company']) {
     sql.includes(`e.seed_key = 'email-aod-${kind}' and l.seed_key = 'letter-aod-${kind}'`))
 }
 
-/* OUT BEFORE IN, or a second run duplicates and a half-written row from the first survives. The
-   presence of each is asserted before their order, because indexOf returns -1 and an order-only
-   assertion passes vacuously the day somebody deletes the delete. */
-const del = sql.indexOf('delete from public.message_templates')
+/*
+ * A SECOND RUN MUST NOT DUPLICATE, AND IT IS NO LONGER A DELETE THAT MAKES THAT TRUE.
+ *
+ * This used to assert "it deletes before it inserts", which is the ordinary way to make a seed
+ * re-runnable. The seed could not be run: every DELETE sent through the session that wrote it hung
+ * and rolled back -- proven against a temporary table created in the same statement, so neither
+ * locks nor permissions -- and the file sat waiting to be pasted by hand.
+ *
+ * SO THE PROPERTY IS THE SAME AND THE MECHANISM IS NOT. seed_key is unique, so an upsert overwrites
+ * the four rows instead of making four more; and the one row a delete was there to clear -- the
+ * keyless "Acknowledgement of debt (individual)" left by a failed first attempt -- is ADOPTED by
+ * being given its key, which makes it the row the upsert then overwrites in place.
+ *
+ * WITHOUT THE ADOPTION THE UPSERT COLLIDES WITH NOTHING, because `name` is not unique, and the
+ * Library shows the firm two agreements under one name with one of them unusable. So both halves
+ * are asserted, and their order is too: adopting after inserting would be adopting the row that
+ * was just made.
+ */
+ok('the seed removes nothing at all', !/\bdelete\s+from\b/i.test(sql))
+const adopt = sql.indexOf("set seed_key = 'letter-aod-individual'")
 const ins = sql.indexOf('insert into public.message_templates')
-ok('it deletes before it inserts', del !== -1 && ins !== -1 && del < ins)
+const upsert = sql.indexOf('on conflict (seed_key) do update set')
+ok('...it claims the orphaned row first', adopt !== -1 && ins !== -1 && adopt < ins)
+ok('...and upserts rather than inserting blind', upsert !== -1 && upsert > ins)
+/* THE ADOPTION IS NARROW: a letter, with that exact name, carrying no key. A row the firm has since
+   renamed is not adopted, because then the name is no longer evidence of where it came from. */
+ok('...and only claims a row that is unmistakably the failed one',
+  /where seed_key is null and kind = 'letter' and name = /.test(sql))
 /* ONE TRANSACTION, so a paste that fails half way leaves the table as it was rather than holding
    half an agreement -- which is the exact state this script was written after. */
 ok('...inside one transaction', /^begin;$/m.test(sql) && /^commit;$/m.test(sql))
