@@ -15,8 +15,9 @@
 import { readFileSync } from 'node:fs'
 import {
   BUREAU_ITEM, OTHER_ITEM, TRACE_SOURCES, bureauSearchCounts, chargeForSource, chargesForThisSearch,
-  traceSourceById, traceSourceNote, traceSourceUrl,
+  traceSourceById, traceSourceNote, traceSourceUrl, tracingThisMonth,
 } from '../../src/lib/traceSources.ts'
+import { MONTHLY_LIMIT, TRACING_ACTION_CODE } from '../../src/lib/actionTariff.ts'
 import { registrationIn } from '../../src/lib/traceStore.ts'
 import { ANNEXURE_B_2026, scheduleFor } from '../../src/lib/annexureB.ts'
 
@@ -395,6 +396,91 @@ check('...and nothing from an empty label', registrationIn(null), null)
 /* AND A TELEPHONE NUMBER IS NOT A REGISTRATION NUMBER. The two live in the same label field, and
    one read as the other is a CIPC search for a debtor's mobile. */
 check('...and never a phone number', registrationIn('Cell · 082 573 3344'), null)
+
+/* ---------------------------------------------------------------------------------------------
+ * FOUR TRACING CHARGES A MONTH, COUNTING BOTH ITEMS TOGETHER
+ *
+ * THE FIRM: "I don't think you have to charge the other necessary expenses for every single one.
+ * It's just if you're starting to conduct those traces... Cap all the tracing activities at four a
+ * month. Whether or not it's a trace or the other necessary expense. Just detail them."
+ * ------------------------------------------------------------------------------------------- */
+
+check('the cap is four', MONTHLY_LIMIT[TRACING_ACTION_CODE], 4)
+/*
+ * KEYED ON THE ACTION, NOT THE ITEM, and that is the whole of "whether or not". A bureau search is
+ * item 4(c) and a SASSA or deeds search is item 3; four is the total of BOTH. Keyed on the item it
+ * would be two separate fours -- twice what was asked for -- and item 3 also carries the perusal of
+ * documents, so an item-3 cap would stop a collector opening a PDF because somebody had searched
+ * the deeds office that month.
+ */
+check('...and it is the code the fees actually carry', TRACING_ACTION_CODE, 'TRC')
+/* NOT 'trace', WHICH IS IN THE ActionCode UNION AND NOTHING WRITES. A cap on the tidier spelling
+   would count nothing for ever and refuse nobody: a guard that looks right in a diff and is not
+   there. Every tracing fee on the book carries TRC. */
+ok('...rather than the spelling nothing writes', MONTHLY_LIMIT.trace === undefined)
+/* AND NOTHING ELSE IS CAPPED BY MONTH. A second entry here would be a rule the firm never asked
+   for, applied to somebody's money. */
+check('...and it is the only monthly cap', Object.keys(MONTHLY_LIMIT), [TRACING_ACTION_CODE])
+
+const engine = readFileSync(new URL('../../src/lib/chargeEngine.ts', import.meta.url), 'utf8')
+ok('the engine counts the month on the action code',
+  /\.eq\('action_code', input\.actionCode\)[\s\S]{0,300}monthStart/.test(engine)
+  || /monthStart[\s\S]{0,400}\.eq\('action_code', input\.actionCode\)/.test(engine))
+/* BILLED ROWS ONLY, like both allowances beside it: a search recorded at nought took nothing from
+   the debtor, so it cannot be the reason the next one goes unrecovered. */
+ok('...counting only what earned something',
+  /actionMonthRoom[\s\S]{0,600}\.eq\('billed', true\)/.test(engine))
+/* AND IT ACTUALLY STOPS THE FEE. A room that is computed and never consulted is the commonest
+   shape of a cap that does not exist. */
+ok('...and a spent allowance earns nothing', /&& actionMonthRoom > 0/.test(engine))
+/* SAID IN ITS OWN WORDS RATHER THAN BLAMING THE GAZETTE -- this is the firm's rule, and the
+   collector who meets it is usually doing necessary work on a multi-debtor account. */
+ok('...and the refusal names the firm s four',
+  /four tracing charges have already been raised/.test(engine))
+ok('...as its own reason rather than the gazette s',
+  /'tracing-limit'/.test(engine) && /\| 'tracing-limit'/.test(engine))
+
+/* ---------------------------------------------------------------------------------------------
+ * "JUST DETAIL THEM"
+ * ------------------------------------------------------------------------------------------- */
+
+const fee = (over) => ({
+  incurredAt: '2026-10-02T09:00:00Z', description: 'Credit bureau search',
+  amountExclVat: 16, billed: true, actionCode: 'TRC', ...over,
+})
+const month = tracingThisMonth([
+  fee({ incurredAt: '2026-10-01T09:00:00Z' }),
+  fee({ incurredAt: '2026-10-02T09:00:00Z', description: 'ONE', amountExclVat: 25 }),
+], '2026-10-15', 4)
+check('it counts both items together', month.used, 2)
+check('...and says how many are left', month.left, 2)
+/* THE LIST IS THE POINT: a collector told "four already" has no way to know whether that was four
+   real searches or one counted four times, and no way to put the case to a team leader. */
+check('...and details each one', month.charges.map((c) => c.description), ['Credit bureau search', 'ONE'])
+check('...oldest first', month.charges.map((c) => c.on), ['2026-10-01', '2026-10-02'])
+
+/* COUNTED THE SAME WAY THE ENGINE COUNTS, which is what must not drift: a panel counting unbilled
+   rows would show four used while the engine still allowed one, and one screen would give a
+   collector two different numbers. */
+check('an unbilled search does not count',
+  tracingThisMonth([fee({ billed: false })], '2026-10-15', 4).used, 0)
+check('...nor one from last month',
+  tracingThisMonth([fee({ incurredAt: '2026-09-30T09:00:00Z' })], '2026-10-15', 4).used, 0)
+check('...nor one from next month',
+  tracingThisMonth([fee({ incurredAt: '2026-11-01T09:00:00Z' })], '2026-10-15', 4).used, 0)
+/* AND A PERUSAL IS NOT A TRACE, which is the item-3 confusion this is keyed on the action to
+   avoid: opening a PDF must not spend a tracing charge. */
+check('a perusal is not a tracing charge',
+  tracingThisMonth([fee({ actionCode: 'perusal', description: 'Perusal of documents' })], '2026-10-15', 4).used, 0)
+/* LEFT NEVER GOES NEGATIVE: five charged in a month -- possible on history, or if the cap is ever
+   lowered -- must read as none left rather than as minus one. */
+check('an over-spent month reads as none left',
+  tracingThisMonth([fee(), fee(), fee(), fee(), fee()], '2026-10-15', 4).left, 0)
+
+ok('the box shows the month before you spend one', /tracing charges used on this account this month/.test(button))
+ok('...and lists what they went on', /tracing\.charges\.map/.test(button))
+ok('...and says the search is still recorded when the four are gone',
+  /it just earns nothing until next month/.test(button))
 
 console.log(`\ncheck-trace-sources: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

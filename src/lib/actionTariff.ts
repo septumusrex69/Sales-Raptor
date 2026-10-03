@@ -172,6 +172,48 @@ export const DAILY_LIMIT: Partial<Record<ActionCode, number>> = {
   perusal: 1,
 }
 
+/**
+ * THE ACTION CODE TRACING ACTUALLY WRITES.
+ *
+ * NOT `trace`, WHICH IS IN THE UNION ABOVE AND NOTHING WRITES. accountTrace has stored 'TRC' since
+ * the Trace button was built, and every tracing fee on the book carries it. Named here rather than
+ * quietly repeated, because the cap below has to match what is in the COLUMN and not what the type
+ * says ought to be there -- a cap keyed on the tidier spelling would count nothing for ever and
+ * refuse nobody, which is the kind of guard that looks right in a diff and does not exist.
+ *
+ * The discrepancy is left alone deliberately: renaming it means rewriting history on 59 215 fee
+ * rows, and CLAUDE.md says imported figures are not swept.
+ */
+export const TRACING_ACTION_CODE = 'TRC'
+
+/**
+ * HOW MANY TIMES AN ACTION MAY BE CHARGED IN A CALENDAR MONTH.
+ *
+ * THE FIRM, settling how the wider trace sources are to be billed: "I don't think you have to
+ * charge the other necessary expenses for every single one. It's just if you're starting to
+ * conduct those traces... Cap all the tracing activities at four a month. Whether or not it's a
+ * trace or the other necessary expense. Just detail them."
+ *
+ * ONE ALLOWANCE ACROSS BOTH ITEMS, WHICH IS WHY IT IS KEYED ON THE ACTION. A bureau search is item
+ * 4(c) and a SASSA or deeds search is item 3, and the firm's instruction is that four is the total
+ * of BOTH -- "whether or not it's a trace or the other necessary expense". Keyed on the item it
+ * would be two separate fours, which is twice what they asked for; and item 3 also carries the
+ * perusal of documents and the PTC confirmation, so an item-3 cap would stop a collector opening a
+ * PDF because somebody had searched the deeds office.
+ *
+ * SEPARATE FROM ENFORCE_MONTHLY_LIMITS, which stays off. That flag is the GAZETTE's per-item
+ * allowances, which the firm switched off on 10 September for a reason that is still true -- the
+ * gazette counts per account while the work happens per person. This is the firm's own cap on
+ * their own activity, so it is their number rather than the gazette's and it binds whatever that
+ * flag is doing. The two agree at four by coincidence, not by construction.
+ *
+ * PER ACCOUNT AND PER CALENDAR MONTH, like the gazette's own wording and like DAILY_LIMIT above:
+ * it is the DEBTOR who pays, so the allowance belongs to the file rather than to whoever spent it.
+ */
+export const MONTHLY_LIMIT: Record<string, number> = {
+  [TRACING_ACTION_CODE]: 4,
+}
+
 export const TARIFF_HISTORY: TariffSchedule[] = [
   {
     effectiveFrom: '2026-03-06',

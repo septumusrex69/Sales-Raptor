@@ -4,8 +4,11 @@ import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
 import { recordTrace } from '../../lib/accountTrace'
 import {
-  bureauSearchCounts, TRACE_SOURCES, traceSourceById, traceSourceUrl, type TraceSource,
+  bureauSearchCounts, TRACE_SOURCES, traceSourceById, traceSourceUrl, tracingThisMonth,
+  type TraceSource, type TracingMonth,
 } from '../../lib/traceSources.ts'
+import { MONTHLY_LIMIT, TRACING_ACTION_CODE } from '../../lib/actionTariff.ts'
+import { fetchLedgers } from '../../lib/accountBook'
 import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
 import { isValidSaId } from '../../lib/newDebtor'
 import { scheduleFor } from '../../lib/annexureB'
@@ -102,6 +105,12 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
   /* What came back. See traceSourceNote.found for why this is typed rather than screenshotted. */
   const [found, setFound] = useState('')
   const [asking, setAsking] = useState(false)
+  /*
+   * WHAT THIS MONTH'S TRACING HAS ALREADY COST, read when the picker opens rather than on every
+   * render of the account. The ledger is a request, and the number only matters once somebody is
+   * about to spend one of the four.
+   */
+  const [tracing, setTracing] = useState<TracingMonth | null>(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ charge: ChargeResult | null; count: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -170,6 +179,11 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
     setResult(null)
     setError(null)
     setChoosing(true)
+    /* Fire and forget: a ledger that will not load costs the detail line, never the trace. */
+    void fetchLedgers(accountId)
+      .then((l) => setTracing(tracingThisMonth(
+        l.fees, new Date().toISOString(), MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)))
+      .catch(() => setTracing(null))
   }
 
   function pick(s: TraceSource) {
@@ -392,6 +406,40 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
             other needs correcting, and a collector told only "no ID" would go and type the
             telephone number sitting in that field straight into the portal.
           */}
+          {/*
+            WHAT THIS MONTH'S FOUR HAVE GONE ON.
+
+            THE FIRM: "cap all the tracing activities at four a month... just detail them." The
+            detail is the half that makes the cap workable: a collector told "no charge, four
+            already" has no way to know whether that was four real searches or one counted four
+            times, and no way to put the case to a team leader. Shown BEFORE they press, so the
+            decision to spend the last one is made knowingly.
+          */}
+          {!result && tracing !== null && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs font-medium text-slate-600">
+                {tracing.left > 0
+                  ? `${tracing.used} of ${tracing.limit} tracing charges used on this account this month`
+                  : `All ${tracing.limit} tracing charges are used on this account this month`}
+              </p>
+              {tracing.charges.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {tracing.charges.map((c, i) => (
+                    <li key={i} className="text-[11px] text-slate-500 flex justify-between gap-2">
+                      <span>{c.on} · {c.description}</span>
+                      <span className="tabular-nums">R{c.exclVat.toFixed(2)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {tracing.left === 0 && (
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  The search is still recorded &mdash; it just earns nothing until next month.
+                </p>
+              )}
+            </div>
+          )}
+
           {/*
             WHAT THE SITE WILL ALSO ASK FOR AND RAPTOR CANNOT GIVE IT.
 

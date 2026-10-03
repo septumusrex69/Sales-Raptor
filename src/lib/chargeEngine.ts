@@ -54,7 +54,7 @@ import { isWrittenOff } from './accountStatus.js'
  * into the function, and its own note says exactly why this is not toISOString().
  */
 import { todayIso } from './reminderTime.js'
-import { DAILY_LIMIT, type ActionCode } from './actionTariff.js'
+import { DAILY_LIMIT, MONTHLY_LIMIT, type ActionCode } from './actionTariff.js'
 import {
   itemAmountFor, itemTotalRemaining, monthlyLimit, monthlyRoom, recoverableFee, roundToCents,
   scheduleFor,
@@ -65,7 +65,14 @@ export interface ChargeResult {
   exclVat: number
   vat: number
   /** Why nothing was charged, for showing to the person who did the work. */
-  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'daily-limit' | 'at-ceiling'
+  /*
+   * A CLOSED LIST OF THE WAYS A FEE CAN COME TO NOTHING, and every one of them is a sentence
+   * somebody reads. 'tracing-limit' is the firm's own cap rather than the gazette's, which is why
+   * it is not folded into 'monthly-limit': the two refuse for different reasons and the collector
+   * should be told which.
+   */
+  reason: 'charged' | 'written-off' | 'item-total-spent' | 'monthly-limit' | 'tracing-limit'
+    | 'daily-limit' | 'at-ceiling'
 }
 
 export interface ChargeInput {
@@ -198,6 +205,42 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
    * disagree about which day a fee belongs to. A boundary read in the wrong zone is a second
    * charge on a debtor who was perused once.
    */
+  /*
+   * AND THE FIRM'S OWN MONTHLY CAP ON TRACING, WHICH IS NOT THE GAZETTE'S.
+   *
+   * THE FIRM: "Cap all the tracing activities at four a month. Whether or not it's a trace or the
+   * other necessary expense."
+   *
+   * COUNTED ON THE ACTION, NOT THE ITEM, and that is the whole of "whether or not": a bureau
+   * search is item 4(c) and a SASSA, deeds or web search is item 3, and four is the total of both.
+   * Counted on the item it would be two separate fours -- twice what they asked for -- and item 3
+   * also carries the perusal of documents, so an item-3 cap would stop a collector opening a PDF
+   * because somebody had searched the deeds office that month.
+   *
+   * SEPARATE FROM THE GAZETTE'S ALLOWANCE ABOVE, which stays switched off. That one is per item
+   * and the firm turned it off in September; this is the firm's own rule about their own activity
+   * and binds regardless. The two happen to agree at four.
+   *
+   * ONLY CHARGES THAT EARNED SOMETHING COUNT, like both allowances above: a search recorded at
+   * nought took nothing from the debtor, so it cannot be the reason the next one goes unrecovered.
+   */
+  const perMonth = MONTHLY_LIMIT[input.actionCode]
+  let actionMonthRoom = Infinity
+  if (perMonth !== undefined) {
+    const monthStart = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1))
+    const nextMonth = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1))
+    const { count, error: monthError } = await db
+      .from('account_fees')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', input.accountId)
+      .eq('action_code', input.actionCode)
+      .eq('billed', true)
+      .gte('incurred_at', monthStart.toISOString())
+      .lt('incurred_at', nextMonth.toISOString())
+    if (monthError) throw new Error(monthError.message)
+    actionMonthRoom = Math.max(0, perMonth - (count ?? 0))
+  }
+
   const perDay = DAILY_LIMIT[input.actionCode as ActionCode]
   let dayRoom = Infinity
   if (perDay !== undefined) {
@@ -217,7 +260,7 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
     dayRoom = Math.max(0, perDay - (count ?? 0))
   }
 
-  const recoverable = !closed && room > 0 && dayRoom > 0
+  const recoverable = !closed && room > 0 && dayRoom > 0 && actionMonthRoom > 0
     ? recoverableFee(asked, towardsCeiling, capital, schedule) : 0
 
   const exclVat = roundToCents(recoverable)
@@ -226,7 +269,8 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
     exclVat > 0 ? 'charged'
       : closed ? 'written-off'
         : room <= 0 ? 'monthly-limit'
-          : dayRoom <= 0 ? 'daily-limit'
+          : actionMonthRoom <= 0 ? 'tracing-limit'
+            : dayRoom <= 0 ? 'daily-limit'
             : remainingOnItem <= 0 ? 'item-total-spent'
               : 'at-ceiling'
 
@@ -303,6 +347,20 @@ export function chargeMessage(r: ChargeResult, itemId: string): string {
   }
   if (r.reason === 'monthly-limit') {
     return `No charge: item ${itemId} has already been charged its maximum for this month. It is recorded, and the allowance resets next month.`
+  }
+  /*
+   * THE FIRM'S OWN CAP ON TRACING, AND THE SENTENCE SAYS SO RATHER THAN BLAMING THE GAZETTE.
+   *
+   * "Cap all the tracing activities at four a month. Whether or not it's a trace or the other
+   * necessary expense." It names the four and says the search still happened, because the common
+   * case for meeting this is a collector doing genuinely necessary work on a multi-debtor account
+   * -- which is the exact objection that had the gazette's own per-item allowance switched off in
+   * September. They should be able to read why it refused and take it to a team leader.
+   */
+  if (r.reason === 'tracing-limit') {
+    return 'No charge: four tracing charges have already been raised on this account this month, '
+      + 'counting bureau searches and other searches together. The search is recorded, and the '
+      + 'allowance resets next month.'
   }
   /* THE FIRM'S OWN RULE RATHER THAN THE GAZETTE'S, so the sentence says so: a perusal is charged
      once a day however many documents are opened, and the work is still written down. */

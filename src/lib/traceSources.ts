@@ -47,6 +47,7 @@
  */
 
 import type { AnnexureBSchedule } from './annexureB.ts'
+import { TRACING_ACTION_CODE } from './actionTariff.ts'
 
 export type TraceSourceKind =
   /** A registered credit bureau. Item 4(c), and only these. */
@@ -357,4 +358,61 @@ export function traceSourceNote(input: {
   /* THE FINDING IS THE SENTENCE WHERE THERE IS ONE. "Searched SASSA." says the work happened;
      "Searched SASSA — drawing an SRD grant since March" is the reason the work was worth doing. */
   return said ? `Trace done — searched ${where} — ${said}` : `Trace done — searched ${where}.`
+}
+
+/**
+ * WHAT THE FOUR WERE, AND HOW MANY ARE LEFT.
+ *
+ * THE FIRM, capping tracing: "Cap all the tracing activities at four a month. Whether or not it's
+ * a trace or the other necessary expense. Just detail them."
+ *
+ * "JUST DETAIL THEM" IS THE HALF THAT MAKES THE CAP WORKABLE. A collector who presses Trace and is
+ * told "no charge, four already this month" has no way of knowing whether the four were four real
+ * searches or one search counted four times, and no way to put the case to a team leader. So the
+ * four are listed, by date and by what was searched.
+ *
+ * COUNTED THE SAME WAY THE ENGINE COUNTS, which is the thing that must not drift: billed rows
+ * only, this calendar month, on the action code rather than the item -- see MONTHLY_LIMIT. A
+ * panel that counted unbilled rows too would show four used while the engine still allowed one,
+ * and the collector would be told two different numbers by the same screen.
+ */
+export interface TracingCharge {
+  /** The day it was raised, ISO. */
+  on: string
+  /** What the statement calls it: "Credit bureau search" or "ONE". */
+  description: string
+  /** Rands excluding VAT. */
+  exclVat: number
+}
+
+export interface TracingMonth {
+  used: number
+  left: number
+  limit: number
+  charges: TracingCharge[]
+}
+
+/**
+ * Read the month off a list of this account's fees.
+ *
+ * PURE, so a check can hold it against the engine's own arithmetic without a database. The caller
+ * passes the fee rows it already has -- the account page loads the whole ledger anyway, so this
+ * costs no request.
+ */
+export function tracingThisMonth(
+  fees: readonly { incurredAt: string; description: string; amountExclVat: number; billed: boolean; actionCode: string | null }[],
+  monthOf: string,
+  limit: number,
+): TracingMonth {
+  const month = monthOf.slice(0, 7)
+  const charges = fees
+    .filter((f) => f.billed && f.actionCode === TRACING_ACTION_CODE && f.incurredAt.slice(0, 7) === month)
+    .map((f) => ({ on: f.incurredAt.slice(0, 10), description: f.description, exclVat: f.amountExclVat }))
+    .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0))
+  return {
+    used: charges.length,
+    left: Math.max(0, limit - charges.length),
+    limit,
+    charges,
+  }
 }
