@@ -14,16 +14,29 @@ import {
  * for all three — "it picks it up and shows me automatically... you should be able to press a
  * little X button next to it if it's wrong".
  *
+ * AND IT OFFERS THE RECORD BEFORE A LETTER IS TYPED. THE FIRM: "if you're on a debtor's file and
+ * it asks you to CC someone and there's an alternative email address, it should kind of give you
+ * the option to do that." Only what is on the record — remembered addresses still wait for the
+ * first letter, which is the firm's other instruction and the reason this is affordable.
+ *
  * IT STAYS A TEXT BOX. Not a locked picker: the person who needs a quotation is often somebody
  * whose address is in the salesperson's head and not yet in the CRM, and refusing to send until
  * they stop and create a contact is how a CRM gets worked around instead of used. The suggestions
  * are an offer.
  */
-export function RecipientField({ value, onChange, contextual, autoFocus, required, id }: {
+export function RecipientField({ value, onChange, contextual, taken, autoFocus, required, id }: {
   value: string
   onChange: (next: string) => void
   /** Whoever is already known on the client, lead or deal in front of you. Offered first. */
   contextual?: { email: string; label?: string }[]
+  /**
+   * Addresses the message already goes to, from the other boxes on the same form.
+   *
+   * NOT OFFERED, BECAUSE OFFERING THEM IS OFFERING A MISTAKE: a Cc to the address already on the
+   * To line sends the debtor two copies of one notice. It only ever hides a SUGGESTION -- the box
+   * stays a text box and will take whatever somebody types into it.
+   */
+  taken?: string[]
   autoFocus?: boolean
   required?: boolean
   id?: string
@@ -57,12 +70,23 @@ export function RecipientField({ value, onChange, contextual, autoFocus, require
    */
   const all = useMemo<Suggestion[]>(() => {
     const seen = new Set<string>()
+    for (const t of taken ?? []) { const a = t.trim().toLowerCase(); if (a) seen.add(a) }
     const out: Suggestion[] = []
+    /*
+     * MINUS THE INDEX, so the record's own order survives the sort. fetchWorkspace returns
+     * contacts primary first and then oldest; one shared use count makes every contextual entry a
+     * tie, and the tiebreak below it is alphabetical by address — which would put a gmail
+     * alternative above the address the firm actually writes to.
+     */
     for (const c of contextual ?? []) {
       const address = c.email.trim().toLowerCase()
       if (!address || seen.has(address)) continue
       seen.add(address)
-      out.push({ address, name: c.label ?? null, uses: Number.MAX_SAFE_INTEGER, lastUsed: null })
+      out.push({
+        address, name: c.label ?? null, lastUsed: null,
+        uses: Number.MAX_SAFE_INTEGER - out.length,
+        onRecord: true,
+      })
     }
     for (const h of history) {
       if (seen.has(h.address)) continue
@@ -70,9 +94,16 @@ export function RecipientField({ value, onChange, contextual, autoFocus, require
       out.push(h)
     }
     return out
-  }, [contextual, history])
+  }, [contextual, history, taken])
 
   const shown = useMemo(() => suggestRecipients(all, value, 6), [all, value])
+  /*
+   * AN OFFER READS DIFFERENTLY FROM A SEARCH RESULT, so it is labelled as one. With nothing typed
+   * these rows are not matches — the person has not asked for anything yet — and a bare list
+   * appearing under an empty box is the thing the firm objected to. One line saying where they
+   * came from is the difference between "here is everything" and "these two are on this file".
+   */
+  const offering = value.trim() === '' && shown.length > 0
 
   /* A click anywhere else closes it, which is what everybody expects of a panel like this. */
   useEffect(() => {
@@ -135,6 +166,14 @@ export function RecipientField({ value, onChange, contextual, autoFocus, require
       {open && shown.length > 0 && (
         <ul id={listId} role="listbox"
           className="absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {/* role="presentation": a heading is not something to arrow onto, and inside a listbox
+              anything without a role of its own is announced as an option. */}
+          {offering && (
+            <li role="presentation"
+              className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+              Already on this file
+            </li>
+          )}
           {shown.map((s, i) => (
             <li key={s.address} role="option" aria-selected={i === active}
               className={`flex items-center gap-2 px-3 py-2 ${i === active ? 'bg-brand-50' : 'hover:bg-slate-50'}`}
@@ -152,8 +191,9 @@ export function RecipientField({ value, onChange, contextual, autoFocus, require
                 </span>
               </button>
               {/* Offered only on what was remembered. Removing somebody who is on the deal in
-                  front of you would hide them until the record itself changed. */}
-              {s.uses !== Number.MAX_SAFE_INTEGER && (
+                  front of you would hide them until the record itself changed — so it reads
+                  `onRecord` and not the use count, which is only how they are ordered. */}
+              {!s.onRecord && (
                 <button type="button" aria-label={`Forget ${s.address}`}
                   onClick={() => { void forget(s.address) }}
                   className="shrink-0 rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-600">

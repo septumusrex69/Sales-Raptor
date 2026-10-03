@@ -21,6 +21,14 @@ export interface Suggestion {
   /** How many messages have gone to them, which is what ranks the list. */
   uses: number
   lastUsed: string | null
+  /**
+   * ON THE RECORD IN FRONT OF YOU, rather than remembered out of sent mail.
+   *
+   * The two are offered differently on an empty box -- see rankOf -- and the distinction is not
+   * the use count: a contextual entry is given a use count high enough to lead, and reading that
+   * number back as "this one is on the record" is a guess about how the caller built the list.
+   */
+  onRecord?: boolean
 }
 
 /**
@@ -57,20 +65,31 @@ export function wordsOf(suggestion: Suggestion): string[] {
 export function rankOf(suggestion: Suggestion, query: string): number | null {
   const q = query.trim().toLowerCase()
   /*
-   * AN EMPTY BOX IS NOT A QUERY, so nothing matches it.
+   * AN EMPTY BOX IS NOT A QUERY, SO HISTORY DOES NOT ANSWER IT -- BUT THE RECORD IN FRONT OF YOU
+   * DOES.
    *
-   * It used to match everything, and the panel opened on focus with the six most-written-to
+   * History used to match everything, and the panel opened on focus with the six most-written-to
    * addresses in it. That was deliberate and it was wrong in use: the firm opened New email and
    * got a list before typing a character -- "it shouldn't automatically already throw you out all
    * the options that there is, because there's just too many. Literally just after you start
    * typing. So if you type R, then all the R's should start to come up."
    *
-   * The reasoning it replaces was that a box which only remembers once you guess the first letter
-   * remembers nobody. It holds for a box that CANNOT match a name -- and this one can: one letter
-   * already finds Reno by his name as well as by r.buitendag@, which is the whole point of the
-   * tiers below. The first letter is not a guess.
+   * The reasoning that replaced was that a box which only remembers once you guess the first
+   * letter remembers nobody. It holds for a box that CANNOT match a name -- and this one can: one
+   * letter already finds Reno by his name as well as by r.buitendag@, which is the whole point of
+   * the tiers below. The first letter is not a guess.
+   *
+   * WHAT IS ON THE RECORD IS A DIFFERENT LIST AND A DIFFERENT SIZE. THE FIRM: "if you're on a
+   * debtor's file and it asks you to CC someone and there's an alternative email address, it
+   * should kind of give you the option to do that." Nobody can guess the first letter of an
+   * address they have never seen -- the alternative on a debtor's file is usually a private
+   * address at a domain with nothing to do with the one above it, so RRC00004's Stephan@gmail.com
+   * is not found by typing the letters of Stephan@urbanhausgroup.co.za. The objection the rule
+   * above answers was about VOLUME: two hundred remembered addresses on a box nobody had typed in
+   * yet. An account's own contacts are one or two rows, they are the answer nearly every time the
+   * box is a Cc on a debtor's file, and they are the one list a person cannot search for.
    */
-  if (q === '') return null
+  if (q === '') return suggestion.onRecord ? 0 : null
   const address = suggestion.address.toLowerCase()
   const name = (suggestion.name ?? '').toLowerCase()
 
@@ -96,8 +115,8 @@ export function rankOf(suggestion: Suggestion, query: string): number | null {
  * write to somebody else. `limit` is the number of rows the list can show without becoming
  * something to scroll rather than glance at.
  *
- * NOTHING AT ALL FOR AN EMPTY BOX — see rankOf. The panel appears on the first letter and not
- * before it.
+ * AN EMPTY BOX GETS WHAT IS ON THE RECORD AND NOTHING ELSE — see rankOf. Remembered addresses
+ * appear on the first letter and not before it.
  */
 export function suggestRecipients(
   all: Suggestion[],

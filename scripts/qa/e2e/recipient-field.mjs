@@ -11,7 +11,7 @@
 import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
-import { PROFILE } from './fixtures.mjs'
+import { COMPANY, PROFILE, TEAM, USER_ID, accountsPage } from './fixtures.mjs'
 
 const t = makeRunner('recipient-field')
 
@@ -25,10 +25,51 @@ const HISTORY = [
 /** Everything the page tried to hide, so the test can prove the X left the browser. */
 const hidden = []
 
+/*
+ * AND A DEBTOR'S FILE WITH TWO EMAIL ADDRESSES ON IT, which is the second half of this file.
+ *
+ * RRC00004's shape exactly: the notice goes to an address at the company's own domain and there is
+ * a private one beside it. The firm, looking at that account's Cc box: "if you're on a debtor's
+ * file and it asks you to CC someone and there's an alternative email address, it should kind of
+ * give you the option to do that."
+ */
+const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000' }
+const contact = (id, value, primary, created) => ({
+  id, account_id: ACCOUNT.id, kind: 'email', value, label: null,
+  person_name: null, person_role: null, is_primary: primary,
+  verified_at: null, retired_at: null, retired_reason: null, notes: null,
+  created_at: created,
+})
+const WORK = 'stephan@urbanhausgroup.co.za'
+const HOME = 'stephan@gmail.com'
+/* RETIRED, so it is not offered: an address the firm has already found to be dead is not an
+   alternative, and a Cc to it is a bounce on a statutory notice. */
+const DEAD = 'stephan@oldfirm.co.za'
+
 const handlers = [
   [(u, r) => /mail_recipient_hidden/.test(u) && r.method() === 'POST',
     (u, r) => { hidden.push(r.postData() ?? ''); return { body: [] } }],
   [(u) => /rpc\/mail_recipient_history/.test(u), () => ({ body: HISTORY })],
+  /*
+   * THE SIGNED-IN PERSON, ANSWERED EVERY TIME THEY ARE ASKED FOR. AuthContext re-reads the profile
+   * while the app is open, and an unanswered read tears the whole app down to "We couldn't load
+   * your profile" -- which took the composer, the account and the panel with it a few seconds
+   * after the modal opened. A fixture that answers the first read and not the second is a test
+   * that fails somewhere else entirely.
+   */
+  [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
+  [(u) => u.includes('/rest/v1/profiles'), () => ({ body: [PROFILE] })],
+  [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
+  [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
+  [(u) => u.includes('/rest/v1/debtor_accounts'),
+    () => ({ body: [ACCOUNT], headers: { 'content-range': '0-0/1' } })],
+  [(u) => u.includes('/rest/v1/account_contacts'), () => ({
+    body: [
+      contact('ct-1', WORK, true, '2026-03-01T08:00:00Z'),
+      contact('ct-2', HOME, false, '2026-04-01T08:00:00Z'),
+      { ...contact('ct-3', DEAD, false, '2026-02-01T08:00:00Z'), retired_at: '2026-05-01T08:00:00Z' },
+    ],
+  })],
 ]
 
 const server = await startServer()
@@ -136,6 +177,75 @@ try {
   t.check('...and the row is gone at once', await options.count(), 0)
 
   await t.shot(page, '20-forgotten')
+
+  /* ---------- and on a debtor's file, the file itself ---------- */
+
+  /*
+   * THE FIRM: "if you're on a debtor's file and it asks you to CC someone and there's an
+   * alternative email address, it should kind of give you the option to do that."
+   *
+   * WHY THIS IS IN A BROWSER AND NOT ONLY IN check-recipient-suggest. The rule is one line in
+   * rankOf and the assertion beside it proves the rule; what it cannot prove is that the panel
+   * ever appears on a focused empty box in the app -- the Cc field has to exist, be handed the
+   * account's contacts, take focus, and render rows. That is four pieces of wiring between the
+   * rule and the firm's eyes, and the empty box is the ONE state the panel used to refuse to open
+   * in.
+   */
+  await page.goto(`http://localhost:${PORT}/accounts/${ACCOUNT.id}`)
+  await page.getByRole('button', { name: 'Email' }).first().waitFor({ timeout: 20000 })
+  await page.getByRole('button', { name: 'Email' }).first().click()
+  /* THE CC BOX IS ALREADY THERE on an account: AccountDetail holds a Cc of its own, so the field
+     is shown rather than hidden behind "Add Cc" -- which is the screen the firm was looking at. */
+  const boxes = page.locator('input[role="combobox"]')
+  await boxes.nth(1).waitFor({ timeout: 10000 })
+  /*
+   * AND THEN LET THE PAGE SETTLE, which is not padding. The composer is handed
+   * `workspace?.contacts`, and the account page reloads that workspace after it first draws -- so
+   * for a moment the modal is open with no contacts behind it and the Cc box has nothing to
+   * offer. A person clicking a field they can see has long since passed that moment; a test that
+   * clicks the instant the input exists lands inside it.
+   */
+  await page.waitForTimeout(2500)
+  t.check('the composer has a To box and a Cc box', await boxes.count(), 2)
+  const toBox = boxes.first()
+  const ccBox = boxes.nth(1)
+  t.check('...with the account’s address already on the To line', await toBox.inputValue(), WORK)
+
+  /* FOCUSED AND EMPTY, which is the state in the firm's screenshot. */
+  await ccBox.click()
+  const ccList = page.locator('ul[role="listbox"]')
+  /*
+   * WAITED FOR AND THEN COUNTED, rather than waited for and assumed. A locator that never resolves
+   * THROWS, which ends the file on a stack trace two lines above the assertion that should have
+   * said what was wrong -- the trap CLAUDE.md names. Breaking the rule in rankOf has to produce
+   * "offers the file: expected 1, got 0", not a timeout.
+   */
+  await ccList.first().waitFor({ timeout: 4000 }).catch(() => {})
+  const offered = await ccList.locator('li[role="option"]').allInnerTexts()
+  t.check(`an empty Cc on a debtor’s file offers the file (${offered.length})`, offered.length, 1)
+  /*
+   * THE ALTERNATIVE, AND ONLY THE ALTERNATIVE. Three assertions in one list: the second address is
+   * there, the one already on the To line is not -- a Cc to it sends the debtor two copies of one
+   * notice -- and the retired one is not either.
+   */
+  t.ok('...which is the alternative address', (offered[0] ?? '').includes(HOME))
+  t.ok('...not the address it is already going to', !offered.join(' ').includes(WORK))
+  t.ok('...and not one the firm has retired', !offered.join(' ').includes(DEAD))
+  /* IT SAYS WHERE THEY CAME FROM. Nobody typed anything, so these rows are an offer rather than a
+     result, and an unexplained list under an untouched box is what the firm objected to. */
+  t.ok('...under a line saying what is being offered',
+    await page.getByText('Already on this file').count() > 0)
+  /* AND NOT ONE REMEMBERED ADDRESS BESIDE THEM, which is the firm's earlier instruction and the
+     reason the two can live together: the file is two rows, history is two hundred. */
+  t.ok('...and nobody out of history', !offered.join(' ').includes('r.buitendag@gpsprop.co.za'))
+  await t.shot(page, '30-cc-on-a-file')
+
+  /* AND TYPING STILL REACHES THE WHOLE BOOK from the same box, or the offer has replaced the
+     search rather than filled the gap in front of it. */
+  await ccBox.fill('REN')
+  await ccList.locator('li[role="option"]').first().waitFor({ timeout: 4000 }).catch(() => {})
+  t.ok('typing in the same box still finds a remembered person',
+    (await ccList.locator('li[role="option"]').allInnerTexts()).join(' ').includes('Reno Buitendag'))
 } finally {
   if (browser) await browser.close()
   stopServer(server)
@@ -145,6 +255,9 @@ const good = t.finish(`
 REN finds Reno, whose address begins with r.buitendag — the case a list matching addresses alone
 fails, which is what the To box did before. The X reaches the database, because the suggestion is
 derived from sent mail that is still there; and it does not address the message to the person it
-was just asked to forget, which is what a button inside a button would have done. Screenshots in
-${OUT}.`)
+was just asked to forget, which is what a button inside a button would have done.
+
+And on a debtor's file the empty Cc box offers that file: the alternative address, without the one
+the notice is already going to and without the one the firm retired — the thing nobody can guess
+the first letter of. Screenshots in ${OUT}.`)
 process.exit(good ? 0 : 1)

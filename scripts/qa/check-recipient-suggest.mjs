@@ -18,6 +18,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-recipient-suggest.mjs
  */
+import { readFileSync } from 'node:fs'
 import {
   describe, looksLikeAddress, rankOf, suggestRecipients, wordsOf,
 } from '../../src/lib/recipientSuggest.ts'
@@ -33,6 +34,10 @@ function check(name, actual, expected) {
 const ok = (name, actual) => check(name, actual, true)
 
 const s = (address, name = null, uses = 1, lastUsed = '2026-09-01') => ({ address, name, uses, lastUsed })
+const read = (f) => readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8')
+/* What the field builds out of the record in front of you: contextual, ordered, above history. */
+const onFile = (address, name, i = 0) =>
+  ({ address, name, uses: Number.MAX_SAFE_INTEGER - i, lastUsed: null, onRecord: true })
 
 const RENO = s('r.buitendag@gpsprop.co.za', 'Reno Buitendag', 9, '2026-09-10')
 const ANDRIES = s('andries@moloto.co.za', 'Andries Moloto', 3, '2026-09-18')
@@ -132,7 +137,7 @@ check('the order is stable where everything else is equal',
   suggestRecipients([s('z@x.co.za', 'Same', 1, '2026-01-01'), s('a@x.co.za', 'Same', 1, '2026-01-01')], 'same')
     .map((x) => x.address), ['a@x.co.za', 'z@x.co.za'])
 
-/* ---------- an empty box offers nothing at all ---------- */
+/* ---------- an empty box offers the record in front of you, and nothing else ---------- */
 
 /*
  * IT USED TO OFFER EVERYBODY, and that was the first thing the firm said about it: "it shouldn't
@@ -145,10 +150,48 @@ check('the order is stable where everything else is equal',
  * too -- one letter finds Reno both ways -- so the first letter is not a guess, and the assertion
  * below is the other half of this pair: nothing at nought characters, and Reno at one.
  */
-check('an empty query offers nobody', suggestRecipients(BOOK, '').length, 0)
+check('an empty query offers nobody out of history', suggestRecipients(BOOK, '').length, 0)
 check('...and whitespace is the same as empty', suggestRecipients(BOOK, '   ').length, 0)
 check('...and an empty query is no match at all, rather than a match on everything',
   rankOf(RENO, ''), null)
+
+/*
+ * BUT THE DEBTOR'S OWN SECOND ADDRESS IS NOT HISTORY AND CANNOT BE SEARCHED FOR.
+ *
+ * THE FIRM: "if you're on a debtor's file and it asks you to CC someone and there's an alternative
+ * email address, it should kind of give you the option to do that."
+ *
+ * RRC00004, WHICH IS THE ACCOUNT THEY WERE LOOKING AT: the notice goes to
+ * Stephan@urbanhausgroup.co.za and the alternative on the file is Stephan@gmail.com. The two
+ * share a first word, so a Cc box that waits for a letter is a Cc box where typing "steph" offers
+ * the address already on the To line -- and the one thing the firm asked for is reached by typing
+ * the letters of a domain they would have to be told about first.
+ *
+ * THE OBJECTION THE RULE ABOVE ANSWERS WAS ABOUT VOLUME, which is why these two can live
+ * together: two hundred remembered addresses under an untouched box is "too many", one or two
+ * contacts off the file in front of you is the answer nearly every time.
+ */
+const WORK = onFile('stephan@urbanhausgroup.co.za', 'Stephan Bredell')
+const HOME = onFile('stephan@gmail.com', 'Stephan Bredell', 1)
+check('the file’s own addresses are offered before a letter is typed',
+  suggestRecipients([WORK, HOME, ...BOOK], '').map((x) => x.address),
+  [WORK.address, HOME.address])
+/* THE RECORD'S OWN ORDER, which is primary first: fetchWorkspace sorts on is_primary and the
+   alphabetical tiebreak below the use count would otherwise lead with the gmail address. */
+check('...primary first, not alphabetically',
+  suggestRecipients([HOME, WORK], '').map((x) => x.address), [WORK.address, HOME.address])
+/* AND STILL NOT ONE REMEMBERED ADDRESS BESIDE THEM, which is the whole of the firm's earlier
+   instruction. Asserted on a book of five that an empty box would have shown six of. */
+check('...and not one address out of history with them',
+  suggestRecipients([WORK, ...BOOK], '').map((x) => x.address), [WORK.address])
+check('...which is a fact about the entry and not about the query',
+  [rankOf(WORK, ''), rankOf(SHARED, '')], [0, null])
+/* ONCE SOMETHING IS TYPED THE RECORD IS RANKED LIKE EVERYTHING ELSE, or an address on the file
+   would sit at the top of a list it does not match. */
+check('a typed letter the record does not answer leaves it out',
+  suggestRecipients([WORK, RENO], 'ren').map((x) => x.address), [RENO.address])
+check('...and one it does answer leads, because it is the record',
+  suggestRecipients([WORK, RENO], 'steph').map((x) => x.address), [WORK.address])
 /* ONE LETTER IS ENOUGH, which is what makes the rule above affordable. */
 check('one letter brings back the people it starts', suggestRecipients(BOOK, 'r').map((x) => x.address),
   [RENO.address])
@@ -171,6 +214,42 @@ ok('...nor an address with a space in it', !looksLikeAddress('reno @x.co.za'))
 check('a remembered person reads as name and address', describe(RENO), 'Reno Buitendag <r.buitendag@gpsprop.co.za>')
 check('...and an address with no name reads as itself', describe(SHARED), SHARED.address)
 
+/* ---------- and the box is wired to all of it ---------- */
+
+const field = read('src/components/RecipientField.tsx')
+/* THE FLAG IS SET WHERE THE RECORD IS READ, or the rule above never fires in the app. */
+ok('the field marks the record’s own addresses as the record', /onRecord: true,/.test(field))
+/* ORDERED BY POSITION, so the record's order survives a sort on the use count. */
+ok('...and numbers them so their order survives the sort',
+  /uses: Number\.MAX_SAFE_INTEGER - out\.length,/.test(field))
+/*
+ * AND THE X IS DECIDED BY THE FLAG, NOT THE COUNT. Forgetting an address is stored, so offering it
+ * on a contact who is on the file would hide them until the record itself changed -- and with the
+ * count now carrying the position, every contextual entry but the first would have been given one.
+ */
+ok('the X is offered on what was remembered', /\{!s\.onRecord && \(/.test(field))
+ok('...and not decided by the use count', !/s\.uses !== Number\.MAX_SAFE_INTEGER/.test(field))
+/*
+ * AN OFFER SAYS WHERE IT CAME FROM. With nothing typed these rows are not matches -- nobody has
+ * asked for anything yet -- and an unexplained list under an empty box is exactly what the firm
+ * objected to the first time.
+ */
+ok('an untyped box says what it is offering', /Already on this file/.test(field))
+ok('...only where nothing has been typed', /value\.trim\(\) === '' && shown\.length > 0/.test(field))
+
+/*
+ * AND NOT THE ADDRESS IT IS ALREADY GOING TO. On a reply the To line is one of these same
+ * contacts; offering it as a Cc offers to send one notice twice.
+ */
+ok('an address the message already goes to is not offered',
+  /for \(const t of taken \?\? \[\]\)/.test(field))
+const composer = read('src/components/ComposeEmailModal.tsx')
+ok('the Cc box knows what the To box holds', /taken=\{\[address\]\}/.test(composer))
+ok('...and the To box knows what the Cc box holds', /taken=\{\[cc\]\}/.test(composer))
+/* IT HIDES A SUGGESTION AND NOTHING MORE: the box stays a text box, which is the thing it is for.
+   A `taken` that reached the input would refuse an address somebody deliberately typed twice. */
+ok('...and it only ever hides a suggestion', !/taken\.(includes|some)\(value/.test(field))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
@@ -181,4 +260,7 @@ console.log(`
 REN finds Reno, whose address begins with r.buitendag — which is the firm's own test and the one a
 match on the address alone fails. A prefix beats a match in the middle, so three letters do not
 return the whole book; two letters never match mid-word at all; and the person written to every
-week leads over somebody written to once this morning.`)
+week leads over somebody written to once this morning.
+
+An untouched box offers the file in front of you — the debtor's second address, which nobody can
+guess the first letter of — and not one remembered address beside it.`)

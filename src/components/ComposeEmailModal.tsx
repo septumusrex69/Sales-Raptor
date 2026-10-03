@@ -472,7 +472,7 @@ export function ComposeEmailModal({
         */}
         <FormField label="To" required>
           <RecipientField value={address} onChange={setAddress}
-            contextual={recipients} required autoFocus={!address} />
+            contextual={recipients} taken={[cc]} required autoFocus={!address} />
         </FormField>
         {/*
           OPEN ON A REPLY-ALL, where it is pre-filled with the people who were on the original and
@@ -492,9 +492,20 @@ export function ComposeEmailModal({
               It was a bare text box, so copying the second person at a client meant knowing their
               address by heart and typing it correctly on a message that goes outside the building.
               The names were already in hand two fields above.
+
+              AND THEY ARE OFFERED BEFORE A LETTER IS TYPED, which the picker alone did not do.
+              THE FIRM: "if you're on a debtor's file and it asks you to CC someone and there's an
+              alternative email address, it should kind of give you the option to do that." The
+              suggestions needed a first letter, and the first letter of an address nobody has seen
+              is not something to guess — RRC00004's alternative is a gmail address and the one
+              above it is at urbanhausgroup.co.za. recipientSuggest answers an empty box with the
+              record and not with history, which is the half that keeps this cheap.
+
+              `taken`: WITHOUT THE ADDRESS IT IS ALREADY GOING TO. On a reply the To line is one of
+              these same contacts, and offering it here as a Cc offers to send one notice twice.
             */}
             <RecipientField value={cc} onChange={setCc} contextual={recipients}
-              autoFocus={initialCc === undefined} />
+              taken={[address]} autoFocus={initialCc === undefined} />
           </FormField>
         ) : (
           <button type="button" onClick={() => setShowCc(true)}
