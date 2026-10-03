@@ -3,6 +3,7 @@ import { credentialsKeyProblem } from '../crypto.js'
 import { adminClient, requireCaller } from '../auth.js'
 import { fetchAttachment, fetchMessageBody } from '../emailSync.js'
 import { findLinkedDetails } from '../../../src/lib/signature.js'
+import { bodyToStore } from '../../../src/lib/mailBodyCache.js'
 
 /**
  * Reaches into a connected mailbox for something that was never stored.
@@ -202,6 +203,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
        * hrefs, the server has the markup in hand anyway, and the page only ever wanted the
        * handful of candidates.
        */
+      /*
+       * AND IT IS KEPT, SO THIS IS THE LAST TIME THIS MESSAGE COSTS A MAIL SERVER ANYTHING.
+       *
+       * A write-back cache, which is what makes the fix reach the mail that is ALREADY in the
+       * mailbox: the sync fills these columns on everything it takes in from now on, and every
+       * row that arrived before it does so the first time somebody opens it. mailBodyCache.ts
+       * decides what is small enough to keep.
+       *
+       * NOT AWAITED AND NEVER FATAL. The caller came here to read their mail; a cache that cannot
+       * be written is a slower read next time and nothing worse, and failing the response over it
+       * would turn a storage problem into an unreadable inbox.
+       */
+      void admin.from('user_emails')
+        .update(bodyToStore(
+          { text: body.text, html: body.html, calendar: body.calendar },
+          new Date().toISOString(),
+        ))
+        .eq('id', mail.id)
+        .then(({ error }) => {
+          if (error) console.log(`[attachment] body not cached for ${mail.id}: ${error.message}`)
+        })
+
       res.status(200).json({
         ok: true,
         text: body.text,

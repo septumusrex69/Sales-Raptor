@@ -27,6 +27,8 @@
 import { supabase } from './supabase'
 import type { InviteResponse } from './inviteReply.ts'
 import { senderName, type MailFilter } from './emailRules'
+import { hasCachedBody, needsPictures, type CachedBody } from './mailBodyCache.ts'
+import { findLinkedDetails } from './signature.ts'
 import { refreshNavCounts } from './navCounts'
 import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
 import type { ContactCandidate } from './signature'
@@ -538,15 +540,66 @@ export interface InlineImage {
 }
 
 /**
- * The full text of a message, fetched from the mailbox when somebody opens it.
+ * The message, out of Raptor's own copy where there is one and out of the mailbox where there is
+ * not.
  *
- * Raptor holds a 240-character snippet; this is how a person reads the rest. It rides on
- * /api/email/attachment, which already opens IMAP connections — Vercel's Hobby plan caps this
- * project at twelve functions and it is at twelve, so a thirteenth route would have made reading
- * your own mail wait on a billing change.
+ * THE FIRM: "doing anything on the mailbox is super slow except writing -- reading something is
+ * super slow... isn't there some way we can mimic the way Outlook works?"
  *
- * Throws with the server's own wording. The caller keeps showing the snippet either way: a
- * message the mail server has since moved should not leave the row blank.
+ * THE CACHED READ IS ONE SELECT ON A ROW WE ALREADY HAVE THE ID OF -- tens of milliseconds
+ * against the seconds the mailbox round trip costs, which is a TLS handshake, a LOGIN, a SELECT
+ * and a FETCH through a serverless function that may be starting cold. That round trip happened
+ * on EVERY open, including a message read a minute before. See mailBodyCache.ts for why the body
+ * was never kept and why that was the wrong half of a decision whose other half was right.
+ *
+ * `pictures` IS THE ONE THING THE CACHE CANNOT ANSWER. The pictures drawn into a message are not
+ * stored -- they are most of its size and they are nearly always a signature logo -- so a cached
+ * read comes back with none and says whether the message refers to any. The caller shows the
+ * words at once and goes to the mailbox for the pictures in the background, which is what Gmail
+ * does and is the opposite of waiting for the whole message because a signature has a logo in it.
+ *
+ * Throws with the server's own wording on the uncached path. The caller keeps showing the snippet
+ * either way: a message the mail server has since moved should not leave the row blank.
+ */
+export async function fetchCachedBody(mailId: string): Promise<{
+  text: string; html: string; calendar: string; details: ContactCandidate[]
+  /** True where the message draws pictures the cache does not hold. */
+  pictures: boolean
+} | null> {
+  const { data, error } = await supabase
+    .from('user_emails')
+    .select('body_text, body_html, body_calendar, body_cached_at')
+    .eq('id', mailId)
+    .maybeSingle()
+  if (error || !data) return null
+  const row = data as CachedBody
+  if (!hasCachedBody(row)) return null
+  const html = row.body_html ?? ''
+  return {
+    text: row.body_text ?? '',
+    html,
+    calendar: row.body_calendar ?? '',
+    /*
+     * READ HERE RATHER THAN ON THE SERVER, which is where the uncached path reads them. The same
+     * function either way -- findLinkedDetails is in src/lib precisely so both sides can have it
+     * -- and it is the hrefs of the markup we already have, so going to a mail server for it
+     * would be fetching a message to look at a copy of itself.
+     */
+    details: html ? findLinkedDetails(html, undefined) : [],
+    pictures: needsPictures(html),
+  }
+}
+
+/**
+ * The full text of a message, fetched from the mailbox.
+ *
+ * It rides on /api/email/attachment, which already opens IMAP connections — Vercel's Hobby plan
+ * caps this project at twelve functions and it is at twelve, so a thirteenth route would have made
+ * reading your own mail wait on a billing change.
+ *
+ * EVERY CALL FILLS THE CACHE for next time: the route writes the body back onto the row, so the
+ * mail that was already in the mailbox before any of this existed becomes fast the first time
+ * somebody opens it.
  */
 export async function fetchMailBody(
   mailId: string,

@@ -43,6 +43,14 @@ const seen = []
  * that was actually made; asserting on the sanitiser's output checks the sanitiser.
  */
 const remote = []
+/*
+ * AND EVERY REQUEST THAT WENT TO A MAIL SERVER FOR A MESSAGE BODY.
+ *
+ * THE FIRM: "reading something is super slow." Each of these is a TLS handshake, a LOGIN, a SELECT
+ * and a FETCH through a serverless function that may be starting cold -- seconds, on every open,
+ * including a message read a minute before. A message Raptor already holds must cost none.
+ */
+const bodyCalls = []
 
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
@@ -101,6 +109,19 @@ const handlers = [
        * off the URL and applied here, and the fixtures are chosen so the tabs genuinely differ.
        */
       const has = (clause) => u.includes(clause)
+      /*
+       * ONE ROW WHEN ONE ROW WAS ASKED FOR.
+       *
+       * fetchCachedBody reads the body off a single row with .maybeSingle(), which PostgREST
+       * fails when more than one comes back -- so a stub that answers every GET out of the whole
+       * fixture makes the cached read look broken and sends the page to the mail server exactly
+       * as it did before. Which would have made this whole file pass over a cache that never
+       * worked.
+       */
+      /* `[?&]` MATTERS: "user_id=eq..." contains "id=eq." and an unanchored match read the
+         SIGNED-IN PERSON as the message being asked for, so every list came back empty. */
+      const oneId = /[?&]id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
+      if (oneId) return { body: MAIL.filter((m) => m.id === oneId) }
       let rows = MAIL
       if (has('is_sent=eq.true')) rows = rows.filter((m) => m.is_sent)
       else if (has('is_filed=eq.true')) rows = rows.filter((m) => m.is_filed)
@@ -175,6 +196,9 @@ try {
    */
   await page.route('**/api/email/attachment*', async (route) => {
     const sent = JSON.parse(route.request().postData() ?? '{}')
+    /* EVERY TRIP TO THE MAIL SERVER, counted. The promise the cache makes is that a kept message
+       costs none of these, and the only way to check that promise is to count them. */
+    if (sent.mailId) bodyCalls.push(sent.mailId)
     const message = MAIL.find((m) => m.id === sent.mailId)
     /*
      * ONE LONG MESSAGE, so the pane actually scrolls. Every fixture body being three lines is how a
@@ -307,6 +331,48 @@ try {
   t.ok('the list is still beside the message',
     await page.getByText('Request for information').first().isVisible())
   await t.shot(page, '22a-mail-reading-pane')
+
+  /* ---------- a message Raptor already holds is read without a mail server ---------- */
+
+  /*
+   * THE FIRM: "doing anything on the mailbox is super slow except writing -- reading something is
+   * super slow... isn't there some way we can mimic the way Outlook works to make it super fast?"
+   *
+   * OUTLOOK IS A CACHE. Its speed is a local copy of the mailbox, not a faster protocol, and
+   * Raptor has had the copy all along without the one part people read. Every open used to be a
+   * TLS handshake, a LOGIN, a SELECT and a FETCH through a serverless function that may be
+   * starting cold -- seconds, on every message, including one read a minute before.
+   *
+   * THE PROMISE IS ABOUT REQUESTS, SO IT IS CHECKED BY COUNTING THEM. A unit check can hold that
+   * the cached read exists and returns the right string; only a browser can say that opening the
+   * message asked nobody for anything.
+   */
+  bodyCalls.length = 0
+  await page.getByText('Agreement and next steps').first().click()
+  await page.waitForTimeout(900)
+  const kept = await page.locator('body').innerText()
+  t.ok('a kept message shows its body', kept.includes('the client has asked us to proceed')
+    || kept.includes('client has asked us to proceed'))
+  t.check(`...without going to the mail server for it (${bodyCalls.length})`, bodyCalls.length, 0)
+
+  /*
+   * AND THE MESSAGE BESIDE IT STILL WORKS THE OLD WAY, which is what keeps this from passing on an
+   * app that simply stopped fetching bodies: everything that arrived before the sync started
+   * keeping them, and anything too big to keep, is read out of the mailbox exactly as before.
+   */
+  /* A MESSAGE NOT YET OPENED IN THIS RUN. One already read is held in the page and fetched
+     again by neither path, so it would count zero for the wrong reason. */
+  bodyCalls.length = 0
+  await page.getByText('Follow up on outstanding account').first().click()
+  await page.waitForTimeout(900)
+  t.check(`a message nobody kept is still fetched (${bodyCalls.length})`, bodyCalls.length, 1)
+  const fetched = await page.locator('body').innerText()
+  t.ok('...and it is on screen too', fetched.includes('any updates regarding the account'))
+
+  /* AND THE LONG MESSAGE IS LEFT OPEN, because the pane further down scrolls through it. Already
+     fetched, so re-opening it costs nothing and asks nobody. */
+  await page.getByText('Debt collection enquiry').first().click()
+  await page.waitForTimeout(500)
 
   /*
    * ---- AND YOU CAN ACTUALLY TYPE IN IT ----

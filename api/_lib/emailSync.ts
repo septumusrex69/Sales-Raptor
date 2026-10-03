@@ -14,6 +14,7 @@ import {
   EMAIL_IN_KIND, normaliseAddress, receivedEmailNote, threadIds,
 } from '../../src/lib/emailRules.js'
 import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
+import { bodyToStore, tooBigFor } from '../../src/lib/mailBodyCache.js'
 import { actsOnItsOwn, bounceSeverity } from '../../src/lib/bounceSeverity.js'
 import { notifyHeld } from './workflow/notify.js'
 
@@ -126,6 +127,22 @@ function realAttachmentNames(
 }
 
 /**
+ * The meeting request inside a message, as the raw ICS.
+ *
+ * SAME TEST AS THE READ PATH, which finds it the same way: mailparser hands a text/calendar part
+ * back among the attachments rather than as body text. Written here so an invite arrives in the
+ * mailbox already readable -- an invite is exactly the message somebody opens in a hurry.
+ */
+function icsOf(
+  attachments: { contentType?: string; content?: unknown }[] | undefined,
+): string {
+  const ics = (attachments ?? []).find(
+    (a) => (a.contentType ?? '').toLowerCase().startsWith('text/calendar'),
+  )
+  return ics?.content ? Buffer.from(ics.content as Buffer).toString('utf8') : ''
+}
+
+/**
  * The senders this agent has blocked, loaded once per sync rather than once per message.
  *
  * Returned as two sets because they are checked differently: an address must match exactly, a
@@ -226,6 +243,17 @@ async function fileUserEmail(
     fromName: string | null
     subject: string
     body: string
+    /**
+     * THE REST OF THE MESSAGE, KEPT.
+     *
+     * The snippet below is cut from `body` and the rest used to be dropped on the floor. The
+     * message is already fetched whole and already parsed by the time this is called, so keeping
+     * it costs nothing at the mail server -- and it is the difference between reading your mail
+     * instantly and waiting on a TLS handshake, a LOGIN and a FETCH for every message you open.
+     * See mailBodyCache.ts, which owns the limits.
+     */
+    html?: string
+    calendar?: string
     attachmentNames: string[]
     isJunk: boolean
     at: string
@@ -253,6 +281,10 @@ async function fileUserEmail(
         from_name: message.fromName,
         subject: message.subject,
         snippet: message.body.replace(/\s+/g, ' ').trim().slice(0, SNIPPET_LENGTH) || null,
+        ...bodyToStore(
+          { text: message.body, html: message.html ?? '', calendar: message.calendar ?? '' },
+          new Date().toISOString(),
+        ),
         attachment_names: message.attachmentNames,
         is_junk: message.isJunk,
         is_sent: message.isSent ?? false,
@@ -1222,6 +1254,16 @@ async function syncMailbox(
        * a blocked address turns out to belong to an account, or answers a demand we sent, it is
        * still filed on that account. Only the mailbox row is skipped.
        */
+      /* WHY ONE MESSAGE IS STILL READ OUT OF THE MAILBOX. Over the cache limits nothing is kept,
+         and without a line here that message is simply slower than its neighbours for no visible
+         reason. See mailBodyCache.ts for the limits and the arithmetic behind them. */
+      const oversized = tooBigFor({
+        text: plainText(parsed.text, parsed.html || undefined),
+        html: parsed.html || '',
+        calendar: '',
+      })
+      if (oversized) console.log(`[emailSync] ${path} UID ${uid}: body not kept — ${oversized}`)
+
       const blocked = isBlocked(normaliseAddress(fromAddress), blocks)
       if (blocked) console.log(`[emailSync] ${path} UID ${uid}: sender blocked, no mailbox row`)
 
@@ -1293,7 +1335,18 @@ async function syncMailbox(
          */
         fromName: displayName,
         subject: parsed.subject || '(no subject)',
-        body: parsed.text || '',
+        /*
+         * THE TEXT OF AN HTML-ONLY MESSAGE, which `parsed.text` does not have.
+         *
+         * plainText() falls back to stripping the markup, which is what fetchMessageBody has
+         * always done when somebody opened one of these -- so the snippet in the list and the body
+         * underneath it now come off the same string. Marketing mail and most mail from a phone is
+         * HTML-only, and its row carried a blank snippet until now.
+         */
+        body: plainText(parsed.text, parsed.html || undefined),
+        html: parsed.html || '',
+        /* A meeting request's ICS, kept so the invite draws without a trip to the mailbox. */
+        calendar: icsOf(parsed.attachments),
         attachmentNames: realAttachmentNames(parsed.attachments),
         /* The folder's answer, or the agent's standing one. Either is enough to make it junk. */
         isJunk: isJunk || junkedSender,

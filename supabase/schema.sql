@@ -20752,3 +20752,48 @@ comment on column public.debtor_accounts.contact_windows is
   '"the debtor likes to be contacted between 8 and 9, and 7 and 5" -- somebody reachable before '
   'work and again after it is not reachable all day, and one wide range says they are. Separate '
   'from contact_preference, which is HOW rather than WHEN. Empty is nobody has asked.';
+
+-- ---------- Reading your own mail without waiting for a mail server ----------
+--
+-- THE FIRM: "doing anything on the mailbox is super slow except writing -- reading something is
+-- super slow... isn't there some way we can mimic the way Outlook works to make it super fast."
+--
+-- WHAT WAS ACTUALLY SLOW. Opening a message asked /api/email/attachment for its body, which
+-- opened a TLS connection to the mail server, logged in, selected the folder and fetched the
+-- message -- every time, for every message, including one read a minute earlier. That is seconds
+-- of waiting per message, and no amount of work on the list would have touched it, because the
+-- list was never the slow part.
+--
+-- AND THE BODY WAS ALREADY IN OUR HANDS. The sync fetches each message whole (`source: true`) and
+-- parses it, to cut a 240-character snippet out and throw the rest away. Keeping it costs NO
+-- extra traffic to the mail server and no extra parse -- it is a storage decision and nothing
+-- else, which is how it was decided originally ("metadata and a snippet only") and is the half
+-- that turned out to be wrong.
+--
+-- OUTLOOK IS A CACHE. Its speed is not a protocol trick: it keeps a local copy of the mailbox and
+-- reads from that. Raptor's copy is this table, and these four columns are the part of it that
+-- was missing.
+--
+-- CAPPED, NOT UNBOUNDED. mailBodyCache.ts holds the limits and the reasoning: at 3 750 messages a
+-- day storing every byte of every newsletter is the one way this table becomes a problem, so an
+-- oversized body is simply not kept and that message reads the old way. account_emails has stored
+-- a debtor's correspondence in full since it was built, which is the precedent.
+alter table public.user_emails
+  add column if not exists body_text text,
+  add column if not exists body_html text,
+  add column if not exists body_calendar text,
+  add column if not exists body_cached_at timestamptz;
+
+comment on column public.user_emails.body_text is
+  'The message as text, kept so reading it needs no mail server. The sync already downloads and '
+  'parses the whole message to cut a 240-character snippet out of it, so this costs no extra '
+  'traffic and no extra parse -- it is the same string, not truncated.';
+comment on column public.user_emails.body_html is
+  'The message as it was written, where it was written in HTML. Never rendered into Raptor''s own '
+  'page: it goes through sanitizeEmailHtml into a sandboxed frame. Capped -- see mailBodyCache.ts '
+  '-- so one 4 MB newsletter cannot sit in a row forever.';
+comment on column public.user_emails.body_calendar is
+  'The raw ICS of a meeting request. Small and rare, and parsed in the browser.';
+comment on column public.user_emails.body_cached_at is
+  'When the body was put here, and the one flag that says there IS one. Null means read it out of '
+  'the mailbox, which is what every row did before this and what an oversized message still does.';

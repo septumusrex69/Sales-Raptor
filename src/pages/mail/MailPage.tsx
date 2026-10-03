@@ -42,7 +42,7 @@ import {
   countUnreadByTab, debtorFileFor, deleteMail, fetchSenderRules,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   isSharedDomain,
-  fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
+  fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
   type BlockedSender, type DebtorFile, type InlineImage, type LinkedRecord,
   type MailFilter, type MailItem,
@@ -626,7 +626,47 @@ export function MailPage() {
     const token = session?.access_token
     if (!token) return
     fetchingBody.current.add(mail.id)
-    setReading(mail.id)
+
+    /*
+     * RAPTOR'S OWN COPY FIRST, AND USUALLY THAT IS THE WHOLE READ.
+     *
+     * THE FIRM: "reading something is super slow... isn't there some way we can mimic the way
+     * Outlook works?" Outlook's speed is a local copy, not a faster protocol, and Raptor has had
+     * the copy all along without the one part people actually read. One select on a row we already
+     * have the id of, against a TLS handshake and a LOGIN and a FETCH through a function that may
+     * be starting cold.
+     *
+     * NO SPINNER ON THIS PATH. `setReading` is deliberately not touched before the cached read:
+     * it comes back in a few tens of milliseconds, and a spinner that appears and vanishes inside
+     * one frame is a flicker that makes a fast screen feel broken.
+     */
+    let cached = null as Awaited<ReturnType<typeof fetchCachedBody>>
+    try {
+      cached = await fetchCachedBody(mail.id)
+    } catch { /* A cache that will not answer is the old behaviour, which is below. */ }
+
+    if (cached) {
+      setBodies((b) => ({ ...b, [mail.id]: cached.text }))
+      setHtmlBodies((h) => ({ ...h, [mail.id]: cached.html }))
+      setCalendars((c) => ({ ...c, [mail.id]: cached.calendar }))
+      setLinkedDetails((d) => ({ ...d, [mail.id]: cached.details }))
+      setBodyImages((i) => ({ ...i, [mail.id]: [] }))
+      setImagesSkipped((n) => ({ ...n, [mail.id]: 0 }))
+      /*
+       * AND THE PICTURES AFTERWARDS, where the message draws any.
+       *
+       * They are not kept -- they are most of a message's size and they are nearly always a
+       * signature logo -- so this goes to the mailbox for them WITH THE WORDS ALREADY ON SCREEN.
+       * The alternative is waiting on the whole message because somebody's signature has a logo
+       * in it, which is most business email and is the slowness this set out to fix.
+       */
+      if (!cached.pictures) {
+        fetchingBody.current.delete(mail.id)
+        return
+      }
+    }
+
+    setReading(cached ? null : mail.id)
     setReadError((e) => { const next = { ...e }; delete next[mail.id]; return next })
     try {
       const { text, html, details, images, imagesSkipped: skipped, calendar } = await fetchMailBody(mail.id, token)
@@ -639,8 +679,15 @@ export function MailPage() {
       setBodyImages((i) => ({ ...i, [mail.id]: images }))
       setImagesSkipped((n) => ({ ...n, [mail.id]: skipped }))
     } catch (e) {
-      // The snippet stays on screen, so this explains the gap rather than leaving it blank.
-      setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
+      /*
+       * The snippet stays on screen, so this explains the gap rather than leaving it blank -- and
+       * where the cache already answered, the message is on screen and only its pictures are
+       * missing, so saying the mailbox could not be reached would be the warning that fires when
+       * nothing is wrong.
+       */
+      if (!cached) {
+        setReadError((prev) => ({ ...prev, [mail.id]: e instanceof Error ? e.message : String(e) }))
+      }
     } finally {
       fetchingBody.current.delete(mail.id)
       setReading(null)

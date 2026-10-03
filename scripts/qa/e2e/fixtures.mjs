@@ -265,6 +265,26 @@ export const MAIL = [
     to_address: 'stephan@bredellferreira.co.za', to_name: 'Stephan',
     to_recipients: [{ name: 'Stephan', address: 'stephan@bredellferreira.co.za' }],
     cc_recipients: [],
+    /*
+     * THE ONE MESSAGE RAPTOR ALREADY HOLDS THE BODY OF.
+     *
+     * THE FIRM: "reading something is super slow." It was: every open went to the mail server for
+     * the body. The sync keeps it now -- it already had it -- and this is the fixture that proves
+     * a kept message is read without asking anybody. Only this one, so the message beside it still
+     * exercises the old path and the two are visibly different rather than accidentally the same.
+     */
+    body_text: 'Please find the signed mandate attached. The capital is R4 200,00 and the '
+      + 'client has asked us to proceed.',
+    /*
+     * TEXT AND NO MARKUP, which is a real message -- a reply typed in Outlook with the HTML part
+     * stripped by a gateway, and most of what a debtor sends from a phone. It is also the half
+     * this file can READ: markup is drawn into a sandboxed frame, and `body` innerText does not
+     * reach inside one, so a fixture with markup would check the frame's absence rather than the
+     * message's presence.
+     */
+    body_html: null,
+    body_calendar: null,
+    body_cached_at: MAIL_AT(149),
     attachment_names: ['mandate.pdf'], is_junk: false, occurred_at: MAIL_AT(150),
     read_at: MAIL_AT(140), is_filed: true, is_settled: true, no_record_at: null,
     linked_account_id: '44444444-4444-4444-8444-444444444444',
