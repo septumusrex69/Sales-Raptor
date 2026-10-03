@@ -128,8 +128,13 @@ ok('the start route reads the re-issue flag', /reissue_allowed/.test(start))
  * EVERY RUN, NOT ANY. One good run among them means this account has had a valid demand, and
  * that is the clock the rule exists to protect.
  */
+/* THE CAST MOVED OUT OF THE FILTER and onto the row list, because the route now needs each run's
+   STATE as well -- it closes the live one before creating its replacement. The rule is unchanged:
+   any run without the flag blocks. */
 ok('...and one good run still closes the door',
-  /filter\(\(r\) => !\(r as \{ reissue_allowed\?: boolean \}\)\.reissue_allowed\)/.test(start))
+  /const blocking = runs\.filter\(\(r\) => !r\.reissue_allowed\)/.test(start))
+ok('...reading every run of this account and version',
+  /\.select\('id, state, reissue_allowed'\)\.eq\('account_id', accountId\)\.eq\('version_id', versionId\)/.test(start))
 ok('...with the browser filtering on the same fact', /if \(!r\.reissue_allowed\) been\.add/.test(store))
 
 /* ------------------------------------------------ and a person is asked, not guessed at */

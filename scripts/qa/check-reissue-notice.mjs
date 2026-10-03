@@ -238,6 +238,57 @@ ok('correcting a contact does not mark anything unserved by itself',
   !/markStepNotServed/.test(contacts))
 ok('...and neither does updateContact', !/markStepNotServed/.test(read('src/lib/accountWorkspace.ts')))
 
+/* ---------------------------------------------------------------------------------------------
+ * AND THE RUN BEING REPLACED IS CLOSED, OR NOTHING IS STARTED AT ALL
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE BUG THIS SECTION EXISTS FOR. `reissue_allowed` lifts the once-per-account-and-version rule
+ * that the start route enforces -- and the database has a SECOND rule of its own,
+ * `workflow_runs_one_live`, a partial unique index refusing a second RUNNING run. The re-issue
+ * marked the notice unserved, unlocked the flag, and fell over on the insert: "duplicate key value
+ * violates unique constraint". The firm pressed the button and got a Postgres error.
+ *
+ * AND THE FAILED PRESS WAS THE SMALLER HALF. The superseded run was left RUNNING with eight steps
+ * still pending -- a final notice a week out, a listing in November, an intended summons on the
+ * 30th -- all dated from a demand the debtor never received, and all of which would have gone out.
+ */
+const schema = read('supabase/schema.sql')
+const start = read('api/_lib/workflow/start.ts')
+
+ok('there is a way to close one run because another replaces it',
+  /create or replace function public\.workflow_supersede_run\(p_run uuid, p_reason text\)/.test(schema))
+/* ONE RUN BY ID. workflow_exit_account closes every live run on the account, which is right when a
+   promise takes the debtor out of everything and wrong here -- re-issuing the section 129 is no
+   reason to stop the handover sequence running beside it. */
+ok('...one run, by id', /where s\.run_id = p_run and s\.state in \('pending', 'held'\)/.test(schema))
+/* A SENT STEP STAYS SENT: it is the record of a notice that reached somebody. */
+ok('...cancelling only what has not happened',
+  !/update public\.workflow_run_steps[\s\S]{0,400}?state = 'cancelled'[\s\S]{0,200}?'sent'/.test(schema))
+/* IDEMPOTENT. A run already closed keeps the reason it actually ended with -- on one that exited on
+   a promise, that is the record of why the firm stopped. */
+ok('...and a run already closed is left alone',
+  /if v_state not in \('running', 'held'\) then return 0; end if;/.test(schema))
+
+ok('the start route closes what it is replacing', /workflow_supersede_run/.test(start))
+/* BEFORE THE INSERT, or the unique index refuses it exactly as it did. PRESENCE BEFORE ORDER:
+   `indexOf` returns -1, and an order-only assertion passes vacuously the moment the thing it
+   orders against is renamed. */
+const closeAt = start.indexOf('workflow_supersede_run')
+const insertAt = start.indexOf(".insert({ account_id: accountId, version_id: versionId")
+ok('the close and the insert are both there', closeAt >= 0 && insertAt >= 0)
+ok('...and the close comes before the insert', closeAt < insertAt)
+/* AND HELD COUNTS AS LIVE. The index only covers `running`, so a held run would not refuse the
+   insert -- it would simply leave two live sequences on one debt, which is worse. */
+ok('...counting a held run as live too',
+  /r\.state === 'running' \|\| r\.state === 'held'/.test(start))
+/*
+ * AND IT IS NOT FIRE AND FORGET. A new run created while the old one still holds its pending steps
+ * is two sequences on one debt -- the exact harm the once-ever rule exists to prevent.
+ */
+ok('...and if it cannot be closed, nothing is started',
+  /nothing was started/.test(start))
+
 console.log(`\ncheck-reissue-notice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

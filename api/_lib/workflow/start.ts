@@ -131,13 +131,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * that is the clock the rule exists to protect.
    */
   const { data: already } = await admin.from('workflow_runs')
-    .select('id, reissue_allowed').eq('account_id', accountId).eq('version_id', versionId)
-  const blocking = (already ?? []).filter((r) => !(r as { reissue_allowed?: boolean }).reissue_allowed)
+    .select('id, state, reissue_allowed').eq('account_id', accountId).eq('version_id', versionId)
+  const runs = (already ?? []) as { id: string; state: string; reissue_allowed?: boolean }[]
+  const blocking = runs.filter((r) => !r.reissue_allowed)
   if (blocking.length > 0) {
     res.status(409).json({
       error: 'This account has already been through this workflow. A second run would be a second clock on one debt.',
     })
     return
+  }
+
+  /*
+   * AND THE RUN BEING REPLACED IS CLOSED BEFORE THE NEW ONE IS MADE.
+   *
+   * THE BUG THIS FIXES, AND IT WAS MINE. `reissue_allowed` lifts the once-per-account-and-version
+   * rule THIS route enforces -- and the database has a second rule of its own,
+   * `workflow_runs_one_live`, a partial unique index that refuses a second RUNNING run. So the
+   * re-issue marked the notice unserved, unlocked the flag, and then fell over on the insert:
+   * "duplicate key value violates unique constraint". The firm pressed the button and got a
+   * Postgres error.
+   *
+   * THE FAILED PRESS WAS THE SMALLER HALF. On RRC00004 the superseded run was left RUNNING with
+   * eight steps still pending -- a final notice a week out, a credit bureau listing in November, an
+   * intended summons on the 30th -- every one of them dated from a demand the debtor never
+   * received, and every one of them would have gone out. The whole point of re-issuing is that
+   * those intervals never started.
+   *
+   * SUPERSEDED, NOT DELETED. The run keeps its sent steps and gains a reason; the file reads "went
+   * to the wrong address on the 1st, re-issued on the 8th", which is what the firm asked for in as
+   * many words.
+   *
+   * ONE RUN AT A TIME, by id. workflow_exit_account closes every live run on the account, which is
+   * right when a promise takes the debtor out of everything and wrong here -- re-issuing the
+   * section 129 is no reason to stop the handover sequence running beside it.
+   *
+   * AND IT IS NOT FIRE AND FORGET. A new run created while the old one still holds its pending
+   * steps is two sequences on one debt, which is the exact harm the once-ever rule exists to
+   * prevent. If this cannot be done, nothing is started.
+   */
+  const live = runs.filter((r) => r.state === 'running' || r.state === 'held')
+  for (const r of live) {
+    const { error: closeError } = await admin.rpc('workflow_supersede_run', {
+      p_run: r.id,
+      p_reason: 'The notice never reached the debtor, so the sequence was issued again.',
+    })
+    if (closeError) {
+      res.status(500).json({
+        error: `The earlier run could not be closed, so nothing was started: ${closeError.message}`,
+      })
+      return
+    }
   }
 
   /* The two the workflow itself exits on, checked here because this is the other order: the exit

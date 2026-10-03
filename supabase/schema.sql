@@ -20659,3 +20659,68 @@ comment on function public.engine_balances(uuid, uuid) is
   'payments took. In duplum gives interest the ceiling first and the costs what is left -- the '
   'firm''s decision, because interest carries no VAT. Shared by allocate_payment and '
   'preview_allocation so a collector''s dry run cannot promise something the engine would not do.';
+
+-- ============================================================================
+-- RE-ISSUING A SEQUENCE CLOSES THE ONE IT REPLACES.
+--
+-- THE BUG: `reissue_allowed` lifts the once-per-account-and-version rule that api/workflow/start
+-- enforces, and the database has a SECOND rule of its own -- `workflow_runs_one_live`, a partial
+-- unique index refusing a second RUNNING run. So the re-issue marked the notice unserved, unlocked
+-- the flag, and fell over on the insert: "duplicate key value violates unique constraint". The firm
+-- pressed the button and got a Postgres error.
+--
+-- THE FAILED PRESS WAS THE SMALLER HALF. On RRC00004 the superseded run was left RUNNING with eight
+-- steps still pending -- a final notice a week out, a credit bureau listing in November, an intended
+-- summons on the 30th -- every one dated from a demand the debtor never received, and every one of
+-- them would have gone out. The whole point of re-issuing is that those intervals never started.
+-- ============================================================================
+
+create or replace function public.workflow_supersede_run(p_run uuid, p_reason text)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_cancelled integer := 0;
+  v_state text;
+begin
+  select state into v_state from public.workflow_runs where id = p_run;
+  if v_state is null then
+    raise exception 'That workflow run is not there.' using errcode = 'no_data_found';
+  end if;
+  /* IDEMPOTENT. A run already closed is left exactly as it was -- re-closing it would overwrite
+     the reason it actually ended with, which on a run that exited on a promise is the record of
+     why the firm stopped. */
+  if v_state not in ('running', 'held') then return 0; end if;
+
+  /* A SENT STEP STAYS SENT -- the same rule workflow_exit_account states. It is the record of a
+     notice that reached somebody, and the file has to read "went to the wrong address on the 1st,
+     re-issued on the 8th". Only what has not happened is cancelled. */
+  with killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = p_reason
+     where s.run_id = p_run and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_run_holds
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(ended_reason, p_reason)
+   where run_id = p_run and ended_on is null;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = p_reason, left_at = now()
+   where id = p_run;
+
+  return v_cancelled;
+end $$;
+
+comment on function public.workflow_supersede_run(uuid, text) is
+  'Close ONE workflow run because a fresh one is being issued in its place, cancelling whatever it '
+  'had still to send. Sent steps stay sent. Narrower than workflow_exit_account, which closes every '
+  'run on the account -- re-issuing a section 129 is no reason to stop the handover beside it.';
+
+revoke all on function public.workflow_supersede_run(uuid, text) from public;
+revoke execute on function public.workflow_supersede_run(uuid, text) from anon, authenticated;
