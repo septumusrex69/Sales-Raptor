@@ -180,7 +180,15 @@ ok('...without duplicating a row', /seen = new Set\(prev\.map\(\(a\) => a\.id\)\
  * `pageSize` belongs in there and `page` does not, and the difference is the whole point:
  * changing how many rows to show is a NEW first page, while loading the next one must append.
  */
-ok('loading more does not reset the list', /\}, \[query, pageSize\]\)\n\n  async function loadMore/.test(list))
+/*
+ * ASSERTED ON THE DEPENDENCY LIST ITSELF, not on what happens to sit under it. This matched
+ * `}, [query, pageSize])` followed immediately by `async function loadMore` -- which held only
+ * while nothing was ever added between them, and the balances effect now is. What matters is
+ * unchanged: `pageSize` belongs in that list and `page` does not.
+ */
+ok('loading more does not reset the list', /\}, \[query, pageSize\]\)/.test(list))
+ok('...because the first page does not watch the page number',
+  !/\}, \[query, pageSize, page\]\)/.test(list) && !/\}, \[page, query, pageSize\]\)/.test(list))
 ok('...but changing the page size does', /\[query, pageSize\]/.test(list))
 ok('...and the effect never depends on the page number', !/\}, \[query[^\]]*\bpage\b[^S]/.test(list))
 ok('the selection survives loading more',

@@ -27,7 +27,7 @@ import { canFreezeAccounts, canHandOutAccounts, canViewClients } from '../../lib
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
-import { timeOnDesk, firmDay, firmToday } from '../../lib/dateLabels'
+import { timeOnDesk, firmToday } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
@@ -44,6 +44,7 @@ import {
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
 import { TRACE_REQUEST_FOR, traceNeeds, traceableMobile } from '../../lib/traceAttempt.ts'
+import { balanceInputFor } from '../../lib/balanceInput.ts'
 import { noticeToReissue, type Reissue } from '../../lib/reissueNotice.ts'
 import { ReissueNoticeModal } from './ReissueNoticeModal'
 import { tracingThisMonth, type TracingMonth } from '../../lib/traceSources.ts'
@@ -525,58 +526,26 @@ export function AccountDetail() {
 
   const statement = useMemo(() => {
     if (!account || !ledgers) return null
-    const input: BalanceInput = {
-      capitalHandedOver: account.capitalHandedOver,
-      handoverDate: account.handoverDate,
-      /* IN DUPLUM IS NOT PASSED ANY MORE, and that is the fix rather than an omission: the ceiling
-         binds every account, so computeBalance applies it without being told. It used to take
-         `account.inDuplum`, which is Swordfish's "has this account REACHED the ceiling" column --
-         false on everything Raptor created, so nothing capped. See accountBalance. */
-      // An account written off stopped accruing then. Swordfish records the date inside the
-      // comment ("Closed on 2026/09/07 ..."), which we do not have, so the last action stands in
-      // for it — imprecise, and labelled as such rather than presented as the closing date.
-      writtenOffAt: isWrittenOff(account.status) ? account.lastActionAt : null,
-      // Interest runs to today, not to the last monthly posting. Without this the balance stands
-      // still between postings and a collector quotes a settlement that is days out of date.
-      interestRateAnnual: account.interestRateAnnual,
-      /* TODAY IN JOHANNESBURG. toISOString is UTC, so between midnight and two in the morning
-         local it is still yesterday -- and interest would be quoted a day short. See firmDay. */
-      accrueTo: firmToday(),
-      ledgers: {
-        payments: ledgers.payments
-          .filter((p) => !p.reversedAt)
-          .map((p) => ({
-            /* THE ID TRAVELS, so an item 9 fee row can be matched to the payment it was raised
-               on and the same fee is not counted a second time. See splitFeeLedger. */
-            id: p.id,
-            /* THE FIRM'S DAY, not the first ten characters of a UTC string -- a payment dated
-               29 September is stored as 22:00 on the 28th and read back a day early. See firmDay. */
-            date: firmDay(p.receivedAt),
-            amount: p.amount,
-            paidToClient: p.paidToClient,
-            receiptFeeExclVat: p.receiptFeeLegacy,
-          })),
-        fees: ledgers.fees.map((f) => ({
-          date: firmDay(f.incurredAt),
-          at: f.incurredAt,
-          description: f.description,
-          exclVat: f.amountExclVat,
-          vat: f.vatAmount,
-          billed: f.billed,
-          segments: f.segments,
-          /* Item 9 is the receipt fee and is counted as one, not as a cost. See splitFeeLedger. */
-          annexureItem: f.annexureItem,
-          paymentId: f.paymentId,
-          /* WHETHER IT IS STILL OWED. A cancelled fee comes off the balance -- the firm, on a
-             reversal: "I agree when you reverse a payment that the receipt fee is removed" -- and
-             an imported promise to pay is the one exception. `feeStands` decides; these two are
-             what it reads, and without them every cancelled fee reads as live. */
-          cancelledAt: f.cancelledAt,
-          legacyName: f.legacyName,
-        })),
-        interest: ledgers.accruals.map((i) => ({ from: i.accruedOn, days: i.days, amount: i.amountAccrued })),
+    /*
+     * ASSEMBLED BY THE ONE FUNCTION THAT ASSEMBLES IT, because the accounts list now shows the
+     * same five figures and has to get there the same way. Written out here and again there, the
+     * list and the account would eventually disagree about one debtor -- which is exactly what the
+     * firm would be looking at when they noticed. See balanceInput.ts.
+     */
+    const input: BalanceInput = balanceInputFor({
+      account: {
+        capitalHandedOver: account.capitalHandedOver,
+        handoverDate: account.handoverDate,
+        interestRateAnnual: account.interestRateAnnual,
+        status: account.status,
+        lastActionAt: account.lastActionAt,
       },
-    }
+      ledgers,
+      /* TODAY IN JOHANNESBURG. toISOString is UTC, so between midnight and two in the morning
+         local it is still yesterday -- and interest would be quoted a day short. */
+      today: firmToday(),
+      writtenOff: isWrittenOff,
+    })
     /*
      * THE INPUT TRAVELS WITH THE STATEMENT, so the repayment calculator projects forward from the
      * very assembly the statement was built on rather than from a second one. Assembled twice, the

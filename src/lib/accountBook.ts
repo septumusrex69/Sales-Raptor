@@ -12,6 +12,7 @@
  * boundary moved on purpose rather than eroding one call site at a time.
  */
 import { supabase } from './supabase'
+import type { LedgerRows } from './balanceInput.ts'
 import type { FrozenBy } from './clientPosition.ts'
 import type { ViewCounts } from './accountViews.ts'
 import type { PractitionerKind } from './accountStanding.ts'
@@ -525,6 +526,87 @@ export interface AccountLedgers {
   accruals: LedgerAccrual[]
   /** Totals over the whole ledger, not just the rows fetched. */
   totals: { paid: number; feesExclVat: number; feesInclVat: number; interest: number; feeCount: number }
+}
+
+/**
+ * THE LEDGERS FOR A PAGE OF ACCOUNTS, so a list can show what each one actually owes.
+ *
+ * THE FIRM, of the accounts list: "in here, I want to see what the current balance is. Capital,
+ * fees, interest, paid, balance."
+ *
+ * WHY THE WHOLE LEDGER AND NOT A SUM. There is a SQL side that looks ready to answer this in one
+ * query -- `engine_balances` returns capital, interest and costs per account -- and it gives a
+ * DIFFERENT NUMBER: R817,01 against the account page's R760,00 on RRC00005, because it applies the
+ * in duplum ceiling to the interest only while computeBalance caps the aggregate. A list and an
+ * account page disagreeing about one debtor is the failure CLAUDE.md names, so the list runs the
+ * same function over the same rows instead. See balanceInput.ts for the whole of that argument.
+ *
+ * THREE QUERIES FOR THE PAGE, NEVER FOR THE BOOK. Fifty rows is three round trips rather than
+ * fifty, and the volume is whatever ledger rows those fifty carry. The busiest account on the
+ * inherited book has 822 fee rows; a page of fifty like that is the one case worth watching, and
+ * the honest lever there is a smaller page rather than a second arithmetic.
+ *
+ * EMPTY IN, EMPTY OUT, with no request made at all -- `in` on an empty list is a round trip that
+ * can only answer nothing.
+ */
+export async function fetchLedgersForAccounts(
+  accountIds: readonly string[],
+): Promise<Map<string, LedgerRows>> {
+  const out = new Map<string, LedgerRows>()
+  if (accountIds.length === 0) return out
+  const ids = [...new Set(accountIds)]
+  for (const id of ids) out.set(id, { payments: [], fees: [], accruals: [] })
+
+  /* THE SAME COLUMNS fetchLedgers ASKS FOR, because the same function reads them. A shorter list
+     here would be a balance computed from less than the account page had. */
+  const [payments, fees, accruals] = await Promise.all([
+    supabase.from('account_payments')
+      .select('account_id,id,received_at,amount,paid_to_client,reversed_at,receipt_fee_legacy')
+      .in('account_id', ids),
+    supabase.from('account_fees')
+      .select('account_id,incurred_at,description,amount_excl_vat,vat_amount,billed,segments,cancelled_at,annexure_item,payment_id,legacy_name')
+      .in('account_id', ids),
+    supabase.from('account_interest_accruals')
+      .select('account_id,accrued_on,days,amount_accrued')
+      .in('account_id', ids),
+  ])
+  for (const r of [payments, fees, accruals]) if (r.error) throw new Error(r.error.message)
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  for (const r of (payments.data ?? []) as any[]) {
+    out.get(r.account_id)?.payments.push({
+      id: r.id,
+      receivedAt: r.received_at,
+      amount: Number(r.amount),
+      paidToClient: !!r.paid_to_client,
+      reversedAt: r.reversed_at,
+      receiptFeeLegacy: r.receipt_fee_legacy === null || r.receipt_fee_legacy === undefined
+        ? null : Number(r.receipt_fee_legacy),
+    })
+  }
+  for (const r of (fees.data ?? []) as any[]) {
+    out.get(r.account_id)?.fees.push({
+      incurredAt: r.incurred_at,
+      description: r.description ?? '',
+      amountExclVat: Number(r.amount_excl_vat ?? 0),
+      vatAmount: Number(r.vat_amount ?? 0),
+      billed: r.billed !== false,
+      segments: r.segments ?? undefined,
+      annexureItem: r.annexure_item ?? null,
+      paymentId: r.payment_id ?? null,
+      cancelledAt: r.cancelled_at ?? null,
+      legacyName: r.legacy_name ?? null,
+    })
+  }
+  for (const r of (accruals.data ?? []) as any[]) {
+    out.get(r.account_id)?.accruals.push({
+      accruedOn: r.accrued_on,
+      days: Number(r.days ?? 1),
+      amountAccrued: Number(r.amount_accrued ?? 0),
+    })
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  return out
 }
 
 /**

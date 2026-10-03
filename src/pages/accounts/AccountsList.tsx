@@ -7,9 +7,16 @@ import { useAppStore } from '../../store/AppStore'
 import { ClientPicker } from '../../components/ui/ClientPicker'
 import { useAuth } from '../../store/AuthContext'
 import {
-  fetchAccounts, fetchBookFacets, fetchBookSummary, fetchViewCounts, hasCommissionDrift,
+  fetchAccounts, fetchBookFacets, fetchBookSummary, fetchLedgersForAccounts, fetchViewCounts,
+  hasCommissionDrift,
   type BookFacets, type BookSummary, type DebtorAccount,
 } from '../../lib/accountBook'
+/* THE ACCOUNT PAGE'S OWN ARITHMETIC, not a second one -- see balanceInput.ts and the note on
+   `balances` below. */
+import { computeBalance, type BalanceBreakdown } from '../../lib/accountBalance.ts'
+import { balanceInputFor } from '../../lib/balanceInput.ts'
+import { isWrittenOff } from '../../lib/accountStatus.ts'
+import { firmToday } from '../../lib/dateLabels.ts'
 import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountFilters'
 import {
   QUIET_VIEW_DAYS, activeView, landingParams, viewParams, viewsFor, type ViewCounts,
@@ -54,6 +61,22 @@ export function AccountsList() {
   const { currentUser } = useAuth()
   const [params, setParams] = useSearchParams()
   const [accounts, setAccounts] = useState<DebtorAccount[]>([])
+  /*
+   * WHAT EACH ROW ACTUALLY OWES, KEYED ON THE ACCOUNT.
+   *
+   * THE FIRM: "in here, I want to see what the current balance is. Capital, fees, interest, paid,
+   * balance."
+   *
+   * RUN THROUGH computeBalance, THE SAME FUNCTION THE ACCOUNT PAGE USES. There is a SQL side that
+   * would answer this in one query and it gives a different number -- R817,01 against the account
+   * page's R760,00 on RRC00005, because it caps in duplum on the interest alone where
+   * computeBalance caps the aggregate. A list disagreeing with the account it links to is the
+   * failure this would have been built to avoid. See balanceInput.ts.
+   *
+   * ITS OWN STATE, AND ITS OWN FAILURE. The book is the thing a collector came for; a ledger that
+   * will not load must cost them the five money columns and never the list.
+   */
+  const [balances, setBalances] = useState<Map<string, BalanceBreakdown>>(new Map())
   const [summary, setSummary] = useState<BookSummary | null>(null)
   const [facets, setFacets] = useState<BookFacets | null>(null)
   const [viewCounts, setViewCounts] = useState<ViewCounts | null>(null)
@@ -188,6 +211,55 @@ export function AccountsList() {
     })()
     return () => { cancelled = true }
   }, [query, pageSize])
+
+  /*
+   * AND WHAT EVERY VISIBLE ROW OWES.
+   *
+   * WATCHING `accounts` RATHER THAN SITTING INSIDE EITHER LOADER, because there are two of them --
+   * the first page and Load more -- and a copy in each is a copy that gets added to one of them.
+   *
+   * ONLY THE ROWS IT HAS NOT GOT, so pressing Load more fetches the ledgers for the fifty that
+   * arrived and not for the two hundred already on screen. The map is keyed on the account id and
+   * is never cleared on append for the same reason.
+   *
+   * IT CANNOT FAIL THE LIST. A collector came for the book; a ledger query that will not answer
+   * costs them five columns, and losing the page as well would be the app deciding that a figure
+   * matters more than the work.
+   */
+  useEffect(() => {
+    const missing = accounts.map((a) => a.id).filter((id) => !balances.has(id))
+    if (missing.length === 0) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await fetchLedgersForAccounts(missing)
+        if (cancelled) return
+        setBalances((prev) => {
+          const next = new Map(prev)
+          for (const a of accounts) {
+            const ledgers = rows.get(a.id)
+            if (!ledgers) continue
+            next.set(a.id, computeBalance(balanceInputFor({
+              account: {
+                capitalHandedOver: a.capitalHandedOver,
+                handoverDate: a.handoverDate,
+                interestRateAnnual: a.interestRateAnnual,
+                status: a.status,
+                lastActionAt: a.lastActionAt,
+              },
+              ledgers,
+              today: firmToday(),
+              writtenOff: isWrittenOff,
+            })))
+          }
+          return next
+        })
+      } catch {
+        /* Deliberately silent -- see above. The columns show a dash and the book is unaffected. */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [accounts, balances])
 
   async function loadMore() {
     setLoadingMore(true); setError(null)
@@ -551,8 +623,18 @@ export function AccountsList() {
                   )}
                   <th className="px-4 py-2.5 font-medium">Account</th>
                   <th className="px-4 py-2.5 font-medium">Debtor</th>
+                  {/*
+                    THE FIVE FIGURES THE FIRM ASKED FOR, IN THE ORDER THEY ASKED FOR THEM:
+                    "capital, fees, interest, paid, balance." They build to the balance left to
+                    right, which is the order somebody checks it in -- and it is the same order and
+                    the same words the account's own summary uses, so a collector moving between
+                    the two is reading one statement rather than learning a second layout.
+                  */}
                   <th className="px-4 py-2.5 font-medium text-right">Capital</th>
+                  <th className="px-4 py-2.5 font-medium text-right">Fees</th>
+                  <th className="px-4 py-2.5 font-medium text-right">Interest</th>
                   <th className="px-4 py-2.5 font-medium text-right">Paid</th>
+                  <th className="px-4 py-2.5 font-medium text-right">Balance</th>
                   <th className="px-4 py-2.5 font-medium text-right">Rate</th>
                   <th className="px-4 py-2.5 font-medium">Position</th>
                   <th className="px-4 py-2.5 font-medium">Desk</th>
@@ -584,8 +666,53 @@ export function AccountsList() {
                         {[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || '—'}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{formatCurrency(a.capitalHandedOver)}</td>
+                      {/*
+                        A DASH UNTIL THE LEDGER ANSWERS, AND A DASH IF IT NEVER DOES.
+                        
+                        Not a nought: on these four columns nought is a real figure -- an account
+                        with no fees, nothing paid -- and showing it before the ledger has been read
+                        would state something false for as long as the request takes. The dash says
+                        "not known here", which is the only true thing before it lands.
+                        
+                        FEES ARE ITEMS 1-7 PLUS THE RECEIPT FEES, both including VAT, which is what
+                        the account's own summary adds up under that word. Split into two columns
+                        they would be a distinction a collector scanning a book does not need and
+                        the firm did not ask for.
+                      */}
                       <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
-                        {a.paymentsToDate ? formatCurrency(a.paymentsToDate) : '—'}
+                        {balances.has(a.id)
+                          ? formatCurrency(balances.get(a.id)!.fees + balances.get(a.id)!.receiptFees)
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                        {balances.has(a.id) ? formatCurrency(balances.get(a.id)!.interest) : '—'}
+                      </td>
+                      {/* PAID COMES OFF THE SAME READING AS THE REST, not off `paymentsToDate` --
+                          that is the imported figure and it is not net of a reversal, so the two
+                          disagree the day somebody reverses a payment. */}
+                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                        {balances.has(a.id)
+                          ? (balances.get(a.id)!.payments ? formatCurrency(balances.get(a.id)!.payments) : '—')
+                          : '—'}
+                      </td>
+                      {/*
+                        AND THE BALANCE, WHICH IS WHAT THE FIRM ASKED FOR.
+                        
+                        IT CARRIES WHY IT STOPPED WHERE IT DID. An account at its in duplum ceiling
+                        shows a balance smaller than its parts add to, and a figure that does not
+                        add up with no explanation is the kind of thing somebody quietly stops
+                        trusting. `cappedBy` is computeBalance's own answer, so the sentence here and
+                        the account page's cannot disagree.
+                      */}
+                      <td className="px-4 py-2.5 text-right tabular-nums font-medium text-slate-800">
+                        {balances.has(a.id) ? (
+                          <span title={balances.get(a.id)!.cappedBy
+                            ? `Stopped by ${balances.get(a.id)!.cappedBy} — ${formatCurrency(balances.get(a.id)!.withheld)} cannot be recovered.`
+                            : undefined}>
+                            {formatCurrency(balances.get(a.id)!.balance)}
+                            {balances.get(a.id)!.cappedBy && <span className="text-amber-600"> *</span>}
+                          </span>
+                        ) : '—'}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums">
                         {a.commissionRate === null ? (

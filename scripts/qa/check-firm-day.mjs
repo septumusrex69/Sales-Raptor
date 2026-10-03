@@ -64,15 +64,36 @@ check('...and not UTC’s', new Date('2026-09-29T22:30:00Z').toISOString().slice
 
 /* ---------------- and the ledger is read through it ---------------- */
 
-const detail = read('src/pages/accounts/AccountDetail.tsx')
+/*
+ * THE ASSEMBLY MOVED AND THE GUARANTEE DID NOT.
+ *
+ * Building computeBalance's input used to happen inside the account page. The accounts list now
+ * shows the same five figures -- the firm: "capital, fees, interest, paid, balance" -- and a second
+ * copy there would be a second thing to drift, so the assembly lives in balanceInput.ts and both
+ * screens call it. Everything this file asserts about what reaches the balance is asserted on that
+ * one place now.
+ */
+const detail = read('src/lib/balanceInput.ts')
 ok('a payment’s date is the firm’s day', /date: firmDay\(p\.receivedAt\)/.test(detail))
 ok('...and a fee’s is too', /date: firmDay\(f\.incurredAt\)/.test(detail))
 /* THE ASSERTION THAT THE OLD WAY IS GONE, not merely that the new one is present. */
 ok('...with no UTC slicing left on the ledger',
   !/receivedAt\.slice\(0, 10\)/.test(detail) && !/incurredAt\.slice\(0, 10\)/.test(detail))
 /* INTEREST RUNS TO THE FIRM'S TODAY, or a settlement quoted at one in the morning is a day short. */
-ok('interest accrues to the firm’s today', /accrueTo: firmToday\(\)/.test(detail))
-ok('...and the statement is struck on it', /asAt=\{firmToday\(\)\}/.test(detail))
+/*
+ * THE DAY IS CHOSEN BY THE SCREEN AND USED BY THE ASSEMBLY, which is the split that lets the
+ * accounts list compute the same balance: balanceInput.ts has no clock of its own -- a pure
+ * function that asked `new Date()` could not be checked, and the server's day is not the firm's.
+ */
+const page = read('src/pages/accounts/AccountDetail.tsx')
+ok('interest accrues to the firm’s today', /today: firmToday\(\)/.test(page))
+ok('...and the assembly uses the day it is handed', /accrueTo: input\.today/.test(detail))
+ok('...rather than reading a clock of its own', !/new Date\(\)/.test(detail))
+ok('...and the statement is struck on it', /asAt=\{firmToday\(\)\}/.test(page))
+/* AND THE LIST STRIKES ITS OWN ROWS ON THE SAME DAY, or the book and the account would quote
+   interest to two different dates. */
+ok('...and so is every row of the book',
+  /today: firmToday\(\)/.test(read('src/pages/accounts/AccountsList.tsx')))
 
 /* ---------------- and the receipt fee is not dated a second early ---------------- */
 

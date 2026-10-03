@@ -49,7 +49,16 @@ const code = (p) => read(p).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*(--|\/
 const sql = read('supabase/schema.sql')
 const balance = code('src/lib/accountBalance.ts')
 const book = code('src/lib/accountBook.ts')
-const detail = code('src/pages/accounts/AccountDetail.tsx')
+/*
+ * THE ASSEMBLY MOVED AND THE GUARANTEE DID NOT.
+ *
+ * Building computeBalance's input used to happen inside the account page. The accounts list now
+ * shows the same five figures -- the firm: "capital, fees, interest, paid, balance" -- and a second
+ * copy there would be a second thing to drift, so the assembly lives in balanceInput.ts and both
+ * screens call it. Everything this file asserts about what reaches the balance is asserted on that
+ * one place now.
+ */
+const detail = code('src/lib/balanceInput.ts')
 const timeline = code('src/lib/accountTimeline.ts')
 
 /* ---------------- the three cases ---------------- */

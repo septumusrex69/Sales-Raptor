@@ -156,7 +156,16 @@ check('what was actually charged beats what would be computed',
  * that carries real money is asserted to supply them.
  */
 const book = read('src/lib/accountBook.ts')
-const detail = read('src/pages/accounts/AccountDetail.tsx')
+/*
+ * THE ASSEMBLY MOVED AND THE GUARANTEE DID NOT.
+ *
+ * Building computeBalance's input used to happen inside the account page. The accounts list now
+ * shows the same five figures -- the firm: "capital, fees, interest, paid, balance" -- and a second
+ * copy there would be a second thing to drift, so the assembly lives in balanceInput.ts and both
+ * screens call it. Everything this file asserts about what reaches the balance is asserted on that
+ * one place now.
+ */
+const detail = read('src/lib/balanceInput.ts')
 /* NOT ANCHORED TO THE END OF THE SELECT. This used to require payment_id to be the LAST column --
    `annexure_item,payment_id'` with the closing quote -- so adding legacy_name after it failed a
    check about something else entirely. What matters is that both columns are asked for. */
