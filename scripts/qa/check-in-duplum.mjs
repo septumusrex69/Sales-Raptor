@@ -92,6 +92,58 @@ const tryingToEscape = computeBalance({ ...rrc, inDuplum: false })
 check('an input asking for it not to apply changes nothing', tryingToEscape.balance, b.balance)
 
 /* ---------------------------------------------------------------------------------------------
+ * 1b. AND INTEREST IS WHAT FILLS THE CEILING
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM: "because interest doesn't charge VAT, it would be beneficial for us if the interest
+ * continues to run, and if the interest runs, it takes interest rather than the Annexure B fees. So
+ * the Annexure B fees is pushed out and the interest comes in. The more interest there is, the more
+ * money we make... interest precedes Annexure B fees in an in duplum scenario."
+ *
+ * THE TOTAL DOES NOT MOVE. The ceiling is the capital whichever charge fills it -- so this is not
+ * about how much the debtor pays, which is why the balance assertions above are unchanged. It is
+ * about WHICH charge gives way, and that is worth 13%: a rand of Annexure B fee is 87 cents to the
+ * firm and 13 to SARS, a rand of interest carries no VAT at all.
+ */
+check('the ceiling is still the same total', b.balance, 760)
+/* THE FEES ARE WHAT IS PUSHED OUT, all R61,91 of it, because R4,90 of interest fits easily. */
+check('...and it is the Annexure B fees that give way', b.withheldFees, 61.91)
+check('...with the interest kept in full', b.withheldInterest, 0)
+check('...and the two account for the whole of it', b.withheldFees + b.withheldInterest, b.withheld)
+
+/*
+ * AND WHERE INTEREST ALONE PASSES THE CEILING, it is clipped too -- there is no more room to give
+ * it, and the fees get nothing at all. The order decides who gives way first, not whether anybody
+ * does.
+ */
+const interestHeavy = computeBalance({
+  capitalHandedOver: 1000,
+  handoverDate: '2024-01-01',
+  ledgers: {
+    payments: [],
+    fees: [{ date: '2024-02-01', description: 'Costs', exclVat: 100, vat: 15, billed: true }],
+    interest: [{ from: '2024-02-01', days: 30, amount: 5000 }],
+  },
+})
+check('interest alone can reach the ceiling', interestHeavy.balance, 2000)
+check('...and then no fee is recoverable at all', interestHeavy.withheldFees, 115)
+check('...with the rest coming off the interest', interestHeavy.withheldInterest, 4000)
+check('...and the two still account for the whole of it',
+  interestHeavy.withheldFees + interestHeavy.withheldInterest, interestHeavy.withheld)
+
+/*
+ * AND THE SENTENCE A COLLECTOR READS NAMES THE FEES. "Interest and fees stopped at the ceiling"
+ * was true of the total and silent on the composition -- which is the half the firm's decision is
+ * entirely about.
+ */
+const balanceLibWords = read('src/lib/accountBalance.ts')
+ok('the statement says interest takes the ceiling first',
+  /Interest takes it first/.test(balanceLibWords))
+ok('...and names the fees as what is not recoverable',
+  /Annexure B fees is not recoverable/.test(balanceLibWords))
+
+/* ---------------------------------------------------------------------------------------------
  * 2. AND IT APPLIES WHERE NOBODY ASKED
  * ------------------------------------------------------------------------------------------- */
 
@@ -125,6 +177,9 @@ const under = computeBalance({
 })
 check('an account under the ceiling is not capped', under.cappedBy, undefined)
 check('...and withholds nothing', under.withheld, 0)
+/* AND GIVES UP NEITHER CHARGE: the order only decides who gives way where something has to. */
+check('...pushing out no fees', under.withheldFees, 0)
+check('...and no interest', under.withheldInterest, 0)
 
 /* ---------------------------------------------------------------------------------------------
  * 3. NOTHING IN THE SOURCE ASKS FIRST
@@ -152,10 +207,64 @@ for (const [what, file] of [
 const openInterest = lastFunction('open_interest')
 ok('open_interest is found in the file at all', openInterest.length > 0)
 ok('...and applies the ceiling',
-  /v_recoverable := greatest\(0, least\(v_accrued, v_ceiling - v_non_capital\)\)/.test(openInterest))
+  /v_recoverable := greatest\(0, least\(v_accrued, v_ceiling - v_posted_recoverable\)\)/.test(openInterest))
 ok('...at the capital handed over, not at twice it',
   /v_ceiling := greatest\(coalesce\(v_acct\.capital_handed_over, 0\), 0\)/.test(openInterest))
 ok('...without asking a column first', !/if v_acct\.in_duplum then/.test(openInterest))
+/*
+ * AND THE NEW ACCRUAL IS CLIPPED BY WHAT INTEREST HAS ALREADY CLAIMED, NOT BY THE FEES.
+ *
+ * THIS LINE USED TO READ `v_ceiling - v_non_capital`, where non-capital was the fees plus the
+ * posted interest -- fees first, interest last. On an account whose fees had reached the ceiling
+ * every month posted `amount_recoverable = 0`, and once posted that is a financial record and the
+ * interest is gone for good. RRC00005 was in exactly that state.
+ */
+ok('...and interest is clipped only by the interest already claimed',
+  /v_ceiling - v_posted_recoverable/.test(openInterest))
+ok('...never by the fees', !/v_non_capital/.test(openInterest))
+/* THE CLAIM IS THE RECOVERABLE HALF, not what the debt earned: a period posted while capped used
+   up only what it was allowed. */
+ok('...counted as what was allowed rather than what accrued',
+  /sum\(a\.amount_recoverable\), 0\) into v_posted_recoverable/.test(openInterest))
+
+/*
+ * AND THE COSTS GIVE WAY, WHICH THEY NEVER DID. engine_balances capped nothing at all, so the split
+ * engine would allocate a payment against fees beyond the ceiling -- R57,01 on RRC00005, every cent
+ * of it VAT. That was reported to the firm as an unresolved discrepancy this morning; their
+ * decision closes it.
+ */
+const engine = lastFunction('engine_balances')
+ok('the split engine is found', engine.length > 0)
+ok('...and clips the costs to what in duplum leaves',
+  /costs := least\(costs, public\.in_duplum_cost_room\(p_account\)\)/.test(engine))
+/*
+ * CLIPPED BEFORE THE ALLOCATIONS ARE NETTED OFF, so an account that has already had costs taken is
+ * measured against the same ceiling as one that has not.
+ *
+ * COMPARED ON THE STATEMENT, NOT ON THE NAME. This read `indexOf('in_duplum_cost_room')`, which
+ * finds the function's own COMMENT explaining the clip -- so moving the clip itself to the wrong
+ * side of the netting left the assertion passing. CLAUDE.md's order-only trap, met in its other
+ * form: not a -1, but a match on prose above the code it was meant to be about.
+ */
+const clipAt = engine.indexOf('costs := least(costs, public.in_duplum_cost_room')
+const netAt = engine.indexOf('sum(a.to_costs)')
+ok('the clip and the netting are both there', clipAt >= 0 && netAt >= 0)
+ok('...and the clip comes before what has already been taken comes off', clipAt < netAt)
+/* AND NEVER NEGATIVE: an account already paid more costs than the ceiling now allows owes no more
+   of them, and a negative would pull the split the other way. */
+ok('...and never reads as a negative', /costs := greatest\(0, costs\)/.test(engine))
+
+/*
+ * ONE DEFINITION OF THE ROOM, because three readers need it and written out in each they would
+ * disagree about how much of one account's fees may be collected.
+ */
+const room = lastFunction('in_duplum_cost_room')
+ok('there is one definition of what the fees may take', room.length > 0)
+ok('...measured against the capital handed over',
+  /coalesce\(d\.capital_handed_over, 0\)/.test(room))
+ok('...less what interest has been allowed', /sum\(a\.amount_recoverable\)/.test(room))
+/* A CEILING OF NOUGHT LEAVES NO ROOM, which is the honest answer rather than an unbounded one. */
+ok('...and never goes below nothing', /greatest\(0,/.test(room))
 /* BOTH FIGURES SURVIVE. `amount_accrued` is what the debt earned and `amount_recoverable` is what
    may be collected; they diverge on a capped account and the client is owed the honest pair. */
 ok('...and still returns what was earned as well as what may be taken',

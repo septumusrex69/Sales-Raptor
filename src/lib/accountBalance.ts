@@ -140,6 +140,26 @@ export interface BalanceBreakdown {
   /** How much interest and fees the cap withheld. Nonzero only when `cappedBy` is set. */
   withheld: number
   /**
+   * WHICH SIDE OF THE CEILING THE WITHHOLDING FELL ON, and the firm chose it.
+   *
+   * THE FIRM: "because interest doesn't charge VAT, it would be beneficial for us if the interest
+   * continues to run, and if the interest runs, it takes interest rather than the Annexure B fees.
+   * So the Annexure B fees is pushed out and the interest comes in... interest precedes Annexure B
+   * fees in an in duplum scenario."
+   *
+   * THE CEILING IS A FIXED SUM AND THE ONLY QUESTION IS WHAT FILLS IT. A rand of Annexure B fee is
+   * 87 cents to the firm and 13 to SARS; a rand of interest carries no VAT and is a whole rand. In
+   * duplum caps the AGGREGATE of non-capital and says nothing about which component gives way, so
+   * taking the interest first and letting the fees be the thing pushed out is the firm's to decide
+   * -- and it is worth 13% of whatever the ceiling holds.
+   *
+   * REPORTED RATHER THAN NETTED OFF `fees`. What was CHARGED is a fact about the account and the
+   * money panel's own vocabulary already separates charged from recoverable -- "charged / taken /
+   * left / cannot take". These two say which bucket the "cannot take" belongs to.
+   */
+  withheldFees: number
+  withheldInterest: number
+  /**
    * Interest since the last posted accrual, computed to `accrueTo` and already included in
    * `interest` above. Kept separate so a statement can label the line as still running rather
    * than present it as charged.
@@ -380,9 +400,38 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
    * filter have always claimed to mean ("non-capital has reached the capital handed over").
    */
   let recoverableNonCapital = nonCapital
+  /*
+   * AND WHEN IT BINDS, INTEREST IS WHAT FILLS THE CEILING FIRST.
+   *
+   * THE FIRM: "because interest doesn't charge VAT, it would be beneficial for us if the interest
+   * continues to run, and if the interest runs, it takes interest rather than the Annexure B fees.
+   * So the Annexure B fees is pushed out and the interest comes in. The more interest there is, the
+   * more money we make... interest precedes Annexure B fees in an in duplum scenario."
+   *
+   * THE TOTAL DOES NOT MOVE. The ceiling is the capital either way; what changes is the COMPOSITION
+   * of what fills it, and that is worth the VAT. A rand of Annexure B fee is 87 cents to the firm
+   * and 13 to SARS; a rand of interest carries none. On a capped account every rand of fee that
+   * interest displaces is 13 cents the firm keeps instead of remitting.
+   *
+   * IT IS THE FIRM'S TO CHOOSE. NCA s103(5) caps the aggregate of interest, fees and costs; it is
+   * silent on which of them gives way, so appropriating the ceiling to interest first is a
+   * commercial decision rather than a reading of the statute. They have made it.
+   *
+   * AND THE CEILING IS STILL MEASURED INCLUDING VAT, which the firm settled in the same breath:
+   * "whether or not there's VAT or not, in duplum reached is in duplum reached." The VAT question
+   * was whether to carve it out of the MEASUREMENT; the answer is no. What it buys is the order.
+   */
+  let withheldFees = 0
+  let withheldInterest = 0
   if (nonCapital > capital) {
     recoverableNonCapital = capital
     withheld = roundToCents(nonCapital - capital)
+    /* INTEREST TAKES WHAT IT CAN, up to the whole ceiling where interest alone exceeds it -- and
+       the fees are what is left over, which may be nothing at all. */
+    const allInterest = roundToCents(interest + open.amount)
+    const interestKept = Math.min(allInterest, capital)
+    withheldInterest = roundToCents(allInterest - interestKept)
+    withheldFees = roundToCents(withheld - withheldInterest)
     cappedBy = 'in duplum'
   } else if (stopAt) {
     cappedBy = 'written off'
@@ -427,6 +476,8 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     settlement: roundToCents(balance + settlementFee),
     cappedBy,
     withheld,
+    withheldFees,
+    withheldInterest,
     interestAccruing: open.amount,
     interestAccruingDays: open.days,
     interestAccruingFrom: open.from,
@@ -775,9 +826,17 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
   return {
     lines,
     breakdown,
+    /*
+     * AND IT NAMES WHICH CHARGE GAVE WAY, now that the firm has decided it: "interest precedes
+     * Annexure B fees in an in duplum scenario", because interest carries no VAT. "Interest and
+     * fees stopped" was true of the total and said nothing about the composition -- which is the
+     * half worth 13% of the ceiling.
+     */
     note: breakdown.cappedBy === 'in duplum'
-      ? `Interest and fees stopped at the in duplum ceiling. ${money(breakdown.withheld)} accrued beyond it and is not recoverable`
-        + `${breakdown.settlementFee === 0 ? ', and the receipt fee on a settlement falls away with it' : ''}.`
+      ? `At the in duplum ceiling. Interest takes it first, so ${money(breakdown.withheldFees)} of `
+        + `Annexure B fees is not recoverable`
+        + `${breakdown.withheldInterest > 0 ? `, and ${money(breakdown.withheldInterest)} of interest with it` : ''}`
+        + `${breakdown.settlementFee === 0 ? ', and the receipt fee on a settlement falls away too' : ''}.`
       : breakdown.cappedBy === 'written off'
         ? `The account was written off on ${stopAt}. ${money(breakdown.withheld)} of later interest and fees is excluded.`
         : undefined,

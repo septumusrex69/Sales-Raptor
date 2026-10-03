@@ -20345,3 +20345,317 @@ select d.id as account_id,
   left join cost_buckets cb on cb.account_id = d.id
   left join interest i on i.account_id = d.id
   left join allocated al on al.account_id = d.id;
+
+
+-- ============================================================================
+-- IN DUPLUM: INTEREST FILLS THE CEILING BEFORE THE ANNEXURE B FEES DO.
+--
+-- THE FIRM: "the one thing for in duplum -- it shouldn't charge the VAT. This is inclusive. Whether
+-- or not there's VAT or not, in duplum reached is in duplum reached. However, because interest
+-- doesn't charge VAT, it would be beneficial for us if the interest continues to run, and if the
+-- interest runs, it takes interest rather than the Annexure B fees. So the Annexure B fees is
+-- pushed out and the interest comes in. The more interest there is, the more money we make,
+-- ultimately... interest precedes Annexure B fees in an in duplum scenario."
+--
+-- TWO ANSWERS IN ONE BREATH, AND THE FIRST SETTLES AN OPEN QUESTION. The ceiling is measured
+-- INCLUDING VAT -- that was put to them this morning and this is the answer. What the VAT buys is
+-- not a smaller measurement but an ORDER.
+--
+-- THE TOTAL DOES NOT MOVE EITHER WAY. The ceiling is the capital handed over whichever charge
+-- fills it. What changes is the COMPOSITION, and that is worth 13%: a rand of Annexure B fee is 87
+-- cents to the firm and 13 to SARS, a rand of interest carries no VAT and is a whole rand. On a
+-- capped account every rand of fee that interest displaces is 13 cents the firm keeps instead of
+-- remitting.
+--
+-- IT IS THE FIRM'S TO CHOOSE. NCA s103(5) caps the AGGREGATE of interest, fees and costs and is
+-- silent on which of them gives way, so appropriating the ceiling to interest first is a commercial
+-- decision rather than a reading of the statute. They have made it.
+--
+-- WHAT WAS HAPPENING INSTEAD, AND IT COMPOUNDED. open_interest clipped each new accrual by
+-- `ceiling - (fees + posted interest)` -- fees first, interest last -- so on an account whose fees
+-- had already reached the ceiling every month posted `amount_recoverable = 0`. Once posted that is
+-- a financial record and the interest is gone for good. RRC00005 was in exactly that state: R437,01
+-- of fees against a R380,00 ceiling, with an accrual due to be written off to nought. It now keeps
+-- its R4,90.
+--
+-- AND THE COSTS NOW GIVE WAY, WHICH THEY NEVER DID. engine_balances capped nothing at all: the
+-- split engine would allocate a payment against fees beyond the ceiling -- R57,01 on RRC00005,
+-- every cent of it VAT. That was the discrepancy reported to the firm this morning as unresolved,
+-- and this closes it: engine_balances and computeBalance now agree at R760,00 on that account.
+--
+-- ONE DEFINITION OF THE ROOM. in_duplum_cost_room is the single place that decides how much of an
+-- account's fees in duplum still allows; engine_balances reads it rather than working it out again.
+-- ============================================================================
+
+create or replace function public.open_interest(
+  p_account uuid, p_as_at date, p_exclude_payment uuid default null)
+returns table (
+  from_day date, days integer, opening_balance numeric,
+  accrued numeric, recoverable numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+  v_covered date;
+  v_from date;
+  v_monthly numeric;
+  v_opening numeric;
+  v_balance numeric;
+  v_accrued numeric := 0;
+  v_month numeric;
+  v_cursor date;
+  v_seg_end date;
+  v_month_end date;
+  v_dim integer;
+  v_day date;
+  v_posted numeric;
+  v_posted_recoverable numeric;
+  v_ceiling numeric;
+  v_recoverable numeric;
+  v_days date[];
+  v_deltas numeric[];
+  v_i integer := 1;
+  v_n integer;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then return; end if;
+
+  /* A RATE OF NOUGHT IS THE CLIENT'S DECISION AND NOT OURS TO OVERRIDE. The firm: "whether or not
+     they charge the interest is up to them. So we will not ask Raptor to calculate this." */
+  if coalesce(v_acct.interest_rate_annual, 0) <= 0 then return; end if;
+
+  /* WRITTEN OFF STOPPED ACCRUING WHEN IT WAS WRITTEN OFF. computeBalance returns no open period at
+     all for one, so reporting one here would put a figure on a screen the account page denies. */
+  if coalesce(v_acct.status, '') ~* 'written.off' then return; end if;
+
+  /* WHERE THE CLOCK PICKS UP: the last day a posted accrual covers, or -- with nothing posted --
+     the day BEFORE the handover, so that the handover day itself is the first day that accrues.
+     `days` is Swordfish's EXCLUSIVE offset, so accrued_on + days is the last covered day. */
+  select max(accrued_on + a.days) into v_covered
+    from public.account_interest_accruals a where a.account_id = p_account;
+  if v_covered is null then v_covered := v_acct.handover_date - 1; end if;
+  /* Neither a posted accrual nor a handover date: no day the firm can point at as the day the debt
+     became theirs, so nothing accrues rather than something dated from the row's creation. */
+  if v_covered is null then return; end if;
+
+  v_from := v_covered + 1;
+  if v_from > p_as_at then return; end if;
+
+  /* WHAT THE PERIOD OPENS ON. Capital, plus every accrual already posted, plus every movement
+     dated on or before the anchor. What falls AFTER the anchor is not in here -- it lands during
+     the period, on its own day, which is the whole point. */
+  select coalesce(sum(a.amount_accrued), 0) into v_posted
+    from public.account_interest_accruals a where a.account_id = p_account;
+  /* WHAT INTEREST HAS ALREADY CLAIMED AGAINST THE CEILING, which is a different figure from what
+     the debt earned: a period posted while the account was capped carries a smaller recoverable
+     than accrued, and it is the recoverable half that has used the ceiling up. */
+  select coalesce(sum(a.amount_recoverable), 0) into v_posted_recoverable
+    from public.account_interest_accruals a where a.account_id = p_account;
+  v_balance := greatest(coalesce(v_acct.capital_handed_over, 0), 0) + v_posted;
+  select v_balance + coalesce(sum(m.delta), 0) into v_balance
+    from public.account_movements(p_account, p_exclude_payment) m where m.on_day <= v_covered;
+  v_opening := round(v_balance, 2);
+  v_balance := v_opening;
+
+  /* The movements inside the period, one entry per day, in order. Read once into arrays: asking
+     the view again on each of five hundred days is the same answer five hundred times. */
+  select array_agg(x.on_day order by x.on_day), array_agg(x.delta order by x.on_day)
+    into v_days, v_deltas
+    from (select m.on_day, sum(m.delta) as delta
+            from public.account_movements(p_account, p_exclude_payment) m
+           where m.on_day >= v_from and m.on_day <= p_as_at
+           group by m.on_day) x;
+  v_n := coalesce(array_length(v_days, 1), 0);
+
+  v_monthly := v_acct.interest_rate_annual / 100.0 / 12.0;
+
+  v_cursor := v_from;
+  while v_cursor <= p_as_at loop
+    v_month_end := (date_trunc('month', v_cursor) + interval '1 month - 1 day')::date;
+    v_seg_end := least(v_month_end, p_as_at);
+    v_dim := extract(day from v_month_end)::integer;
+    /* The month's interest is accumulated and joined to the balance ONCE, at the close. Adding it
+       day by day would compound within the month, which the posted history does not do -- the book
+       has always charged a flat 2% of the running balance per month. */
+    v_month := 0;
+    v_day := v_cursor;
+    while v_day <= v_seg_end loop
+      -- Everything dated today lands before today earns anything.
+      while v_i <= v_n and v_days[v_i] <= v_day loop
+        v_balance := v_balance + v_deltas[v_i];
+        v_i := v_i + 1;
+      end loop;
+      -- Guarded above zero because an overpaid account must not earn the debtor interest.
+      if v_balance > 0 then
+        v_month := v_month + v_balance * v_monthly / v_dim;
+      end if;
+      v_day := v_day + 1;
+    end loop;
+    v_accrued := v_accrued + v_month;
+    v_balance := v_balance + v_month;
+    v_cursor := v_seg_end + 1;
+  end loop;
+
+  v_accrued := round(v_accrued, 2);
+  if v_accrued <= 0 then return; end if;
+
+  /* IN DUPLUM. Non-capital may not pass the capital handed over, and the ceiling is fixed there
+     rather than recalculated as the balance falls. `recoverable` is what may actually be collected
+     and `accrued` is what the debt earned: they diverge on a capped account and both are returned,
+     because the client is owed an honest account of what was written off rather than a quietly
+     smaller number. engine_balances counts the recoverable half, so that is the half a split may
+     take. */
+  /* AND IT IS NOT GATED ON A COLUMN ANY MORE. `debtor_accounts.in_duplum` is Swordfish's own "In
+     Duplum" column -- Yes or No, meaning THIS ACCOUNT HAS REACHED THE CEILING -- and it was read
+     here as "this account is SUBJECT to the rule", which is a different question whose answer is
+     yes on every account. Everything Raptor created carried false, so no ceiling engaged.
+     In duplum at common law binds every debt; NCA s103(5) is the wider version and binds credit
+     agreements. Raptor applies the wider one to everything, which on a debt the NCA does not reach
+     under-recovers rather than over-recovers. accountBalance.ts holds the browser's half of this
+     and the whole of the argument. */
+  /*
+   * AND INTEREST FILLS THE CEILING BEFORE THE ANNEXURE B FEES DO.
+   *
+   * THE FIRM: "because interest doesn't charge VAT, it would be beneficial for us if the interest
+   * continues to run, and if the interest runs, it takes interest rather than the Annexure B fees.
+   * So the Annexure B fees is pushed out and the interest comes in. The more interest there is, the
+   * more money we make... interest precedes Annexure B fees in an in duplum scenario."
+   *
+   * THIS LINE USED TO DO THE OPPOSITE. It clipped the new accrual by `ceiling - (fees + posted)`,
+   * so on an account whose fees had already reached the ceiling every month posted
+   * `amount_recoverable = 0` -- and once posted that is a financial record and the interest is gone
+   * for good. RRC00005 was in exactly that state: R437,01 of fees against a R380,00 ceiling, and an
+   * accrual due to be written off to nought.
+   *
+   * THE TOTAL IS UNCHANGED EITHER WAY -- the ceiling is the capital. What changes is WHICH charge
+   * fills it, and that is worth the VAT: a rand of fee is 87 cents to the firm and 13 to SARS, a
+   * rand of interest is a whole rand. engine_balances carries the other half of this, clipping the
+   * COSTS by what interest leaves, so the two cannot add up to more than the ceiling between them.
+   *
+   * MEASURED INCLUDING VAT STILL, which the firm settled in the same breath: "whether or not
+   * there's VAT or not, in duplum reached is in duplum reached."
+   */
+  v_ceiling := greatest(coalesce(v_acct.capital_handed_over, 0), 0);
+  v_recoverable := greatest(0, least(v_accrued, v_ceiling - v_posted_recoverable));
+
+  /* `days` IS THE EXCLUSIVE OFFSET, so from_day + days is the last day covered -- p_as_at. The
+     convention is Swordfish's and `accrualEnd` holds the browser's half of it. */
+  from_day := v_from;
+  days := (p_as_at - v_from);
+  opening_balance := v_opening;
+  accrued := v_accrued;
+  recoverable := v_recoverable;
+  return next;
+end $$;
+
+/*
+ * WHAT THE ANNEXURE B FEES MAY TAKE, ONCE INTEREST HAS HAD ITS SHARE.
+ *
+ * ONE DEFINITION BECAUSE THREE READERS NEED IT: the split engine, the money view, and anything that
+ * reports what is left to take. Written out in each, they would eventually disagree about how much
+ * of one account's fees may be collected -- and the one that is wrong would still look like a
+ * figure about that account.
+ *
+ * INTEREST IS COUNTED AS RECOVERABLE, NOT AS ACCRUED. What the debt earned beyond the ceiling was
+ * never ours; what has been allowed against the ceiling is what has used it up. Interest already
+ * TAKEN still counts, because taking it did not give the room back.
+ *
+ * A CEILING OF NOUGHT LEAVES NO ROOM, which is the honest answer rather than an unbounded one: an
+ * account with no capital handed over is a data problem, and letting it recover unlimited fees
+ * would be this function deciding otherwise.
+ */
+create or replace function public.in_duplum_cost_room(p_account uuid)
+returns numeric
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $fn$
+  select greatest(0, greatest(coalesce(d.capital_handed_over, 0), 0)
+    - coalesce((select sum(a.amount_recoverable)
+                  from public.account_interest_accruals a
+                 where a.account_id = d.id), 0))
+  from public.debtor_accounts d
+ where d.id = p_account;
+$fn$;
+
+comment on function public.in_duplum_cost_room(uuid) is
+  'How much of an account''s Annexure B fees in duplum still allows, after interest has taken its '
+  'share of the ceiling. The firm''s decision: interest precedes the fees, because interest carries '
+  'no VAT. The one definition -- engine_balances and account_money_position both read it.';
+
+revoke all on function public.in_duplum_cost_room(uuid) from public;
+grant execute on function public.in_duplum_cost_room(uuid) to authenticated;
+
+create or replace function public.engine_balances(p_account uuid, p_exclude_payment uuid)
+returns table (interest numeric, costs numeric, capital numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then
+    interest := 0; costs := 0; capital := 0; return next; return;
+  end if;
+
+  /* Interest is `amount_recoverable`, not `amount_accrued`: interest the in duplum ceiling put out
+     of reach was never ours to take, and half A must not pretend otherwise. */
+  select coalesce(sum(amount_recoverable), 0) into interest
+    from public.account_interest_accruals where account_id = p_account;
+  select interest - coalesce(sum(a.to_interest), 0) into interest
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment)
+     and a.status <> 'reversed';
+
+  /* Costs INCLUDING VAT -- the firm's decision 1 -- with fees raised above the items 1-7 ceiling
+     (billed = false) left out, because those may not be recovered, and cancelled fees left out
+     through fee_stands, which keeps the one exception the firm named. */
+  select coalesce(sum(f.amount_excl_vat + coalesce(f.vat_amount, 0)), 0) into costs
+    from public.account_fees f
+   where f.account_id = p_account
+     and public.fee_stands(f.cancelled_at, f.legacy_name)
+     and f.billed is not false
+     and (p_exclude_payment is null or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid) <> p_exclude_payment);
+
+  /*
+   * AND IN DUPLUM TAKES THEM DOWN TO WHAT INTEREST LEAVES -- see in_duplum_cost_room, which is the
+   * one place that decides it.
+   *
+   * THIS FUNCTION DID NOT CAP THE COSTS AT ALL. open_interest clipped the interest and the fees
+   * stood at whatever had been raised, so on an account at its ceiling the split engine would
+   * allocate a payment against fees that are not recoverable -- R57,01 of it on RRC00005, every
+   * cent of which is VAT. With interest now taking its share first, leaving the costs uncapped
+   * would let the two add up to MORE than the ceiling between them, which is the thing the ceiling
+   * exists to stop.
+   *
+   * CLIPPED BEFORE THE ALLOCATIONS ARE NETTED OFF, so an account that has already had costs taken
+   * is measured against the same ceiling as one that has not.
+   */
+  costs := least(costs, public.in_duplum_cost_room(p_account));
+
+  select costs - coalesce(sum(a.to_costs), 0) into costs
+    from public.payment_allocations a
+   where a.account_id = p_account
+     and (p_exclude_payment is null or a.payment_id <> p_exclude_payment)
+     and a.status <> 'reversed';
+  /* An account that has already been paid more costs than the ceiling now allows owes no more of
+     them; it must never read as a negative and pull the split the other way. */
+  costs := greatest(0, costs);
+
+  capital := greatest(coalesce(v_acct.capital_outstanding, v_acct.capital_handed_over, 0), 0);
+  return next;
+end $$;
+
+comment on function public.engine_balances(uuid, uuid) is
+  'What an account still owes in interest, costs (incl VAT) and capital, net of what earlier '
+  'payments took. In duplum gives interest the ceiling first and the costs what is left -- the '
+  'firm''s decision, because interest carries no VAT. Shared by allocate_payment and '
+  'preview_allocation so a collector''s dry run cannot promise something the engine would not do.';

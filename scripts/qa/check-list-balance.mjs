@@ -151,6 +151,18 @@ check('the five money columns are in the firm’s own order',
   headings.slice(0, 5), ['Capital', 'Fees', 'Interest', 'Paid', 'Balance'])
 ok('...with the rate after them', headings[5] === 'Rate')
 
+/*
+ * AND THE DAY IT CAME IN. THE FIRM: "something on there that can be added is the hand-over date as
+ * well." It is how old the matter is -- the first thing asked of a row nobody has worked -- and it
+ * is what prescription runs from.
+ */
+ok('the book says when each account was handed over', /font-medium">Handed over<\/th>/.test(list))
+ok('...off the account’s own handover date', /a\.handoverDate \? formatDate\(a\.handoverDate\)/.test(list))
+/* A DASH WHERE THERE IS NONE, not a blank: half the inherited book arrived without one, and a
+   column that quietly shows nothing reads as a rendering fault. */
+ok('...and a dash where there is none',
+  /a\.handoverDate \? formatDate\(a\.handoverDate\) : '—'/.test(list))
+
 ok('the list computes with the account page’s own function', /computeBalance\(balanceInputFor\(/.test(list))
 ok('...over the ledgers for the rows it is showing', /fetchLedgersForAccounts\(missing\)/.test(list))
 /* ONLY THE ROWS IT HAS NOT GOT, so Load more fetches fifty ledgers and not two hundred and fifty. */
@@ -180,8 +192,12 @@ ok('...and none of them falls back to a nought', !/balances\.get\(a\.id\)\?\.\w+
 
 /* THE CAP IS EXPLAINED WHERE IT BITES. A balance smaller than its own parts with nothing saying
    why is a figure people quietly stop trusting. */
-ok('a capped balance says what stopped it', /Stopped by \$\{balances\.get\(a\.id\)!\.cappedBy\}/.test(list))
-ok('...and how much cannot be recovered', /\.withheld\)\} cannot be recovered/.test(list))
+ok('a capped balance says what stopped it', /At the in duplum ceiling\./.test(list))
+/* AND WHICH CHARGE GAVE WAY, now that the firm has decided it: "interest precedes Annexure B fees
+   in an in duplum scenario", because interest carries no VAT. */
+ok('...naming the fees as what is pushed out',
+  /withheldFees\)\} of Annexure B fees cannot be recovered/.test(list))
+ok('...and why they are', /interest takes the ceiling first/.test(list))
 
 /*
  * PAID COMES OFF THE SAME READING AS THE REST. `paymentsToDate` is the imported figure and is not

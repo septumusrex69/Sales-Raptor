@@ -370,7 +370,20 @@ ok('in duplum caps what is recoverable', /v_recoverable := greatest\(0, least\(v
 ok('...on every account, with no column asked first', !/if v_acct\.in_duplum then/.test(accrue))
 ok('...at the capital handed over, not at twice it',
   /v_ceiling := greatest\(coalesce\(v_acct\.capital_handed_over, 0\), 0\)/.test(accrue))
-ok('...never below nothing', /greatest\(0, least\(v_accrued, v_ceiling - v_non_capital\)\)/.test(accrue))
+/*
+ * AND INTEREST IS CLIPPED BY WHAT INTEREST HAS ALREADY CLAIMED, NOT BY THE FEES.
+ *
+ * THIS READ `v_ceiling - v_non_capital` -- the fees plus the posted interest, so the fees filled
+ * the ceiling and the accrual took what was left. THE FIRM reversed it: "because interest doesn't
+ * charge VAT... it takes interest rather than the Annexure B fees. So the Annexure B fees is pushed
+ * out and the interest comes in... interest precedes Annexure B fees in an in duplum scenario."
+ *
+ * IT COMPOUNDED THE OTHER WAY ROUND. On an account whose fees had reached the ceiling every month
+ * posted `amount_recoverable = 0`, and a posted accrual is a financial record -- that interest was
+ * gone for good. See check-in-duplum, which holds the whole of the rule.
+ */
+ok('...never below nothing',
+  /greatest\(0, least\(v_accrued, v_ceiling - v_posted_recoverable\)\)/.test(accrue))
 /* BOTH FIGURES SURVIVE THE HANDOVER BETWEEN THE TWO FUNCTIONS: open_interest returns them and
    accrue_interest_to writes them into their own columns. Returning only the recoverable half would
    lose what the debt actually earned, which is what the client is owed an account of. */

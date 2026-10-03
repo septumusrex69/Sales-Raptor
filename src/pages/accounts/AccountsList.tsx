@@ -623,6 +623,10 @@ export function AccountsList() {
                   )}
                   <th className="px-4 py-2.5 font-medium">Account</th>
                   <th className="px-4 py-2.5 font-medium">Debtor</th>
+                  {/* THE FIRM: "something on there that can be added is the hand-over date as
+                      well." It is how old the matter is, which is the first thing asked of a row
+                      nobody has worked -- and it is what prescription runs from. */}
+                  <th className="px-4 py-2.5 font-medium">Handed over</th>
                   {/*
                     THE FIVE FIGURES THE FIRM ASKED FOR, IN THE ORDER THEY ASKED FOR THEM:
                     "capital, fees, interest, paid, balance." They build to the balance left to
@@ -665,6 +669,9 @@ export function AccountsList() {
                       <td className="px-4 py-2.5 text-slate-700">
                         {[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || '—'}
                       </td>
+                      <td className="px-4 py-2.5 text-slate-500">
+                        {a.handoverDate ? formatDate(a.handoverDate) : '—'}
+                      </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{formatCurrency(a.capitalHandedOver)}</td>
                       {/*
                         A DASH UNTIL THE LEDGER ANSWERS, AND A DASH IF IT NEVER DOES.
@@ -705,10 +712,18 @@ export function AccountsList() {
                         the account page's cannot disagree.
                       */}
                       <td className="px-4 py-2.5 text-right tabular-nums font-medium text-slate-800">
+                        {/*
+                          AND THE HOVER NAMES WHICH CHARGE GAVE WAY, now that the firm has decided
+                          it. Their rule: "interest precedes Annexure B fees in an in duplum
+                          scenario", because interest carries no VAT and a rand of fee is 87 cents
+                          to the firm. So the sentence names the FEES, which is what is pushed out.
+                        */}
                         {balances.has(a.id) ? (
-                          <span title={balances.get(a.id)!.cappedBy
-                            ? `Stopped by ${balances.get(a.id)!.cappedBy} — ${formatCurrency(balances.get(a.id)!.withheld)} cannot be recovered.`
-                            : undefined}>
+                          <span title={balances.get(a.id)!.cappedBy === 'in duplum'
+                            ? `At the in duplum ceiling. ${formatCurrency(balances.get(a.id)!.withheldFees)} of Annexure B fees cannot be recovered — interest takes the ceiling first.`
+                            : balances.get(a.id)!.cappedBy
+                              ? `Stopped by ${balances.get(a.id)!.cappedBy} — ${formatCurrency(balances.get(a.id)!.withheld)} cannot be recovered.`
+                              : undefined}>
                             {formatCurrency(balances.get(a.id)!.balance)}
                             {balances.get(a.id)!.cappedBy && <span className="text-amber-600"> *</span>}
                           </span>
