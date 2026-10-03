@@ -1,25 +1,26 @@
 /**
- * THE ALLEGED DISPUTE IS THREE DAYS LONG.
+ * THE ALLEGED-DISPUTE SEQUENCE IS RETIRED, AND THE SECTION 129 CARRIES IT.
  *
- * THE FIRM: day 1 ask for it in writing with 48 hours to respond, day 3 remind with 24 hours, day
- * 4 deemed undisputed.
+ * THE FIRM: "let's just leave that out for now, because all of these things are stipulated in the
+ * section 129. The matter is seen as undisputed, and that's the way that it stands, and it reminds
+ * them already about these things. So for the alleged dispute workflow, I think we can actually
+ * delete that... We keep the option to show that there's an alleged dispute, but what we would
+ * report to the client is the debtor disputes it, but we've never received anything in writing.
+ * Because an alleged dispute should be matched with a dispute."
  *
- * WHAT IT WAS: day 1 with TEN BUSINESS DAYS to respond, day 6, day 10 "Last day", day 12 deemed
- * undisputed -- the better part of three weeks in which a section 129 sequence sits still because
- * somebody said on the telephone that they dispute the account.
+ * WHAT THIS FILE USED TO BE. It held a three-day schedule -- ask in writing, remind at 48 hours,
+ * deemed undisputed at day 4 -- which was itself a correction of a fourteen-day one. Both were
+ * answers to the wrong question: the section 129 already gives the debtor ten business days and
+ * already tells them what happens if nothing comes, so ANY second sequence is a second clock on
+ * the same window, in the firm's own letters, pausing a statutory demand while it runs.
  *
- * AND THE TEN DAYS WERE BORROWED. Ten business days is the SECTION 129's statutory period -- the
- * time the Act gives a debtor to refer the agreement to a debt counsellor or an ombud. Nothing in
- * the Act gives anybody ten days to put an alleged dispute in writing. It had been copied onto a
- * step that is not statutory at all, which is the kind of mistake that looks like care.
- *
- * WHAT THIS FILE CAN AND CANNOT SEE. The schedule lives in the DATABASE, so this holds the SQL
- * that puts it there -- the file the firm runs. It cannot say what is live on staging; the script
- * reads that back itself when it runs.
+ * SO WHAT IS ASSERTED NOW IS THE ABSENCE, and the two things that make an absence safe: nothing
+ * can start it again, and nothing it already started is still going.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-alleged-dispute.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
+import { clientLine } from '../../src/lib/accountNarrative.ts'
 
 let pass = 0
 const failures = []
@@ -29,45 +30,120 @@ const check = (name, actual, expected) => {
   failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
 }
 const ok = (name, actual) => check(name, actual, true)
+const at = (p) => new URL(`../../${p}`, import.meta.url)
+const sql = readFileSync(at('supabase/schema.sql'), 'utf8')
 
-const sql = readFileSync(new URL('../../scripts/sql/alleged-dispute-three-days.sql', import.meta.url), 'utf8')
+/* ---------------------------------------------------------------------------------------------
+ * NOTHING CAN START IT AGAIN
+ * ------------------------------------------------------------------------------------------- */
 
-/* THE THREE DAYS THE FIRM NAMED, each asserted on its own: a single "contains 3 and 4" would pass
-   on a file that had moved the wrong step. */
-ok('the reminder moves to day 3', /set day = 3\s*\n\s*where version_id = v_draft and key like 'dispute-reminder-%'/.test(sql))
-ok('deemed undisputed moves to day 4', /set day = 4\s*\n\s*where version_id = v_draft and key like 'dispute-undisputed-%'/.test(sql))
-/* 48 AND 24 HOURS, IN THE UNIT THIS MODEL HAS. Day 1 + 2 = day 3 and day 3 + 1 = day 4, which is
-   the arithmetic behind the firm's own day numbers. */
-ok('the first notice gives two business days', /deadline_days = 2, deadline_unit = 'business'/.test(sql))
-ok('...and the reminder one', /deadline_days = 1, deadline_unit = 'business'/.test(sql))
-/* AND THE TEN DAYS ARE GONE. The assertion that matters most, because ten is the number that was
-   wrong and it is the section 129's, not this sequence's. */
-ok('nothing still gives ten days', !/deadline_days = 10/.test(sql))
-/* THE "LAST DAY" PAIR GOES. There is no room for a third warning in three days. */
-ok('the last-day steps are removed',
-  /delete from public\.workflow_nodes\s*\n\s*where version_id = v_draft and key like 'dispute-final-reminder-%'/.test(sql))
+/* BOTH VERSIONS, not just the active one. A draft left behind is one press from being published,
+   and the press is in the workflow builder where it looks like ordinary work. */
+ok('both versions of the sequence are archived',
+  /update public\.workflow_versions\s*\n\s*set state = 'archived'[\s\S]{0,260}state in \('active', 'draft'\)/.test(sql))
 
 /*
- * NEVER THE LIVE VERSION. Version 1 carries a run, and a debtor already on a sequence keeps the
- * schedule they started under -- the dates in a notice they have already been sent. Asserted as
- * presence before order, because indexOf returns -1 for something deleted and -1 beats everything.
+ * ARCHIVED RATHER THAN DELETED, and the reason is the record rather than the tooling. A run exists
+ * against the active version with notices already posted to a real debtor, and the version is what
+ * says what those notices WERE. Deleting it leaves a debtor's file pointing at nothing.
  */
-const draft = sql.indexOf('workflow_take_draft(v_active)')
-const edit = sql.indexOf('delete from public.workflow_nodes')
-const publish = sql.indexOf('workflow_publish(v_draft)')
-ok('it takes a draft, edits it, then publishes',
-  draft !== -1 && edit !== -1 && publish !== -1 && draft < edit && edit < publish)
-/* AND IT TOUCHES NOTHING BUT THE DRAFT. A statement keyed on the active version would edit the
-   sequence a debtor is on, which the database refuses -- and a check is cheaper than finding out. */
-ok('...and every change is keyed on the draft',
-  (sql.match(/version_id = v_draft/g) ?? []).length === 5
-  && !/version_id = v_active/.test(sql))
+ok('...and the versions themselves are kept',
+  !/delete\s+from\s+public\.workflow_versions/i.test(sql))
+ok('...as are the workflows', !/delete\s+from\s+public\.workflows\b/i.test(sql))
 
-/* SAFE TO RUN TWICE: take_draft returns the draft that already exists rather than making a second,
-   and every statement is written to be true after it has run. */
-ok('it says it is safe to run twice', /SAFE TO RUN MORE THAN ONCE/.test(sql))
-/* AND IT READS BACK WHAT IT DID, like every other script the firm is asked to run. */
-ok('...and reads back what is live afterwards', /order by n\.day, n\.ordinal;/.test(sql))
+/*
+ * AND THE OBSOLETE SCRIPT IS GONE. It published a three-day version of this sequence; run now it
+ * would take a workflow the firm has retired and make it live again. A file that undoes a decision
+ * is worse than no file, because it looks like maintenance.
+ */
+ok('the script that would republish it is removed',
+  !existsSync(at('scripts/sql/alleged-dispute-three-days.sql')))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND NOTHING IT ALREADY STARTED IS STILL GOING
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * ARCHIVING A VERSION DOES NOT STOP A RUN. The run holds its own steps and keeps posting them, so
+ * retiring the sequence without this would have left six more notices to go out on an account the
+ * firm had just decided should not receive any.
+ */
+ok('a run already going is stopped', /set state = 'left',\s*\n\s*left_reason = 'The alleged-dispute sequence was retired/.test(sql))
+ok('...and its outstanding steps are cancelled',
+  /set state = 'cancelled',[\s\S]{0,320}state in \('pending', 'held'\)/.test(sql))
+/* HELD STEPS TOO. A held step has not gone either, and one left on a collector's list is how a
+   retired sequence posts a letter next month. */
+ok('...held ones included', /s\.state in \('pending', 'held'\)/.test(sql))
+/* AND ANY HOLD IS ENDED, or the account carries a reason it is paused for a sequence that no
+   longer exists. */
+ok('...and any hold it placed is ended', /ended_reason = coalesce\(h\.ended_reason, 'The sequence was retired'\)/.test(sql))
+
+/*
+ * A SENT STEP STAYS SENT. It is the record of a notice that reached a debtor, and rewriting it
+ * would be rewriting the file an attorney reads eighteen months later.
+ */
+ok('...but what was already sent is untouched',
+  !/set state = 'cancelled'[\s\S]{0,320}'sent'/.test(sql))
+
+/*
+ * SCOPED TO THIS WORKFLOW, NOT TO THE ACCOUNT, and this is the one that would be catastrophic to
+ * get wrong. workflow_exit_account stops EVERY live run on an account; used here it would have
+ * stopped the section 129 as well -- the very sequence the firm's decision exists to let continue.
+ */
+/*
+ * COUNTED, NOT MERELY PRESENT, and the first draft of this assertion got it wrong. There are THREE
+ * statements -- the steps, the holds, the runs -- and each needs the name on it. A regex asking
+ * only whether the name appears anywhere passes while two of the three are unscoped, which is the
+ * vacuous assertion CLAUDE.md warns about: it survived deleting the scope from all three, because
+ * the name also appears in the `with live as (...)` subquery above them.
+ *
+ * THREE, AND WHICH THREE MATTERS: the `with live as` subquery the steps statement reads through,
+ * the holds statement, and the runs statement. The archive at the top is scoped by its own
+ * subselect on `workflows.name` and does not use the alias, so it is asserted separately above.
+ */
+const scoped = (sql.match(/w\.name = 'Dispute alleged'/g) ?? []).length
+check('every statement is scoped to this workflow', scoped, 3)
+ok('...rather than to the whole account', !/workflow_exit_account\([\s\S]{0,80}Dispute alleged/.test(sql))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE ALLEGATION IS STILL RECORDED, AND THE CLIENT IS TOLD THE DIFFERENCE
+ *
+ * "We keep the option to show that there's an alleged dispute, but what we would report to the
+ * client is the debtor disputes it, but we've never received anything in writing."
+ * ------------------------------------------------------------------------------------------- */
+
+const alleged = clientLine({
+  position: 'disputed', disputeRaisedOn: '2026-09-21', disputeInWriting: false,
+}).happened
+const written = clientLine({
+  position: 'disputed', disputeRaisedOn: '2026-09-21', disputeInWriting: true,
+}).happened
+
+ok('an allegation says nothing has arrived', /nothing in writing/.test(alleged))
+/* AND SAYS WHAT THAT MEANS, which is the half a client acts on: the account has not stopped. */
+ok('...and that the account stands as undisputed', /stands as undisputed/.test(alleged))
+ok('...and that collection continues', /collection continues/.test(alleged))
+/* A WRITTEN ONE MUST NOT SAY ANY OF THAT, or a client with a real dispute on their desk is told
+   there is nothing to answer. */
+ok('a written dispute does not', !/nothing in writing/.test(written))
+check('...and reads as it always did', written,
+  'The debtor disputed the account on 21 September 2026.')
+
+/*
+ * UNDEFINED READS AS IN WRITING. Every caller that ever set disputeRaisedOn was reporting a logged
+ * dispute, and a field added today must not silently rewrite what those accounts have already told
+ * their clients. Only a caller that KNOWS it is unanswered says so.
+ */
+check('an unstated one is treated as written',
+  clientLine({ position: 'disputed', disputeRaisedOn: '2026-09-21' }).happened, written)
+
+/* AND THE ACCOUNT PAGE PASSES THE UNANSWERED DISPUTE RATHER THAN THE NEWEST. A dispute the firm
+   has already decided is not what the account is doing now, and a client told about it would go
+   looking for a live file that is finished. */
+const page = readFileSync(at('src/pages/accounts/AccountDetail.tsx'), 'utf8')
+ok('the page reports the dispute still open',
+  /queries\.find\(\(q\) => q\.allegedOn && q\.outcome === null\)/.test(page))
+ok('...with whether it arrived in writing', /disputeInWriting: open\.inWriting/.test(page))
 
 console.log(`\ncheck-alleged-dispute: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

@@ -19844,3 +19844,76 @@ comment on function public.signing_sign(text, text, text, text, text) is
 
 grant execute on function public.signing_open(text) to anon, authenticated;
 grant execute on function public.signing_sign(text, text, text, text, text) to anon, authenticated;
+
+
+-- ============================================================================
+-- THE ALLEGED-DISPUTE SEQUENCE IS RETIRED. THE SECTION 129 ALREADY SAYS ALL OF IT.
+--
+-- THE FIRM: "let's just leave that out for now, because all of these things are stipulated in the
+-- section 129. The matter is seen as undisputed, and that's the way that it stands, and it reminds
+-- them already about these things. So for the alleged dispute workflow, I think we can actually
+-- delete that... We keep the option to show that there's an alleged dispute, but what we would
+-- report to the client is the debtor disputes it, but we've never received anything in writing.
+-- Because an alleged dispute should be matched with a dispute."
+--
+-- IT WAS A SECOND CLOCK ON THE SAME TEN DAYS. The section 129 gives the debtor ten business days
+-- and tells them in terms what happens if nothing comes; the alleged-dispute sequence asked for
+-- the same thing over the same window, in its own letters, and paused the statutory demand while
+-- it did. Removing it removes no protection -- the protection is in the notice.
+--
+-- ARCHIVED RATHER THAN DELETED, and not only because a DELETE cannot be sent from the session that
+-- wrote this. There is a RUN against the active version with two notices already posted to a real
+-- debtor, and the version is what says what those notices were. Deleting it would leave a debtor's
+-- file pointing at nothing, which is the record an attorney reads eighteen months later.
+-- `archived` is the state workflow_publish already uses, and no trigger can start an archived
+-- version.
+update public.workflow_versions
+   set state = 'archived'
+ where workflow_id = (select id from public.workflows where name = 'Dispute alleged')
+   and state in ('active', 'draft');
+
+-- AND ANY RUN ALREADY GOING IS STOPPED, which archiving on its own does NOT do: a run holds its
+-- own steps and would post the rest of its notices regardless.
+--
+-- SCOPED TO THESE RUNS, NOT TO THE ACCOUNT. workflow_exit_account stops EVERY live run on an
+-- account, and the account may be carrying a section 129 that must keep going -- which is the
+-- whole point of the firm's decision. The three statements below are what that function does,
+-- narrowed to this workflow.
+--
+-- A SENT STEP STAYS SENT: it is the record of a notice that reached a debtor. Only what has not
+-- happened is cancelled, held steps included -- a held step has not gone either, and leaving one
+-- on a collector's list is how a retired sequence posts a letter next month.
+with live as (
+  select r.id from public.workflow_runs r
+   where r.version_id in (
+     select v.id from public.workflow_versions v
+      join public.workflows w on w.id = v.workflow_id
+     where w.name = 'Dispute alleged')
+     and r.state in ('running', 'held')
+)
+update public.workflow_run_steps s
+   set state = 'cancelled',
+       note = 'The alleged-dispute sequence was retired: the section 129 already states that an account not disputed in writing stands as undisputed.'
+  from live
+ where s.run_id = live.id and s.state in ('pending', 'held');
+
+update public.workflow_run_holds h
+   set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+       ended_reason = coalesce(h.ended_reason, 'The sequence was retired')
+  from public.workflow_runs r
+  join public.workflow_versions v on v.id = r.version_id
+  join public.workflows w on w.id = v.workflow_id
+ where h.run_id = r.id
+   and w.name = 'Dispute alleged'
+   and r.state in ('running', 'held')
+   and h.ended_on is null;
+
+update public.workflow_runs r
+   set state = 'left',
+       left_reason = 'The alleged-dispute sequence was retired: the section 129 already states it.',
+       left_at = now()
+  from public.workflow_versions v
+  join public.workflows w on w.id = v.workflow_id
+ where v.id = r.version_id
+   and w.name = 'Dispute alleged'
+   and r.state in ('running', 'held');

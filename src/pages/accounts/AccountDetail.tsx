@@ -966,6 +966,26 @@ export function AccountDetail() {
          * Same value the panel's own heading uses, so the line and the label cannot disagree.
          */
         position: clientReport.position,
+        /*
+         * THE DISPUTE, AND WHETHER ANYTHING HAS ACTUALLY ARRIVED.
+         *
+         * THE FIRM, retiring the alleged-dispute sequence: "we keep the option to show that there's
+         * an alleged dispute, but what we would report to the client is the debtor disputes it, but
+         * we've never received anything in writing... an alleged dispute should be matched with a
+         * dispute."
+         *
+         * THE UNANSWERED ONE, not the newest. A dispute the firm has already decided is not what
+         * the account is doing now, and a client told about it would go looking for a live file
+         * that is finished. `outcome` is the decision, so no outcome is what "still open" means --
+         * there is no 'closed' stage, because the stage says who is HOLDING it rather than whether
+         * it is done.
+         */
+        ...(() => {
+          const open = queries.find((q) => q.allegedOn && q.outcome === null)
+          return open
+            ? { disputeRaisedOn: open.allegedOn, disputeInWriting: open.inWriting }
+            : {}
+        })(),
         lastAttemptOn: account.lastActionAt,
         // Deliberately not passed: the book records that something was done and never what came
         // of it, so claiming a non-answer would be a statement about the debtor, not a record.

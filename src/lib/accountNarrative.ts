@@ -82,6 +82,26 @@ export interface NarrativeInput {
   paidInPeriod?: { amount: number; on: string } | null
   /** When the debtor disputed the account. */
   disputeRaisedOn?: string | null
+  /**
+   * HAS THE DISPUTE ACTUALLY ARRIVED IN WRITING?
+   *
+   * THE FIRM, retiring the alleged-dispute sequence: "we keep the option to show that there's an
+   * alleged dispute, but what we would report to the client is the debtor disputes it, but we've
+   * never received anything in writing... because an alleged dispute should be matched with a
+   * dispute."
+   *
+   * IT IS THE DIFFERENCE BETWEEN A CLIENT ANSWERING SOMETHING AND A CLIENT WAITING. A written
+   * dispute is a document with a claim in it that somebody has to go and answer; a debtor saying
+   * on the telephone that they dispute it is an assertion with nothing behind it yet. Reported as
+   * one sentence they look identical, and the client picks up the file expecting to find the
+   * letter -- which is exactly the ambiguity the firm is closing.
+   *
+   * UNDEFINED READS AS IN WRITING, deliberately. Every caller that has ever set disputeRaisedOn
+   * was reporting a real logged dispute, and a field added today must not silently rewrite what
+   * those accounts have already told their clients. Only a caller that KNOWS it is unanswered
+   * says so.
+   */
+  disputeInWriting?: boolean
   /** When a trace went to the bureaus. */
   traceLodgedOn?: string | null
   /**
@@ -246,6 +266,16 @@ function whatHappened(input: NarrativeInput): string {
   }
 
   if (input.disputeRaisedOn) {
+    /*
+     * AND WHETHER ANYTHING HAS ACTUALLY ARRIVED. See disputeInWriting: "the debtor disputes it,
+     * but we've never received anything in writing" is the firm's own wording, and it is the
+     * sentence that stops a client looking for a letter that does not exist.
+     */
+    if (input.disputeInWriting === false) {
+      return `The debtor disputed the account on ${onDate(input.disputeRaisedOn)}, but has sent `
+        + 'nothing in writing. Until they do, the account stands as undisputed and collection '
+        + 'continues.'
+    }
     return `The debtor disputed the account on ${onDate(input.disputeRaisedOn)}.`
   }
 
