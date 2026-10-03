@@ -97,14 +97,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const pressed = !fromCron
 
+  /*
+   * THE STALEST MAILBOX FIRST, AND THIS IS A BUG FIX WITH A NAME ON IT.
+   *
+   * It was `select('*')` with no order, so the rows arrived in whatever order Postgres handed them
+   * back -- which is stable in practice. Pair that with the budget below, and the mailboxes at the
+   * tail of that order are skipped by EVERY press and by every cron run that hits Vercel's cap.
+   * They do not sync late; they never sync at all.
+   *
+   * IT HAPPENED. The firm sent a section 129 from samuel@ and the debtor replied to it. Four days
+   * later the reply still was not on the account, Raptor's own Emails tab said "0 received", and
+   * the firm pressed sync on their own address and then on the whole company and nothing changed.
+   * `samuel@` carried `last_sync_attempt_at = null` -- the sweep had never once opened it, while
+   * four other mailboxes were read that same morning.
+   *
+   * OLDEST FIRST IS SELF-CORRECTING, which is why it is the right rule rather than merely a
+   * better one: every run takes the mailbox that has gone longest unread, and finishing it moves
+   * it to the back of the queue. A mailbox cannot be starved, however short the budget, because
+   * going unread is exactly what promotes it. Nulls lead, because a mailbox that has never been
+   * synced at all is the most overdue thing there is.
+   */
   const { data: connections, error } = await admin.from('email_connections').select('*')
+    .order('last_synced_at', { ascending: true, nullsFirst: true })
   if (error) {
     res.status(500).json({ error: error.message })
     return
   }
 
   const started = Date.now()
-  const results: { userId: string; logged?: number; error?: string; skipped?: boolean }[] = []
+  const results: { userId: string; email?: string; logged?: number; error?: string; skipped?: boolean }[] = []
+  /*
+   * WHICH MAILBOXES THE BUDGET DID NOT REACH, BY ADDRESS.
+   *
+   * A count cannot be acted on. "2 left -- press again" is a spinner's worth of information; "not
+   * reached: samuel@bredellferreira.co.za" is the sentence that would have ended the four days
+   * above, because the person reading it knows which mailbox the reply they are waiting for is in.
+   */
+  const notReached: string[] = []
   let remaining = 0
   const all = (connections ?? []) as EmailConnectionRow[]
   for (const conn of all) {
@@ -113,11 +142,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      * person is told "9 of 15 -- press again" rather than watching a spinner die. The cron never
      * reaches this, because `pressed` is false for it.
      */
-    if (pressed && Date.now() - started > PRESS_BUDGET_MS) { remaining += 1; continue }
+    if (pressed && Date.now() - started > PRESS_BUDGET_MS) {
+      remaining += 1
+      if (conn.email) notReached.push(conn.email)
+      continue
+    }
     /* Read a moment ago by somebody else's press. Nothing to gain and a connection to spend. */
     if (pressed && conn.last_synced_at
         && Date.now() - new Date(conn.last_synced_at).getTime() < RECENT_MS) {
-      results.push({ userId: conn.user_id, skipped: true })
+      results.push({ userId: conn.user_id, email: conn.email, skipped: true })
       continue
     }
     /*
@@ -127,7 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      * sitting there. Skipping costs nothing: this mailbox was being synced anyway.
      */
     if (!(await claimSync(admin, conn.user_id))) {
-      results.push({ userId: conn.user_id, skipped: true })
+      results.push({ userId: conn.user_id, email: conn.email, skipped: true })
       continue
     }
     /*
@@ -145,13 +178,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const result = await syncConnection(admin, conn)
       /* Cleared on success, so it never describes a mailbox that has since recovered. */
       await admin.from('email_connections').update({ sync_error: null }).eq('user_id', conn.user_id)
-      results.push({ userId: conn.user_id, logged: result.logged })
+      results.push({ userId: conn.user_id, email: conn.email, logged: result.logged })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Sync failed.'
       await admin.from('email_connections')
         .update({ sync_error: message.slice(0, 500) })
         .eq('user_id', conn.user_id)
-      results.push({ userId: conn.user_id, error: message })
+      results.push({ userId: conn.user_id, email: conn.email, error: message })
     } finally {
       await releaseSync(admin, conn.user_id)
     }
@@ -193,6 +226,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     failed,
     skipped,
     remaining,
+    /* Named, not counted -- see notReached. */
+    notReached,
     pressedBy,
     results,
   })

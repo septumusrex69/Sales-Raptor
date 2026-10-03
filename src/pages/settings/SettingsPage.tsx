@@ -2364,7 +2364,17 @@ function EmailIntegrationCard() {
         if (body.skipped) bits.push(`${body.skipped} synced moments ago`)
         if (body.failed) bits.push(`${body.failed} could not be reached`)
         if (body.remaining) bits.push(`${body.remaining} left — press again to finish`)
-        setSyncMessage(`${bits.join(' · ')}.`)
+        /*
+         * AND WHICH ONES, BY ADDRESS.
+         *
+         * A COUNT CANNOT BE ACTED ON, and this is the sentence that would have saved four days:
+         * the firm sent a section 129 from samuel@, the debtor replied to it, and the reply never
+         * appeared because the sweep had never once opened that mailbox. "2 left" told them
+         * nothing; "not reached: samuel@…" tells them where the message they are waiting for is.
+         */
+        const missed: string[] = Array.isArray(body.notReached) ? body.notReached : []
+        setSyncMessage(`${bits.join(' · ')}.${
+          missed.length > 0 ? ` Not reached: ${missed.join(', ')}.` : ''}`)
         await refreshSyncedData()
       }
     } catch {
