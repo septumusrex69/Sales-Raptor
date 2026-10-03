@@ -20,6 +20,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-contact-order.mjs
  */
 import { readFileSync } from 'node:fs'
+import { debtorSlots } from '../../src/lib/debtorSlots.ts'
 
 let pass = 0
 const failures = []
@@ -28,6 +29,12 @@ function check(name, actual, expected) {
   failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    got      ${JSON.stringify(actual)}`)
 }
 const ok = (name, actual) => check(name, actual, true)
+/* Object.is above compares identity, so two equal arrays are never equal to it. */
+const same = (name, actual, expected) => {
+  const a = JSON.stringify(actual); const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
+}
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
 
 const store = read('../../src/lib/accountWorkspace.ts')
@@ -58,31 +65,70 @@ ok('...with the reason it is not tidiness', /in whatever physical order they hap
 /* ------------------------------------------------ every address is drawn */
 
 /*
- * THE SLOT SHOWS ONE AND THE REST ARE DRAWN UNDER IT, which is exactly how the numbers already
- * worked — "Mobile (Primary)", "Alternative Number", then "Other numbers". An email had the first
- * of those and neither of the others.
+ * NOT COUNTED IN REGEXES ANY MORE. The slots used to be read out of the panel's source -- "the
+ * first email is the slot, emails.slice(1) is the list" -- which held while the rule was one line
+ * of JSX. The firm then asked for the second address to have a SLOT of its own ("so an email
+ * address, there should be a second, an alternative email address"), and the question stopped
+ * being about one list: four addresses now land in three places, and what matters is that between
+ * them they account for all four and none of them twice.
+ *
+ * debtorSlots is where that is decided, so it is where it is checked. Nothing here says which
+ * rows the panel draws; it says no row can fall between the slots and the list under them, which
+ * is the failure the firm reported -- an address that could not be seen on this screen at all.
  */
-ok('every email on the account is collected', /const emails = live\.filter\(\(c\) => c\.kind === 'email'\)/.test(panel))
-ok('...the slot shows the first', /const email = emails\[0\]/.test(panel))
-ok('...and the rest are drawn', /emails\.length > 1 &&/.test(panel)
-  && /Other email addresses/.test(panel))
-ok('...all of them, not a second one only', /emails\.slice\(1\)\.map/.test(panel))
+const c = (id, kind, extra = {}) =>
+  ({ id, kind, value: `${id}@x.co.za`, isPrimary: false, label: null, personName: null,
+    personRole: null, verifiedAt: null, retiredAt: null, retiredReason: null, notes: null,
+    accountId: 'a', createdAt: '2026-01-01', ...extra })
+
+const four = [c('e1', 'email'), c('e2', 'email'), c('e3', 'email'), c('e4', 'email')]
+const s4 = debtorSlots(four)
+same('the first two addresses take the two slots',
+  [s4.email?.id, s4.altEmail?.id], ['e1', 'e2'])
+same('...and the rest are drawn under them', s4.otherEmails.map((x) => x.id), ['e3', 'e4'])
+/* THE WHOLE ACCOUNT, ONCE EACH -- the assertion the regexes could not make. */
+const drawn = [s4.email, s4.altEmail, ...s4.otherEmails].map((x) => x.id)
+same('...so every address on the account is somewhere', drawn.sort(), ['e1', 'e2', 'e3', 'e4'])
+check('...and none of them twice', drawn.length, new Set(drawn).size)
+/* THE MARKED ONE LEADS WHEREVER IT SITS. Primary first is the query's order and the flag is the
+   only thing on the account somebody chose, so the slot reads it rather than trusting the sort. */
+check('the primary address leads even when it is not first',
+  debtorSlots([c('e1', 'email'), c('e2', 'email', { isPrimary: true })]).email?.id, 'e2')
+
+/* AND THE NUMBERS, THE SAME WAY. Three kinds, three slots, everything else under them. */
+const numbers = [c('m1', 'mobile'), c('m2', 'mobile'), c('m3', 'mobile'),
+  c('w1', 'work'), c('h1', 'phone')]
+const sn = debtorSlots(numbers)
+same('the two mobiles take the two mobile slots',
+  [sn.primaryMobile?.id, sn.secondMobile?.id], ['m1', 'm2'])
+check('...the work line takes its own', sn.workNumber?.id, 'w1')
+/* THE HOME LINE KEEPS ITS PLACE. The firm: "I'd say a work number, because nobody has a home
+   number anymore" -- and the book disagrees politely, so it is listed rather than given a slot. */
+same('...and the third mobile and the home line are still drawn',
+  sn.otherNumbers.map((x) => x.id).sort(), ['h1', 'm3'])
+const dialled = [sn.primaryMobile, sn.secondMobile, sn.workNumber, ...sn.otherNumbers].map((x) => x.id)
+check('...so every number is somewhere, once', dialled.length, new Set(dialled).size)
+/* A RETIRED ROW IS NOT A SLOT'S CONTENTS. The panel hands in the live list only -- a retired
+   number sitting in "Mobile (Primary)" is a collector dialling a line the firm knows is dead. */
+check('a slot is empty rather than filled with something nobody should use',
+  debtorSlots([]).primaryMobile, null)
+
+/* ------------------------------------------------ and the panel draws what it is given */
+
+ok('the panel lays the slots out with that rule', /const slots = debtorSlots\(live\)/.test(panel))
+ok('...and draws what fell outside them', /slots\.otherNumbers\.map/.test(panel)
+  && /slots\.otherEmails\.map/.test(panel))
+ok('...under one heading, which is what the firm asked for',
+  /Anything else on file/.test(panel))
 /*
- * NOT ON A COMPANY. A company's addresses belong to named people and are already listed under
- * whoever they belong to — the same rule that keeps "Residential address" off a company, and the
- * same rule the numbers below already follow.
+ * NOT ON A COMPANY. A company's addresses and numbers belong to named people and are already
+ * listed under whoever they belong to — the same rule that keeps "Residential address" off a
+ * company.
  */
-ok('...and not on a company, whose addresses belong to people',
-  /\{!isCompany && emails\.length > 1 && \(/.test(panel))
+ok('...and not on a company, whose contacts belong to people',
+  /\{!isCompany && \(slots\.otherEmails\.length > 0 \|\| slots\.otherNumbers\.length > 0\) && \(/.test(panel))
 /* Still one press to write to any of them: an address you can see and cannot use is half a fix. */
 ok('...each of them still opens a compose', /onOpen=\{\(\) => onEmail\(c\.value\)\}/.test(panel))
-
-/* ------------------------------------------------ and the numbers still work the way they did */
-
-/* The pattern this follows. Asserted so that "email got its own list" cannot quietly become
-   "email got its own list and the numbers lost theirs". */
-ok('numbers beyond the two slots are still drawn', /phones\.length > 2 &&/.test(panel)
-  && /Other numbers/.test(panel))
 
 /* ------------------------------------------------------------------ */
 

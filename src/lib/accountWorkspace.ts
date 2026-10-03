@@ -12,6 +12,7 @@
 import { supabase } from './supabase'
 import { chargePerusal, type ChargeResult } from './accountCharges.ts'
 import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
+import { parseWindows, type ContactWindow } from './contactWindows.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
 import type { CancelCause } from './promiseRules.ts'
 
@@ -808,11 +809,22 @@ export async function saveDebtorPreferences(accountId: string, patch: {
   preferredLanguage?: string | null
   contactPreference?: string | null
   consentStatus?: string | null
+  /**
+   * WHEN they may be telephoned, which is not the same question as HOW.
+   *
+   * Written whole rather than one window at a time: the list is three or four rows the collector
+   * is looking at, and a per-row write would need rows with identities, which is a table. See
+   * contactWindows.ts.
+   */
+  contactWindows?: ContactWindow[]
 }): Promise<void> {
-  const row: Record<string, string | null> = {}
+  const row: Record<string, unknown> = {}
   if ('preferredLanguage' in patch) row.preferred_language = patch.preferredLanguage?.trim() || null
   if ('contactPreference' in patch) row.contact_preference = patch.contactPreference?.trim() || null
   if ('consentStatus' in patch) row.consent_status = patch.consentStatus?.trim() || null
+  /* Re-read on the way out, so a window that would not survive being read back is never written:
+     the one shape stored is the one shape parseWindows recognises. */
+  if ('contactWindows' in patch) row.contact_windows = parseWindows(patch.contactWindows ?? [])
   const { error } = await supabase.from('debtor_accounts').update(row).eq('id', accountId)
   if (error) throw new Error(error.message)
 }

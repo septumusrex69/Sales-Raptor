@@ -158,3 +158,21 @@ export function firmDay(iso: string): string {
 export function firmToday(now: Date = new Date()): string {
   return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 }
+
+/**
+ * The time of day in Johannesburg, as "HH:MM" on a 24-hour clock.
+ *
+ * SAME ARGUMENT AS firmToday AND FOR A SHARPER REASON: this one is compared against the hours a
+ * debtor asked to be telephoned in. A collector working from home on a laptop still set to London
+ * would be told four in the afternoon was six, and the one thing the window exists to prevent is a
+ * call at the wrong hour.
+ *
+ * `en-GB` with hour12 false gives "16:05" rather than "4:05 pm", which is the shape the stored
+ * windows are in -- and `hourCycle: 'h23'` because en-GB midnight is "24:00" otherwise, which sorts
+ * after every window there is.
+ */
+export function firmClock(now: Date = new Date()): string {
+  return now.toLocaleTimeString('en-GB', {
+    timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  })
+}

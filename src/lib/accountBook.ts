@@ -127,6 +127,15 @@ export interface DebtorAccount {
   mainCommentAt: string | null
   preferredLanguage: string | null
   contactPreference: string | null
+  /**
+   * The hours this debtor asked to be telephoned in, straight off the jsonb column.
+   *
+   * `unknown` ON PURPOSE. Everything else here is a scalar the database guarantees the shape of;
+   * this one is jsonb, which holds whatever is put in it, and typing it as a window array here
+   * would be the type system asserting something nobody checked. parseWindows is where it becomes
+   * windows, and anything that is not a pair of times is simply not one.
+   */
+  contactWindows: unknown
   consentStatus: string | null
   debtorTitle: string | null
   debtorInitials: string | null
@@ -210,6 +219,10 @@ const toAccount = (r: any): DebtorAccount => ({
   mainCommentAt: r.main_comment_at ?? null,
   preferredLanguage: r.preferred_language ?? null,
   contactPreference: r.contact_preference ?? null,
+  /* Named here like every other column: one missing from this mapper reads as undefined for ever
+     and nothing fails -- and an undefined here is an account that quietly forgets the hours a
+     debtor asked to be rung in. */
+  contactWindows: r.contact_windows ?? [],
   consentStatus: r.consent_status ?? null,
   debtorTitle: r.debtor_title ?? null,
   debtorInitials: r.debtor_initials ?? null,

@@ -203,8 +203,22 @@ ok('...and the question is only raised where the value really moved',
    is wired to it. */
 const wired = contacts.match(/onValueChanged=\{onEmailChanged\}/g) ?? []
 check('exactly one contact slot asks the question', wired.length, 1)
+/*
+ * AND IT IS THE FIRST EMAIL SLOT. Matched with no other `label=` in between rather than inside a
+ * character budget: the slot carries a paragraph saying why the ALTERNATIVE address does not ask
+ * the question, and a window counted in characters makes the length of a comment load-bearing.
+ */
 ok('...and it is the email one',
-  /label="Email address"[\s\S]{0,400}onValueChanged=\{onEmailChanged\}/.test(contacts))
+  /label="Email address"(?:(?!label=)[\s\S])*onValueChanged=\{onEmailChanged\}/.test(contacts))
+/*
+ * NOT THE ALTERNATIVE ONE, which is the slot the firm asked for in the same breath as this. A
+ * section 129 goes out on the address in the FIRST slot; correcting the second changes nothing
+ * that was ever served, and offering to re-serve a statutory demand over it would be the warning
+ * that fires when nothing is wrong.
+ */
+ok('...and the alternative address does not ask it',
+  /label="Alternative email"(?:(?!label=)[\s\S])*$|label="Alternative email"(?:(?!label=)[\s\S])*label=/.test(contacts)
+  && !/label="Alternative email"(?:(?!label=)[\s\S])*onValueChanged/.test(contacts))
 
 const detail = read('src/pages/accounts/AccountDetail.tsx')
 ok('the page decides whether to ask, off the runs it holds',

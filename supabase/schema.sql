@@ -20724,3 +20724,31 @@ comment on function public.workflow_supersede_run(uuid, text) is
 
 revoke all on function public.workflow_supersede_run(uuid, text) from public;
 revoke execute on function public.workflow_supersede_run(uuid, text) from anon, authenticated;
+
+-- ---------- When this debtor asked to be telephoned ----------
+-- THE FIRM: "maybe we can add something like there, contact time, between certain hours, and then
+-- you can choose the two hours and then add a different schedule -- for example the debtor likes
+-- to be contacted between 8 and 9, and 7 and 5."
+--
+-- SEVERAL WINDOWS, NOT ONE RANGE, and that example is the reason: somebody who can take a call
+-- before work and again after it is not available all day, and a single "08:00 to 17:00" says
+-- exactly that. It is the difference between ringing a man on a factory floor at eleven and
+-- reaching him at ten past five.
+--
+-- A COLUMN RATHER THAN account_contacts ROWS, like the three preference fields above it: the hours
+-- belong to the person and not to any one of their numbers. And separate from contact_preference,
+-- which is HOW to reach them -- a debtor who wants WhatsApp only still wants it in their lunch
+-- hour, so the two are independent and are asked separately.
+--
+-- Read back through parseWindows, which treats anything that is not a pair of "HH:MM" times as
+-- not a window: jsonb will hold whatever is put in it, and a panel that throws on one bad row
+-- takes the debtor's name and telephone number down with it.
+alter table public.debtor_accounts
+  add column if not exists contact_windows jsonb not null default '[]'::jsonb;
+
+comment on column public.debtor_accounts.contact_windows is
+  'The hours this debtor asked to be telephoned in, as [{"from":"08:00","to":"09:00"}, ...] on a '
+  '24-hour clock in Africa/Johannesburg. SEVERAL, not one range, at the firm''s instruction: '
+  '"the debtor likes to be contacted between 8 and 9, and 7 and 5" -- somebody reachable before '
+  'work and again after it is not reachable all day, and one wide range says they are. Separate '
+  'from contact_preference, which is HOW rather than WHEN. Empty is nobody has asked.';

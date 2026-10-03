@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Building2, Check, Download, FileText, Globe, IdCard, Loader2, Mail, MapPin, MessageCircle,
+  Building2, Check, Clock, Download, FileText, Globe, IdCard, Loader2, Mail, MapPin, MessageCircle,
   Phone, Plus, ShieldCheck, Smartphone, Trash2, Upload, User, X, Home
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -18,6 +18,12 @@ import {
 import { chargeMessage, PERUSAL_ITEM_ID } from '../../lib/accountCharges.ts'
 import { DictateButton } from '../../components/ui/Dictate'
 import { contactWhat, contactsByPerson, otherPeople } from '../../lib/contactPeople.ts'
+import { debtorSlots, ringsOnCall } from '../../lib/debtorSlots.ts'
+import {
+  describeWindows, insideWindow, parseWindows, windowProblem, withWindow, withoutWindow,
+  type ContactWindow,
+} from '../../lib/contactWindows.ts'
+import { firmClock } from '../../lib/dateLabels.ts'
 import type { TraceItem } from '../../lib/traceStore.ts'
 
 /** Surfaces a failed write instead of leaving a button that silently did nothing. */
@@ -55,9 +61,11 @@ export function useWriter(onChange: () => Promise<void>) {
  * consent — are columns, because they describe the person rather than any one number.
  */
 const SLOT_ICON = {
-  name: User, id: IdCard, mobile: Smartphone, alt: Phone, email: Mail,
+  name: User, id: IdCard, mobile: Smartphone, alt: Smartphone, work: Phone, email: Mail,
   address: MapPin, employer: Building2, language: Globe, preference: MessageCircle,
-  consent: ShieldCheck,
+  /* A SECOND CELLPHONE IS A CELLPHONE AND A WORK LINE IS NOT. The alternative slot used to wear
+     the handset the landline wears, which drew a second mobile as though it were a switchboard. */
+  hours: Clock, consent: ShieldCheck,
 } as const
 
 export function DebtorDetailsPanel({ account, name, workspace, properties, onChange, userId, onEmail, onEmailChanged, onOpenTrace }: {
@@ -110,25 +118,27 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
    * else's name on it is precisely the row nobody must dial thinking it is the debtor.
    */
   const kin = isCompany ? [] : otherPeople(live)
-  const phones = live.filter((c) => c.kind === 'mobile' || c.kind === 'phone' || c.kind === 'work')
+  /*
+   * THE SLOTS ARE BY KIND, AND THE RULE IS ITS OWN MODULE.
+   *
+   * THE FIRM: "it's important to show that a debtor has a mobile primary number. He could have a
+   * secondary number, mobile. Then a work number... I'd say a work number, because nobody has a
+   * home number anymore. So an email address, there should be a second, an alternative email
+   * address."
+   *
+   * WHAT IT REPLACES WAS "THE NEXT NUMBER, WHATEVER IT IS" -- one slot labelled "Alternative
+   * number" holding the first phone that was not the primary, so which of a second cellphone and
+   * a work line appeared was decided by the order the rows came back in. See debtorSlots.ts; the
+   * reasoning, and the reason a home number keeps its chip rather than a slot, lives there.
+   *
+   * 105 ACCOUNTS ON THE BOOK CARRY MORE THAN ONE EMAIL ADDRESS -- the firm: "if a debtor has more
+   * than one email address, it should be shown. It's important. If they have, for example, a work
+   * and a personal one" -- so the second has a slot of its own now rather than a list underneath.
+   */
+  const slots = debtorSlots(live)
   // Shared with the action bar's Call button, so both ring the same number.
   const primaryPhone = dialableNumber(live)
-  const altPhone = phones.find((c) => c.id !== primaryPhone?.id)
-  /*
-   * EVERY EMAIL ADDRESS, NOT THE FIRST ONE FOUND.
-   *
-   * THE FIRM: "if a debtor has more than one email address, it should be shown. It's important.
-   * If they have, for example, a work and a personal one." They hit it the hard way — an account
-   * carrying two addresses, one slot, and editing one of them made the other appear.
-   *
-   * 105 ACCOUNTS ON THE BOOK CARRY MORE THAN ONE, and until now each had an address that could
-   * not be seen on this screen at all. Most came in the way the second one on that account did:
-   * a collector matched an email and ticked "save the address".
-   */
-  const emails = live.filter((c) => c.kind === 'email')
-  const email = emails[0]
-  const address = live.find((c) => c.kind === 'address')
-  const employer = live.find((c) => c.kind === 'employer')
+  const windows = parseWindows(account.contactWindows)
 
   return (
     // A container, so the fields below can reflow on the PANEL's width rather than the screen's.
@@ -241,17 +251,37 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         */}
         {!isCompany && (
           <>
-            <ContactSlot icon="mobile" label="Mobile (Primary)" contact={primaryPhone}
+            <ContactSlot icon="mobile" label="Mobile (Primary)" contact={slots.primaryMobile}
               onAdd={() => setAddKind('mobile')} userId={userId} busy={busy} run={run} />
-            <ContactSlot icon="alt" label="Alternative number" contact={altPhone}
-              onAdd={() => setAddKind('phone')} userId={userId} busy={busy} run={run} />
-            <ContactSlot icon="email" label="Email address" contact={email}
+            <ContactSlot icon="alt" label="Mobile (Second)" contact={slots.secondMobile}
+              onAdd={() => setAddKind('mobile')} userId={userId} busy={busy} run={run} />
+            {/*
+              THE SWITCHBOARD, AND WHETHER IT IS THE ONE CALL RINGS.
+
+              `dialableNumber` picks across all three kinds, so on an account whose only number is
+              a work line the Call button rings it while "Mobile (Primary)" sits empty above --
+              correct, and unreadable unless this slot says so. The badge appears only in that
+              case; where the primary mobile is the one dialled, its own label already says it.
+            */}
+            <ContactSlot icon="work" label="Work number" contact={slots.workNumber}
+              badge={ringsOnCall(slots.workNumber, primaryPhone) ? 'Call rings this' : undefined}
+              onAdd={() => setAddKind('work')} userId={userId} busy={busy} run={run} />
+            <ContactSlot icon="email" label="Email address" contact={slots.email}
               onAdd={() => setAddKind('email')} userId={userId} busy={busy} run={run}
-              onOpen={email ? () => onEmail(email.value) : undefined}
+              onOpen={slots.email ? () => onEmail(slots.email!.value) : undefined}
+              /*
+                ONLY THE FIRST ADDRESS OFFERS TO RE-SERVE. A section 129 goes out on the address in
+                THIS slot, so correcting it is what may have left a statutory demand sitting in a
+                mailbox nobody reads. Correcting the alternative below changes nothing that was
+                served. See reissueNotice.ts.
+              */
               onValueChanged={onEmailChanged} />
-            <ContactSlot icon="address" label="Residential address" contact={address}
+            <ContactSlot icon="email" label="Alternative email" contact={slots.altEmail}
+              onAdd={() => setAddKind('email')} userId={userId} busy={busy} run={run}
+              onOpen={slots.altEmail ? () => onEmail(slots.altEmail!.value) : undefined} />
+            <ContactSlot icon="address" label="Residential address" contact={slots.address}
               onAdd={() => setAddKind('address')} userId={userId} busy={busy} run={run} />
-            <ContactSlot icon="employer" label="Employer" contact={employer}
+            <ContactSlot icon="employer" label="Employer" contact={slots.employer}
               onAdd={() => setAddKind('employer')} userId={userId} busy={busy} run={run} />
           </>
         )}
@@ -262,6 +292,17 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         <EditableSlot icon="preference" label="Contact preference" value={account.contactPreference}
           options={['Phone', 'Phone, WhatsApp', 'WhatsApp', 'SMS', 'Email', 'Post', 'Do not contact']}
           onSave={(v) => run(() => saveDebtorPreferences(account.id, { contactPreference: v }))} busy={busy} />
+        {/*
+          AND WHEN, WHICH IS A DIFFERENT QUESTION FROM HOW.
+
+          THE FIRM: "maybe we can add something like there, contact time, between certain hours,
+          and then you can choose the two hours and then add a different schedule -- for example
+          the debtor likes to be contacted between 8 and 9, and 7 and 5." Two windows rather than
+          one range, because somebody reachable before work and again after it is not reachable
+          all day.
+        */}
+        <WindowsSlot windows={windows} busy={busy}
+          onSave={(next) => run(() => saveDebtorPreferences(account.id, { contactWindows: next }))} />
         <EditableSlot icon="consent" label="Consent status" value={account.consentStatus}
           options={['Consented', 'Not obtained', 'Withdrawn']}
           onSave={(v) => run(() => saveDebtorPreferences(account.id, { consentStatus: v }))} busy={busy}
@@ -318,7 +359,7 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         that row is the one nobody must dial thinking they have the debtor on the line.
       */}
       {kin.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 text-sm">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Other people on this account</p>
           {kin.map((group) => (
             <div key={group.person ?? ''}>
@@ -370,7 +411,7 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
       )}
 
       {isCompany && people.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-3 text-sm">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Who to ask for</p>
           {people.map((group) => (
             <div key={group.person ?? 'the company'}>
@@ -423,25 +464,27 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
         Not on a company: a company's addresses belong to named people and are listed above, under
         whoever they belong to.
       */}
-      {!isCompany && emails.length > 1 && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">Other email addresses</p>
-          {emails.slice(1).map((c) => (
+      {/*
+        ANYTHING BEYOND THE SLOTS, under one heading rather than two.
+
+        THE FIRM, of the block that used to sit here: "the other email addresses -- there's other
+        email addresses here at the bottom now, so it's kind of any additional info can come under
+        there." Which is what it is: a third address, a home line a trace turned up, a second
+        switchboard. Each row says what it is -- contactWhat draws the chip -- so one heading over
+        a mixed list reads better than two headings over one row each.
+
+        THE SECOND EMAIL IS NOT HERE ANY MORE. It has a slot of its own above, which is the half of
+        this the firm asked for first.
+      */}
+      {!isCompany && (slots.otherEmails.length > 0 || slots.otherNumbers.length > 0) && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 text-sm">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">Anything else on file</p>
+          {slots.otherNumbers.map((c) => (
+            <ContactValue key={c.id} contact={c} userId={userId} busy={busy} run={run} />
+          ))}
+          {slots.otherEmails.map((c) => (
             <ContactValue key={c.id} contact={c} userId={userId} busy={busy} run={run}
               onOpen={() => onEmail(c.value)} />
-          ))}
-        </div>
-      )}
-
-      {/*
-        Numbers beyond the two slots above. An account can carry several.
-        Not on a company: they are already listed above, under whoever they belong to.
-      */}
-      {!isCompany && phones.length > 2 && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">Other numbers</p>
-          {phones.slice(2).map((c) => (
-            <ContactValue key={c.id} contact={c} userId={userId} busy={busy} run={run} />
           ))}
         </div>
       )}
@@ -465,15 +508,23 @@ export function DebtorDetailsPanel({ account, name, workspace, properties, onCha
   )
 }
 
-function SlotShell({ icon, label, children, hint }: {
+function SlotShell({ icon, label, children, hint, badge }: {
   icon: keyof typeof SLOT_ICON; label: string; children: React.ReactNode; hint?: string
+  badge?: string
 }) {
   const Icon = SLOT_ICON[icon]
   return (
     <div className="flex gap-2.5">
       <Icon size={14} className="text-slate-300 mt-1 shrink-0" />
       <div className="min-w-0 flex-1">
-        <dt className="text-[11px] text-slate-400" title={hint}>{label}</dt>
+        <dt className="text-[11px] text-slate-400 flex items-center gap-1.5" title={hint}>
+          {label}
+          {badge && (
+            <span className="text-[10px] px-1.5 rounded bg-gold-50 text-[var(--c-gold-deep)]">
+              {badge}
+            </span>
+          )}
+        </dt>
         <dd className="text-sm text-slate-800 break-words">{children}</dd>
       </div>
     </div>
@@ -636,10 +687,12 @@ function NameSlot({ account, name, isCompany, onSave, busy }: {
   )
 }
 
-function ContactSlot({ icon, label, contact, onAdd, userId, busy, run, onOpen, onValueChanged }: {
+function ContactSlot({ icon, label, contact, badge, onAdd, userId, busy, run, onOpen, onValueChanged }: {
   icon: keyof typeof SLOT_ICON
   label: string
-  contact?: AccountContact
+  contact?: AccountContact | null
+  /** Said beside the label where the slot holds something the label does not cover. */
+  badge?: string
   onAdd: () => void
   userId: string | null
   busy: boolean
@@ -649,7 +702,7 @@ function ContactSlot({ icon, label, contact, onAdd, userId, busy, run, onOpen, o
   onValueChanged?: (before: string, after: string) => void
 }) {
   return (
-    <SlotShell icon={icon} label={label}>
+    <SlotShell icon={icon} label={label} badge={contact ? badge : undefined}>
       {contact
         ? <ContactValue contact={contact} userId={userId} busy={busy} run={run} onOpen={onOpen}
             onValueChanged={onValueChanged} />
@@ -703,7 +756,15 @@ function ContactValue({ contact, userId, busy, run, onOpen, onValueChanged }: {
 
   const dialable = contact.kind === 'mobile' || contact.kind === 'phone' || contact.kind === 'work'
   return (
-    <div>
+    /*
+      THE SAME SIZE WHEREVER IT IS DRAWN. THE FIRM, looking at the addresses under the slots: "the
+      script is really big -- it should be the same as the other one." It was: inside a slot this
+      sits in a `dd` that sets the size, and in the lists below there was nothing setting it, so
+      the same component drew an email address two points larger at the bottom of the panel than
+      the one three rows above it. Set here rather than on each list, so the next list to be added
+      cannot get it wrong.
+    */
+    <div className="text-sm">
       <div className="flex items-start gap-2">
         {dialable
           // A phone hands off to the device's dialler, which is what a tablet is good at —
@@ -771,6 +832,90 @@ function ContactValue({ contact, userId, busy, run, onOpen, onValueChanged }: {
         </button>
       </div>
     </div>
+  )
+}
+
+/**
+ * WHEN THIS DEBTOR ASKED TO BE TELEPHONED, as a list you can add to.
+ *
+ * THE FIRM: "you can choose the two hours and then add a different schedule -- for example the
+ * debtor likes to be contacted between 8 and 9, and 7 and 5."
+ *
+ * EACH CHANGE IS A SAVE, which is not how the slots beside it work and is right here. The others
+ * are one value being corrected, so a draft and a Save button is the shape; this is a list being
+ * built, and a Save that has to be remembered after adding a window is a window lost every time
+ * somebody adds one and closes the panel.
+ *
+ * `<input type="time">` RATHER THAN A BOX TO TYPE INTO, because the firm works on an iPad: it
+ * gives them the wheel they already know and it is the one control that cannot produce "half past
+ * eight" where the column holds "HH:MM".
+ */
+function WindowsSlot({ windows, busy, onSave }: {
+  windows: ContactWindow[]
+  busy: boolean
+  onSave: (next: ContactWindow[]) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [from, setFrom] = useState('08:00')
+  const [to, setTo] = useState('09:00')
+  const problem = windowProblem({ from, to })
+
+  if (!editing) {
+    return (
+      <SlotShell icon="hours" label="Best time to call"
+        hint="The hours this debtor asked to be telephoned in.">
+        <button onClick={() => setEditing(true)}
+          className={`text-left hover:underline ${windows.length ? '' : 'text-slate-300 hover:text-brand-600'}`}>
+          {windows.length ? describeWindows(windows) : 'Not recorded'}
+        </button>
+        {/*
+          AND WHETHER NOW IS ONE OF THEM.
+
+          ONLY WHERE SOMEBODY HAS ACTUALLY BEEN TOLD AN HOUR. insideWindow answers true for an
+          account with no windows on it, which is nearly the whole book -- a caution on every one
+          of those would be a caution nobody reads, and this screen's rule is that a warning which
+          fires when nothing is wrong is worse than no warning.
+        */}
+        {windows.length > 0 && !insideWindow(windows, firmClock()) && (
+          <span className="block text-[11px] text-gold-600">Not one of those hours now.</span>
+        )}
+      </SlotShell>
+    )
+  }
+
+  return (
+    <SlotShell icon="hours" label="Best time to call">
+      <div className="space-y-1.5 mt-0.5">
+        {windows.map((w, i) => (
+          <div key={`${w.from}-${w.to}`} className="flex items-center gap-1.5">
+            <span className="tabular-nums">{describeWindows([w])}</span>
+            <button disabled={busy} onClick={() => onSave(withoutWindow(windows, i))}
+              aria-label={`Remove ${w.from} to ${w.to}`}
+              className="text-slate-300 hover:text-negative disabled:opacity-50">
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input type="time" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From"
+            className="text-sm rounded-lg border border-slate-200 px-1.5 py-1" />
+          <span className="text-[11px] text-slate-400">to</span>
+          <input type="time" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To"
+            className="text-sm rounded-lg border border-slate-200 px-1.5 py-1" />
+          <button disabled={busy || problem !== null} onClick={() => onSave(withWindow(windows, { from, to }))}
+            className="text-[11px] font-medium px-2 py-1 rounded bg-brand-600 text-white disabled:opacity-50">
+            Add
+          </button>
+        </div>
+        {/* SAID, AND THE BUTTON REFUSES. A window ending before it starts is a typo every time and
+            there is nothing in it worth keeping -- stored, it would read as a ban on the middle of
+            the day. See windowProblem, which is the one place that judgement is made. */}
+        {problem && <span className="block text-[11px] text-gold-600">{problem}</span>}
+        <button onClick={() => setEditing(false)} className="text-[11px] text-slate-500 hover:text-slate-700">
+          Done
+        </button>
+      </div>
+    </SlotShell>
   )
 }
 
