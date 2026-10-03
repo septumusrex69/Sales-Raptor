@@ -121,6 +121,14 @@ export async function recordConsultation(input: {
   comment: string
   /** The account_calls row, where there is one, so the fee is claimed exactly once. */
   callId?: string | null
+  /**
+   * WHO WAS SPOKEN TO, where it was not the debtor: "his mother", "the accounts lady".
+   *
+   * IT DOES NOT CHANGE THE FEE, at the firm's decision -- any conversation about the account is a
+   * consultation, see CONSULTATION_ITEM_NOTE. It changes the NOTE, which is what has to survive
+   * somebody reading the account two years later and asking who agreed to what.
+   */
+  spokeTo?: string | null
   actor: Actor
 }): Promise<ChargeResult> {
   const said = input.comment?.trim()
@@ -160,7 +168,7 @@ export async function recordConsultation(input: {
    */
   await addNote({
     accountId: input.accountId,
-    body: consultationNote(input.number),
+    body: consultationNote(input.number, input.spokeTo),
     // Raptor's words, not a person's: hidden when the timeline is set to show only
     // what people wrote. See TimelineEntry.automated.
     source: 'system',

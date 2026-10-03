@@ -32,6 +32,28 @@ import type { ClientPosition } from '../../lib/clientPosition'
 const SPOKE_TO_THEM = CALL_OUTCOME_ORDER.filter((k) => CALL_OUTCOMES[k].reached)
 
 /**
+ * AND THE TWO MORE THAT BECOME TRUE ONCE YOU SPOKE TO SOMEBODY WHO WAS NOT THE DEBTOR.
+ *
+ * `reached` is a fact about the DEBTOR, which is why Tracing and Under administration are off the
+ * list above: both mean the debtor was not reached, and the list above sits on a press that bills
+ * a conversation. That was right while the box had only one question.
+ *
+ * IT IS WRONG ONCE THE BOX ASKS WHO. You ring the mother, you have a real conversation -- the firm
+ * charges it, and says so -- and she tells you he moved to Durban in March. That call reached a
+ * person AND lands the account on Tracing, and until now the only way to record it was to say the
+ * call was not answered, which is a lie that also loses the R60 the firm is entitled to.
+ *
+ * UNDER ADMINISTRATION IS THE SAME SHAPE AND IS NEARLY ALWAYS SOMEBODY ELSE: you learn a debtor is
+ * under debt review by speaking to the debt counsellor. Its own hint says so -- "the practitioner
+ * from here".
+ *
+ * NOT "ALL EIGHT". `no_answer` stays off: having written down who you spoke to, "nobody answered"
+ * is the one thing that cannot also be true, and a list that offers a contradiction is a list
+ * somebody eventually picks from by mistake.
+ */
+const SPOKE_TO_SOMEBODY_ELSE = CALL_OUTCOME_ORDER.filter((k) => k !== 'no_answer')
+
+/**
  * Call a debtor, and put the call on the account.
  *
  * The dial charges Annexure B item 2 straight away -- the firm's rule, every outgoing call is
@@ -98,6 +120,12 @@ export function CallButton({ accountId, numbers, actor, livePromise, standing, c
    * have no idea why.
    */
   const [alsoMain, setAlsoMain] = useState(false)
+  /*
+   * WHO WAS SPOKEN TO. Empty means the debtor, which is the overwhelming common case and must
+   * stay a zero-press answer -- a box that asked "who?" on every call would be answered "him" four
+   * hundred times a day and then stop being read.
+   */
+  const [spokeTo, setSpokeTo] = useState('')
   /**
    * WHERE THE CALL LEAVES THE ACCOUNT, answered on the same box and saved by the same press.
    *
@@ -185,7 +213,7 @@ export function CallButton({ accountId, numbers, actor, livePromise, standing, c
     try {
       if (yes) {
         const charge = await recordConsultation({
-          accountId, number: asking, comment, callId: answeredCallId, actor,
+          accountId, number: asking, comment, callId: answeredCallId, actor, spokeTo,
         })
         setStatus(charge.reason === 'charged'
           ? `Consultation charged R${charge.exclVat.toFixed(2)} + VAT`
@@ -420,10 +448,45 @@ export function CallButton({ accountId, numbers, actor, livePromise, standing, c
             do not cover must still be able to record the call; a required field with no honest
             answer is how "Review" came to mean nothing.
           */}
+          {/*
+            WHO DID YOU SPEAK TO?
+
+            THE FIRM: "sometimes we have a consultation with the debtor's mother about the account,
+            and then she would take responsibility for that. Or it will be somebody in the company
+            -- not the owner, but the receptionist or the accounts lady making an agreement."
+
+            THE FEE DOES NOT TURN ON IT. They settled that in the same breath: "you can charge
+            anybody that we spoke to the consultation." This is the RECORD, and it matters more
+            than the money -- "the mother agreed to R500 a month" is not the debtor promising
+            anything, and a receptionist cannot bind a company where a director can.
+
+            EMPTY MEANS THE DEBTOR, so the common case costs nobody a press. A required picker here
+            would be answered "the debtor" four hundred times a day by people who had stopped
+            reading it, which is the same failure as a warning that fires when nothing is wrong.
+          */}
+          <label className="block mt-3">
+            <span className="text-xs font-medium text-slate-500">
+              Who did you speak to? <span className="text-slate-400">— leave it empty if it was the debtor</span>
+            </span>
+            {/*
+              NAMED, so a check can tell it from the note.
+              
+              The e2e counts every surface you can type into and insists there is exactly ONE,
+              which is the firm's "notes should be made only at one place" held as a number. This
+              field is not a second note -- it asks WHO, where the note asks WHAT WAS SAID -- and
+              the count has to be able to say so rather than being loosened to two, which would
+              let a genuine second note back in tomorrow.
+            */}
+            <input value={spokeTo} onChange={(e) => setSpokeTo(e.target.value)}
+              name="spoke-to" aria-label="Who did you speak to"
+              placeholder="His mother · the accounts lady · a debt counsellor"
+              className="mt-1 w-full text-sm rounded-lg border border-slate-200 px-3 py-2" />
+          </label>
+
           <div className="mt-3.5 pt-3.5 border-t border-slate-100">
             <OutcomePicker
               value={choice}
-              offer={SPOKE_TO_THEM}
+              offer={spokeTo.trim() ? SPOKE_TO_SOMEBODY_ELSE : SPOKE_TO_THEM}
               current={standing ?? null}
               livePromise={livePromise ?? null}
               /* THE NOTE ABOVE IS THE WORDS. One sentence, typed once -- see wordsAskedAs. */

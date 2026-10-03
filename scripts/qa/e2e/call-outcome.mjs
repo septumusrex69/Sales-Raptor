@@ -155,8 +155,23 @@ try {
      * field is an `<input>`, so the count stayed at one while the screen had two. Nothing on a
      * dispute asks for a number or a date, so any typing surface beyond the first is the fault.
      */
+    /*
+     * AND "WHO DID YOU SPEAK TO" IS EXCLUDED BY NAME RATHER THAN BY RAISING THE NUMBER.
+     *
+     * The firm widened item 7 to any conversation about the account -- "the debtor's mother... the
+     * receptionist or the accounts lady" -- so the box now asks who was spoken to. That is a
+     * different question from what was said, and it is not a second note.
+     *
+     * COUNTED AROUND IT, NOT COUNTED UP TO TWO. Loosening this to 2 would let a genuine second
+     * note back in tomorrow and nobody would notice, which is exactly how the double note-taking
+     * the firm complained about got in the first time.
+     */
     const TYPE_INTO = 'textarea, input:not([type]), input[type="text"]'
-    t.check('a dispute asks for no second note', await modal.locator(TYPE_INTO).count(), 1)
+    const NOTES = `:is(${TYPE_INTO}):not([name="spoke-to"])`
+    t.check('a dispute asks for no second note', await modal.locator(NOTES).count(), 1)
+    /* AND THE WHO IS THERE, ONCE, so the exclusion above cannot be hiding its disappearance. */
+    t.check('...and who you spoke to is asked once',
+      await modal.locator('[name="spoke-to"]').count(), 1)
     /* AND NOT BY ITS LABEL EITHER, which is what the second box said when it was there. */
     t.ok('...and nothing asks the same question twice',
       !/what do they dispute|say what they told you/i.test(withDispute))
