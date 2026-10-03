@@ -283,7 +283,11 @@ export async function runOneStep(
     capitalHandedOver: Number(account.capital_handed_over ?? 0),
     handoverDate: account.opening_as_at ?? null,
     ledgers: ledgerRes,
-    inDuplum: true,
+    /* IN DUPLUM IS NO LONGER PASSED, and this line is why the rest of the app was wrong. It said
+       `true` unconditionally -- correctly, because the ceiling has no exception -- while the
+       account screen passed the stored column, which is false on everything Raptor created. So a
+       section 129 quoted a capped balance and the screen beside it quoted an uncapped one. One
+       rule, applied in one place: see accountBalance. */
     interestRateAnnual: account.interest_rate_annual ? Number(account.interest_rate_annual) : undefined,
   }
   /* THE BALANCE THE NOTICE QUOTES, through the one place that arithmetic lives. A second

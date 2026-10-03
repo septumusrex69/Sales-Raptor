@@ -39,10 +39,9 @@ const CHARTER = '"Charter", "Bitstream Charter", Georgia, serif'
  * not a document, and neither is one for an offer that does not clear the account.
  */
 export function repaymentLetterRefusal(plan: RepaymentPlan): string | null {
-  if (plan.outcome === 'never') {
-    return 'This offer does not cover the interest, so there is no schedule to send: the account '
-      + 'would never be settled by it.'
-  }
+  /* THE 'never' REFUSAL IS GONE WITH THE OUTCOME. In duplum bounds every account, so an offer
+     below the interest does settle in the end -- it simply does not finish inside the horizon,
+     which `not_within` below already refuses in words that are true either way. */
   if (plan.outcome === 'not_within') {
     return plan.rows.length <= 1
       ? 'A single payment that does not settle the account has no schedule to send.'

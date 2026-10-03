@@ -141,24 +141,40 @@ near('...being the balance plus the fee for settling it',
  * R150 never touches the debt -- and the first cut of this said it settled, because it measured
  * the balance inside the period rather than from one period to the next.
  */
-const small = plan(150, account({ inDuplum: false }))
-check('R150 a month on R10 200 never settles', small.outcome, 'never')
+/*
+ * THE OUTCOME IS NO LONGER 'never' AND THE FACT IS UNCHANGED.
+ *
+ * This read `plan(150, account({ inDuplum: false }))` and expected 'never'. THE FIRM, looking at
+ * RRC00005: "in duplum is still not working here." It was not -- the switch was Swordfish's "has
+ * this account REACHED the ceiling" column, false on everything Raptor created -- and with the
+ * ceiling binding every account there is no such plan to make. The debt climbs to the ceiling,
+ * interest stops, and R150 a month then chips at it, so it settles sixteen years out: 'not_within'
+ * rather than 'never', which is the sentence further down this file already said was the honest
+ * one. What a collector needs is `belowTheInterest` and the floor, and both are untouched.
+ */
+const small = plan(150)
+check('R150 a month on R10 200 does not settle inside the horizon', small.outcome, 'not_within')
 ok('...and says why', small.belowTheInterest)
-ok('...stopping rather than walking ten years to prove it', small.rows.length <= 3)
-/* BIGGER THAN WHERE THE LAST PAYMENT LEFT IT, which is the comparison that means anything -- not
-   bigger than the opening balance, because the first period is only the few days since the last
-   posting and a single payment does dent it. Found by this assertion failing on right code. */
-ok('...with the debt bigger than where the last payment left it',
-  small.leftOwing > small.rows[0].balanceAfter)
+/* IT WALKS THE WHOLE HORIZON NOW instead of stopping after three rows, because there is no longer
+   a point at which the arithmetic can say "and it never will". */
+check('...walking the horizon rather than stopping early', small.rows.length, MAX_INSTALMENTS)
+/* STILL OWING AT THE END OF TEN YEARS, which is the fact the old 'never' was reaching for. */
+ok('...and still owing at the end of it', small.leftOwing > 0)
 /*
  * AND IT NAMES THE FLOOR, which is a floor and not a counter-offer: interest is pro-rated by days
  * in the calendar month, so an amount sitting exactly on this line stalls in a short month. What
  * is asserted is the only thing that is certainly true of it -- BELOW it, nothing moves.
  */
 ok('...and names the floor', small.minimumInstalment >= 226 && small.minimumInstalment <= 240)
+/*
+ * BELOW THE FLOOR THE PAYMENT DOES NOT COVER THE INTEREST, and that is the whole of what the floor
+ * says. It used to be asserted as the OUTCOME ('never'), which conflated two different facts, and
+ * with in duplum binding every account it is plainly wrong: R1 below the floor reaches the ceiling
+ * and then settles inside ten years. The floor is about the month, not about the end.
+ */
 for (const under of [1, 6, 20, 50]) {
-  check(`R${under} below the floor never moves`,
-    plan(small.minimumInstalment - under, account({ inDuplum: false })).outcome, 'never')
+  ok(`R${under} below the floor does not cover the interest`,
+    plan(small.minimumInstalment - under).belowTheInterest)
 }
 /* The floor is not sold as an answer: what to ask for is instalmentToSettleIn, below. */
 
@@ -166,11 +182,13 @@ for (const under of [1, 6, 20, 50]) {
  * IN DUPLUM CHANGES THE VERDICT WITHOUT CHANGING THE FACT. The debt climbs to the ceiling, interest
  * stops, and every payment above its own receipt fee then chips at it -- so it does settle,
  * eventually. "Never" there would be a lie a debtor could disprove by paying.
+ *
+ * THE SAME PLAN AS `small` ABOVE, now that there is only one kind of account. Kept as its own name
+ * because what is asserted here is different: above is the verdict and the floor, here is that the
+ * ceiling was reached and that the figures quoted respect it.
  */
 const capped = plan(150)
-check('the same offer under in duplum is not called never', capped.outcome, 'not_within')
-ok('...but still says the payment does not cover the interest', capped.belowTheInterest)
-ok('...and that the ceiling was reached', capped.hitInDuplum)
+ok('the ceiling is reached on the walk', capped.hitInDuplum)
 /*
  * AND THE INTEREST QUOTED IS WHAT IS CHARGED, NOT WHAT ACCRUED. The ceiling is the capital handed
  * over, so non-capital can never exceed R10 000 however long this runs. Totalling the raw accrual

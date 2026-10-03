@@ -515,7 +515,10 @@ export function AccountDetail() {
     const input: BalanceInput = {
       capitalHandedOver: account.capitalHandedOver,
       handoverDate: account.handoverDate,
-      inDuplum: account.inDuplum,
+      /* IN DUPLUM IS NOT PASSED ANY MORE, and that is the fix rather than an omission: the ceiling
+         binds every account, so computeBalance applies it without being told. It used to take
+         `account.inDuplum`, which is Swordfish's "has this account REACHED the ceiling" column --
+         false on everything Raptor created, so nothing capped. See accountBalance. */
       // An account written off stopped accruing then. Swordfish records the date inside the
       // comment ("Closed on 2026/09/07 ..."), which we do not have, so the last action stands in
       // for it — imprecise, and labelled as such rather than presented as the closing date.

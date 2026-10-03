@@ -361,14 +361,29 @@ const empty = { payments: [], fees: [], interest: [] }
   check('near the ceiling: the fee is trimmed to the headroom', nearly.settlementFee, 50)
   check('near the ceiling: settlement lands exactly on the ceiling', nearly.settlement, 2000)
 
-  /* An account not subject to in duplum is untouched by any of this. */
+  /*
+   * AND THERE IS NO SUCH THING AS AN ACCOUNT NOT SUBJECT TO IT.
+   *
+   * THIS ASSERTED THE OPPOSITE. It passed `inDuplum` off and checked that R5 000 of interest on
+   * R1 000 of capital stood at R6 000 uncapped -- which was the behaviour, and the behaviour was
+   * wrong. THE FIRM, looking at RRC00005: "in duplum is still not working here." It was not,
+   * because the switch was `debtor_accounts.in_duplum`, Swordfish's "has this account REACHED the
+   * ceiling" column, false on everything Raptor ever created.
+   *
+   * In duplum at common law binds every debt; NCA s103(5) is the wider version and binds credit
+   * agreements. There is no input to pass any more, so the same figures cap, and the assertion
+   * that used to prove the escape hatch now proves it is shut.
+   */
   const free = computeBalance({
     capitalHandedOver: 1000, handoverDate: '2024-01-01',
     ledgers: { payments: [], fees: [], interest: [{ from: '2024-02-01', days: 30, amount: 5000 }] },
   })
-  // 10% of R6,000 is R600, still under the R610 maximum, so it is not the cap that applies here.
-  check('without in duplum the fee is charged in full', free.settlementFee, 690)
-  check('and the balance is not capped', free.balance, 6000)
+  check('there is no way to ask for it NOT to cap: the balance stops at twice capital',
+    free.balance, 2000)
+  check('...and the ceiling leaves no room for a settlement fee', free.settlementFee, 0)
+  /* `check` here compares numbers, so the reason is asserted as the one thing it must be. */
+  check('...and it says what stopped it', free.cappedBy === 'in duplum' ? 1 : 0, 1)
+  check('...and how much it withheld', free.withheld, 4000)
 }
 
 /*

@@ -359,7 +359,15 @@ ok('...and that is how the period is read back',
  * rather than a quietly smaller number. engine_balances takes the recoverable half, which is the
  * half that must not pass the ceiling.
  */
-ok('in duplum caps what is recoverable', /if v_acct\.in_duplum then/.test(accrue))
+/*
+ * AND IT IS NOT ASKED FIRST. This asserted `if v_acct.in_duplum then`, which is the bug: that
+ * column is Swordfish's "has this account REACHED the ceiling", false on everything Raptor ever
+ * created, so no ceiling engaged on any account the firm opened. THE FIRM, looking at RRC00005:
+ * "in duplum is still not working here." The rule binds every debt -- common law on all of them,
+ * NCA s103(5) wider on credit agreements -- so there is nothing to ask.
+ */
+ok('in duplum caps what is recoverable', /v_recoverable := greatest\(0, least\(v_accrued/.test(accrue))
+ok('...on every account, with no column asked first', !/if v_acct\.in_duplum then/.test(accrue))
 ok('...at the capital handed over, not at twice it',
   /v_ceiling := greatest\(coalesce\(v_acct\.capital_handed_over, 0\), 0\)/.test(accrue))
 ok('...never below nothing', /greatest\(0, least\(v_accrued, v_ceiling - v_non_capital\)\)/.test(accrue))

@@ -370,15 +370,13 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
           <span className="font-medium">{shortDate(plan.settlesOn ?? '')}</span>.
         </p>
       )}
-      {plan.outcome === 'never' && (
-        <p className="mt-1 flex items-start gap-1.5 text-[13px] font-medium text-negative-700">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          <span>
-            {money(shown)} {each} does not cover the interest, so the account never clears.
-            {plan.minimumInstalment ? ` Nothing below ${money(plan.minimumInstalment)} can.` : ''}
-          </span>
-        </p>
-      )}
+      {/*
+        THERE WAS A THIRD SENTENCE HERE -- "so the account never clears" -- and the account always
+        clears now. In duplum stops the debt growing at the capital handed over, so an offer below
+        the interest reaches the ceiling and then chips away at it; what it does not do is finish
+        inside the horizon, which is what `not_within` says. The two facts that sentence carried
+        both moved into it: the offer not covering the interest, and the smallest one that works.
+      */}
       {plan.outcome === 'not_within' && (
         <p className="mt-1 flex items-start gap-1.5 text-[13px] font-medium text-[var(--c-gold-deep)]">
           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
@@ -389,6 +387,11 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
               ? `That leaves ${money(plan.leftOwing)} on the account.`
               : `After ${plan.rows.length} payments ${money(plan.leftOwing)} would still be owing.`}
             {plan.belowTheInterest && ` ${money(shown)} ${each} does not cover the interest.`}
+            {/* AND THE SMALLEST ONE THAT DOES. It was only ever said on the branch above, so a
+                collector arguing a debtor up to a workable figure lost the one number that settles
+                the argument the moment in duplum bounded the debt. */}
+            {plan.belowTheInterest && plan.minimumInstalment
+              ? ` Nothing below ${money(plan.minimumInstalment)} covers it.` : ''}
           </span>
         </p>
       )}

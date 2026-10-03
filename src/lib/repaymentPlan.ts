@@ -66,12 +66,16 @@ export interface RepaymentRow {
 export type RepaymentOutcome =
   /** It clears, and `rows` ends with the settlement. */
   | 'settles'
-  /**
-   * It never clears: a full payment leaves the debt no smaller, so no number of them will. Only
-   * reachable with in duplum off -- with it on, the debt stops growing at the ceiling and any
-   * payment above its own receipt fee gets there eventually, however long that takes.
+  /*
+   * 'never' WAS HERE AND IS GONE. It meant "a full payment leaves the debt no smaller, so no number
+   * of them will", and its own note already said it was only reachable with in duplum off. In
+   * duplum is now on everywhere -- it always was, in law -- so the debt stops growing at the
+   * ceiling and any payment above its own receipt fee gets there eventually, however long it takes.
+   *
+   * WHAT A COLLECTOR NEEDS SURVIVED IN TWO BETTER PLACES: `not_within` says the offer does not
+   * clear the account, which is the sentence a debtor is given either way, and `belowTheInterest`
+   * says the offer does not cover what the account charges, which is the figure to argue about.
    */
-  | 'never'
   /**
    * It does not finish: either a once-off that leaves a balance behind, or an arrangement still
    * running at the end of the horizon. Both are the same answer to the debtor -- "this does not
@@ -326,22 +330,22 @@ export function repaymentPlan(input: RepaymentInput): RepaymentPlan {
      */
     if (after.balance >= previous.balance) {
       /*
-       * THE REASON IS ALWAYS WORTH RECORDING, THE VERDICT IS NOT ALWAYS "NEVER".
+       * THE REASON IS ALWAYS WORTH RECORDING, AND THE VERDICT IS NEVER "NEVER".
        *
-       * WITHOUT IN DUPLUM THE DEBT GROWS FOR EVER and there is nothing more to walk. WITH IT the
-       * growth is bounded: the debt climbs to the ceiling, interest stops there, and every payment
-       * above its own receipt fee then chips away at it -- so it does settle, sixteen years later.
-       * Calling that "never" would be a lie a debtor could disprove by paying, and pretending it is
-       * a working arrangement would be the worse one. So the walk continues and the horizon
-       * answers, while `belowTheInterest` carries the fact a collector actually needs: this payment
-       * does not cover what the account charges.
+       * THE DEBT IS BOUNDED ON EVERY ACCOUNT. In duplum stops non-capital at the capital handed
+       * over, so the balance climbs to the ceiling and stops there, and every payment above its own
+       * receipt fee then chips away at it -- it does settle, sixteen years later. Calling that
+       * "never" would be a lie a debtor could disprove by paying, and pretending it is a working
+       * arrangement would be the worse one. So the walk continues and the horizon answers, while
+       * `belowTheInterest` carries the fact a collector actually needs: this payment does not cover
+       * what the account charges.
+       *
+       * THIS BRANCH USED TO BREAK OUT WITH 'never' WHERE `account.inDuplum` WAS FALSE -- which was
+       * every account Raptor created, because that column is Swordfish's "has reached the ceiling"
+       * and not a switch. Now that the ceiling applies without being asked, the case it was written
+       * for cannot arise. See accountBalance.
        */
       belowTheInterest = true
-      if (!input.account.inDuplum) {
-        outcome = 'never'
-        leftOwing = roundToCents(after.balance)
-        break
-      }
     }
 
     leftOwing = roundToCents(after.balance)

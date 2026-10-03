@@ -97,11 +97,10 @@ export interface BalanceInput {
   capitalHandedOver: number
   handoverDate: string | null
   ledgers: LedgerLines
-  /**
-   * In duplum: non-capital may not exceed the capital outstanding when the debt was handed over.
-   * Where it binds, interest and fees stop — they do not accrue and then get written back.
+  /*
+   * IN DUPLUM TOOK A SWITCH HERE AND NO LONGER DOES. See the ceiling below: the rule applies to
+   * every account, so there is nothing to pass.
    */
-  inDuplum?: boolean
   /** An account written off stops accruing on this date. */
   writtenOffAt?: string | null
   vatRate?: number
@@ -343,10 +342,45 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   let cappedBy: BalanceBreakdown['cappedBy']
   let withheld = 0
 
-  // In duplum caps non-capital at the capital outstanding when the debt was handed over. The
-  // ceiling is fixed there and never recalculated as the balance falls (§5).
+  /*
+   * IN DUPLUM, AND IT IS NOT A SETTING.
+   *
+   * Non-capital may not exceed the capital outstanding when the debt was handed over. The ceiling
+   * is fixed there and never recalculated as the balance falls (§5).
+   *
+   * ------------------------------------------------------------------------------------------
+   * IT USED TO BE GATED ON A COLUMN THAT ANSWERS A DIFFERENT QUESTION
+   * ------------------------------------------------------------------------------------------
+   *
+   * THE FIRM, looking at RRC00005: "in duplum is still not working here." It was not, and the
+   * reason is the oldest fault in this codebase -- a column standing in for an answer.
+   *
+   * `debtor_accounts.in_duplum` is Swordfish's "In Duplum" column, Yes or No, and in Swordfish it
+   * means THIS ACCOUNT HAS REACHED THE CEILING. It was read here as "this account is SUBJECT to
+   * the rule", which is a different question -- and one whose answer is yes on every account.
+   * So every account Raptor created carried `false`, no ceiling engaged, and RRC00005 sat R61,91
+   * past its own with nothing on the screen saying so. The ceiling itself was sitting in
+   * `in_duplum_ceiling` beside it, correctly set to the R380 capital, used by nothing.
+   *
+   * WORSE THAN NOT CAPPING: THE NOTICE AND THE SCREEN DISAGREED. `api/_lib/workflow/step.ts`
+   * passed `inDuplum: true` unconditionally, because whoever wrote it knew the rule has no
+   * exception -- so a section 129 on that account quoted R760,00 while the account page beside it
+   * said R821,91. Two figures for one debt, and the one the debtor was holding was the other one.
+   *
+   * AND THE RULE REALLY HAS NO EXCEPTION. In duplum at COMMON LAW binds every debt there is:
+   * arrear interest stops at the capital outstanding whatever the agreement was. NCA s103(5) is
+   * the wider version -- interest, initiation and service fees, collection costs and default
+   * charges, in aggregate -- and it binds credit agreements. Raptor applies the wider one to
+   * everything. On a debt the NCA does not reach that under-recovers rather than over-recovers,
+   * which is an error the firm can correct case by case; the other direction is money taken from a
+   * debtor that a taxing master would order back.
+   *
+   * THE READING STAYS DERIVED. Whether an account HAS reached the ceiling is `cappedBy` below,
+   * computed from the figures rather than read off a flag -- which is what the pills and the
+   * filter have always claimed to mean ("non-capital has reached the capital handed over").
+   */
   let recoverableNonCapital = nonCapital
-  if (input.inDuplum && nonCapital > capital) {
+  if (nonCapital > capital) {
     recoverableNonCapital = capital
     withheld = roundToCents(nonCapital - capital)
     cappedBy = 'in duplum'
@@ -373,7 +407,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
    * Where the cap is close but not yet reached, only the part of the fee that still fits is
    * charged.
    */
-  const headroom = input.inDuplum ? Math.max(0, roundToCents(capital - recoverableNonCapital)) : Infinity
+  const headroom = Math.max(0, roundToCents(capital - recoverableNonCapital))
   const settlementFee = balance > 0 ? Math.min(settlementReceiptFee(balance, vatRate), headroom) : 0
 
   // The VAT already inside `fees` and `receiptFees`. A receipt fee is charged VAT-inclusive, so

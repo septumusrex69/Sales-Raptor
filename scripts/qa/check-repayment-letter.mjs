@@ -210,9 +210,21 @@ ok('...while an uncapped one does not mention it',
  * looking for it.
  */
 check('a schedule that settles is not refused', repaymentLetterRefusal(plan), null)
-const never = repaymentPlan({ account: account({ inDuplum: false }), instalment: 150, schedule: monthly() })
-check('an offer that never clears the account is refused', never.outcome, 'never')
-ok('...in words a collector can read out', /never be settled/.test(repaymentLetterRefusal(never) ?? ''))
+/*
+ * THE 'never' REFUSAL IS GONE WITH THE OUTCOME, and the offer it was written for is still refused.
+ *
+ * It built a plan on `account({ inDuplum: false })` -- an account the ceiling did not bind, which
+ * turned out to be every account Raptor ever created, which is why the firm found RRC00005 R61,91
+ * past its own ceiling with nothing saying so. With in duplum binding everything, R150 a month
+ * reaches the ceiling and then settles sixteen years out: it does not clear inside the horizon,
+ * which is `not_within` and has its own refusal below.
+ */
+const below = repaymentPlan({ account: account(), instalment: 150, schedule: monthly() })
+check('an offer below the interest is not called never', below.outcome, 'not_within')
+ok('...and is still refused', repaymentLetterRefusal(below) !== null)
+ok('...in words a collector can read out', /no end to show/.test(repaymentLetterRefusal(below) ?? ''))
+ok('...and never promises the account can never be settled',
+  !/never be settled/.test(repaymentLetterRefusal(below) ?? ''))
 const shortOnce = repaymentPlan({
   account: account(), instalment: 2000, schedule: monthly({ arrangement: 'once_off' }),
 })
