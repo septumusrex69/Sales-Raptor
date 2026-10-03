@@ -43,7 +43,7 @@ const TODAY = new Date().toISOString().slice(0, 10)
  */
 export function EscalateModal({
   accountId, debtorName, users, clientLiaison, actor, alreadyDisputed, fromEmail, initialKind,
-  openQueries = [], onClose, onDone,
+  initialRequestFor, initialDescription, openQueries = [], onClose, onDone,
 }: {
   accountId: string
   /** Who the ticket is about, for the sentence in the owner's notification. Nothing else reads it. */
@@ -88,6 +88,22 @@ export function EscalateModal({
   }
   /** Which of the two buttons was pressed. Ignored where there is no email. */
   initialKind?: EscalationKind
+  /**
+   * A REQUEST OPENED ON SOMETHING THAT ALREADY KNOWS WHAT IT IS ASKING FOR.
+   *
+   * The trace box opens this one when a trace could not be run for want of an identity number, and
+   * it knows two of the answers already: WHAT is being asked for, and WHY. Retyping either is how
+   * a ticket comes to read "see the trace note", which is the thing REQUEST_KINDS exists to stop.
+   *
+   * STILL EDITABLE, and everything else is still asked. Who answers it, when it is chased and
+   * whether anything is charged are the questions this box is for, and a prefilled description is
+   * a draft rather than a decision -- which is why these set the initial state and do not lock it.
+   *
+   * `initialKind` IS READ ONLY ALONGSIDE AN EMAIL, so these do not lean on it: a caller that
+   * passes a description means a request, and says so by passing one.
+   */
+  initialRequestFor?: string
+  initialDescription?: string
   /**
    * THE TICKETS ALREADY OPEN ON THIS ACCOUNT, so this email can be ADDED to one.
    *
@@ -153,8 +169,11 @@ export function EscalateModal({
 
   /* DISPUTE IS THE DEFAULT, EXCEPT WHERE IT IS NOT AVAILABLE -- a box opening on an option that
      cannot be chosen reads as broken. On an email it is whichever button was pressed. */
+  /* A PREFILLED DESCRIPTION IS A REQUEST being raised from somewhere that already knows what it is
+     asking for -- see initialRequestFor. Nothing else opens this box on a kind, and it can never
+     land on 'dispute', which is the option that gets barred. */
   const [kind, setKind] = useState<EscalationKind>(
-    fromEmail && initialKind ? initialKind : (alreadyDisputed ? 'help' : 'dispute'),
+    fromEmail && initialKind ? initialKind : initialDescription ? 'request' : (alreadyDisputed ? 'help' : 'dispute'),
   )
   const [toId, setToId] = useState(clientLiaison?.id ?? '')
   /*
@@ -178,7 +197,7 @@ export function EscalateModal({
    * what the note above this box has said all along. It is shown beside the box, read-only, so
    * this is a summary of something visible rather than something remembered.
    */
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(initialDescription ?? '')
   /* Capped where the endpoint caps, so what is shown is what is stored. */
   const emailWords = fromEmail
     ? ((fromEmail.body ?? '').replace(/\r\n/g, '\n').trim() || (fromEmail.subject ?? '').trim())
@@ -201,7 +220,14 @@ export function EscalateModal({
    * WHAT A REQUEST IS ASKING FOR. The statement is the ordinary case by a distance -- it is the
    * document a handover most often arrives without.
    */
-  const [requestFor, setRequestFor] = useState<string>(REQUEST_KINDS[0].value)
+  const [requestFor, setRequestFor] = useState<string>(
+    /* Held against REQUEST_KINDS rather than taken on trust: the database refuses a value outside
+       the list, and a caller naming one that has since been renamed would fail at the insert with
+       a constraint name rather than here with nothing lost. */
+    (initialRequestFor && REQUEST_KINDS.some((r) => r.value === initialRequestFor))
+      ? initialRequestFor
+      : REQUEST_KINDS[0].value,
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

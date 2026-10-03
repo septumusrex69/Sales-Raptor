@@ -142,6 +142,29 @@ export interface NarrativeInput {
    */
   trace?: { lodgedOn: string | null; round: TraceRound } | null
   /**
+   * A TRACE THAT COULD NOT BE RUN, AND WHAT THE CLIENT HAS TO SEND BEFORE IT CAN.
+   *
+   * THE FIRM: "we would need more information like an ID number... we haven't been able to trace
+   * the data on the information provided."
+   *
+   * IT IS A STATEMENT ABOUT THE INFORMATION, NEVER ABOUT THE DEBTOR. traceSentence below carries
+   * the same rule at length: whether a debtor is untraceable is a decision a team leader makes,
+   * not a conclusion arithmetic may reach on their behalf. What this says is factual and narrow --
+   * the account does not carry a key any bureau or portal can be searched on, and here is what
+   * would fix that.
+   *
+   * SET FROM THE REQUEST, NOT FROM THE ABSENCE OF A COLUMN. The caller passes this when there is
+   * an OPEN REQUEST for the debtor's details on the account -- so the sentence and the ask are one
+   * fact and cannot drift. An account simply missing an identity number says nothing: most of the
+   * book is missing one, most of it is being collected perfectly well, and "we cannot trace this
+   * debtor" on an account that is paying would be the one dishonest line in the report.
+   *
+   * `askedClient` IS WHETHER THE REQUEST HAS ACTUALLY REACHED THEM. A request still sitting with
+   * the collector or the liaison is the firm asking itself; "we have asked you" on a client's own
+   * report, where nobody has, is a claim the client can check and find false.
+   */
+  traceAttempt?: { attemptedOn: string | null; needs: string; askedClient: boolean } | null
+  /**
    * What is booked next, from the diary entry itself.
    *
    * The KIND is what makes this worth saying. "We will follow up on the 22nd" is a date; "We
@@ -307,6 +330,22 @@ function whatHappened(input: NarrativeInput): string {
    * ABOVE THE PLAIN "we lodged a trace" SENTENCE, which is what is left when nobody has recorded a
    * result yet. The firm's complaint was that the lodging sentence was all a client ever got.
    */
+  /*
+   * A TRACE THAT COULD NOT BE RUN, ABOVE THE ONES THAT DID.
+   *
+   * ABOVE because it is the only clause in this function that needs the CLIENT to do something,
+   * and a client whose eye is caught by a trace result further down has no reason to read on. It
+   * is also rarely in competition: a trace that produced a round was a trace that had a key, and
+   * this clause exists for the accounts that have none.
+   */
+  if (input.traceAttempt) {
+    const when = input.traceAttempt.attemptedOn
+      ? ` on ${onDate(input.traceAttempt.attemptedOn)}`
+      : ''
+    return `We attempted to trace the debtor${when}. The information handed over does not allow a `
+      + `trace to be completed, and we have requested ${input.traceAttempt.needs}.`
+  }
+
   if (input.trace) {
     const line = traceSentence(input.trace.lodgedOn, input.trace.round)
     if (line) return line
@@ -434,7 +473,25 @@ function whatNext(input: NarrativeInput): string {
    * is adrift — the firm has stopped working it without deciding to — and a client is entitled
    * to see that rather than a blank space.
    */
-  if (!input.next) return 'No further action has been scheduled.'
+  if (!input.next) {
+    /*
+     * WAITING ON SOMETHING IS NOT THE SAME AS NOTHING BEING SCHEDULED.
+     *
+     * An account whose trace cannot be run until the client sends an identity number has no diary
+     * date to report and "no further action has been scheduled" would read as the firm having
+     * dropped it. What it is actually doing is waiting, and on whom is the useful half.
+     *
+     * ONLY WHERE THERE IS NO DIARY DATE. Where the firm has booked a day, that day is the real
+     * commitment and NEXT_BY_KIND already names it -- a trace follow-up says so in its own words.
+     * The ask itself is carried by `happened`, so it is never lost either way.
+     */
+    if (input.traceAttempt) {
+      return input.traceAttempt.askedClient
+        ? `We will trace the debtor as soon as you are able to let us have ${input.traceAttempt.needs}.`
+        : `We will trace the debtor as soon as ${input.traceAttempt.needs} is available.`
+    }
+    return 'No further action has been scheduled.'
+  }
   /*
    * A DATE THAT HAS PASSED IS NOT A COMMITMENT.
    *

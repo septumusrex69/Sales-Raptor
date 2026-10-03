@@ -385,6 +385,13 @@ ok('...and opens on one that can be',
 ok('...or on the button that was pressed, off an email',
   /fromEmail && initialKind \? initialKind :/.test(modal))
 /*
+ * AND A BOX OPENED WITH A REASON ALREADY IN IT IS A REQUEST. The trace box opens this one to ask
+ * the client for the identity number a trace could not be run without -- so that path has to land
+ * somewhere choosable too, and 'request' is never the barred option.
+ */
+ok('...and a prefilled reason opens on a request',
+  /initialDescription \? 'request' :/.test(modal))
+/*
  * THE OTHER TWO KINDS ARE UNTOUCHED. Asking a team leader for help and recommending litigation
  * start no clock and hold nothing; an open dispute is no reason to refuse either, and barring them
  * would leave a collector with an open dispute unable to ask anybody anything.

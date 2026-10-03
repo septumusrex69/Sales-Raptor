@@ -265,7 +265,18 @@ ok('...not whatever the row happened to say',
  * WHAT THE DEBTOR WROTE IS NOT WHAT IT MEANS. "I want to dispute the account" is the email; "says
  * the vehicle went back in March and he has the collection note" is what a liaison has to answer.
  */
-ok('the box no longer opens full of the email', /const \[description, setDescription\] = useState\(''\)/.test(modal))
+/*
+ * SUPERSEDED IN FORM, NOT IN SUBSTANCE. The box takes an `initialDescription` now -- the trace box
+ * passes one when it asks the client for the identity number a trace could not be run without --
+ * so the state is no longer unconditionally empty. What has to stay true is narrower and is the
+ * whole of what this ever guarded: NOTHING FROM THE EMAIL reaches the description. It is empty, or
+ * it is what a caller wrote, and never `mail.body`.
+ */
+ok('the box no longer opens full of the email',
+  /const \[description, setDescription\] = useState\(initialDescription \?\? ''\)/.test(modal))
+ok('...and nothing puts the email body into it',
+  !/setDescription\(\s*fromEmail/.test(modal)
+  && !/useState\([^)]*fromEmail[^)]*\)/.test(modal.slice(modal.indexOf('[description'))))
 ok('...and the email is shown beside it instead', /What they wrote/.test(modal))
 ok('...read-only, so the summary cannot become the thread again',
   /emailWords[\s\S]{0,400}?whitespace-pre-wrap/.test(modal))

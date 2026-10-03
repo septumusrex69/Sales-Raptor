@@ -195,8 +195,17 @@ ok('...the same schedule the price comes off',
   && /schedule\.items\.find\(\(i\) => i\.id === '4c'\)/.test(button))
 /* COUNTED ONLY WHERE COUNTING MEANS SOMETHING, and the predicate is the same one the charge uses. */
 ok('only a bureau search is counted', /const counted = source\.kind === 'credit_bureau'/.test(button))
-ok('...so the numbers are not drawn otherwise', /!result && counted && \(/.test(button))
-ok('...and there is a single button instead', /!result && !counted && \(/.test(button))
+/*
+ * THE GATE GREW A THIRD CLAUSE AND THE RULE IS UNCHANGED. `attempt === 'no'` is there because
+ * recording "we could not trace" takes the charge controls away with it -- a recorded non-search
+ * and a fee for one are two records that contradict each other. See check-trace-attempt, which
+ * holds that half. What this still guards is that a count is offered only where counting means
+ * something.
+ */
+ok('...so the numbers are not drawn otherwise',
+  /!result && counted && attempt === 'no' && \(/.test(button))
+ok('...and there is a single button instead',
+  /!result && !counted && attempt === 'no' && \(/.test(button))
 /* AND THE PRICE LINE NAMES THE ITEM IT IS ACTUALLY CHARGED UNDER. It said 4(c) whatever the
    source was, which quoted the bureau's line of the gazette on a fee raised under item 3. */
 ok('a non-bureau search is priced under item 3', /under Annexure B item 3/.test(button))
@@ -383,8 +392,8 @@ ok('a missing name is the only way a name fails',
  */
 ok('the box asks the source s own question', /\{source\.asks\.prompt\}/.test(button))
 ok('...only on the sources with no workspace',
-  /!result && !counted && source\.asks\.kind === 'text'/.test(button)
-  && /!result && !counted && source\.asks\.kind === 'yes_no'/.test(button))
+  /!result && !counted && attempt === 'no' && source\.asks\.kind === 'text'/.test(button)
+  && /!result && !counted && attempt === 'no' && source\.asks\.kind === 'yes_no'/.test(button))
 ok('...and it reaches the record', /sourceId: source\.id, named, found,/.test(button))
 /* CLEARED WITH THE SOURCE, or a finding typed against SASSA follows the collector on to the
    voters' roll and lands on the wrong note. */

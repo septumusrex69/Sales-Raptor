@@ -839,6 +839,16 @@ function Row({ row, category, worked, isNew, busy, onOutcome, onPromote, onDial,
                what every source can be searched on either way. */
             idNumber={registrationIn(row.label)}
             debtorName={row.value}
+            /*
+             * NO CELL NUMBER FALLBACK ON A LINKED COMPANY, and not because none is handy.
+             *
+             * The debtor's cell number is the DEBTOR'S. Searching a bureau on it while the subject
+             * of the trace is a company the debtor is linked to would charge the account for a
+             * search about somebody else and file the answer under the company -- which is the
+             * same fault as the telephone number that was sitting in an ID field. Where the
+             * registration number is missing, the company's NAME is what every source can take.
+             */
+            mobile={null}
             label="Trace this company"
             className="inline-flex items-center gap-1 text-sm font-medium px-2.5 py-1.5 rounded-lg
               border border-slate-200 text-slate-700 hover:bg-slate-50"

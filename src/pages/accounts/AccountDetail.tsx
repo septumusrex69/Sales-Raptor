@@ -43,6 +43,7 @@ import {
   type ClientFlag, type ClientPosition, type DeskPosition,
 } from '../../lib/clientPosition.ts'
 import { clientLine, type ClientLine } from '../../lib/accountNarrative.ts'
+import { TRACE_REQUEST_FOR, traceNeeds, traceableMobile } from '../../lib/traceAttempt.ts'
 import { tracingThisMonth, type TracingMonth } from '../../lib/traceSources.ts'
 import { MONTHLY_LIMIT, TRACING_ACTION_CODE } from '../../lib/actionTariff.ts'
 import {
@@ -240,6 +241,16 @@ export function AccountDetail() {
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [disputing, setDisputing] = useState(false)
+  /*
+   * THE REQUEST THE TRACE BOX ASKED FOR, as a prefilled description.
+   *
+   * THE FIRM: "we would need more information like an ID number." A trace that cannot be run is
+   * one of the few places where nothing the firm does next moves the account, so the trace box
+   * offers the ask -- and it opens the Escalate box rather than raising anything itself, because a
+   * request has to reach somebody by name and the owner picker lives there. See
+   * TraceButton.onAskClient.
+   */
+  const [askingTrace, setAskingTrace] = useState<string | null>(null)
   /* The message the Escalate box was opened on, and which of its two buttons was pressed. */
   const [classifying, setClassifying] = useState<{ email: AccountEmail; kind: 'dispute' | 'request' } | null>(null)
   /*
@@ -822,6 +833,16 @@ export function AccountDetail() {
   const callContact = dialableNumber(workspace?.contacts ?? [])
   // One list for both: whatever you could SMS, you could ring.
   const smsNumbers = reachableNumbers(workspace?.contacts ?? [])
+  /*
+   * A CELL NUMBER A BUREAU CAN BE SEARCHED ON, where this account has one.
+   *
+   * THE FIRM: "the cell phone number can also be traced." Taken off the whole reachable list
+   * rather than the contacts labelled 'mobile', because half the imported book has every number
+   * under one label -- Swordfish carried a single telephone column -- so the cell number sitting
+   * there is usually filed as a "phone". traceableMobile decides what is actually a cell number,
+   * and refuses 086 and 087, which look exactly like one and belong to a switchboard.
+   */
+  const traceMobile = traceableMobile(smsNumbers.map((n) => n.value))
   // Who looks after this debtor's CLIENT — a different person from the pre-legal agent working
   // the debtor, and the one a query about the debt itself has to go to.
   /*
@@ -882,9 +903,13 @@ export function AccountDetail() {
             /* For the sources searched on a name rather than a number -- a web search, SARS's VAT
                vendor search. `name` is the same string the hero draws, so the two cannot differ. */
             debtorName={name}
+            /* THE FALLBACK KEY, where there is no identity number and the bureau will take one.
+               See TraceButton.mobile. */
+            mobile={traceMobile}
             label="Do the trace"
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
-            onDone={reload} onUpload={(f) => setTracing(f ?? true)} />
+            onDone={reload} onUpload={(f) => setTracing(f ?? true)}
+            onAskClient={setAskingTrace} />
         )}
         traceActionCompact={(
           /* THE SAME CONTROL, HEADER-SIZED. A second instance rather than a style prop: they are
@@ -892,9 +917,11 @@ export function AccountDetail() {
           <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
             debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
             debtorName={name}
+            mobile={traceMobile}
             label="Do another"
             className="text-[11px] font-medium px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:border-[#c9a052] hover:bg-gold-50 inline-flex items-center gap-1"
-            onDone={reload} onUpload={(f) => setTracing(f ?? true)} />
+            onDone={reload} onUpload={(f) => setTracing(f ?? true)}
+            onAskClient={setAskingTrace} />
         )}
         onUpload={() => setTracing(true)}
         onOpenTrace={setOpenTrace}
@@ -1052,6 +1079,33 @@ export function AccountDetail() {
             lodgedOn: debtor.latest.enquiredOn ?? debtor.latest.createdAt.slice(0, 10),
             round: traceRound(debtor.latest.items),
           }
+        })(),
+        /*
+         * AND A TRACE THAT COULD NOT BE RUN AT ALL.
+         *
+         * THE FIRM: "we would need more information like an ID number... we haven't been able to
+         * trace the data on the information provided."
+         *
+         * READ OFF THE OPEN REQUEST, not off the missing column. Most of the book has no identity
+         * number and most of it is being collected perfectly well -- "we cannot trace this debtor"
+         * on an account that is paying would be the one dishonest line in the report. What makes
+         * it true is that the firm has recorded the attempt and ASKED for what it needs, and the
+         * request is that record. The sentence and the ask are then one fact and cannot drift.
+         *
+         * `askedClient` IS THE STAGE. A request still sitting with the collector or the liaison is
+         * the firm asking itself; "we have asked you" where nobody has is a claim the client can
+         * check and find false.
+         */
+        ...(() => {
+          const ask = queries.find((q) => q.kind === 'request' && q.outcome === null
+            && q.requestFor === TRACE_REQUEST_FOR)
+          return ask
+            ? { traceAttempt: {
+              attemptedOn: ask.raisedAt?.slice(0, 10) ?? null,
+              needs: traceNeeds(account.debtorKind),
+              askedClient: ask.stage === 'client',
+            } }
+            : {}
         })(),
         frozenReason: account.frozenReason,
         frozenOn: account.frozenAt?.slice(0, 10) ?? null,
@@ -1415,8 +1469,10 @@ export function AccountDetail() {
         livePromise={due ? { amount: due.amount, dueOn: due.dueOn } : null}
         idNumber={account.debtorIdNumber}
         debtorKind={account.debtorKind}
+        traceMobile={traceMobile}
         onTraced={reload}
         onUpload={() => setTracing(true)}
+        onAskClient={setAskingTrace}
         startable={startable}
         onStartWorkflow={(versionId) => {
           /*
@@ -1708,6 +1764,30 @@ export function AccountDetail() {
         />
       )}
 
+      {/*
+        ASKING THE CLIENT FOR WHAT THE TRACE NEEDS.
+
+        THE SAME BOX AS EVERY OTHER REQUEST, opened with two of its answers already filled in:
+        WHAT is being asked for ("Debtor details") and WHY (the trace that could not be run). Who
+        answers it, when it is chased and whether anything is charged are still asked, which is
+        what this box is for -- and a request has to reach somebody by name. See
+        TraceButton.onAskClient.
+      */}
+      {askingTrace !== null && (
+        <EscalateModal
+          accountId={account.id}
+          debtorName={name}
+          users={users}
+          clientLiaison={clientLiaison}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null, teamId: currentUser?.teamId }}
+          alreadyDisputed={openDisputeOn(queries) !== null}
+          initialRequestFor={TRACE_REQUEST_FOR}
+          initialDescription={askingTrace}
+          onClose={() => setAskingTrace(null)}
+          onDone={reload}
+        />
+      )}
+
       {disputing && (
         <EscalateModal
           accountId={account.id}
@@ -1984,7 +2064,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, onTraced, onUpload, startable, onStartWorkflow }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -2014,9 +2094,13 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   standing: ClientPosition | null
   /** What they are called, for the trace sources searched on a name. See TraceButton.debtorName. */
   debtorName: string | null
+  /** The cell number a bureau can be searched on where there is no ID. See TraceButton.mobile. */
+  traceMobile: string | null
   onTraced: () => Promise<void>
   /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
   onUpload: () => void
+  /** Opens the Escalate box on a request for what the trace needs. See TraceButton.onAskClient. */
+  onAskClient: (description: string) => void
   /**
    * THE WORKFLOWS A PERSON MAY START HERE, WHICH IN PRACTICE IS THE SECTION 129.
    *
@@ -2114,9 +2198,9 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
           title={`${startable.length} sequences can be started on this account`} />
       )}
       <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
-        debtorName={debtorName}
+        debtorName={debtorName} mobile={traceMobile}
         className={`${ACTION_BASE} ${ACTION_ENABLED}`}
-        onDone={onTraced} onUpload={onUpload} />
+        onDone={onTraced} onUpload={onUpload} onAskClient={onAskClient} />
       {/*
         When this account comes back, and why. Sits with the other actions rather than in a
         corner because it is the last thing done to an account before it is left alone, and an

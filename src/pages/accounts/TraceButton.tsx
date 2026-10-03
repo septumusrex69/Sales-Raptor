@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, FileUp, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
-import { recordTrace } from '../../lib/accountTrace'
+import { recordTrace, recordTraceAttempt } from '../../lib/accountTrace'
+import { mobileKeyFor, traceAttemptAsk, traceAttemptNote, traceNeedsFor } from '../../lib/traceAttempt.ts'
 import {
   bureauSearchCounts, TRACE_SOURCES, traceSourceById, traceSourceUrl, tracingThisMonth,
   type TraceSource, type TracingMonth,
@@ -48,7 +49,7 @@ function chargeWords(
  * Closing without answering charges nothing, which is the right outcome for a portal opened by
  * mistake and for a search that turned out not to be needed.
  */
-export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName, label, className, onDone, onUpload }: {
+export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName, mobile, label, className, onDone, onUpload, onAskClient }: {
   accountId: string
   actor: { id: string | null; name: string | null }
   /** Which number is expected: an ID for a person, a registration number for a company. */
@@ -72,6 +73,17 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
    * cannot use. See TraceSource.searchOn.
    */
   debtorName: string | null
+  /**
+   * A CELL NUMBER THE BUREAU CAN BE SEARCHED ON, WHERE THE ACCOUNT HAS ONE.
+   *
+   * THE FIRM: "the cell phone number can also be traced." It is the fallback and never the first
+   * choice -- an identity number is one person, a cell number is whoever is holding it this year --
+   * and it is offered only at the bureau, because nothing else on the list will take one. See
+   * TraceSource.fallbackOn.
+   *
+   * ON A BOOK THAT IS 97% WITHOUT IDENTITY NUMBERS THIS IS THE ORDINARY PATH, not an edge case.
+   */
+  mobile: string | null
   /** What to call the button. The panel's empty box wants a fuller phrase than the action row. */
   label?: string
   /** The action row's styling, so this matches the buttons beside it. */
@@ -86,6 +98,19 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
    * firm ended up paying for traces whose answers were never typed in.
    */
   onUpload: (file?: File) => void
+  /**
+   * ASK THE CLIENT FOR WHAT IS MISSING.
+   *
+   * THE FIRM: "we would need more information like an ID number." A trace that cannot run is one
+   * of the few places where nothing the firm does next will move the account -- so recording the
+   * attempt and stopping there would leave it exactly where it was with a tidier note on it.
+   *
+   * IT OPENS THE ESCALATE BOX RATHER THAN RAISING THE REQUEST ITSELF, and that is deliberate: a
+   * request must reach somebody by name, and the owner picker, the chase date and the
+   * notification all live in that box already. Raising one from here would be a second, thinner
+   * copy of it -- and a ticket raised with nobody on it is a ticket nobody answers.
+   */
+  onAskClient?: (description: string) => void
 }) {
   /*
    * WHICH SOURCE, ASKED FIRST.
@@ -114,6 +139,12 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ charge: ChargeResult | null; count: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * RECORDING THAT WE COULD NOT TRACE. 'no' until somebody presses it, 'saved' once the note is on
+   * the account -- which is what turns the offer to ask the client on, because asking a client for
+   * an identity number without the attempt on the file is a request with nothing behind it.
+   */
+  const [attempt, setAttempt] = useState<'no' | 'saving' | 'saved'>('no')
   /* 'asking' until the clipboard answers, because a write can be refused after it is accepted. */
   const [copied, setCopied] = useState<'asking' | 'yes' | 'no' | 'nothing'>('nothing')
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -158,15 +189,25 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
    * name has is being absent.
    */
   const nameKey = (debtorName ?? '').trim()
+  /*
+   * AND THE CELL NUMBER, WHERE THERE IS NO IDENTITY NUMBER AND THE SOURCE WILL TAKE ONE.
+   *
+   * THE FIRM: "the cell phone number can also be traced." Second, never first: an identity number
+   * identifies one person for life and a cell number identifies whoever is holding it this year,
+   * so the number is only reached for once the identity key has failed. mobileKeyFor refuses it on
+   * every source but the bureau -- SASSA, the voters' roll and CIPC all want an identity or a
+   * registration number, and a form that cannot be submitted is a trip made for nothing.
+   */
+  const fallback = identity.ok ? null : mobileKeyFor(source, mobile)
   const key = source.searchOn === 'name'
     ? (nameKey
       ? { ok: true as const, value: nameKey, what: 'name' as const }
       : { ok: false as const, found: null, why: 'missing' as const })
-    : identity
+    : (fallback ?? identity)
   /* The sentence for a bad ID is written for an ID; a missing name needs its own. */
   const problem = source.searchOn === 'name'
     ? (key.ok ? null : `This source is searched on a name and the account has none recorded.`)
-    : searchKeyProblem(identity, debtorKind)
+    : (fallback ? null : searchKeyProblem(identity, debtorKind))
 
   /*
    * THE PICKER OPENS ON THE TAP AND NOTHING ELSE HAPPENS YET.
@@ -198,7 +239,12 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
      */
     /* THE KEY FOR THE SOURCE BEING PICKED, for the same reason the address is -- `key` above is
        derived from `source`, which is still the previous one until setSource runs. */
-    const copying = s.searchOn === 'name' ? nameKey : (identity.ok ? identity.value : '')
+    /* THE SAME FALLBACK THE DISPLAYED KEY USES -- built from `s` rather than from `source`, which
+       setSource below has not reached yet. A cell number shown on the screen and an empty
+       clipboard would be the collector retyping the one thing we had. */
+    const copying = s.searchOn === 'name'
+      ? nameKey
+      : (identity.ok ? identity.value : (mobileKeyFor(s, mobile)?.value ?? ''))
     setCopied(copying ? 'asking' : 'nothing')
     if (copying) {
       try {
@@ -224,7 +270,9 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
      * state here would open the PREVIOUS source's address, which is the kind of bug that sends a
      * collector to the right site for the wrong debtor.
      */
-    const wanted = s.searchOn === 'name' ? nameKey : (identity.ok ? identity.value : '')
+    const wanted = s.searchOn === 'name'
+      ? nameKey
+      : (identity.ok ? identity.value : (mobileKeyFor(s, mobile)?.value ?? ''))
     const href = traceSourceUrl(s, wanted)
     if (href) window.open(href, '_blank', 'noopener,noreferrer')
     setSource(s)
@@ -234,7 +282,45 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
     /* Cleared with the source, or a finding typed against SASSA follows the collector on to the
        voters' roll and lands on the wrong note. */
     setFound('')
+    /* Cleared with the source: "we could not search SASSA" is not a record about the voters' roll,
+       and an offer to ask the client left standing would carry the wrong source's reason. */
+    setAttempt('no')
     setAsking(true)
+  }
+
+  /*
+   * "WE TRIED AND THERE WAS NOTHING TO TRACE ON."
+   *
+   * THE FIRM: "I think it's some place that we have to say like trace attempted and there was no
+   * trace on the data. We would need more information like an ID number."
+   *
+   * THE ONLY WAY OUT OF THIS BOX USED TO BE "Didn't trace", WHICH WROTE NOTHING. So an account
+   * that CANNOT be traced read exactly like an account nobody had got round to -- no note, no
+   * date, nothing for a team leader and nothing for the client to be asked for. On a book where
+   * 19 668 of 19 912 live accounts carry no identity number, that is the ordinary case.
+   *
+   * AND NO FEE. Nothing was searched, so there is nothing Annexure B prices -- see
+   * recordTraceAttempt, which cannot raise one.
+   */
+  async function saveAttempt() {
+    setAttempt('saving')
+    setError(null)
+    try {
+      await recordTraceAttempt({
+        accountId, actor,
+        note: traceAttemptNote({
+          source, debtorKind, mobile,
+          /* The wrong number is named on the record as well as on the screen, so it gets
+             corrected rather than attempted again next month. */
+          unusable: identity.ok ? null : identity.found,
+        }),
+      })
+      setAttempt('saved')
+      await onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setAttempt('no')
+    }
   }
 
   async function charge(count: number) {
@@ -457,9 +543,58 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
           )}
 
           {!result && problem !== null && (
-            <p className="text-xs text-negative-700 mt-3 rounded-lg bg-negative-50 border border-negative-100 px-3 py-2">
-              {problem}
-            </p>
+            <div className="mt-3 rounded-lg bg-negative-50 border border-negative-100 px-3 py-2">
+              <p className="text-xs text-negative-700">{problem}</p>
+              {/*
+                AND A WAY TO WRITE DOWN THAT IT COULD NOT BE DONE.
+
+                THE FIRM: "trace attempted and there was no trace on the data." The box named the
+                problem and then offered only "Didn't trace", which wrote nothing at all -- so an
+                hour spent trying to find somebody looked identical, on the file and in every
+                report, to never having tried.
+
+                NOTHING IS CHARGED. No portal was searched, so there is no action for Annexure B to
+                price, and the line says so where somebody is about to press it.
+              */}
+              {attempt !== 'saved' ? (
+                <button type="button" onClick={() => void saveAttempt()} disabled={attempt === 'saving'}
+                  className="mt-2 text-xs font-medium px-3 py-1.5 rounded-lg border border-negative-200
+                    bg-white text-negative-700 hover:bg-negative-100 disabled:opacity-50">
+                  Record that we could not trace
+                </button>
+              ) : (
+                <div className="mt-2">
+                  <p className="text-xs text-slate-600">
+                    Recorded on the account &mdash; nothing charged, because nothing was searched.
+                  </p>
+                  {/*
+                    AND THE ASK, STRAIGHT AFTER IT.
+
+                    THE FIRM: "we would need more information like an ID number." This is one of
+                    the few places where nothing the firm does next will move the account, so the
+                    attempt and the request belong in one breath -- the firm's own preference, said
+                    of the two boxes this modal used to be: "these 2 could be one screen and one
+                    step if you combine them."
+
+                    IT OPENS THE ESCALATE BOX. A request has to reach somebody by name, and the
+                    owner, the chase date and the notification all live there already.
+                  */}
+                  {onAskClient && (
+                    <button type="button"
+                      onClick={() => {
+                        setAsking(false)
+                        onAskClient(traceAttemptAsk({ debtorKind, debtorName, mobile, source }))
+                      }}
+                      className="mt-2 text-xs font-medium px-3 py-1.5 rounded-lg bg-navy-900 text-white">
+                      {/* NAMES WHAT THIS SOURCE NEEDED. A web search is searched on a name, and
+                          asking a client for an identity number because a web search had no name
+                          is a request they cannot act on. See traceNeedsFor. */}
+                      Ask the client for {traceNeedsFor(source, debtorKind)}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           {/*
             FOUR, AND THE FOUR IS THE GAZETTE'S. The firm: "make it only go up to four, not more
@@ -467,7 +602,10 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
             offered a number the tariff does not have. Taken off the schedule rather than typed --
             see bureauSearchCounts.
           */}
-          {!result && counted && (
+          {/* ONCE "we could not trace" IS ON THE FILE, THE CHARGE BUTTONS GO. Recording that the
+              search could not be run and then charging for it is two records that contradict each
+              other, and the one on the debtor's statement is the one that gets taxed. */}
+          {!result && counted && attempt === 'no' && (
             <div className="flex flex-wrap gap-2 mt-4">
               {counts.map((n) => (
                 <button
@@ -512,7 +650,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
             SENTENCE rather than the box that was ticked: "Yes" alone, read six months later, says
             nothing about what was asked.
           */}
-          {!result && !counted && source.asks.kind === 'yes_no' && (
+          {!result && !counted && attempt === 'no' && source.asks.kind === 'yes_no' && (
             <div className="mt-3">
               <span className="text-xs font-medium text-slate-600">{source.asks.prompt}</span>
               <div className="flex gap-2 mt-1.5">
@@ -533,7 +671,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
             </div>
           )}
 
-          {!result && !counted && source.asks.kind === 'text' && (
+          {!result && !counted && attempt === 'no' && source.asks.kind === 'text' && (
             <label className="block mt-3">
               <span className="text-xs font-medium text-slate-600">{source.asks.prompt}</span>
               <textarea value={found} onChange={(e) => setFound(e.target.value)} rows={2}
@@ -549,7 +687,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
           {/* AND WHERE THERE IS NOTHING TO COUNT, ONE BUTTON. Item 3 is once per person whatever
               was searched, so a row of numbers here would be asking a question whose answer the
               charge ignores. */}
-          {!result && !counted && (
+          {!result && !counted && attempt === 'no' && (
             <button type="button" onClick={() => void charge(1)} disabled={busy}
               className="mt-4 text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-900 text-white disabled:opacity-50">
               Record the trace
@@ -559,7 +697,9 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
           {/* WHAT IT COSTS, IN THE WORDS OF THE ITEM IT IS ACTUALLY CHARGED UNDER. This said
               "item 4(c)" whatever the source was, so a SASSA search quoted the bureau's line of
               the gazette and the bureau's price for a fee raised under item 3. */}
-          {!result && (
+          {/* AND THE PRICE GOES WITH THEM: a tariff line under a recorded non-search reads as a
+              fee that was raised. */}
+          {!result && attempt === 'no' && (
             <p className="text-xs text-slate-400 mt-3">
               {counted
                 ? <>{rate > 0 && <>R{rate.toFixed(2)} plus VAT each, under Annexure B item 4(c). </>}
@@ -631,8 +771,10 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
           {!result && (
             <div className="flex items-center justify-end gap-2 mt-5">
               {busy && <Loader2 size={15} className="animate-spin text-slate-400" />}
+              {/* "Didn't trace" IS THE WRONG WORD ONCE THAT IS EXACTLY WHAT HAS BEEN RECORDED --
+                  it reads as undoing the note that was just written. */}
               <button onClick={() => setAsking(false)} disabled={busy} className="text-sm font-medium px-3.5 py-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
-                Didn&apos;t trace
+                {attempt === 'saved' ? 'Close' : 'Didn\u2019t trace'}
               </button>
             </div>
           )}

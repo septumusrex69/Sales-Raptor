@@ -132,6 +132,19 @@ export interface TraceSource {
    * who opens a form they cannot complete has spent the trip for nothing.
    */
   alsoNeeds?: string
+  /**
+   * WHAT THIS SOURCE CAN BE SEARCHED ON INSTEAD, WHERE THERE IS NO IDENTITY NUMBER.
+   *
+   * THE FIRM: "the cell phone number can also be traced." A registered bureau will search on one,
+   * and on a book where 19 668 of 19 912 live accounts carry no identity number that is the
+   * difference between a trace and no trace at all.
+   *
+   * THE BUREAU AND NOTHING ELSE, which is why this is a field rather than a rule. SASSA's status
+   * page wants an identity number, the voters' roll wants an identity number, CIPC wants a
+   * registration number -- hand any of them a cell number and the form cannot be submitted, so
+   * the collector makes the trip for nothing. See mobileKeyFor.
+   */
+  fallbackOn?: 'mobile'
 }
 
 export const TRACE_SOURCES: readonly TraceSource[] = [
@@ -142,6 +155,9 @@ export const TRACE_SOURCES: readonly TraceSource[] = [
     url: 'https://www.online.xds.co.za/Portal/Account/Login?ReturnUrl=%2FPortal%2F',
     what: 'Numbers, addresses, employment, deeds and linked people. Searched on an ID or a registration number.',
     searchOn: 'identity',
+    /* THE ONE SOURCE THAT TAKES A CELL NUMBER. See TraceSource.fallbackOn: a bureau will search on
+       one, and nothing else on this list will. */
+    fallbackOn: 'mobile',
     asks: { kind: 'text', prompt: 'Anything to note about this search?',
       placeholder: 'Usually nothing \u2014 the findings are in the report you upload.' },
   },

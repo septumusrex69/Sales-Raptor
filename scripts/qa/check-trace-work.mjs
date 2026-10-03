@@ -614,8 +614,17 @@ ok('...choosing the source before anything opens', /TRACE_SOURCES\.map\(\(s\) =>
    a fee is lawful, and it is not something to find out afterwards on a statement. */
 ok('...with the item it is charged under beside each one',
   /Credit bureau \u00b7 item 4\(c\)/.test(button) && /Item 3 \u00b7 R25\.00 \u00b7 once per person/.test(button))
-/* Closing without answering is a portal opened by mistake, and charges nothing. */
-ok('...and closing without answering charges nothing', /Didn&apos;t trace/.test(button))
+/*
+ * Closing without answering is a portal opened by mistake, and charges nothing.
+ *
+ * THE WORDS CHANGE ONCE "we could not trace" HAS BEEN RECORDED, and that is the point: "Didn't
+ * trace" beside a note saying exactly that reads as an offer to undo it. So the button says Close
+ * there and keeps its own words everywhere else. Both halves are held, because the half that
+ * matters is the one on the ordinary path.
+ */
+ok('...and closing without answering charges nothing', /Didn\\u2019t trace/.test(button))
+ok('...and says Close instead once the attempt is on the file',
+  /attempt === 'saved' \? 'Close' :/.test(button))
 
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)

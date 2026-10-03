@@ -112,6 +112,41 @@ export async function recordTrace(input: {
 }
 
 /**
+ * RECORD A TRACE THAT COULD NOT BE RUN. NO FEE.
+ *
+ * THE FIRM: "I think it's some place that we have to say like trace attempted and there was no
+ * trace on the data. We would need more information like an ID number... we haven't been able to
+ * trace the data on the information provided."
+ *
+ * NOTHING IS CHARGED AND THAT IS NOT AN OVERSIGHT. Annexure B prices ACTIONS -- item 4(c) is a
+ * bureau search, item 3 is a necessary expense incurred -- and here there was neither: no portal
+ * was searched because there was no key to search it on. A debtor billed R16 because the client's
+ * handover sheet arrived without an identity number would be paying for somebody else's omission,
+ * which is exactly the sort of line that is found when a bill of costs is taxed. So this function
+ * does not take a schedule, does not call chargeItem, and cannot be made to raise one.
+ *
+ * IT IS STILL A RECORD. Before it existed the only way out of the trace box was "Didn't trace",
+ * which wrote nothing at all -- so an account that CANNOT be traced read exactly like an account
+ * nobody had got round to. See traceAttempt.ts for the whole of that argument.
+ */
+export async function recordTraceAttempt(input: {
+  accountId: string
+  actor: { id: string | null; name: string | null }
+  /** The sentence, from traceAttemptNote. Composed by the caller, which knows what was missing. */
+  note: string
+}): Promise<void> {
+  await addNote({
+    accountId: input.accountId,
+    body: input.note,
+    /* Raptor's words rather than a person's, same as a trace that did run. See
+       TimelineEntry.automated. */
+    source: 'system',
+    authorName: input.actor.name,
+    createdBy: input.actor.id,
+  })
+}
+
+/**
  * What the charge is for.
  *
  * Only what was done — how MANY is `segments` on the row, and the statement and the timeline both
