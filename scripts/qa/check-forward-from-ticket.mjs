@@ -44,7 +44,10 @@ const code = (p) => read(p).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*(--|\/
 
 const sql = read('supabase/schema.sql')
 const page = code('src/pages/queries/QueryDetail.tsx')
-const card = code('src/components/queries/TicketEmails.tsx')
+/* THE CORRESPONDENCE CARD WAS FOLDED INTO THE THREAD -- see below. Same assertions, on the
+   component that draws the button now. */
+const card = code('src/components/queries/TicketThread.tsx')
+const thread = card
 const mail = code('src/lib/accountEmails.ts')
 const queries = code('src/lib/accountQueries.ts')
 
@@ -74,9 +77,24 @@ ok('the page asks for it', /fetchQueryEmails\(id\)/.test(page))
 /* NEVER FATAL. A ticket whose mail cannot be read is still a ticket somebody has to work. */
 ok('...and a failure to read it does not break the ticket',
   /fetchQueryEmails\(id\)\.catch\(\(\) => \[\]\)/.test(page))
-ok('the card is drawn', /<TicketEmails/.test(page))
-/* ABSENT RATHER THAN EMPTY: most tickets are raised on a call and have no email at all. */
-ok('...and hides itself when there is no mail', /if \(emails\.length === 0\) return null/.test(card))
+/*
+ * DRAWN IN THE THREAD NOW, NOT IN A CARD OF ITS OWN.
+ *
+ * THE FIRM, showing a design of what a dispute ticket should look like: the internal note, the
+ * client's email and the debtor's words in ONE list, each labelled with who said it. The
+ * correspondence card was half of that list drawn separately, so a ticket's own conversation was
+ * told in two places in two orders. What this check guards is unchanged -- the mail is on the
+ * ticket and can be put in front of the client -- and where it is drawn has moved.
+ */
+ok('the mail is drawn on the ticket', /<TicketThread/.test(page))
+ok('...carrying the forward', /onForward=\{\(emailId\) =>/.test(page))
+/* AND IT STILL FINDS THE REAL MESSAGE TO FORWARD. The thread carries an id; the page turns it back
+   into the email the composer needs, or the button would open an empty box. */
+ok('...resolved back to the message itself', /emails\.find\(\(e\) => e\.id === emailId\)/.test(page))
+/* ABSENT RATHER THAN EMPTY on a ticket with nothing on it yet -- most are raised on a call. The
+   thread says so in words rather than drawing a heading over nothing. */
+ok('...and a ticket with nothing said on it says so',
+  /Nothing has been said on this ticket yet/.test(thread))
 
 /* ---------------- only a liaison presses it ---------------- */
 
@@ -113,7 +131,7 @@ ok('...and says why', /title=\{why \?\? undefined\}/.test(card))
  * item 1(a) like any message that leaves, and the price is on the screen beside the button.
  */
 ok('the card says it is charged', /item 1\(a\)/.test(card))
-ok('...before the press, not after', /canForward && \(\s*<p/.test(card))
+ok('...before the press, not after', /\{canForward && \(\s*\n\s*<p/.test(card))
 ok('the composer repeats it where the message is actually written', /charged R25 under `\s*\+ 'item 1\(a\)/.test(page))
 /* CHARGED THROUGH THE ONE FUNCTION THAT CHARGES, never an `if` written here. Two places that
    decide what a debtor pays is how one of them charges for something the firm said was free. */

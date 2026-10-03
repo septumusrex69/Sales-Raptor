@@ -10,6 +10,11 @@ import {
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type QueryStage,
 } from '../../lib/accountQueries'
+/* The kind's own words, from the file that OWNS the dispute vocabulary rather than through the
+   module that re-exports the queries half of it. */
+import { ESCALATION_KINDS, escalationCard } from '../../lib/disputeCategories'
+import { nextAction, ticketThread } from '../../lib/ticketThread.ts'
+import { TicketThread } from '../../components/queries/TicketThread'
 import {
   acceptDraftRow, approveDraft, clearDraftRowDecision, discardDraft, fetchDraft,
   fetchDraftForHandover, followUpDraft, rejectDraftRow, setDraftRowValue,
@@ -21,7 +26,6 @@ import { fetchClientCommissionRate } from '../../lib/accountBook'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
-import { TicketEmails } from '../../components/queries/TicketEmails'
 import { TicketWork } from '../../components/queries/TicketWork'
 import { addNote, fetchQueryNotes, type AccountNote } from '../../lib/accountWorkspace'
 import { ComposeEmailModal } from '../../components/ComposeEmailModal'
@@ -326,6 +330,90 @@ export function QueryDetail() {
         )}
       </div>
 
+      {/*
+        THE TICKET SAYS WHAT IT IS AND WHERE IT STANDS, BEFORE ANYTHING ELSE.
+        ---------------------------------------------------------------------
+        THE FIRM, showing a design of what a dispute ticket should look like: a band across the top
+        carrying the reference, the debtor, the account, the state, who owns it and when it comes
+        back.
+
+        EVERY ONE OF THOSE WAS ALREADY ON THE PAGE AND NONE OF THEM WAS AT THE TOP. The state was a
+        chip beside a title, the owner and the follow-up were in a rail two thirds of the way down,
+        and the account number was a subtitle. Somebody opening a ticket at nine in the morning
+        asks four questions -- whose, what, where has it got to, when does it come back -- and had
+        to look in four places for them.
+
+        DARK, LIKE THE ACCOUNT'S OWN HERO, because it is doing the same job: this is the one band on
+        the screen that is about the thing itself rather than about the work on it.
+
+        ON AN ACCOUNT TICKET ONLY. A batch ticket is about a client's spreadsheet -- it has no
+        debtor, no account number and no account to work -- and a band of blanks reads as a screen
+        that failed to load.
+      */}
+      {q.accountId && (
+        <div className="rounded-2xl bg-navy-950 text-white px-4 py-3.5 sm:px-5">
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+            <div className="min-w-0">
+              {/*
+                WHAT KIND OF TICKET, rather than a number.
+                
+                THE FIRM'S DESIGN SHOWS A REFERENCE -- "DSP-00428" -- AND RAPTOR HAS NONE. A ticket
+                is identified by its row id, which is a UUID: not something anybody reads out on a
+                telephone, and printing eight characters of one here would look like a reference
+                while being unusable as one. A real ticket number is a sequence and a migration, and
+                it is worth having; inventing the look of one is not. So this says what the ticket
+                IS, which is the thing the kind already answers honestly.
+              */}
+              <p className="text-[11px] uppercase tracking-wide text-white/50">
+                {escalationCard(q.kind).label}
+              </p>
+              <h1 className="text-lg sm:text-xl font-semibold mt-0.5 wrap-anywhere">
+                {q.category || q.requestFor || ESCALATION_KINDS[q.kind ?? 'dispute'].label}
+              </h1>
+              <p className="text-sm text-white/70 mt-0.5 wrap-anywhere">
+                {data.account?.debtorName ?? 'An account'}
+                {data.account?.accountNumber ? ` · ${data.account.accountNumber}` : ''}
+              </p>
+            </div>
+            <dl className="flex flex-wrap items-start gap-x-6 gap-y-2">
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-white/50">Where it stands</dt>
+                <dd className="text-sm font-medium mt-0.5">
+                  {q.status === 'closed'
+                    ? (q.outcome ? QUERY_OUTCOME_LABEL[q.outcome] : 'Closed')
+                    : stageLine({ stage: q.stage, chaseOn: q.chaseOn }).label}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-white/50">With</dt>
+                <dd className="text-sm font-medium mt-0.5">{ownerName ?? 'Nobody yet'}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] uppercase tracking-wide text-white/50">Follow up</dt>
+                {/* THE ONE FIGURE HERE THAT CAN BE WRONG RATHER THAN MERELY OLD, so it is the one
+                    that gets a colour -- the same rule the rail below has always followed. */}
+                <dd className={`text-sm font-medium mt-0.5 ${stale ? 'text-gold-300' : ''}`}>
+                  {q.chaseOn ? formatDate(q.chaseOn) : 'Not booked'}
+                </dd>
+              </div>
+            </dl>
+          </div>
+          {/*
+            AND WHAT TO DO NEXT, WHICH IS THE QUESTION THE BAND ABOVE ONLY ANSWERS HALFWAY.
+            
+            THE FIRM'S DESIGN PUTS IT ABOVE THE CONVERSATION -- "Next action: ask client to verify
+            payment". Composed from the stage, which is the one field that already means this, so
+            the imperative here and the board's reading of the same ticket cannot disagree.
+          */}
+          {nextAction({ stage: q.stage, status: q.status }) && (
+            <p className="text-sm text-gold-300 mt-3 pt-3 border-t border-white/10">
+              <span className="font-medium">Next:</span>{' '}
+              {nextAction({ stage: q.stage, status: q.status })}
+            </p>
+          )}
+        </div>
+      )}
+
       <Card>
         <CardHeader
           title={data.batch
@@ -406,7 +494,6 @@ export function QueryDetail() {
       */}
       {q.accountId && (
         <TicketWork
-          notes={notes}
           canReachClient={mayWriteToClient}
           canEmail={forwardWhy === null}
           clientWhy={clientWhy}
@@ -445,15 +532,35 @@ export function QueryDetail() {
       )}
 
       {/*
-        DIRECTLY UNDER THE TICKET, above everything about the sheet. On a dispute this is the only
-        other thing on the page, and on a batch ticket the rows below it run to hundreds — put the
-        debtor's own words under those and nobody would ever reach them.
+        AND THE WHOLE CONVERSATION UNDER IT, as ONE list.
+        -------------------------------------------------
+        THE FIRM, showing a design of what a dispute ticket should look like: the internal note, the
+        client's email and the debtor's own words one under the other, each labelled with who said
+        it.
+
+        IT WAS TWO CARDS -- the notes inside TicketWork and the correspondence in TicketEmails --
+        so the question a ticket exists to answer, what passed between the three parties and in
+        what order, could only be answered by reading two lists and merging them in your head.
+
+        THE VOICE IS DERIVED FROM THE ADDRESS, which is why the client's own people are passed in:
+        `account_emails` carries the OTHER party's address whichever end they were on, so "client or
+        debtor" is a question only this page can answer. See ticketThread.
       */}
-      <TicketEmails
-        emails={emails}
+      <TicketThread
+        entries={ticketThread({
+          notes,
+          emails,
+          clientAddresses: [
+            data.clientEmail,
+            ...data.clientPeople.map((person) => person.email),
+          ].filter((a): a is string => !!a),
+        })}
         canForward={forwardWhy === null}
         why={forwardWhy}
-        onForward={setForwarding}
+        onForward={(emailId) => {
+          const found = emails.find((e) => e.id === emailId)
+          if (found) setForwarding(found)
+        }}
       />
       </div>
 

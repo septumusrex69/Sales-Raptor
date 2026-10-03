@@ -108,9 +108,28 @@ try {
    */
   t.ok('what has already happened is on the ticket', /Request raised: Proof of communication/.test(body))
   t.ok('...including a call somebody logged', /They are pulling the file/.test(body))
-  t.ok('...and who wrote each one', /Vusi Maringa/.test(body) && /Nicole Loder/.test(body))
-  /* OLDEST FIRST. A ticket is a short exchange read in order. */
-  t.ok('...oldest first', body.indexOf('Request raised') < body.indexOf('They are pulling'))
+  t.ok('...and who wrote the one a person wrote', /Nicole Loder/.test(body))
+  /*
+   * AND RAPTOR'S OWN ENTRY IS SIGNED RAPTOR, not whoever was at the desk when it was written.
+   * `author_name` is carried on a system note so the ACCOUNT's timeline can say who was working;
+   * on a ticket thread it reads as that person having written the sentence, which they did not --
+   * "Request raised: Proof of communication." is the app's wording, not Vusi's.
+   */
+  t.ok('...while the app\u2019s own entry is signed Raptor',
+    /Raptor<\/span>|>Raptor</.test(body) || /Raptor/.test(body))
+  /*
+   * NEWEST FIRST, AND THIS IS A CHANGE RATHER THAN A DRIFT.
+   *
+   * It read oldest first on the reasoning that "a ticket is a short exchange read in order". THE
+   * FIRM'S OWN DESIGN reads down from the most recent, and they are right about which question is
+   * being asked: somebody opening a ticket wants to know where it has GOT TO, and on a ticket three
+   * weeks old that answer was at the bottom of a scroll.
+   */
+  t.ok('...newest first', body.indexOf('They are pulling') < body.indexOf('Request raised'))
+  /* AND EACH VOICE IS NAMED, which is the other half of the firm's design: a liaison skimming for
+     what the CLIENT said must not have to tell it from a colleague's note by reading both. The two
+     on this fixture are the app's own entry and a logged call. */
+  t.ok('...with each voice named', /Call/.test(body) && /Raptor/.test(body))
 
   /* ---------- where it stands ---------- */
 

@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import { Loader2, Mail, MessageSquare, Phone, StickyNote } from 'lucide-react'
+import { Loader2, Mail, Phone, StickyNote } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { DictateButton } from '../ui/Dictate'
-import { formatDate } from '../../data/mockData'
-import type { AccountNote } from '../../lib/accountWorkspace'
 
 /**
  * THE TICKET AS A PLACE YOU WORK, RATHER THAN A ROW YOU READ.
@@ -52,10 +50,8 @@ import type { AccountNote } from '../../lib/accountWorkspace'
 export type TicketAction = 'email' | 'call' | 'note'
 
 export function TicketWork({
-  notes, canReachClient, canEmail, clientWhy, emailWhy, busy, onEmail, onNote, onCall,
+  canReachClient, canEmail, clientWhy, emailWhy, busy, onEmail, onNote, onCall,
 }: {
-  /** The ticket's own thread. Oldest first — a ticket is a short exchange read in order. */
-  notes: AccountNote[]
   /**
    * MAY THIS PERSON TOUCH THE CLIENT AT ALL?
    *
@@ -214,26 +210,14 @@ export function TicketWork({
         </div>
       )}
 
-      {/* ---------------- the thread ---------------- */}
-
-      {notes.length > 0 && (
-        <div className="mt-4 pt-3 border-t border-slate-100 space-y-3">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">
-            {notes.length === 1 ? 'One entry' : `${notes.length} entries`}
-          </p>
-          {notes.map((n) => (
-            <div key={n.id} className="flex gap-2.5">
-              <MessageSquare size={13} className="mt-0.5 shrink-0 text-slate-300" />
-              <div className="min-w-0">
-                <p className="text-sm text-slate-700 whitespace-pre-wrap wrap-anywhere">{n.body}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  {n.authorName ?? 'Raptor'} · {formatDate(n.createdAt)}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/*
+        THE ENTRIES USED TO BE LISTED HERE AND THEY HAVE MOVED.
+        
+        THE FIRM'S DESIGN PUTS EVERY VOICE IN ONE LIST -- see TicketThread. Notes drawn here and
+        emails drawn in a card below meant the ticket's own conversation was told in two places in
+        two orders, and the one question it exists to answer could only be got at by merging them
+        by eye. This panel is now what it says it is: the three things a person DOES.
+      */}
     </Card>
   )
 }
