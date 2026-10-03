@@ -213,10 +213,21 @@ ok('a non-bureau search is priced under item 3', /under Annexure B item 3/.test(
    successful charge is what closed it before the offer could be made. */
 ok('recording does not close the box', !/setResult\(\{ charge: c, count \}\)\s*\n\s*setAsking\(false\)/.test(button))
 ok('...and the box offers the upload itself', /Upload what it found/.test(button))
-/* BOTH CALL SITES, WRITTEN DIFFERENTLY ON PURPOSE: the modal has to close itself first, the line
-   under the button is already outside it. Asserted separately so neither can quietly go. */
-ok('...calling the handler from inside the box', /setResult\(null\); onUpload\(\)/.test(button))
-ok('...and the line under the button still calls it too', /onClick=\{onUpload\}/.test(button))
+/*
+ * BOTH CALL SITES, AND THEY NOW DIFFER IN WHAT THEY PASS AS WELL AS IN WHERE THEY ARE.
+ *
+ * Inside the box a FILE has just been chosen -- the chooser lives on the confirmation, so the
+ * reader opens on the profile rather than on a second empty chooser. The line under the button
+ * survives after the box has closed, where there is no file in hand, so it opens the reader on its
+ * own chooser exactly as it always did.
+ *
+ * Asserted separately so neither can quietly go, and on what each PASSES, because handing the file
+ * over is the whole of what the firm asked for.
+ */
+ok('...handing the chosen file over from inside the box',
+  /setResult\(null\); onUpload\(f\)/.test(button))
+ok('...and the line under the button still opens it with nothing',
+  /onClick=\{\(\) => onUpload\(\)\}/.test(button))
 /* ASKED, NOT DONE. "If you want to" is the firm's own qualifier: a declining answer has to exist,
    and it must not read as though it undoes the fee that was just raised. */
 ok('...and it can be declined', /Not now/.test(button))
@@ -581,6 +592,42 @@ ok('...and against the month s allowance', /of \{tracingMonth\.limit\} tracing c
 /* OFF THE LEDGER THE PAGE ALREADY HOLDS: a second request for a number that is already in memory
    is a slower page for nothing. */
 ok('...off the ledger already loaded', /tracingThisMonth\(ledgers\.fees/.test(detail))
+
+/* ---------------------------------------------------------------------------------------------
+ * RECORDING THE SEARCH AND HANDING OVER WHAT IT FOUND IS ONE STEP
+ *
+ * THE FIRM, looking at "Trace recorded · charged R16.00 + VAT" followed by a second box saying
+ * "Choose the trace PDF": "these 2 could be one screen and one step if you combine them."
+ *
+ * They are right. It is ONE action in the collector's head, and the press between them asked
+ * somebody to confirm a decision they had already made.
+ * ------------------------------------------------------------------------------------------- */
+
+ok('the confirmation carries the chooser itself', /accept="application\/pdf,\.pdf"/.test(button))
+/* AND IT IS A FILE INPUT RATHER THAN A BUTTON THAT OPENS ONE. The whole of the fix is that no
+   second box is drawn, so a button whose job is to open one would be the old shape renamed. */
+ok('...rather than a button that opens a second box',
+  !/Upload what it found\s*\n\s*<\/button>[\s\S]{0,200}onUpload\(\)/.test(button))
+ok('...and the file goes straight to the reader', /onUpload\(f\)/.test(button))
+
+const detail2 = readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')
+ok('the page carries the file to the upload box', /setTracing\(f \?\? true\)/.test(detail2))
+ok('...and hands it over', /initialFile=\{tracing instanceof File \? tracing : null\}/.test(detail2))
+
+const upload = readFileSync(new URL('../../src/pages/accounts/TraceUploadModal.tsx', import.meta.url), 'utf8')
+ok('the reader reads it as soon as it opens', /if \(initialFile\) void read\(initialFile\)/.test(upload))
+/*
+ * ONCE, ON THE FILE. `read` is a useCallback over debtorKind and directors, and those settle after
+ * the account loads -- depending on it would re-read the PDF each time they did, which is real
+ * work and a profile flickering out and back while somebody is looking at it.
+ */
+ok('...once, rather than whenever the account settles', /\}, \[initialFile\]\)/.test(upload))
+/*
+ * AND THE CHOOSER IS NOT DELETED. This box is also opened on its own -- from the trace panel, with
+ * a PDF somebody was emailed and no search of ours behind it. Both doors, one reader.
+ */
+ok('...and the box still has its own chooser for a PDF with no search behind it',
+  /Choose the trace PDF/.test(upload))
 
 console.log(`\ncheck-trace-sources: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

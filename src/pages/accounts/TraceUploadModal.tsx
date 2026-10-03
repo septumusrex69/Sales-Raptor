@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Building2, Check, FileUp, Loader2, Scale, User } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { pdfTokens } from '../../lib/pdfText.ts'
@@ -31,9 +31,24 @@ import { formatDate } from '../../data/mockData'
  */
 export function TraceUploadModal({
   accountId, debtorKind, registrationNumber, directors, hasPractitioner, actor,
-  onClose, onDone, onAddPractitioner, onWork,
+  onClose, onDone, onAddPractitioner, onWork, initialFile,
 }: {
   accountId: string
+  /**
+   * A PDF ALREADY CHOSEN, SO THIS BOX NEVER DRAWS ITS OWN CHOOSER.
+   *
+   * THE FIRM, looking at "Trace recorded · charged R16.00" followed by a second box saying "Choose
+   * the trace PDF": "these 2 could be one screen and one step if you combine them."
+   *
+   * They are right: recording the search and handing over what it found is one action in the
+   * collector's head, and splitting it put a press between somebody and the thing they had already
+   * decided to do. The file is now chosen on the confirmation itself and arrives here, which skips
+   * straight to reading it.
+   *
+   * THE CHOOSER IS NOT DELETED, because this box is also opened on its own -- from the trace panel,
+   * with a PDF somebody was emailed and no search of ours behind it. Both doors, one reader.
+   */
+  initialFile?: File | null
   debtorKind: 'individual' | 'company'
   /** The account's own registration number, to warn when the trace is for a different company. */
   registrationNumber: string | null
@@ -136,6 +151,23 @@ export function TraceUploadModal({
       setReading(false)
     }
   }, [debtorKind, directors])
+
+  /*
+   * A FILE CHOSEN ON THE CONFIRMATION IS READ AS SOON AS THIS OPENS.
+   *
+   * THE FIRM: "these 2 could be one screen and one step if you combine them." Recording the search
+   * and handing over what it found is one action, so the chooser moved onto the confirmation and
+   * the file arrives here already picked.
+   *
+   * ONCE, ON THE FILE RATHER THAN ON EVERY RENDER. `read` is a useCallback over debtorKind and
+   * directors, and those settle after the account loads -- depending on it here would re-read the
+   * PDF each time they did, which is a few hundred milliseconds of work and a profile flickering
+   * out and back while somebody is looking at it.
+   */
+  useEffect(() => {
+    if (initialFile) void read(initialFile)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile])
 
   /*
    * Filing it without reading it. Charges nothing, same as filing one that was read — the search

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Loader2, Search } from 'lucide-react'
+import { Check, FileUp, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
 import { recordTrace } from '../../lib/accountTrace'
@@ -85,7 +85,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
    * the search. Asked an hour later, on a panel, it is a task to come back to — which is how the
    * firm ended up paying for traces whose answers were never typed in.
    */
-  onUpload: () => void
+  onUpload: (file?: File) => void
 }) {
   /*
    * WHICH SOURCE, ASKED FIRST.
@@ -283,7 +283,9 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
           Straight after the charge, while the downloads are still in the corner of the screen. The
           line stays for ten seconds and then clears itself, same as the charge it sits beside.
         */}
-        <button type="button" onClick={onUpload}
+        {/* NO FILE: this is the line that survives after the box has closed, so it opens the
+            reader on its own chooser as it always did. */}
+        <button type="button" onClick={() => onUpload()}
           className="text-[11px] font-medium text-[var(--c-steel)] hover:underline text-left">
           Upload what it found
         </button>
@@ -587,11 +589,33 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
                 Upload what {source.name} found and Raptor reads the numbers, addresses, employment
                 and linked people off it.
               </p>
-              <div className="flex items-center justify-end gap-2 mt-5">
-                <button type="button" onClick={() => { setAsking(false); setResult(null); onUpload() }}
-                  className="text-sm font-medium px-3.5 py-2 rounded-lg bg-navy-900 text-white">
-                  Upload what it found
-                </button>
+              {/*
+                THE CHOOSER ITSELF, NOT A BUTTON THAT OPENS ONE.
+
+                THE FIRM, looking at this box followed by a second one saying "Choose the trace
+                PDF": "these 2 could be one screen and one step if you combine them."
+
+                They are right. Recording the search and handing over what it came back with is ONE
+                action in the collector's head, and the press between them was asking somebody to
+                confirm a decision they had already made. The file goes straight to the reader,
+                which opens on the profile rather than on its own empty chooser.
+              */}
+              <label className="mt-3 flex flex-col items-center justify-center gap-1.5 rounded-xl
+                border-2 border-dashed border-slate-200 py-7 cursor-pointer
+                hover:border-gold-400 hover:bg-gold-50/40">
+                <input type="file" accept="application/pdf,.pdf" className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (!f) return
+                    setAsking(false); setResult(null); onUpload(f)
+                  }} />
+                <FileUp size={20} className="text-slate-400" />
+                <span className="text-sm font-medium text-slate-600">Choose the trace PDF</span>
+                <span className="text-[11px] text-slate-400">
+                  Read in this tab &mdash; nothing is stored until you say so.
+                </span>
+              </label>
+              <div className="flex items-center justify-end gap-2 mt-4">
                 {/* NOT NOW, NOT CANCEL. Nothing is undone by declining -- the trace is already
                     recorded and charged -- and "Cancel" beside a fee that has been raised reads
                     as though it takes it off. */}

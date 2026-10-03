@@ -303,7 +303,17 @@ export function AccountDetail() {
   const [touched, setTouched] = useState(false)
   const [hasEntry, setHasEntry] = useState<boolean | null>(null)
   const [leavingOpen, setLeavingOpen] = useState(false)
-  const [tracing, setTracing] = useState(false)
+  /*
+   * THE UPLOAD BOX, AND THE PDF IT WAS HANDED WHERE THERE IS ONE.
+   *
+   * THE FIRM: "these 2 could be one screen and one step if you combine them." The trace
+   * confirmation now carries the file chooser, so the file arrives with the request to open --
+   * and the reader skips straight to the profile rather than drawing a second empty chooser.
+   *
+   * `true` IS STILL A VALID VALUE: every other door into this box (the trace panel, the workspace,
+   * a document somebody was emailed) opens it with nothing chosen.
+   */
+  const [tracing, setTracing] = useState<boolean | File>(false)
   /** Null = closed. A kind inside it is the office the trace's status line implied. */
   const [practitioner, setPractitioner] = useState<{ suggest: PractitionerKind | null } | null>(null)
   /* Null when closed; `editing` null means adding, a director means correcting that one. */
@@ -874,7 +884,7 @@ export function AccountDetail() {
             debtorName={name}
             label="Do the trace"
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
-            onDone={reload} onUpload={() => setTracing(true)} />
+            onDone={reload} onUpload={(f) => setTracing(f ?? true)} />
         )}
         traceActionCompact={(
           /* THE SAME CONTROL, HEADER-SIZED. A second instance rather than a style prop: they are
@@ -884,7 +894,7 @@ export function AccountDetail() {
             debtorName={name}
             label="Do another"
             className="text-[11px] font-medium px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:border-[#c9a052] hover:bg-gold-50 inline-flex items-center gap-1"
-            onDone={reload} onUpload={() => setTracing(true)} />
+            onDone={reload} onUpload={(f) => setTracing(f ?? true)} />
         )}
         onUpload={() => setTracing(true)}
         onOpenTrace={setOpenTrace}
@@ -1733,6 +1743,7 @@ export function AccountDetail() {
           directors={standing.directors}
           hasPractitioner={account.practitionerKind !== null || account.practitionerName !== null}
           actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          initialFile={tracing instanceof File ? tracing : null}
           onClose={() => setTracing(false)}
           onDone={reload}
           onAddPractitioner={(kind) => setPractitioner({ suggest: kind })}
