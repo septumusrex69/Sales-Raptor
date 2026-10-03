@@ -77,6 +77,12 @@ export interface DebtorImport {
     mainComments: number
     importedNotes: number
     idsRejected: number
+    /** Rows where the ID Number cell was empty. See the coverage note. */
+    idsBlank: number
+    /** Rows holding twelve digits — an ID whose leading zero a spreadsheet ate. */
+    idsTwelveDigit: number
+    /** True where the sheet has an ID Number column at all. */
+    idColumnPresent: boolean
   }
 }
 
@@ -124,6 +130,22 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     stats: {
       rows: 0, contacts: 0, mobiles: 0, emails: 0, addresses: 0,
       promises: 0, mainComments: 0, importedNotes: 0, idsRejected: 0,
+      idsBlank: 0, idsTwelveDigit: 0,
+      /*
+       * IS THE COLUMN EVEN THERE?
+       *
+       * THE FIRM, told what Raptor had: "I don't know why the ID numbers didn't pull in, but
+       * usually we have like 80% or 90% of all the ID numbers." The book Raptor imported had them
+       * on 3%, and nothing anywhere said which of the three possible reasons it was: the sheet has
+       * no such column, the column is there and mostly blank, or the column is there and we are
+       * rejecting what is in it. Those want three different people to do three different things,
+       * and a silent null looks identical for all of them -- which is this codebase's standing
+       * complaint about hand-written mappers, met in the one place it costs a whole book.
+       *
+       * READ OFF THE FIRST ROW'S KEYS, because every row of a parsed sheet carries every header.
+       * An empty export answers false, which is also the honest answer: there is no column there.
+       */
+      idColumnPresent: rows.length > 0 && Object.prototype.hasOwnProperty.call(rows[0], 'ID Number'),
     },
   }
 
@@ -138,7 +160,16 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
 
     const rawId = (text(r['ID Number']) ?? '').replace(/\s/g, '')
     const idNumber = isIdNumber(rawId) ? rawId : null
+    if (!rawId) out.stats.idsBlank++
     if (rawId && !idNumber) out.stats.idsRejected++
+    /*
+     * TWELVE DIGITS IS THE ONE REJECTION WITH A KNOWN CAUSE, and it is worth counting apart.
+     * A spreadsheet reading an ID column as a NUMBER eats the leading zero, so every debtor born
+     * in a month or on a day that starts the number with 0 arrives one digit short. It is not a
+     * stray phone number and it is not bad data at the client -- it is the export's format, and
+     * whether to restore the zero is the firm's decision rather than a guess made here.
+     */
+    if (rawId && !idNumber && /^\d{12}$/.test(rawId)) out.stats.idsTwelveDigit++
 
     const patch: DebtorPatch = {
       debtor_first_name: text(r['First Name']),
@@ -272,10 +303,54 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
   }
 
   if (missingRef) out.problems.push(`${missingRef} rows had no Swordfish Reference and were skipped.`)
+  /*
+   * WHAT THE ID COVERAGE ACTUALLY IS, SAID OUT LOUD.
+   *
+   * THE FIRM EXPECTS 80 TO 90 PER CENT and was surprised by what landed. The three reasons want
+   * three different answers, so they are reported apart rather than as one silence:
+   *   no column            a mapping fault, and the sheet should be exported again with it
+   *   column, mostly blank Swordfish's own data is thinner than the firm believes
+   *   column, rejected     our rule is refusing what is there, and the twelve-digit count says
+   *                        how much of that is a spreadsheet eating a leading zero
+   *
+   * A PROBLEM RATHER THAN A NOTE WHERE THE COLUMN IS MISSING: 97% of a book untraceable is not a
+   * footnote, and the import's problems are what somebody reads before deciding to go ahead.
+   */
+  if (!out.stats.idColumnPresent && out.stats.rows > 0) {
+    out.problems.push(
+      'This export has no "ID Number" column, so no identity numbers were imported at all. '
+      + 'Nothing on these accounts can be traced at a credit bureau until it is exported again '
+      + 'with that column.',
+    )
+  } else if (out.stats.rows > 0) {
+    const held = out.stats.rows - out.stats.idsBlank - out.stats.idsRejected
+    const pct = Math.round((held / out.stats.rows) * 100)
+    const line = `${held} of ${out.stats.rows} debtors (${pct}%) came with a usable identity number.`
+    /* THE FIRM'S OWN EXPECTATION IS THE THRESHOLD. Below it, this is something to look at before
+       the book is worked; at or above it, it is a figure for the record. */
+    if (pct < 80) out.problems.push(`${line} The firm expects 80–90%, so this export is worth checking.`)
+    else out.notes.push(line)
+    if (out.stats.idsBlank) {
+      out.notes.push(`${out.stats.idsBlank} had the ID Number cell empty in Swordfish.`)
+    }
+  }
   if (out.stats.idsRejected) {
     out.notes.push(
-      `${out.stats.idsRejected} ID Number values were not 13 digits — 22 of them are the debtor's `
-      + `own cellphone number — so they were left off rather than stored as identity numbers.`,
+      `${out.stats.idsRejected} ID Number values were not 13 digits — some are the debtor's own `
+      + `cellphone number — so they were left off rather than stored as identity numbers.`,
+    )
+  }
+  /*
+   * AND THE ONE REJECTION WORTH ACTING ON. Twelve digits is almost always a leading zero a
+   * spreadsheet ate on export, not bad data: those debtors DO have identity numbers and Raptor is
+   * throwing them away. Restoring the zero is the firm's decision, so this says how many it is
+   * worth and does not do it.
+   */
+  if (out.stats.idsTwelveDigit) {
+    out.problems.push(
+      `${out.stats.idsTwelveDigit} of those are exactly twelve digits, which is what a spreadsheet `
+      + `leaves when it reads an ID column as a number and drops the leading zero. Re-export that `
+      + `column as text and they come in; nothing here guesses the missing digit.`,
     )
   }
   out.notes.push(

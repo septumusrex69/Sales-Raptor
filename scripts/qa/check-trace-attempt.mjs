@@ -8,10 +8,13 @@
  *
  * WHAT THIS FILE GUARDS:
  *
- *   1. THE MONEY. Nothing was searched, so nothing may be charged. recordTraceAttempt must not
- *      reach chargeItem, and the modal must not go on offering the tariff buttons once "we could
- *      not trace" is on the file -- two records that contradict each other, with the one on the
- *      debtor's statement being the one that gets taxed.
+ *   1. THE MONEY, AND THE FIRM CORRECTED ME ON IT: "now you should charge them even though we
+ *      couldn't find the trace, because you already filled the things in with the credit bureau --
+ *      you did a credit bureau trace, whether or not the finding was positive or not, you still
+ *      charge them." Item 4(c) prices the SEARCH, not the answer. So a bureau attempt raises it and
+ *      everything else does not, because item 3 is "other necessary EXPENSES" and a form that could
+ *      not be submitted is not one. The tariff buttons still go once the record is on the file --
+ *      one search recorded twice is two fees on one statement.
  *   2. THE CELL NUMBER IS A BUREAU KEY AND NOTHING ELSE'S. 086 and 087 are ten digits beginning
  *      08 and belong to a switchboard; SASSA, the voters' roll and CIPC cannot be searched on a
  *      cell number at all.
@@ -22,8 +25,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  TRACE_REQUEST_FOR, mobileKeyFor, traceAttemptAsk, traceAttemptNote, traceNeeds, traceNeedsFor,
-  traceableMobile,
+  TRACE_REQUEST_FOR, attemptIsChargeable, mobileKeyFor, traceAttemptAsk, traceAttemptNote,
+  traceNeeds, traceNeedsFor, traceableMobile,
 } from '../../src/lib/traceAttempt.ts'
 import { TRACE_SOURCES, traceSourceById } from '../../src/lib/traceSources.ts'
 import { REQUEST_KINDS } from '../../src/lib/disputeCategories.ts'
@@ -254,13 +257,38 @@ const fn = write.slice(write.indexOf('export async function recordTraceAttempt')
 const body = fn.slice(0, fn.indexOf('\n}\n') + 3)
 ok('recordTraceAttempt exists', body.includes('recordTraceAttempt'))
 /*
- * NOTHING WAS SEARCHED, SO NOTHING IS CHARGED. Annexure B prices ACTIONS -- item 4(c) a bureau
- * search, item 3 a necessary expense incurred -- and here there was neither. A debtor billed R16
- * because the client's handover sheet arrived without an identity number would be paying for
- * somebody else's omission.
+ * THE SEARCH WAS STILL RUN, SO IT IS STILL CHARGED. This asserted the opposite -- "it raises no
+ * fee" -- on the reasoning that nothing had been searched. THE FIRM: "you already filled the things
+ * in with the credit bureau... whether or not the finding was positive or not, you still charge
+ * them." Pressing Trace opens the portal whether or not Raptor had a key, so the collector went
+ * there and typed in what the account had; the bureau is paid for the search and not for the
+ * answer, which is what item 4(c) prices.
  */
-ok('...and it raises no fee', !/chargeItem|chargeForSource|scheduleFor/.test(body))
-ok('...it writes a note and that is all', /addNote\(/.test(body))
+ok('...and it raises the fee through the one charging door', /chargeItem\(\{/.test(body))
+ok('...priced off the source rather than typed here', /chargeForSource\(source\)/.test(body))
+/* ONE SEARCH. The row of counts is not offered on this path: a search that came back with nothing
+   to work on is one search, and asking how many would be asking a question nobody can answer. */
+ok('...as one search', /quantity: 1,/.test(body))
+/* AND ONLY WHERE THE SOURCE IS ONE THAT CHARGES. The gate is the pure rule, not an if here. */
+ok('...and only where the source raises one', /attemptIsChargeable\(source\)/.test(body))
+ok('...it writes the note as well', /addNote\(/.test(body))
+/* THE FEE BEFORE THE NOTE, like recordTrace, so a timeline entry can never quote a charge the
+   ledger does not carry. */
+ok('...the fee first, then the note', body.indexOf('chargeItem({') < body.indexOf('addNote({'))
+
+/*
+ * WHICH SOURCES CHARGE, HELD AS THE RULE RATHER THAN AS A LIST OF SCREENS.
+ *
+ * A bureau is paid for the query whatever it returns. SASSA, the voters' roll, CIPC and a web
+ * search are public pages: a form that could not be submitted cost nobody anything, and billing
+ * R25 for a page somebody opened and closed is the kind of entry found at a taxation.
+ */
+ok('a bureau attempt is charged', attemptIsChargeable(bureau))
+ok('...and SASSA is not', !attemptIsChargeable(sassa))
+ok('...nor the voters\u2019 roll', !attemptIsChargeable(iec))
+ok('...nor a web search', !attemptIsChargeable(google))
+check('exactly one source charges for an attempt that found nothing',
+  TRACE_SOURCES.filter(attemptIsChargeable).map((s) => s.id), ['xds'])
 
 /* ---------------------------------------------------------------------------------------------
  * THE BOX: A WAY TO RECORD IT, AND THE TARIFF BUTTONS GONE ONCE IT IS RECORDED
@@ -297,8 +325,21 @@ ok('...and the price under them',
  * assertion passes vacuously the moment one of the two things it orders is deleted.
  */
 ok('the box confirms the attempt was recorded', btn.includes('Recorded on the account'))
-ok('...and says nothing was charged, where somebody is reading it',
-  btn.includes('nothing charged, because nothing was searched'))
+/*
+ * AND IT SAYS WHAT IT COSTS BEFORE THE PRESS, which is this row's standing rule: the gazette's item
+ * is the one fact that decides whether a fee is lawful, and it is not something to find out
+ * afterwards on a statement.
+ */
+ok('...and says what it will cost before the press',
+  btn.includes('under Annexure B item 4(c)') && /attemptIsChargeable\(source\)/.test(btn))
+ok('...naming why the bureau is charged anyway',
+  btn.includes('the bureau is paid whether or not it'))
+ok('...and saying where nothing is charged', btn.includes('no expense to recover'))
+/* THE CONFIRMATION QUOTES THE LEDGER, not the tariff: the fee ceiling and the four-a-month cap both
+   sit between the two, and a line reading R16.00 beside a fee that was refused is the firm
+   believing it has money coming that it has not. */
+ok('...and the confirmation quotes what was actually raised',
+  /attemptCharge\?\.reason === 'charged'/.test(btn))
 ok('the ask is offered after the attempt is on the file, not instead of it',
   btn.indexOf('Ask the client for') > btn.indexOf('Recorded on the account'))
 ok('...and it opens the Escalate box rather than raising a ticket here',

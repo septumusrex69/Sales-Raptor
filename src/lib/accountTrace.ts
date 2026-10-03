@@ -21,6 +21,7 @@ import { chargeItem, type ChargeResult } from './accountCharges'
 import {
   chargeForSource, chargesForThisSearch, traceSourceById, traceSourceNote,
 } from './traceSources.ts'
+import { attemptIsChargeable } from './traceAttempt.ts'
 
 /** Item 4(c). Named once so the reason for the charge is greppable from the button. */
 export const TRACE_ITEM = '4c'
@@ -112,29 +113,53 @@ export async function recordTrace(input: {
 }
 
 /**
- * RECORD A TRACE THAT COULD NOT BE RUN. NO FEE.
+ * RECORD A TRACE THAT CAME BACK WITH NOTHING TO WORK ON.
  *
  * THE FIRM: "I think it's some place that we have to say like trace attempted and there was no
  * trace on the data. We would need more information like an ID number... we haven't been able to
  * trace the data on the information provided."
  *
- * NOTHING IS CHARGED AND THAT IS NOT AN OVERSIGHT. Annexure B prices ACTIONS -- item 4(c) is a
- * bureau search, item 3 is a necessary expense incurred -- and here there was neither: no portal
- * was searched because there was no key to search it on. A debtor billed R16 because the client's
- * handover sheet arrived without an identity number would be paying for somebody else's omission,
- * which is exactly the sort of line that is found when a bill of costs is taxed. So this function
- * does not take a schedule, does not call chargeItem, and cannot be made to raise one.
+ * AND IT CHARGES, WHICH IT DID NOT AT FIRST. The firm corrected that: "now you should charge them
+ * even though we couldn't find the trace, because you already filled the things in with the credit
+ * bureau -- you did a credit bureau trace, whether or not the finding was positive or not, you
+ * still charge them." Item 4(c) prices a necessary registered credit bureau search and says nothing
+ * about the search succeeding; the bureau is paid either way. Pressing Trace opens the portal
+ * whether or not Raptor had a key to hand over, so the collector went there and typed in what the
+ * account had -- the search ran, and it ran thin.
  *
- * IT IS STILL A RECORD. Before it existed the only way out of the trace box was "Didn't trace",
- * which wrote nothing at all -- so an account that CANNOT be traced read exactly like an account
- * nobody had got round to. See traceAttempt.ts for the whole of that argument.
+ * ONLY THE BUREAU RAISES ONE. attemptIsChargeable holds the line and says why: item 3 is "other
+ * necessary EXPENSES", and a public form that could not be submitted is not an expense.
+ *
+ * THE FEE FIRST, THEN THE NOTE, like recordTrace -- so a timeline entry can never quote a charge
+ * the ledger does not carry.
+ *
+ * IT IS STILL A RECORD ABOVE ALL. Before it existed the only way out of the trace box was "Didn't
+ * trace", which wrote nothing at all -- so an account that could not be traced read exactly like an
+ * account nobody had got round to. See traceAttempt.ts.
  */
 export async function recordTraceAttempt(input: {
   accountId: string
   actor: { id: string | null; name: string | null }
+  /** Where they looked. Decides whether this raises a fee, and under which item. */
+  sourceId?: string
   /** The sentence, from traceAttemptNote. Composed by the caller, which knows what was missing. */
   note: string
-}): Promise<void> {
+}): Promise<ChargeResult | null> {
+  const source = traceSourceById(input.sourceId ?? 'xds')
+  const what = chargeForSource(source)
+  const charge = attemptIsChargeable(source)
+    ? await chargeItem({
+      accountId: input.accountId,
+      itemId: what.itemId,
+      actionCode: what.actionCode,
+      description: what.description,
+      /* ONE SEARCH. The row of counts is not offered on this path -- a search that came back with
+         nothing to work on is one search, and asking how many would be asking a question whose
+         answer nobody has. */
+      quantity: 1,
+      createdBy: input.actor.id,
+    })
+    : null
   await addNote({
     accountId: input.accountId,
     body: input.note,
@@ -144,6 +169,7 @@ export async function recordTraceAttempt(input: {
     authorName: input.actor.name,
     createdBy: input.actor.id,
   })
+  return charge
 }
 
 /**

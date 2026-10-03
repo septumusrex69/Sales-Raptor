@@ -3,7 +3,9 @@ import { Check, FileUp, Loader2, Search } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { RecordActionNote } from '../../components/record/RecordShell'
 import { recordTrace, recordTraceAttempt } from '../../lib/accountTrace'
-import { mobileKeyFor, traceAttemptAsk, traceAttemptNote, traceNeedsFor } from '../../lib/traceAttempt.ts'
+import {
+  attemptIsChargeable, mobileKeyFor, traceAttemptAsk, traceAttemptNote, traceNeedsFor,
+} from '../../lib/traceAttempt.ts'
 import {
   bureauSearchCounts, TRACE_SOURCES, traceSourceById, traceSourceUrl, tracingThisMonth,
   type TraceSource, type TracingMonth,
@@ -145,6 +147,9 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
    * an identity number without the attempt on the file is a request with nothing behind it.
    */
   const [attempt, setAttempt] = useState<'no' | 'saving' | 'saved'>('no')
+  /* What the attempt cost, so the confirmation quotes the ledger rather than the tariff. Null where
+     the source raises nothing -- see attemptIsChargeable. */
+  const [attemptCharge, setAttemptCharge] = useState<ChargeResult | null>(null)
   /* 'asking' until the clipboard answers, because a write can be refused after it is accepted. */
   const [copied, setCopied] = useState<'asking' | 'yes' | 'no' | 'nothing'>('nothing')
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -285,6 +290,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
     /* Cleared with the source: "we could not search SASSA" is not a record about the voters' roll,
        and an offer to ask the client left standing would carry the wrong source's reason. */
     setAttempt('no')
+    setAttemptCharge(null)
     setAsking(true)
   }
 
@@ -306,8 +312,8 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
     setAttempt('saving')
     setError(null)
     try {
-      await recordTraceAttempt({
-        accountId, actor,
+      const c = await recordTraceAttempt({
+        accountId, actor, sourceId: source.id,
         note: traceAttemptNote({
           source, debtorKind, mobile,
           /* The wrong number is named on the record as well as on the screen, so it gets
@@ -315,6 +321,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
           unusable: identity.ok ? null : identity.found,
         }),
       })
+      setAttemptCharge(c)
       setAttempt('saved')
       await onDone()
     } catch (e) {
@@ -557,15 +564,41 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
                 price, and the line says so where somebody is about to press it.
               */}
               {attempt !== 'saved' ? (
-                <button type="button" onClick={() => void saveAttempt()} disabled={attempt === 'saving'}
-                  className="mt-2 text-xs font-medium px-3 py-1.5 rounded-lg border border-negative-200
-                    bg-white text-negative-700 hover:bg-negative-100 disabled:opacity-50">
-                  Record that we could not trace
-                </button>
+                <>
+                  <button type="button" onClick={() => void saveAttempt()} disabled={attempt === 'saving'}
+                    className="mt-2 text-xs font-medium px-3 py-1.5 rounded-lg border border-negative-200
+                      bg-white text-negative-700 hover:bg-negative-100 disabled:opacity-50">
+                    Record that we could not trace
+                  </button>
+                  {/*
+                    AND WHAT IT COSTS, BEFORE THE PRESS.
+                    
+                    THE FIRM: "you already filled the things in with the credit bureau -- whether or
+                    not the finding was positive or not, you still charge them." Item 4(c) prices the
+                    SEARCH and not the answer. Said here rather than discovered on a statement, which
+                    is this row's standing rule: the gazette's item is the one fact that decides
+                    whether a fee is lawful.
+                  */}
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    {attemptIsChargeable(source)
+                      ? <>The search was still run, so it is charged R{rate.toFixed(2)} plus VAT
+                        under Annexure B item 4(c) &mdash; the bureau is paid whether or not it
+                        finds anything.</>
+                      : <>Nothing is charged: {source.name} could not be searched at all, so there
+                        is no expense to recover.</>}
+                  </p>
+                </>
               ) : (
                 <div className="mt-2">
+                  {/* WHAT THE LEDGER TOOK, not what the tariff says -- the ceiling and the monthly
+                      cap both sit between the two. See chargeWords. */}
                   <p className="text-xs text-slate-600">
-                    Recorded on the account &mdash; nothing charged, because nothing was searched.
+                    Recorded on the account &mdash; {
+                      attemptCharge?.reason === 'charged'
+                        ? `charged R${attemptCharge.exclVat.toFixed(2)} + VAT`
+                        : attemptCharge === null
+                          ? 'nothing charged, because nothing could be searched'
+                          : 'no charge (the fee ceiling)'}.
                   </p>
                   {/*
                     AND THE ASK, STRAIGHT AFTER IT.

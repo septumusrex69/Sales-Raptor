@@ -18,14 +18,30 @@
  * number, that is not an edge case -- it is the ordinary one.
  *
  * ------------------------------------------------------------------------------------------------
- * AND IT IS NOT A FEE
+ * A BUREAU SEARCH THAT FOUND NOTHING IS STILL A BUREAU SEARCH
  * ------------------------------------------------------------------------------------------------
  *
- * Nothing was searched, so nothing is charged. Annexure B prices ACTIONS -- item 4(c) a bureau
- * search, item 3 a necessary expense -- and there was neither. A debtor billed R16 because the
- * firm's own handover sheet arrived without an identity number would be paying for the client's
- * omission, and it is the kind of line that is only ever found at a taxation. recordTraceAttempt
- * raises nothing and says so.
+ * THIS FILE SAID THE OPPOSITE AND THE FIRM CORRECTED IT: "now you should charge them even though we
+ * couldn't find the trace, because you already filled the things in with the credit bureau -- you
+ * did a credit bureau trace, whether or not the finding was positive or not, you still charge
+ * them."
+ *
+ * THEY ARE RIGHT AND THE ERROR WAS IN WHAT I THOUGHT HAD HAPPENED. The reasoning here was "nothing
+ * was searched, so there is nothing Annexure B prices" -- which describes a collector who never
+ * opened the portal. That is not what happens: pressing Trace OPENS XDS whether or not Raptor had a
+ * key to put on the clipboard, and the collector types in what the account does have. The search
+ * runs. It comes back thin because the data was thin. Item 4(c) prices a "necessary registered
+ * credit bureau search", and the gazette says nothing about the search succeeding -- the bureau is
+ * paid either way, which is the whole reason the firm raises it.
+ *
+ * IT IS THE SAME RULE AS THE ORDINARY PATH, which has always charged a bureau search whose findings
+ * were empty. What was wrong was that recording "we could not trace" went down a different road and
+ * quietly cost the firm the fee.
+ *
+ * AND ONLY THE BUREAU. Item 3 is "other necessary EXPENSES", and a SASSA form that could not be
+ * submitted for want of an identity number incurred none -- nobody was paid, no query was run. A
+ * collector who DID search SASSA and got nothing records it the ordinary way and is charged item 3
+ * the ordinary way. See attemptIsChargeable.
  *
  * ------------------------------------------------------------------------------------------------
  * "WE CANNOT TRACE ON THIS", NEVER "THE DEBTOR IS UNTRACEABLE"
@@ -104,6 +120,23 @@ export function mobileKeyFor(
      your clipboard". A `kind` as well, because a caller that stores what was searched needs to
      tell a cell number from an identity number and `what` is prose. */
   return { ok: true, kind: 'mobile', value: mobile, what: 'cell number' }
+}
+
+/**
+ * DOES RECORDING "we could not trace" RAISE A FEE?
+ *
+ * THE FIRM: "you already filled the things in with the credit bureau... whether or not the finding
+ * was positive or not, you still charge them." A registered bureau is paid for the search and not
+ * for the answer, so item 4(c) is raised on the search -- exactly as it is when the same search
+ * comes back with twelve numbers.
+ *
+ * NO, EVERYWHERE ELSE, and the line is the gazette's rather than ours. Item 3 is "other necessary
+ * expenses not specifically provided for": a form on a public site that could not be submitted is
+ * not an expense, because nobody was paid for it. Billing R25 for a page somebody looked at and
+ * closed is the kind of entry that is only ever found at a taxation.
+ */
+export function attemptIsChargeable(source: TraceSource): boolean {
+  return source.kind === 'credit_bureau'
 }
 
 /** What the firm needs before this account can be traced, in the firm's words. */
