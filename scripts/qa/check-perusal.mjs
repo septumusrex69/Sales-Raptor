@@ -209,10 +209,23 @@ ok('...and hands the charge back to be shown', /charge: ChargeResult \| null/.te
 /* OPENING ONE. */
 ok('opening a document raises it', /export async function openDocument\(/.test(workspace))
 const open = workspace.slice(workspace.indexOf('export async function openDocument('))
-/* THE URL FIRST, for the same reason: a document that cannot be opened has not been perused. */
-const atUrl = open.indexOf('await documentUrl(')
-const atOpenCharge = open.indexOf('chargePerusal(')
-ok('...after the address is signed', atUrl > 0 && atOpenCharge > atUrl)
+/*
+ * THE URL FIRST, for the same reason: a document that cannot be opened has not been perused.
+ *
+ * MEASURED INSIDE THE FILE BRANCH, which is the only one that can fail. A signed document is not
+ * in the bucket -- it IS the signing request, and the row points at it -- so its address is built
+ * rather than fetched and there is nothing to go wrong before the fee. Measured across the whole
+ * function, that branch's charge sits above `documentUrl` and this read as a regression on code
+ * that is right.
+ */
+const fileBranch = open.slice(open.indexOf('const url = await documentUrl('))
+const atUrl = fileBranch.indexOf('await documentUrl(')
+const atOpenCharge = fileBranch.indexOf('chargePerusal(')
+ok('...after the address is signed', atUrl >= 0 && atOpenCharge > atUrl)
+/* AND THE SIGNED ONE IS CHARGED TOO. Item 6 is for reading a document on the account; where it is
+   kept is not the debtor's business, and a fee that depends on storage is a fee nobody can explain. */
+ok('...and a signed document is perused like any other',
+  /signingPath\(doc\.storagePath\.slice\('signing\/'\.length\)\),\s*\n\s*charge: await chargePerusal\(/.test(open))
 ok('the documents panel opens through it', /await openDocument\(doc, userId\)/.test(panels))
 /* AND SAYS WHAT IT EARNED, where it earned anything -- and only then: "no charge, already charged
    today" on every document anybody opens is a line people stop reading. */

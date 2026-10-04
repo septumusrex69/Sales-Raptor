@@ -25,11 +25,20 @@ import {
  * debt is the instrument the firm would sue on, and a signed copy that re-merged itself would show
  * the court a different balance from the one the debtor agreed to.
  */
-export function SigningPanel({ accountId, values, debtorName }: {
+export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
   accountId: string
   /** The merge values for this account, resolved by the page. Same ones the composer uses. */
   values: Record<string, string>
   debtorName: string | null
+  /**
+   * WHICH QUESTIONS THE DEBTOR IS ASKED AT ALL.
+   *
+   * THE FIRM: "why would you ask for the employer and for the company at the same time? If you're
+   * speaking to a company, you're speaking to a company. If you're speaking to an individual,
+   * you're speaking to an individual." A company has no employer and a person has no registration
+   * number -- asking both makes the form read as something nobody looked at.
+   */
+  debtorKind: 'individual' | 'company'
 }) {
   const [rows, setRows] = useState<Awaited<ReturnType<typeof listSigningRequests>> | null>(null)
   const [choosing, setChoosing] = useState(false)
@@ -101,7 +110,7 @@ export function SigningPanel({ accountId, values, debtorName }: {
         .filter((b) => !(values[b.key] ?? '').trim())
         .map((b) => b.key)
       const terms = ['ptp_amount', 'ptp_frequency', 'ptp_date']
-      const blanks = blanksFor(leaveBlank ? [...unanswered, ...terms] : unanswered)
+      const blanks = blanksFor(leaveBlank ? [...unanswered, ...terms] : unanswered, debtorKind)
       const token = await createSigningRequest({
         accountId,
         title: template.name,

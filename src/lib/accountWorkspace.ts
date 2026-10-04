@@ -591,6 +591,15 @@ export interface AccountDocument {
   kind: string | null
   uploadedByName: string | null
   createdAt: string
+  /**
+   * SET WHERE THIS ROW IS A SIGNED DOCUMENT RATHER THAN A FILE.
+   *
+   * THE FIRM: "when it's signed and saved, I can't see the document that's signed or saved
+   * anywhere." It is filed by the database the moment it is signed -- the signer is anonymous and
+   * could never have written this row themselves -- and there is no file in the bucket to open,
+   * because everything the document is already lives on the signing request. The token opens it.
+   */
+  signingToken: string | null
 }
 
 const toDocument = (r: any): AccountDocument => ({
@@ -601,6 +610,11 @@ const toDocument = (r: any): AccountDocument => ({
   mimeType: r.mime_type,
   sizeBytes: r.size_bytes === null ? null : Number(r.size_bytes),
   kind: r.kind,
+  /* NAMED HERE BY HAND like every other column -- one missing from this mapper reads as undefined
+     for ever, and here it would make a signed document look like a file that will not open. */
+  signingToken: typeof r.storage_path === 'string' && r.storage_path.startsWith('signing/')
+    ? r.storage_path.slice('signing/'.length)
+    : null,
   uploadedByName: r.uploaded_by_name,
   createdAt: r.created_at,
 })
@@ -714,8 +728,27 @@ export async function openDocument(
   doc: { accountId: string; storagePath: string },
   by: string | null,
 ): Promise<{ url: string; charge: ChargeResult | null }> {
+  /*
+   * A SIGNED DOCUMENT IS NOT IN THE BUCKET. It is the signing request, and the token opens the
+   * same page the debtor signed on -- which shows the signed copy, their mark and the date. Asking
+   * storage for it would hand a collector "object not found" on a document that plainly exists.
+   *
+   * THE PERUSAL FEE IS RAISED EITHER WAY. Item 6 is for reading a document on the account, and
+   * where it is kept is not the debtor's business.
+   */
+  if (doc.storagePath.startsWith('signing/')) {
+    return {
+      url: signingPath(doc.storagePath.slice('signing/'.length)),
+      charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }),
+    }
+  }
   const url = await documentUrl(doc.storagePath)
   return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
+}
+
+/** Where the signing page for a token lives. One place, so the link and the opener agree. */
+export function signingPath(token: string): string {
+  return `/sign/${token}`
 }
 
 /**

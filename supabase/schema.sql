@@ -20950,3 +20950,71 @@ comment on function public.signing_sign(text, text, text, text, text, jsonb) is
 
 revoke all on function public.signing_sign(text, text, text, text, text, jsonb) from public;
 grant execute on function public.signing_sign(text, text, text, text, text, jsonb) to anon, authenticated;
+
+-- ---------- A signed document files itself under the account ----------
+--
+-- THE FIRM: "when it's signed and saved, I can't see the document that's signed or saved anywhere.
+-- It doesn't go anywhere. So it should go to signed, it should go under documents."
+--
+-- IT COULD NOT, AND THE REASON IS WHO IS HOLDING THE PEN. The signer is anonymous -- the token is
+-- the whole authority -- and the anon role has no rights on the storage bucket or on
+-- account_documents. A browser that could write a document row onto an account would be a browser
+-- that could write anything onto any account, which is not a trade worth making for a file.
+--
+-- SO THE DATABASE FILES IT, at the moment the state becomes 'signed', as the only actor in the
+-- exchange entitled to. And the row POINTS AT THE SIGNING REQUEST rather than at a file: the
+-- request already holds everything the document is -- the frozen body, the sheet it was drawn on,
+-- what the signer filled in, their mark and their typed name -- so the PDF is drawn from it on
+-- demand rather than stored twice and allowed to disagree with itself.
+--
+-- storage_path carries 'signing/<token>', which keeps the table's own unique constraint meaningful
+-- for these rows as well as for uploaded files.
+alter table public.account_documents
+  add column if not exists signing_request_id uuid references public.signing_requests (id) on delete cascade;
+
+create unique index if not exists account_documents_signing_idx
+  on public.account_documents (signing_request_id) where signing_request_id is not null;
+
+comment on column public.account_documents.signing_request_id is
+  'The signed document this row IS, rather than a file in the bucket. The signer is anonymous and '
+  'the anon role has no rights on the bucket or on this table, so a signed copy could never be '
+  'uploaded from the page the debtor signs on. The signing request already holds everything the '
+  'document is, so the row points at it and the PDF is drawn on demand.';
+
+create or replace function public.signing_file_signed()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.state = 'signed' and coalesce(old.state, '') <> 'signed' and new.account_id is not null then
+    insert into public.account_documents
+      (account_id, name, storage_path, mime_type, kind, notes, uploaded_by_name, signing_request_id)
+    values (
+      new.account_id,
+      new.title || ' — signed',
+      'signing/' || new.token,
+      'application/pdf',
+      'Signed document',
+      case when coalesce(new.signed_name, '') <> ''
+        then 'Signed online by ' || new.signed_name else 'Signed online' end,
+      coalesce(new.signed_name, 'The debtor'),
+      new.id
+    )
+    on conflict (signing_request_id) where signing_request_id is not null do nothing;
+  end if;
+  return new;
+end $$;
+
+-- CREATED BEHIND A CATALOGUE GUARD, never dropped and recreated: `drop trigger` hangs through this
+-- project's migration tooling exactly as DELETE and DROP do. The guard also makes re-running safe,
+-- which a bare `create trigger` is not.
+do $do$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'signing_requests_file_signed') then
+    create trigger signing_requests_file_signed
+      after update on public.signing_requests
+      for each row execute function public.signing_file_signed();
+  end if;
+end $do$;

@@ -37,8 +37,22 @@
  * Pure: no database, no clock. The sender decides; this decides what the sender is allowed to ask.
  */
 
-/** How the signer's page draws the box, and how the answer is checked. */
-export type BlankKind = 'text' | 'lines' | 'amount' | 'date'
+/**
+ * How the signer's page draws the box, and how the answer is checked.
+ *
+ * `amount` AND `choice` ARE NOT TEXT BOXES, and the firm's own reasoning is why:
+ *
+ *   "a figure for how much is going to be paid should be a figure, not just type it in there,
+ *   because there could be typos. There is an R -- some people can put R for rand and others
+ *   could not. That might influence the way that the payment is captured."
+ *
+ * They are right, and it is worse than typos: "R500", "500", "R 500.00" and "r500,00" are four
+ * strings for one number, and the one that reaches a payment arrangement decides what the firm
+ * thinks it was promised. So an amount is a NUMBER the page draws an R beside, and a frequency is
+ * a CHOICE -- "rather give the option, for example, monthly, weekly or bi-weekly, or other, and
+ * then you can type in other."
+ */
+export type BlankKind = 'text' | 'lines' | 'amount' | 'date' | 'choice'
 
 export interface Blank {
   /** The merge field this fills, without the braces. */
@@ -46,6 +60,19 @@ export interface Blank {
   /** What the signer is asked for, in their words rather than the template's. */
   label: string
   kind: BlankKind
+  /** For a `choice`: what may be picked. The last one admits anything, typed beside it. */
+  options?: string[]
+  /**
+   * Which kind of debtor is asked this at all.
+   *
+   * THE FIRM: "why would you ask for the employer and for the company at the same time? If you're
+   * speaking to a company, you're speaking to a company. If you're speaking to an individual,
+   * you're speaking to an individual."
+   *
+   * Exactly so -- a company has no employer and a person has no registration number, and asking
+   * both makes the form read as something nobody looked at. Absent means both.
+   */
+  forKind?: 'individual' | 'company'
   /**
    * Whether the document can be signed without it.
    *
@@ -63,6 +90,9 @@ export interface Blank {
  * Keyed by the merge field so the sender's choice, the frozen document and the signed answer all
  * speak one vocabulary -- the same one the templates are written in.
  */
+/** What the firm offers as a payment frequency. The last admits anything, typed beside it. */
+export const FREQUENCIES = ['Monthly', 'Fortnightly', 'Weekly', 'Other']
+
 export const FILLABLE: Blank[] = [
   { key: 'debtor_address', label: 'Your street address', kind: 'lines', required: true },
   {
@@ -75,16 +105,29 @@ export const FILLABLE: Blank[] = [
      * the firm PRINTS of it afterwards is masking's business, not this form's.
      */
     required: false,
+    forKind: 'individual',
   },
-  { key: 'debtor_reg_no', label: 'Company registration number', kind: 'text', required: false },
-  { key: 'debtor_employer', label: 'Your employer', kind: 'text', required: false },
+  {
+    key: 'debtor_reg_no',
+    label: 'Company registration number',
+    kind: 'text',
+    required: false,
+    forKind: 'company',
+  },
+  { key: 'debtor_employer', label: 'Your employer', kind: 'text', required: false, forKind: 'individual' },
   /*
    * THE ARRANGEMENT, WHICH IS THE WHOLE POINT. Required together: an instalment with no date and a
    * date with no instalment are each half a promise, and half a promise on a signed instrument is
    * an argument waiting to happen.
    */
   { key: 'ptp_amount', label: 'What you will pay each time', kind: 'amount', required: true },
-  { key: 'ptp_frequency', label: 'How often you will pay it', kind: 'text', required: true },
+  {
+    key: 'ptp_frequency',
+    label: 'How often you will pay it',
+    kind: 'choice',
+    options: FREQUENCIES,
+    required: true,
+  },
   { key: 'ptp_date', label: 'The date of your first payment', kind: 'date', required: true },
 ]
 
@@ -108,14 +151,33 @@ export function blankFor(key: string): Blank | null {
  * collector about at the moment they are trying to get a document out. The CHECK is what catches
  * it, and the document simply prints that field as Raptor has it.
  */
-export function blanksFor(keys: string[]): Blank[] {
-  const out: Blank[] = []
-  for (const key of keys) {
-    const blank = BY_KEY.get(key)
-    if (blank && !out.some((b) => b.key === key)) out.push(blank)
-  }
-  /* In the order the firm's documents read, not the order somebody ticked them. */
-  return FILLABLE.filter((b) => out.some((o) => o.key === b.key))
+export function blanksFor(keys: string[], debtorKind: 'individual' | 'company' = 'individual'): Blank[] {
+  const want = new Set(keys)
+  /* In the order the firm's documents read, not the order somebody ticked them -- and never a
+     question for the other kind of debtor. */
+  return FILLABLE.filter((b) => want.has(b.key) && (!b.forKind || b.forKind === debtorKind))
+}
+
+/**
+ * AN AMOUNT A DEBTOR TYPED, AS A NUMBER.
+ *
+ * THE FIRM: "there is an R -- some people can put R for rand and others could not. That might
+ * influence the way that the payment is captured."
+ *
+ * The page draws the R and takes digits, so this is mostly a second lock rather than the only one:
+ * a pasted "R 1 500,00", a thousands space, a comma for a decimal point and a full stop for one
+ * all have to come out as 1500. Returns null where there is no number in it at all, which is what
+ * keeps "five hundred" out of an arrangement.
+ */
+export function amountOf(typed: string): number | null {
+  const cleaned = (typed ?? '')
+    .replace(/[Rr\s\u00a0]/g, '')
+    /* A COMMA IS A DECIMAL POINT HERE. en-ZA writes 1 500,00 -- read as a thousands separator,
+       a debtor offering R1,50 a month would be recorded as R150. */
+    .replace(/,/g, '.')
+  if (!/^\d*\.?\d+$/.test(cleaned)) return null
+  const value = Number(cleaned)
+  return Number.isFinite(value) && value > 0 ? value : null
 }
 
 /**
@@ -125,7 +187,14 @@ export function blanksFor(keys: string[]): Blank[] {
  * and still has to hunt; "Your street address and the date of your first payment" is the answer.
  */
 export function missingBlanks(blanks: Blank[], filled: Record<string, string>): Blank[] {
-  return blanks.filter((b) => b.required && !(filled[b.key] ?? '').trim())
+  return blanks.filter((b) => {
+    const given = (filled[b.key] ?? '').trim()
+    if (b.required && !given) return true
+    /* AN AMOUNT THAT IS NOT A NUMBER IS NOT AN ANSWER. "about five hundred" in an instalment field
+       is a promise nobody can diarise, and it would reach a collector as though it were one. */
+    if (b.kind === 'amount' && given && amountOf(given) === null) return true
+    return false
+  })
 }
 
 /**

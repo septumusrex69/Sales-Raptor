@@ -23,7 +23,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  blankFor, blanksFor, FILLABLE, isFillable, missingBlanks, offerLine, withFilled,
+  amountOf, blankFor, blanksFor, FILLABLE, FREQUENCIES, isFillable, missingBlanks, offerLine,
+  withFilled,
 } from '../../src/lib/signingBlanks.ts'
 
 let pass = 0
@@ -92,6 +93,70 @@ check('the blanks come out in the order the documents read',
   ['debtor_address', 'ptp_amount', 'ptp_date'])
 
 /* ---------------------------------------------------------------------------------------------
+ * A COMPANY IS ASKED COMPANY THINGS AND A PERSON PERSON THINGS
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM: "why would you ask for the employer and for the company at the same time? If you're
+ * speaking to a company, you're speaking to a company. If you're speaking to an individual, you're
+ * speaking to an individual. So please get that right."
+ *
+ * A company has no employer and a person has no registration number. Asking both is how a form
+ * reads as something nobody looked at -- and their own AoD did exactly that.
+ */
+const everything = ['debtor_address', 'debtor_id_masked', 'debtor_reg_no', 'debtor_employer']
+check('a company is asked for its registration number and not an employer',
+  blanksFor(everything, 'company').map((b) => b.key), ['debtor_address', 'debtor_reg_no'])
+check('...and a person for an employer and not a registration number',
+  blanksFor(everything, 'individual').map((b) => b.key),
+  ['debtor_address', 'debtor_id_masked', 'debtor_employer'])
+/* AND AN IDENTITY NUMBER IS A PERSON'S. A company registration number in the ID field is the
+   confusion Raptor already has a whole rule about elsewhere. */
+check('an identity number is never asked of a company',
+  blanksFor(['debtor_id_masked'], 'company'), [])
+/* THE TERMS ARE ASKED OF BOTH, because an arrangement is an arrangement. */
+check('both are asked for the arrangement',
+  blanksFor(['ptp_amount'], 'company').length, blanksFor(['ptp_amount'], 'individual').length)
+
+/* ---------------------------------------------------------------------------------------------
+ * AN AMOUNT IS A NUMBER AND A FREQUENCY IS A CHOICE
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM: "a figure for how much is going to be paid should be a figure, not just type it in
+ * there, because there could be typos. There is an R -- some people can put R for rand and others
+ * could not. That might influence the way that the payment is captured."
+ *
+ * Four strings for one number is the problem: "R500", "500", "R 500.00", "r500,00". The one that
+ * reaches an arrangement decides what the firm thinks it was promised.
+ */
+check('a plain number is an amount', amountOf('500'), 500)
+check('...and so is one somebody typed a rand sign onto', amountOf('R500'), 500)
+check('...and a pasted en-ZA figure, spaces and all', amountOf('R 1 500,00'), 1500)
+/* A COMMA IS A DECIMAL POINT HERE. Read as a thousands separator, R1,50 a month becomes R150. */
+check('...a comma is a decimal point, not a thousands mark', amountOf('1,50'), 1.5)
+check('...and a full stop still works', amountOf('1500.50'), 1500.5)
+check('words are not an amount', amountOf('five hundred'), null)
+check('...nor is nothing', amountOf(''), null)
+check('...nor nought', amountOf('0'), null)
+check('...nor a negative', amountOf('-5'), null)
+/* AND AN AMOUNT THAT IS NOT A NUMBER IS NOT AN ANSWER: "about five hundred" would otherwise reach
+   a collector as though it were an instalment. */
+const amountOnly = blanksFor(['ptp_amount'])
+check('an unreadable amount is still missing', missingBlanks(amountOnly, { ptp_amount: 'about 500' }).length, 1)
+check('...and a readable one is not', missingBlanks(amountOnly, { ptp_amount: 'R500' }).length, 0)
+
+/*
+ * A FREQUENCY IS PICKED, NOT SPELLED. THE FIRM: "rather give the option, for example, monthly,
+ * weekly, or bi-weekly, or other, and then you can type in other."
+ */
+check('the frequency is a choice', blankFor('ptp_frequency')?.kind, 'choice')
+ok('...with the firm’s own options on it',
+  ['Monthly', 'Fortnightly', 'Weekly'].every((f) => FREQUENCIES.includes(f)))
+/* "OTHER" IS LAST AND IT IS THE ESCAPE. Without it the choice is three options and a refusal. */
+check('...and Other is the last of them', FREQUENCIES[FREQUENCIES.length - 1], 'Other')
+
+/* ---------------------------------------------------------------------------------------------
  * AND WHAT THE SIGNER TYPED
  * ------------------------------------------------------------------------------------------- */
 
@@ -146,19 +211,36 @@ ok('...and the thinning sees it as answered, so its line stays',
   && doc.indexOf('for (const key of leaveOpen)') < doc.indexOf('const thinned = documentWithoutOptional'))
 
 /* ---------------------------------------------------------------------------------------------
- * THE PAPER
+ * THE MEASURE OF THE PAGE, WITHOUT THE PAPER
  * ------------------------------------------------------------------------------------------- */
 
+/*
+ * TWO ROUNDS OF THE FIRM LOOKING AT THIS, and the second reversed half of the first.
+ *
+ * "It's not on a letterhead, the letters are all over the place" -- the page drew the blocks with
+ * no sheet at all. Then, with the letterhead on: "look at how this displays on the letterhead...
+ * I'm not sure if it's necessary to show the entire letterhead and the division of the pages to
+ * the person when they are signing online. I think what is important is when it is printed."
+ *
+ * AND THE SCREENSHOT SHOWED WHY IT WAS WORSE THAN A PREFERENCE. The letterhead repeats every
+ * 297mm; the body on this page is NOT paginated -- planPageBreaks is measured against the editor's
+ * own sheet and never ran here -- so the second letterhead landed across the middle of item 3 and
+ * the footer strip ran through the creditor's address. A repeating background behind unpaginated
+ * text is a guarantee of that rather than a risk.
+ */
 const page = read('src/pages/sign/SignPage.tsx')
-ok('the signing page draws the firm’s own sheet', /letterCss\(\{ \.\.\.blankLetter\(\), blocks: request\.body \}, page\)/.test(page))
+ok('the signing page keeps the sheet’s measure', /letterCss\(\{ \.\.\.blankLetter\(\), blocks: request\.body \}, page\)/.test(page))
 ok('...at the sheet’s own width', /width: `\$\{page\.widthMm\}mm`/.test(page))
-/* THE LETTERHEAD ON EVERY PAGE, not once at the top -- which is what a printer does and what the
-   firm circled on a two-page notice when it did not. */
-ok('...with the letterhead repeating down it', /backgroundRepeat: page\.backgroundUrl \? 'repeat-y'/.test(page))
+/* AND NOT THE PAPER ITSELF. The letterhead is the PDF's, where the pagination is real. */
+ok('...and no letterhead behind it', /const page = \{ \.\.\.sheet, backgroundUrl: null \}/.test(page))
+ok('...nor a page division drawn across it', !/repeat-y/.test(page))
+/* ONE CONTINUOUS SHEET: letterCss's own page height would otherwise pad a one-paragraph mandate
+   out to a full A4 and push the signing controls below the fold. */
+ok('...and it is one continuous document', /minHeight: 0/.test(page))
 /* AND PLAIN A4 WHERE A REQUEST CARRIES NO SHEET: every link sent before the column existed. The
    right width and the right margins is not the firm's paper, but it is a document. */
 ok('...and plain A4 where the request predates the sheet',
-  /const page = request\?\.pageSetup \?\? A4_LETTERHEAD/.test(page))
+  /const sheet = request\?\.pageSetup \?\? A4_LETTERHEAD/.test(page))
 
 const panel = read('src/pages/accounts/SigningPanel.tsx')
 ok('the sender freezes the sheet onto the request', /pageSetup: sheet,/.test(panel))
@@ -196,6 +278,46 @@ ok('...and it stores what was typed', /filled = coalesce\(p_filled, '\{\}'::json
 /* THE SIGNER'S SIDE READS ONE jsonb, which is why the sheet and the blanks could be added at all:
    signing_open returned a row of columns and a function's return type cannot be replaced. */
 ok('the document is opened as one jsonb', /rpc\('signing_document', \{ p_token: token \}\)/.test(read('src/lib/signing.ts')))
+
+/* ---------------------------------------------------------------------------------------------
+ * A SIGNED DOCUMENT FILES ITSELF
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM: "when it's signed and saved, I can't see the document that's signed or saved anywhere.
+ * It doesn't go anywhere. So it should go to signed, it should go under documents."
+ *
+ * IT COULD NOT, AND THE REASON IS WHO IS HOLDING THE PEN. The signer is anonymous -- the token is
+ * the whole authority -- and the anon role has no rights on the storage bucket or on
+ * account_documents. A browser that could write a document row onto an account would be a browser
+ * that could write anything onto any account. So the DATABASE files it, as the only actor in the
+ * exchange entitled to.
+ */
+const trigger = sql.lastIndexOf('create or replace function public.signing_file_signed()')
+ok('the database files a signed document', trigger > 0)
+const filing = trigger > 0 ? sql.slice(trigger, sql.indexOf('$$;', trigger) + 3) : ''
+ok('...onto the account it belongs to', /insert into public\.account_documents/.test(filing))
+/* ONLY ON THE CROSSING, not on every update: a later edit to the row must not file it twice. */
+ok('...only when it becomes signed',
+  /new\.state = 'signed' and coalesce\(old\.state, ''\) <> 'signed'/.test(filing))
+ok('...and never twice', /do nothing/.test(filing))
+ok('the trigger is created behind a catalogue guard',
+  /if not exists \(select 1 from pg_trigger where tgname = 'signing_requests_file_signed'\)/.test(sql))
+
+/*
+ * AND THE ROW POINTS AT THE REQUEST RATHER THAN AT A FILE. Everything the document is already
+ * lives on the signing request -- the frozen body, the sheet, what was filled in, the mark -- so
+ * storing a second copy is storing something that can disagree with it.
+ */
+const store = read('src/lib/accountWorkspace.ts')
+ok('a signed document opens the page it was signed on',
+  /if \(doc\.storagePath\.startsWith\('signing\/'\)\)/.test(store))
+ok('...rather than asking storage for a file that is not there',
+  store.indexOf("doc.storagePath.startsWith('signing/')") < store.indexOf('const url = await documentUrl'))
+/* THE PERUSAL FEE IS RAISED EITHER WAY: item 6 is for reading a document on the account, and where
+   it is kept is not the debtor's business. */
+const opens = (store.match(/charge: await chargePerusal\(/g) ?? [])
+check('both kinds of document raise the perusal fee', opens.length, 2)
 
 /* ---------------------------------------------------------------------------------------------
  * AND THE DATE CAME OFF THE ROW

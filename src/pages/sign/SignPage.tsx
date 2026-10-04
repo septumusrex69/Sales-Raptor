@@ -8,7 +8,8 @@ import {
 import {
   A4_LETTERHEAD, blankLetter, letterCss, letterToHtml,
 } from '../../lib/letterDocument.ts'
-import { missingBlanks, withFilled } from '../../lib/signingBlanks.ts'
+import { amountOf, missingBlanks, withFilled } from '../../lib/signingBlanks.ts'
+import { formatMoney } from '../../data/mockData'
 
 /**
  * THE PAGE A DEBTOR OPENS FROM A LINK, SIGNS, AND NEVER SEES AGAIN.
@@ -42,6 +43,7 @@ export default function SignPage() {
    * to make."
    */
   const [filled, setFilled] = useState<Record<string, string>>({})
+  const set = (key: string, value: string) => setFilled((f) => ({ ...f, [key]: value }))
   const [agreed, setAgreed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -66,18 +68,28 @@ export default function SignPage() {
   useEffect(() => { void load() }, [load])
 
   /*
-   * THE SHEET THE FIRM SENT IT ON, and before this there was none.
+   * THE SHEET'S MEASURE, WITHOUT THE PAPER ITSELF.
    *
-   * THE FIRM, looking at an acknowledgement of debt here: "it looks crappy, it doesn't look good.
-   * It's not on a letterhead, the letters are all over the place, it's just not nice." Exactly so:
-   * the page drew the blocks and no paper -- no letterhead, no A4 width, no margins -- so a
-   * document written for a 210mm sheet ran the full width of a browser window.
+   * TWO ROUNDS OF THE FIRM LOOKING AT THIS. First: "it's not on a letterhead, the letters are all
+   * over the place, it's just not nice" -- the page drew the blocks with no sheet at all, so a
+   * document written for 210mm ran the full width of a browser. Then, with the letterhead on:
+   * "look at how this displays on the letterhead... I'm not sure if it's necessary to show the
+   * entire letterhead and the division of the pages to the person when they are signing online. I
+   * think what is important is when it is printed, then it can be on the letterhead."
    *
-   * A4_LETTERHEAD WHERE THE REQUEST CARRIES NONE, which is every link sent before the column
-   * existed. Plain A4 at the right width and the right margins is not the firm's paper, and it is
-   * a document rather than a wall of text.
+   * THEY ARE RIGHT, AND THE SCREENSHOT SHOWED WHY IT WAS WORSE THAN A PREFERENCE. The letterhead
+   * repeats every 297mm; the body on this page is NOT paginated -- planPageBreaks is measured
+   * against the editor's own sheet and never ran here -- so the second letterhead landed across
+   * the middle of item 3 and the footer strip ran through the creditor's address. A repeating
+   * background behind unpaginated text is a guarantee of that, not a risk of it.
+   *
+   * SO THE SCREEN GETS THE MEASURE AND NOT THE PAPER: the same width, the same margins and the
+   * same type as the printed page, with no background and no page divisions. One continuous
+   * document to read and sign. The letterhead is the PDF's -- letterPdf draws it there, where the
+   * pagination is real.
    */
-  const page = request?.pageSetup ?? A4_LETTERHEAD
+  const sheet = request?.pageSetup ?? A4_LETTERHEAD
+  const page = { ...sheet, backgroundUrl: null }
 
   /*
    * Drawn once per document rather than on every stroke of the signature pad -- the sheet is the
@@ -187,9 +199,12 @@ export default function SignPage() {
       <div className="rounded-xl bg-slate-200/70 overflow-auto max-h-[65vh] p-4 mb-5">
         <div className="mx-auto shadow-lg relative" style={{ width: `${page.widthMm}mm` }}>
           <style>{letterCss({ ...blankLetter(), blocks: request.body }, page)}</style>
-          <div className="ltr-page" style={{
-            backgroundRepeat: page.backgroundUrl ? 'repeat-y' : 'no-repeat',
-          }}>
+          {/*
+            ONE CONTINUOUS SHEET. `minHeight: 0` undoes letterCss's own page height, which would
+            otherwise pad a short document out to a full A4 and leave the signing controls below
+            the fold on a one-paragraph mandate.
+          */}
+          <div className="ltr-page" style={{ minHeight: 0 }}>
             <div className="ltr-body" dangerouslySetInnerHTML={{ __html: html }} />
           </div>
         </div>
@@ -238,8 +253,60 @@ export default function SignPage() {
                   </span>
                   {b.kind === 'lines' ? (
                     <textarea rows={3} value={filled[b.key] ?? ''}
-                      onChange={(e) => setFilled((f) => ({ ...f, [b.key]: e.target.value }))}
+                      onChange={(e) => set(b.key, e.target.value)}
                       className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+                  ) : b.kind === 'choice' ? (
+                    /*
+                      A CHOICE RATHER THAN A SENTENCE. THE FIRM: "rather give the option, for
+                      example, monthly, weekly, or bi-weekly, or other, and then you can type in
+                      other." A typed frequency is forty spellings of four things, and the one that
+                      reaches an arrangement decides when the firm expects to be paid.
+                    */
+                    <div className="flex flex-wrap gap-1.5">
+                      {(b.options ?? []).map((option) => {
+                        const chosen = (filled[b.key] ?? '').trim() === option
+                          || (option === 'Other' && !!(filled[b.key] ?? '').trim()
+                              && !(b.options ?? []).includes((filled[b.key] ?? '').trim()))
+                        return (
+                          <button key={option} type="button"
+                            onClick={() => set(b.key, option === 'Other' ? '' : option)}
+                            className={`px-3 py-1.5 rounded-lg border text-sm ${chosen
+                              ? 'border-[#c9a052] bg-gold-50 text-slate-900'
+                              : 'border-slate-200 text-slate-600'}`}>
+                            {option}
+                          </button>
+                        )
+                      })}
+                      {/* "OTHER" IS A BOX, not a dead end: picking it has to leave somewhere to say
+                          what it is, or the choice is three options and a refusal. */}
+                      {!(b.options ?? []).includes((filled[b.key] ?? '').trim()) && (
+                        <input value={filled[b.key] ?? ''} aria-label={`${b.label} — other`}
+                          placeholder="Say how often"
+                          onChange={(e) => set(b.key, e.target.value)}
+                          className="flex-1 min-w-[10rem] text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+                      )}
+                    </div>
+                  ) : b.kind === 'amount' ? (
+                    /*
+                      THE R IS DRAWN, NOT TYPED. THE FIRM: "there is an R -- some people can put R
+                      for rand and others could not. That might influence the way that the payment
+                      is captured." So the box takes digits and the rand sign is part of the form;
+                      amountOf still reads a pasted "R 1 500,00" because somebody will paste one.
+                    */
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-500">R</span>
+                      <input type="text" inputMode="decimal" value={filled[b.key] ?? ''}
+                        placeholder="0,00"
+                        onChange={(e) => set(b.key, e.target.value)}
+                        className="flex-1 text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
+                      {/* SAID BACK AS A FIGURE, so a debtor sees what the firm will read. A typo is
+                          obvious here and invisible in the raw string. */}
+                      {amountOf(filled[b.key] ?? '') !== null && (
+                        <span className="text-xs text-slate-500 tabular-nums">
+                          = {formatMoney(amountOf(filled[b.key] ?? '') ?? 0)}
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     /*
                       A DATE PICKER FOR A DATE, on an iPad and on a telephone alike -- the first
@@ -247,8 +314,7 @@ export default function SignPage() {
                       which is not something the firm can diarise.
                     */
                     <input type={b.kind === 'date' ? 'date' : 'text'} value={filled[b.key] ?? ''}
-                      inputMode={b.kind === 'amount' ? 'decimal' : undefined}
-                      onChange={(e) => setFilled((f) => ({ ...f, [b.key]: e.target.value }))}
+                      onChange={(e) => set(b.key, e.target.value)}
                       className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
                   )}
                 </label>

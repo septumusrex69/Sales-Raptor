@@ -962,7 +962,8 @@ export function AccountDetail() {
       {/* SENDING SOMETHING OUT TO BE SIGNED. With the money because that is what the firm is
           signing ABOUT -- an acknowledgement of debt is an admission of a balance, and whoever
           sends one has just been looking at it. */}
-      <SigningPanel accountId={account.id} values={letterContext.values} debtorName={name} />
+      <SigningPanel accountId={account.id} values={letterContext.values} debtorName={name}
+        debtorKind={account.debtorKind} />
     </div>
   )
   const timelinePanel = (
