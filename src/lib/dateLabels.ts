@@ -176,3 +176,38 @@ export function firmClock(now: Date = new Date()): string {
     timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   })
 }
+
+/**
+ * HOW LONG AGO, IN THE FEWEST WORDS THAT ARE TRUE.
+ *
+ * THE FIRM, of the mailbox: "not having to go and sync and blah blah blah." The answer to that is
+ * not a better button, it is knowing you do not need one -- so the mailbox says when it was last
+ * read and the button becomes something you press when you are impatient rather than something
+ * you have to remember.
+ *
+ * ROUNDED DOWN AND NEVER FLATTERED. "Just now" is the minute it happened and not the four after
+ * it: a mailbox that says "just now" when it was last read twenty minutes ago is worse than a
+ * mailbox that says nothing, because somebody would stop pressing the button on the strength of
+ * it. Beyond a day it stops counting -- "2 days ago" is already the sentence that means something
+ * is wrong, and the exact number of days adds nothing to it.
+ *
+ * NO CLOCK OF ITS OWN: the time to compare against is passed in, so this can be checked without
+ * mocking one.
+ */
+export function agoLabel(iso?: string | null, now: Date = new Date()): string {
+  if (!iso) return ''
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const seconds = Math.floor((now.getTime() - at.getTime()) / 1000)
+  /* A CLOCK A LITTLE AHEAD OF OURS IS STILL "NOW". Postgres stamps the row and the browser does
+     the subtraction, so a second or two of drift is ordinary and "in -1 minutes" is not. */
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes === 1) return '1 minute ago'
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours === 1) return '1 hour ago'
+  if (hours < 24) return `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  return days === 1 ? 'yesterday' : `${days} days ago`
+}

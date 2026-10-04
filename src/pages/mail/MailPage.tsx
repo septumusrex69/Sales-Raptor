@@ -22,7 +22,7 @@ import {
   type CalendarEvent,
 } from '../../lib/calendarEvents.ts'
 import { useAuth } from '../../store/AuthContext'
-import { relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
+import { agoLabel, relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
 import { recordSentEmail, replySubject } from '../../lib/accountEmails'
 import {
@@ -293,13 +293,35 @@ export function MailPage() {
    * -- and being copied on your own reply-all doubles the thread every round.
    */
   const [mailbox, setMailbox] = useState<string | null>(null)
+  /**
+   * WHEN THIS MAILBOX WAS LAST READ.
+   *
+   * THE FIRM: "not having to go and sync and blah blah blah." The answer is not a better button --
+   * it is knowing there is no need to press one. The sweep reaches every mailbox in the firm every
+   * few minutes now; saying so where the button is turns the button into an impatience control.
+   */
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+  /*
+   * AND THE LABEL AGES WHILE THE PAGE IS OPEN. A mailbox left open all afternoon that still says
+   * "just now" is worse than one that says nothing: somebody would stop pressing the button on
+   * the strength of it. A minute is the resolution agoLabel works at, so a minute is the tick.
+   */
+  const [, setClockTick] = useState(0)
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockTick((n) => n + 1), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
   useEffect(() => {
     const token = session?.access_token
     if (!token) return
     let cancelled = false
     void fetch('/api/email/status', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
-      .then((b: { email?: string | null }) => { if (!cancelled) setMailbox(b.email ?? null) })
+      .then((b: { email?: string | null; lastSyncedAt?: string | null }) => {
+        if (cancelled) return
+        setMailbox(b.email ?? null)
+        setCheckedAt(b.lastSyncedAt ?? null)
+      })
       /* Not knowing costs a reply-all one address it might have dropped, not the mailbox. */
       .catch(() => {})
     return () => { cancelled = true }
@@ -628,10 +650,12 @@ export function MailPage() {
   }, [currentUser, blocksVersion])
 
   /*
-   * Read the mailbox now, not at 05:00 tomorrow.
+   * Read the mailbox now rather than waiting for the sweep.
    *
-   * The cron syncs everyone once a day, which is the ceiling on the current plan. Opening your
-   * own mailbox is the clearest possible signal that you want it current, so it pulls.
+   * The sweep reaches every mailbox in the firm every few minutes, which is the thing that makes
+   * pressing anything optional. Opening your own mailbox is still the clearest possible signal
+   * that you want it current, so it pulls -- and the header says when it was last read, so the
+   * button is for somebody who is impatient rather than somebody who has to remember.
    */
   const syncMine = useCallback(async () => {
     const token = session?.access_token
@@ -639,6 +663,7 @@ export function MailPage() {
     setSyncing(true)
     try {
       await fetch('/api/email/sync', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      setCheckedAt(new Date().toISOString())
     } catch {
       // Offline, or no mailbox connected. The list still shows what was already synced.
     } finally {
@@ -1163,6 +1188,17 @@ export function MailPage() {
               every mail client on earth uses for the same thing, and spelling it out made the pair
               read as two equal choices rather than one action and one refresh.
             */}
+            {/*
+              WHEN IT WAS LAST READ, beside the button that reads it.
+
+              Hidden below `sm`: on a phone the header is the mailbox name and two controls, and a
+              sentence squeezed between them is the thing that pushes the address off the edge.
+            */}
+            {checkedAt && (
+              <span className="hidden sm:inline shrink-0 text-xs text-slate-400">
+                Checked {agoLabel(checkedAt)}
+              </span>
+            )}
             <button onClick={() => void syncMine()} disabled={syncing}
               aria-label="Check for new mail now"
               title={syncing ? 'Checking your mailbox\u2026' : 'Check for new mail now'}

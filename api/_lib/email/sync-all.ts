@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
 import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../emailSync.js'
+import { inPool } from '../../../src/lib/pool.js'
 
 /*
  * NOTHING IS PRUNED. Mail stays until somebody deals with it.
@@ -62,6 +63,28 @@ const RECENT_MS = 2 * 60_000
  * because a run that starts a little late must not skip the whole round.
  */
 const SWEEP_RECENT_MS = 4 * 60_000
+
+/**
+ * HOW MANY MAILBOXES ARE READ AT ONCE.
+ *
+ * THE FIRM: "the company's got 50 people, so in 60 seconds it doesn't sync anything -- or it syncs
+ * two people and the third person is not synced. You still have a loophole in your method."
+ *
+ * THE LOOP WAS SERIAL AND THAT IS THE LOOPHOLE. Fifty mailboxes one after another, each waiting on
+ * a mail server before the next one starts, is minutes of wall clock to do seconds of work --
+ * nearly all of it idle, because a sync is a handshake, a LOGIN and a UID SEARCH per folder. The
+ * note at the foot of this file has said so since the day it was written.
+ *
+ * FIVE, NOT FIFTY. Every mailbox in this firm is on the same mail server, and a server asked for
+ * fifty connections at once refuses some of them -- which would turn a sweep that reached
+ * everybody slowly into one that reached nobody quickly. Five makes fifty mailboxes about ten
+ * waves, which finishes inside a cycle with room to spare, and is no more than a handful of
+ * colleagues having Raptor open at the same time.
+ *
+ * ORDER SURVIVES IT. Workers take the next mailbox off the front of a list sorted oldest-first, so
+ * the stalest is still started first -- the whole of the starvation fix, kept.
+ */
+const AT_ONCE = 5
 
 /**
  * EVERY MAILBOX IN THE FIRM, AND NOW TWO THINGS CAN ASK FOR IT.
@@ -153,7 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const notReached: string[] = []
   let remaining = 0
   const all = (connections ?? []) as EmailConnectionRow[]
-  for (const conn of all) {
+  await inPool(all, AT_ONCE, async (conn) => {
     /*
      * OUT OF TIME. Everything already done is real and is reported; what is left is counted so the
      * person is told "9 of 15 -- press again" rather than watching a spinner die. The cron never
@@ -162,7 +185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (pressed && Date.now() - started > PRESS_BUDGET_MS) {
       remaining += 1
       if (conn.email) notReached.push(conn.email)
-      continue
+      return
     }
     /* Read a moment ago -- by somebody else's press, by the person whose mailbox it is, or by the
        sweep before this one. Nothing to gain and a connection to spend. */
@@ -170,7 +193,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (conn.last_synced_at
         && Date.now() - new Date(conn.last_synced_at).getTime() < freshFor) {
       results.push({ userId: conn.user_id, email: conn.email, skipped: true })
-      continue
+      return
     }
     /*
      * THE CRON DEFERS TO A PERSON. If somebody has their mailbox open and Raptor is already
@@ -180,7 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      */
     if (!(await claimSync(admin, conn.user_id))) {
       results.push({ userId: conn.user_id, email: conn.email, skipped: true })
-      continue
+      return
     }
     /*
      * THE ATTEMPT IS RECORDED WHETHER IT WORKS OR NOT, and the reason is kept when it does not.
@@ -207,24 +230,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } finally {
       await releaseSync(admin, conn.user_id)
     }
-  }
+  })
 
   /*
-   * KNOWN LIMIT, recorded where somebody will find it.
+   * THE LIMIT THIS FILE USED TO RECORD, AND WHAT IS LEFT OF IT.
    *
-   * This loops every mailbox inside one request. At the firm's real volume — 50 agents taking
-   * 50-100 messages a day — that is 50 IMAP handshakes and thousands of messages in a single
-   * invocation, and it will hit Vercel's function duration cap and stop partway. Mailboxes that
-   * were not reached simply sync next time, or when their owner opens Raptor (the Messages menu
-   * syncs the signed-in agent's own mailbox on demand), so nothing is lost — but this route is
-   * the wrong shape for that many mailboxes and needs to become one invocation per mailbox.
+   * It said: this loops every mailbox inside one request, which at fifty agents is fifty IMAP
+   * handshakes in one invocation, it will hit Vercel's duration cap and stop partway, and the
+   * route "is the wrong shape for that many mailboxes". The firm found the same thing from the
+   * outside: "in 60 seconds it doesn't sync anything -- or it syncs two people and the third
+   * person is not synced. You still have a loophole in your method."
    *
-   * WHAT CHANGED IS THAT A PRESS NOW STOPS ITSELF RATHER THAN BEING KILLED. PRESS_BUDGET_MS ends
-   * the loop in time to answer, and `remaining` says how many were not reached — so the limit is
-   * a sentence on the screen instead of a spinner that dies. The CRON still runs unbudgeted and
-   * still hits the cap; that part is unchanged and still wants one invocation per mailbox.
+   * THREE THINGS CLOSED IT AND THEY ARE DIFFERENT THINGS.
    *
-   * `results` shows how far it actually got, which is the evidence for when that matters.
+   *   - ORDER. Oldest first, so a short run reaches the mailboxes that have gone longest unread
+   *     rather than the same ones every time. Fairness, not speed.
+   *   - CADENCE. The cron runs every few minutes rather than once at five in the morning, so a
+   *     mailbox missed by one run waits minutes and not a day. See vercel.json.
+   *   - SHAPE. The loop is no longer serial: AT_ONCE mailboxes are read at a time, which is what
+   *     turns "fifty handshakes end to end" into about ten waves. Nearly all of a sync is waiting
+   *     on a mail server rather than working, which is why this is worth so much.
+   *
+   * ONE INVOCATION PER MAILBOX IS STILL THE SHAPE THIS WANTS AT A FEW HUNDRED PEOPLE, and the
+   * reason not to do it now is the function cap: Vercel's Hobby plan allowed twelve, this project
+   * is at seven routes, and a dispatcher plus a per-mailbox worker is a real design rather than a
+   * tidy-up. At fifty agents, five at a time inside five minutes has the room.
+   *
+   * `results` shows how far it actually got, which is the evidence for when that stops being true.
    */
   /*
    * WHAT THE PERSON IS TOLD, in the shape the button needs: how many mailboxes were read, how much
