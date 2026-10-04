@@ -20797,3 +20797,156 @@ comment on column public.user_emails.body_calendar is
 comment on column public.user_emails.body_cached_at is
   'When the body was put here, and the one flag that says there IS one. Null means read it out of '
   'the mailbox, which is what every row did before this and what an oversized message still does.';
+
+-- ---------- The sheet a document was signed on, and the blanks the signer fills ----------
+--
+-- THE FIRM, looking at an acknowledgement of debt on the signing page: "it looks crappy, it
+-- doesn't look good. It's not on a letterhead, the letters are all over the place, it's just not
+-- nice." They are right and the cause is one omission: the page drew the frozen blocks with no
+-- sheet around them -- no letterhead, no A4 width, no margins -- so the text ran the full width of
+-- the browser on bare white.
+--
+-- THE SHEET IS FROZEN BESIDE THE BODY, not fetched. The signer is anonymous and cannot read the
+-- letterheads table; and the same rule that freezes the body applies to the paper it is on,
+-- because "we changed the letterhead afterwards" is as much of an argument as "we changed the
+-- wording afterwards".
+--
+-- AND THE BLANKS ARE THE FIRM'S NEWER INSTRUCTION: "you currently pull the data from the PTP, but
+-- there's a scenario where no PTP exists... it should ask, use the PTP data or leave it blank, and
+-- then you put a small line where the person can fill in whatever they need to, based on an
+-- arrangement they would like to make. If there's any missing documentation, make provisions for
+-- that being filled in by the individual completing the document."
+--
+-- NEVER THE MONEY. What the debtor may complete is their own particulars and the terms they are
+-- offering; the capital, the fees, the interest and the balance are printed. An acknowledgement of
+-- debt whose balance the debtor can retype is not an acknowledgement of anything.
+alter table public.signing_requests
+  add column if not exists page_setup jsonb,
+  add column if not exists blanks jsonb not null default '[]'::jsonb,
+  add column if not exists filled jsonb not null default '{}'::jsonb;
+
+comment on column public.signing_requests.page_setup is
+  'The SHEET the document was drawn on -- the letterhead, the page size and the margins -- frozen '
+  'beside the body at send time. The signer is anonymous and cannot read the letterheads table, '
+  'and without this the signing page drew the blocks on bare white at the full width of the '
+  'browser. Frozen rather than fetched for the same reason the body is: what somebody signed must '
+  'not follow a later edit.';
+
+comment on column public.signing_requests.blanks is
+  'The fields the SIGNER fills in, as [{key,label,kind,required}]. THE FIRM: "if there is any '
+  'missing documentation, make provisions for that being filled in by the individual completing '
+  'the document". Never money the firm is owed: a balance the debtor can retype is not an '
+  'acknowledgement of anything.';
+
+comment on column public.signing_requests.filled is
+  'What the signer typed into those blanks, as {key: value}, captured with the signature and part '
+  'of what was signed.';
+
+-- WHAT THE SIGNER'S PAGE READS, AND WHY IT IS A NEW NAME.
+--
+-- signing_open returned a ROW OF COLUMNS, and this change adds three to it. A function's return
+-- type cannot be changed by `create or replace` -- Postgres says so in as many words -- and the
+-- drop that would be needed first does not go through this project's migration tooling: it was
+-- tried twice, directly and inside a `do` block, and timed out both times with the function still
+-- there. CLAUDE.md already records that DELETE and DROP hang this way.
+--
+-- SO IT RETURNS ONE jsonb, which is the part worth keeping rather than a workaround. A jsonb
+-- return can gain a field for ever without a drop, so the next thing the signing page needs will
+-- not meet this wall. signing_open is left in place, superseded and uncalled.
+create or replace function public.signing_document(p_token text)
+returns jsonb
+language sql
+security definer
+set search_path to 'public'
+as $$
+  select to_jsonb(x) from (
+    select r.title, r.body, r.page_setup, r.blanks, r.filled, r.signer_name, r.state,
+           r.signed_at, r.signature_png, r.initials_png, r.signed_name
+      from public.signing_requests r
+     where r.token = p_token
+       and (r.expires_at is null or r.expires_at > now())
+  ) x
+$$;
+
+comment on function public.signing_document(text) is
+  'Open one signing request by its token: the only way the anon role may read the table. '
+  'ONE jsonb RATHER THAN A ROW OF COLUMNS, and that is the lesson rather than a style. It replaces '
+  'signing_open, whose OUT parameters had to grow by three when the sheet and the signer''s blanks '
+  'were added -- and a function''s return type cannot be changed by create-or-replace, so it has '
+  'to be dropped first, which this project cannot do through its migration tooling. A jsonb return '
+  'can gain a field without a drop, for ever. signing_open is left in place, superseded and '
+  'uncalled; it reads the same rows and tells nobody anything it did not already.';
+
+revoke all on function public.signing_document(text) from public;
+grant execute on function public.signing_document(text) to anon, authenticated;
+
+-- SIGNING IT, WITH WHAT THE SIGNER TYPED INTO THE DOCUMENT'S BLANKS.
+--
+-- A SIXTH PARAMETER RATHER THAN A CHANGED ONE. Adding a parameter makes a NEW overload, which
+-- `create or replace` allows; changing a return type does not, and the drop that would be needed
+-- first does not go through this project's migration tooling (see signing_document above). The
+-- five-argument form is left in place and is no longer called.
+--
+-- AND THE REQUIRED BLANKS ARE ENFORCED HERE as well as on the page. The signer's page is reachable
+-- by anybody holding the link and its checks are the browser's; this is the instrument the firm
+-- would sue on, and an acknowledgement of debt with empty terms acknowledges a debt and promises
+-- nothing. The firm asked for the blanks precisely so that an arrangement could be made on it.
+create or replace function public.signing_sign(
+  p_token text,
+  p_signature text,
+  p_initials text,
+  p_name text,
+  p_agent text,
+  p_filled jsonb
+) returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_done integer;
+  v_blanks jsonb;
+  v_blank jsonb;
+begin
+  if coalesce(trim(p_signature), '') = '' then
+    raise exception 'Sign in the box before submitting.' using errcode = '22023';
+  end if;
+  if coalesce(trim(p_name), '') = '' then
+    raise exception 'Type your full name before submitting.' using errcode = '22023';
+  end if;
+
+  select blanks into v_blanks from public.signing_requests where token = p_token;
+  for v_blank in select * from jsonb_array_elements(coalesce(v_blanks, '[]'::jsonb)) loop
+    if coalesce((v_blank ->> 'required')::boolean, false)
+       and coalesce(trim(coalesce(p_filled, '{}'::jsonb) ->> (v_blank ->> 'key')), '') = '' then
+      raise exception 'Fill in: %', coalesce(v_blank ->> 'label', v_blank ->> 'key')
+        using errcode = '22023';
+    end if;
+  end loop;
+
+  update public.signing_requests
+     set state = 'signed',
+         signed_at = now(),
+         signature_png = p_signature,
+         initials_png = nullif(trim(p_initials), ''),
+         signed_name = trim(p_name),
+         signed_agent = left(coalesce(p_agent, ''), 400),
+         filled = coalesce(p_filled, '{}'::jsonb)
+   where token = p_token
+     and state = 'sent'
+     and (expires_at is null or expires_at > now());
+  get diagnostics v_done = row_count;
+
+  return v_done > 0;
+end $$;
+
+comment on function public.signing_sign(text, text, text, text, text, jsonb) is
+  'Sign one request by its token, with whatever the signer typed into the document''s blanks. '
+  'A SIXTH PARAMETER RATHER THAN A CHANGED ONE: adding a parameter makes a new overload, which '
+  'create-or-replace allows, where changing a return type would need a drop this project cannot '
+  'run. The five-argument form is left in place and is no longer called. '
+  'The required blanks are enforced HERE as well as on the page: the page is reachable by anybody '
+  'holding the link, and an acknowledgement of debt with empty terms promises nothing.';
+
+revoke all on function public.signing_sign(text, text, text, text, text, jsonb) from public;
+grant execute on function public.signing_sign(text, text, text, text, text, jsonb) to anon, authenticated;

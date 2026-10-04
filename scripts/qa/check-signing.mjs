@@ -162,11 +162,41 @@ check('...and the line somebody signs on', everywhere.blocks[3].spans[0].text, '
    once against the whole document, so a block kind added later cannot slip through. */
 ok('no merge field survives into a signed document',
   !JSON.stringify(everywhere).includes('{{'))
+/*
+ * EXCEPT WHAT THE SIGNER WAS ASKED FOR, which keeps its braces on purpose -- that is the line they
+ * fill in. Asserted beside the rule above so the two cannot be confused later: everything the FIRM
+ * answers is answered, and only a field named in `leaveOpen` survives to be answered by the DEBTOR.
+ */
+const withBlank = fillLetter({ ...blankLetter(), blocks: [
+  { kind: 'paragraph', spans: [{ text: 'Domicilium: {{debtor_address}}' }] },
+  { kind: 'paragraph', spans: [{ text: 'Balance: {{balance}}' }] },
+] }, { balance: 'R 1 134,40' }, ['debtor_address'])
+check('a field left for the signer keeps its braces',
+  withBlank.blocks[0].spans[0].text, 'Domicilium: {{debtor_address}}')
+check('...and its line is still on the document', withBlank.blocks.length, 2)
+check('...while the figure beside it is answered and fixed',
+  withBlank.blocks[1].spans[0].text, 'Balance: R 1 134,40')
 
-ok('the panel freezes what it sends', /fillLetter\(doc, values\)\.blocks/.test(code('src/pages/accounts/SigningPanel.tsx')))
-/* AND THE SIGNING PAGE MERGES NOTHING, because there is nothing left in them to merge. Passing
-   real values there would be a second, later resolution -- the exact thing being prevented. */
-ok('...and the signing page resolves nothing itself', /filled: true, values: \{\} \}/.test(page))
+ok('the panel freezes what it sends',
+  /fillLetter\(doc, values, blanks\.map\(\(b\) => b\.key\)\)\.blocks/.test(code('src/pages/accounts/SigningPanel.tsx')))
+
+/*
+ * AND THE SIGNING PAGE RESOLVES NOTHING OF THE FIRM'S.
+ *
+ * THIS USED TO READ "the signing page merges nothing at all", and it was right until the firm
+ * asked for the other thing: "if there's any missing documentation, make provisions for that being
+ * filled in by the individual completing the document." A closed set of fields is now left open on
+ * purpose, and the page must merge those or the debtor cannot complete the arrangement.
+ *
+ * THE GUARANTEE IS THE EMPTY MAP. withFilled starts from `{}` -- not from the account's values --
+ * so the only thing that can be resolved on this page is a blank the firm deliberately left, and
+ * every figure the firm printed is already text in the frozen body with nothing to re-resolve it
+ * from. A second, later resolution of a balance remains impossible; it is just impossible for a
+ * sharper reason than "there is nothing left".
+ */
+ok('...and the signing page resolves only the signer’s own blanks',
+  /values: withFilled\(\{\}, request\.blanks, filled\)/.test(page))
+ok('...starting from nothing of the account’s', !/values: mergeValues/.test(page))
 
 /* ---------------------------------------------------------------------------------------------
  * THE PAGE IS OUTSIDE THE FIRM

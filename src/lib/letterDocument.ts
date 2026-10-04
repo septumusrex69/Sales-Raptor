@@ -570,7 +570,29 @@ export function documentWithoutOptional(
  * than stand on a signed instrument with braces in it. Running the two in the other order would
  * resolve the field to empty and leave the blank line behind.
  */
-export function fillLetter(doc: LetterDocument, values: Record<string, string>): LetterDocument {
+export function fillLetter(
+  doc: LetterDocument,
+  values: Record<string, string>,
+  /**
+   * FIELDS THE SIGNER WILL ANSWER, WHICH MUST SURVIVE THE MERGE WITH THEIR BRACES ON.
+   *
+   * THE FIRM: "if there's any missing documentation, make provisions for that being filled in by
+   * the individual completing the document." A field left for the debtor cannot be resolved here
+   * -- there is nothing to resolve it to -- and it cannot be dropped either, because the line it
+   * is on is the line they are meant to complete.
+   *
+   * ANSWERED WITH THEMSELVES, which is the whole trick and needs no new merge rule. Giving
+   * `debtor_address` the value `{{debtor_address}}` makes it non-empty, so documentWithoutOptional
+   * keeps its block instead of thinning it away, and renderTemplate substitutes the placeholder
+   * for the placeholder -- so the braces reach the frozen body intact and the signing page merges
+   * the signer's own answer over them. See signingBlanks.ts for which fields may ever be on this
+   * list; the money the firm is owed is never one of them.
+   */
+  leaveOpen: string[] = [],
+): LetterDocument {
+  const answered = { ...values }
+  for (const key of leaveOpen) answered[key] = `{{${key}}}`
+  values = answered
   const thinned = documentWithoutOptional(doc, values)
   const fill = (spans: Span[]): Span[] =>
     spans.map((span) => ({ ...span, text: renderTemplate(span.text, values).text }))

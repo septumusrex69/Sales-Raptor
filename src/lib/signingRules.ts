@@ -26,7 +26,8 @@
  * what a state means live here where a check can hold them. The same split accountQueries and
  * disputeCategories already have, and for the same reason.
  */
-import type { Block } from './letterDocument.ts'
+import type { Block, PageSetup } from './letterDocument.ts'
+import type { Blank } from './signingBlanks.ts'
 
 /** Where a signing request can be. */
 export type SigningState = 'sent' | 'signed' | 'declined' | 'cancelled'
@@ -34,6 +35,20 @@ export type SigningState = 'sent' | 'signed' | 'declined' | 'cancelled'
 export interface SigningRequest {
   title: string
   body: Block[]
+  /**
+   * THE SHEET IT WAS DRAWN ON, frozen beside the body.
+   *
+   * THE FIRM, looking at one on the signing page: "it looks crappy... it's not on a letterhead,
+   * the letters are all over the place." The page had the blocks and no paper to put them on. The
+   * signer is anonymous and cannot read the letterheads table, and the same rule that freezes the
+   * wording applies to the letterhead -- "we changed it afterwards" is as much of an argument
+   * about one as the other. `null` on anything sent before this existed: see A4_LETTERHEAD.
+   */
+  pageSetup: PageSetup | null
+  /** What the SIGNER is asked to fill in. See signingBlanks.ts for what may ever be on this list. */
+  blanks: Blank[]
+  /** What they typed into those blanks. Empty until it is signed. */
+  filled: Record<string, string>
   signerName: string | null
   state: SigningState
   signedAt: string | null

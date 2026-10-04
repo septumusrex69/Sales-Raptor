@@ -3,11 +3,12 @@ import { Check, Copy, Loader2, PenLine } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary'
-import { fillLetter, parseLetter } from '../../lib/letterDocument.ts'
+import { A4_LETTERHEAD, fillLetter, parseLetter, type PageSetup } from '../../lib/letterDocument.ts'
+import { defaultOf, fetchLetterheads } from '../../lib/letterheads'
+import { blanksFor, FILLABLE } from '../../lib/signingBlanks.ts'
 import {
   createSigningRequest, listSigningRequests, signingLink, type SigningState,
 } from '../../lib/signing.ts'
-import { formatDate } from '../../data/mockData'
 
 /**
  * SEND A DOCUMENT OUT TO BE SIGNED, AND SEE WHAT CAME BACK.
@@ -43,6 +44,22 @@ export function SigningPanel({ accountId, values, debtorName }: {
   }, [accountId])
   useEffect(() => { void load() }, [load])
 
+  /*
+   * THE FIRM'S OWN PAPER, fetched here and frozen onto the request.
+   *
+   * The signer is anonymous and cannot read the letterheads table, so the sheet has to travel with
+   * the document. Plain A4 where there is none: the right width and the right margins is not the
+   * firm's letterhead, but it is a document rather than a wall of text at browser width.
+   */
+  const [sheet, setSheet] = useState<PageSetup>(A4_LETTERHEAD)
+  useEffect(() => {
+    let cancelled = false
+    void fetchLetterheads()
+      .then((all) => { if (!cancelled) setSheet(defaultOf(all)?.page ?? A4_LETTERHEAD) })
+      .catch(() => { /* A letterhead we cannot read costs the paper, not the document. */ })
+    return () => { cancelled = true }
+  }, [])
+
   async function openPicker() {
     setChoosing(true)
     setError(null)
@@ -58,17 +75,42 @@ export function SigningPanel({ accountId, values, debtorName }: {
     }
   }
 
-  async function send(template: LibraryTemplate) {
+  async function send(template: LibraryTemplate, leaveBlank: boolean) {
     setBusy(template.id)
     setError(null)
     try {
       const doc = parseLetter(template.body)
       if (!doc) throw new Error(`${template.name} could not be read back, so nothing was sent.`)
+      /*
+       * WHAT THE DEBTOR FILLS IN, DECIDED HERE AND NOT GUESSED.
+       *
+       * THE FIRM: "you currently pull the data from the PTP. But there's a scenario where no PTP
+       * exists. So when you send it, it should use the PTP data, or it should ask: use the PTP
+       * data or leave it blank."
+       *
+       * THE TWO ARE DIFFERENT DOCUMENTS and only a person knows which is wanted. Left blank, the
+       * arrangement is whatever the debtor offers; filled from the promise, it is the arrangement
+       * the firm already has and the debtor is acknowledging it. Sending the second where the
+       * first was meant puts terms in a debtor's mouth.
+       *
+       * AND ANYTHING RAPTOR SIMPLY HAS NO ANSWER FOR goes to the debtor regardless -- their
+       * address, their identity number -- because those are theirs and a blank is better than
+       * braces. signingBlanks.ts holds the closed list of what may ever be asked.
+       */
+      const unanswered = FILLABLE
+        .filter((b) => !(values[b.key] ?? '').trim())
+        .map((b) => b.key)
+      const terms = ['ptp_amount', 'ptp_frequency', 'ptp_date']
+      const blanks = blanksFor(leaveBlank ? [...unanswered, ...terms] : unanswered)
       const token = await createSigningRequest({
         accountId,
         title: template.name,
         /* ANSWERED NOW, FROZEN FROM NOW. See fillLetter. */
-        body: fillLetter(doc, values).blocks,
+        body: fillLetter(doc, values, blanks.map((b) => b.key)).blocks,
+        /* THE PAPER IS FROZEN WITH THE WORDS. Without it the signer gets bare white at browser
+           width -- the firm's "it's not on a letterhead, the letters are all over the place". */
+        pageSetup: sheet,
+        blanks,
         signerName: debtorName,
       })
       setMade({ title: template.name, url: signingLink(token, window.location.origin) })
@@ -154,14 +196,35 @@ export function SigningPanel({ accountId, values, debtorName }: {
           )}
           <div className="space-y-2">
             {(letters ?? []).map((t) => (
-              <button key={t.id} type="button" onClick={() => void send(t)} disabled={busy !== null}
-                className="w-full text-left px-3.5 py-3 rounded-lg border border-slate-200
+              <div key={t.id} className="rounded-lg border border-slate-200">
+              <button type="button" onClick={() => void send(t, false)} disabled={busy !== null}
+                className="w-full text-left px-3.5 py-3 rounded-lg
                   hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
                 <span className="block text-sm font-semibold text-slate-800">{t.name}</span>
                 <span className="block text-xs text-slate-500 mt-0.5">
                   The figures are fixed at the moment you send it.
                 </span>
               </button>
+              {/*
+                AND THE SECOND WAY OF SENDING THE SAME DOCUMENT.
+
+                THE FIRM: "you currently pull the data from the PTP. But there's a scenario where
+                no PTP exists. So when you send it, it should use the PTP data, or it should ask:
+                use the PTP data or leave it blank. So then you will put a small line where the
+                person can fill in whatever it is that they need to fill in, based on an
+                arrangement that they would like to make."
+
+                TWO PRESSES RATHER THAN A TICK BOX, because they are two different documents and
+                the difference matters: one states the arrangement the firm already has, the other
+                asks the debtor for one. A tick somebody leaves as they found it is how the wrong
+                one goes out.
+              */}
+              <button type="button" onClick={() => void send(t, true)} disabled={busy !== null}
+                className="w-full text-left px-3.5 py-2 border-t border-slate-100 text-xs
+                  text-slate-500 hover:bg-gold-50 disabled:opacity-50 rounded-b-lg">
+                Or send it with the arrangement left blank, for the debtor to fill in
+              </button>
+              </div>
             ))}
           </div>
           {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
@@ -173,8 +236,16 @@ export function SigningPanel({ accountId, values, debtorName }: {
 
 /** What a row says. Kept out of the markup so the four states read as one list. */
 function stateWords(r: { state: SigningState; signedAt: string | null; signedName: string | null }): string {
+  /*
+   * THE DATE IS GONE FROM THIS LINE, at the firm's asking: "this AOD says signed at -- maybe we
+   * can remove that. It just gives you the option to sign."
+   *
+   * WHO signed is the thing somebody reads this row for; WHEN is on the signed document itself,
+   * which is where a court would look for it and where it is now filed. A row that spends half its
+   * width on a date nobody is checking is a row that reads as busy.
+   */
   if (r.state === 'signed') {
-    return `Signed${r.signedName ? ` by ${r.signedName}` : ''}${r.signedAt ? ` · ${formatDate(r.signedAt)}` : ''}`
+    return `Signed${r.signedName ? ` by ${r.signedName}` : ''}`
   }
   if (r.state === 'declined') return 'Declined'
   if (r.state === 'cancelled') return 'Withdrawn'

@@ -3,7 +3,8 @@
  * check can import; this file reaches Supabase and therefore cannot be imported by one.
  */
 import { supabase } from './supabase'
-import type { Block } from './letterDocument.ts'
+import type { Block, PageSetup } from './letterDocument.ts'
+import type { Blank } from './signingBlanks.ts'
 import { newToken, type SigningRequest, type SigningState } from './signingRules.ts'
 
 export * from './signingRules.ts'
@@ -15,6 +16,10 @@ export async function createSigningRequest(input: {
   accountId: string | null
   title: string
   body: Block[]
+  /** The firm's own sheet, frozen with the body. Without it the signer gets bare white paper. */
+  pageSetup?: PageSetup | null
+  /** What the signer may fill in, where Raptor had nothing to print. See signingBlanks.ts. */
+  blanks?: Blank[]
   signerName?: string | null
   signerEmail?: string | null
   createdBy?: string | null
@@ -25,6 +30,8 @@ export async function createSigningRequest(input: {
     account_id: input.accountId,
     title: input.title,
     body: input.body,
+    page_setup: input.pageSetup ?? null,
+    blanks: input.blanks ?? [],
     signer_name: input.signerName ?? null,
     signer_email: input.signerEmail ?? null,
     created_by: input.createdBy ?? null,
@@ -35,19 +42,25 @@ export async function createSigningRequest(input: {
 
 /** Open one by its token. Anonymous: this is the signer's side. */
 export async function openSigningRequest(token: string): Promise<SigningRequest | null> {
-  const { data, error } = await supabase.rpc('signing_open', { p_token: token })
+  /* ONE jsonb, NOT A ROW OF COLUMNS. signing_open's OUT parameters could not grow to carry the
+     sheet and the blanks without dropping it first, which this project's tooling cannot do. See
+     the comment on signing_document. */
+  const { data, error } = await supabase.rpc('signing_document', { p_token: token })
   if (error) throw new Error(error.message)
-  const row = Array.isArray(data) ? data[0] : data
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
   if (!row) return null
   return {
-    title: row.title,
+    title: row.title as string,
     body: (row.body ?? []) as Block[],
-    signerName: row.signer_name ?? null,
+    pageSetup: (row.page_setup ?? null) as PageSetup | null,
+    blanks: (row.blanks ?? []) as Blank[],
+    filled: (row.filled ?? {}) as Record<string, string>,
+    signerName: (row.signer_name ?? null) as string | null,
     state: (row.state ?? 'sent') as SigningState,
-    signedAt: row.signed_at ?? null,
-    signaturePng: row.signature_png ?? null,
-    initialsPng: row.initials_png ?? null,
-    signedName: row.signed_name ?? null,
+    signedAt: (row.signed_at ?? null) as string | null,
+    signaturePng: (row.signature_png ?? null) as string | null,
+    initialsPng: (row.initials_png ?? null) as string | null,
+    signedName: (row.signed_name ?? null) as string | null,
   }
 }
 
@@ -59,6 +72,8 @@ export async function signDocument(input: {
   signaturePng: string
   initialsPng: string | null
   name: string
+  /** What they typed into the document's blanks. Checked again in the database -- see the RPC. */
+  filled?: Record<string, string>
 }): Promise<boolean> {
   const { data, error } = await supabase.rpc('signing_sign', {
     p_token: input.token,
@@ -66,6 +81,7 @@ export async function signDocument(input: {
     p_initials: input.initialsPng ?? '',
     p_name: input.name,
     p_agent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+    p_filled: input.filled ?? {},
   })
   if (error) throw new Error(error.message)
   return data === true
