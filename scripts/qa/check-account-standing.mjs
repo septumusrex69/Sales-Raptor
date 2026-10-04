@@ -314,10 +314,43 @@ ok('...and refetched after a write', /fetchStanding\(account\.id\)/.test(detail)
  * less than everything.
  */
 const detailsSlot = /const detailsPanel = \(([\s\S]*?)\n  \)\n/.exec(detail)?.[1] ?? ''
-ok('the panel is in the details column', detailsSlot.includes('<StandingPanel'))
+/*
+ * AND IN THREE COLUMNS IT MOVES UNDER THE TIMELINE.
+ *
+ * THE FIRM, drawing a box in the empty half of an account's middle column: "in the three grid
+ * view, put the trace information here." They are reading a real imbalance -- the details column
+ * is the longest thing on the page and the timeline beside it ends where the account's history
+ * ends, so on a young account half the middle column is white space while the left one runs off
+ * the bottom.
+ *
+ * BUILT ONCE, PLACED TWICE, which is this page's rule for every panel: "defining them here rather
+ * than three times over is the whole reason the layouts can be trusted to stay the same page."
+ */
+ok('the panel is built once, as a value', /const standingPanel = \(\s*\n\s*<StandingPanel/.test(detail))
+const built = detail.match(/<StandingPanel/g) ?? []
+/* ONCE IN THE WHOLE FILE. Two copies is two sets of props to keep in step, which is the bug the
+   page's own note says the layouts exist to prevent. */
+eq('...and only once', built.length, 1)
 ok('...beside the debtor\'s own details', detailsSlot.includes('<DebtorDetailsPanel'))
 ok('...after them, because it answers the same question',
-  detailsSlot.indexOf('<DebtorDetailsPanel') < detailsSlot.indexOf('<StandingPanel'))
+  detailsSlot.indexOf('<DebtorDetailsPanel') < detailsSlot.indexOf('standingPanel'))
+/* IN THE DETAILS COLUMN WHERE THERE IS NOWHERE ELSE: `wide` stacks the details on top of the
+   timeline in one column and `stacked` is one column by name. */
+ok('...drawn in the details column in the other two arrangements',
+  detailsSlot.includes('{!underTimeline && standingPanel}'))
+/* AND UNDER THE TIMELINE IN THE ONE ARRANGEMENT THAT HAS A SECOND COLUMN TO SPILL INTO. */
+ok('...and under the timeline in three columns',
+  /underMain=\{underTimeline \? standingPanel : null\}/.test(detail))
+/*
+ * NEVER BOTH AT ONCE. The two placements read the same flag in opposite senses, which is what
+ * stops the panel being drawn twice on one screen -- the failure nobody notices in review and
+ * everybody notices on the account.
+ */
+ok('...decided by one flag, so it cannot be drawn twice',
+  /const underTimeline = layout === 'columns'/.test(detail))
+ok('the layout can take a panel under the main column',
+  /underMain\?: ReactNode/.test(read('../../src/components/record/RecordShell.tsx')))
+ok('...and draws it there', /\{main\}\s*\n\s*\{underMain\}/.test(read('../../src/components/record/RecordShell.tsx')))
 /* And gone from the figures column, or it renders twice. */
 ok('...and not left among the figures', !/side=\{\[[^\]]*[Ss]tandingPanel/.test(detail))
 /*

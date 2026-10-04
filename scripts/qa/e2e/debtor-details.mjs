@@ -169,6 +169,48 @@ try {
   t.ok('...beside the two that were already on file',
     (written[0] ?? '').includes('"from":"08:00"') && (written[0] ?? '').includes('"from":"17:00"'))
   await t.shot(page, '20-hours-open')
+
+  /* ---------- and the trace panel is drawn once, whichever layout is on ---------- */
+
+  /*
+   * THE FIRM, drawing a box in the empty half of an account's middle column: "in the three grid
+   * view, put the trace information here."
+   *
+   * THEY ARE READING A REAL IMBALANCE. The details column is the longest thing on the page -- who
+   * they are, every number, the money, the ledger, what is out for signature -- and the timeline
+   * beside it ends where the account's history ends, which on a young account is four lines.
+   *
+   * WHICH MAKES "ONCE" THE THING TO CHECK IN A BROWSER. The panel is built once and placed by the
+   * layout: in three columns under the timeline, in the other two under the debtor's own details.
+   * Both placements read one flag in opposite senses, and the failure if that ever slips is a
+   * panel drawn TWICE on one screen -- which source-reading can argue about and only a browser
+   * can settle.
+   */
+  await page.keyboard.press('Escape')
+  for (const name of ['Wide', 'One column', 'Three columns']) {
+    await page.getByRole('button', { name, exact: true }).click()
+    await page.waitForTimeout(700)
+    t.check(`${name}: the trace panel is drawn once`,
+      await page.getByText('Trace information', { exact: true }).count(), 1)
+  }
+  /* AND IT IS UNDER THE TIMELINE IN THE ONE ARRANGEMENT THAT HAS ROOM FOR IT -- the whole of what
+     was asked for. Compared by where they sit on the page rather than by markup: the columns are
+     a grid, and "after it in the DOM" is true in every layout. */
+  /*
+   * DEFENSIVE, BECAUSE A MISSING PANEL MUST REPORT RATHER THAN THROW. boundingBox() on a locator
+   * that matches nothing waits and then throws, which ends the file on a stack trace instead of
+   * "the trace panel is drawn once: expected 1, got 0" -- and the break-test for exactly that
+   * produced no output at all. CLAUDE.md names this trap; it is the same one wearing a locator.
+   */
+  const whereIs = async (text) => {
+    const found = page.getByText(text, { exact: true }).first()
+    if (await found.count() === 0) return { x: -1, y: -1 }
+    return (await found.boundingBox().catch(() => null)) ?? { x: -1, y: -1 }
+  }
+  const timeline = await whereIs('Activity timeline')
+  const trace = await whereIs('Trace information')
+  t.ok('...and in three columns it sits under the timeline',
+    trace.y > timeline.y && Math.abs(trace.x - timeline.x) < 40)
 } finally {
   if (browser) await browser.close()
   stopServer(server)

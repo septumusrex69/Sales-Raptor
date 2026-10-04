@@ -867,6 +867,64 @@ export function AccountDetail() {
    * Wrapped, because RecordLayout's details slot is a single node and two of its three
    * arrangements put no gap between siblings — the cards touched.
    */
+  /*
+   * WHAT STANDS BEHIND AND AGAINST THEM -- the traces, the directors, the judgments.
+   *
+   * BUILT ONCE AND PLACED TWICE, which is this page's rule for every other panel. THE FIRM, having
+   * drawn a box in the empty half of the middle column: "in the three grid view, put the trace
+   * information here." They are reading a real imbalance: the details column is the longest thing
+   * on the page and the timeline beside it ends where the account's history ends, so on a young
+   * account half the middle column is white space while the left one runs off the bottom.
+   *
+   * ONLY IN THREE COLUMNS. `wide` stacks the details on top of the timeline in one column and
+   * `stacked` is one column by name -- in both there is nothing to move it to, so it stays where
+   * it has always been: directly under the debtor's own details, which is where it belongs when
+   * they are read one after another. It is not a figure; it is the rest of the answer to "who am
+   * I ringing".
+   */
+  const underTimeline = layout === 'columns'
+  const standingPanel = (
+    <StandingPanel account={account} standing={standing} position={position}
+      traces={traces}
+      /* OFF THE LEDGER THE PAGE ALREADY HOLDS, so saying what tracing cost needs no request of
+         its own. Counted exactly as the engine counts -- see tracingThisMonth. */
+      tracingMonth={ledgers
+        ? tracingThisMonth(ledgers.fees, new Date().toISOString(),
+            MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)
+        : null}
+      traceAction={(
+        <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
+          /* For the sources searched on a name rather than a number -- a web search, SARS's VAT
+             vendor search. `name` is the same string the hero draws, so the two cannot differ. */
+          debtorName={name}
+          /* THE FALLBACK KEY, where there is no identity number and the bureau will take one.
+             See TraceButton.mobile. */
+          mobile={traceMobile}
+          label="Do the trace"
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
+          onDone={reload} onUpload={(f) => setTracing(f ?? true)}
+          onAskClient={setAskingTrace} />
+      )}
+      traceActionCompact={(
+        /* THE SAME CONTROL, HEADER-SIZED. A second instance rather than a style prop: they are
+           independent controls in independent places, and the picker each opens is its own. */
+        <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
+          debtorName={name}
+          mobile={traceMobile}
+          label="Do another"
+          className="text-[11px] font-medium px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:border-[#c9a052] hover:bg-gold-50 inline-flex items-center gap-1"
+          onDone={reload} onUpload={(f) => setTracing(f ?? true)}
+          onAskClient={setAskingTrace} />
+      )}
+      onUpload={() => setTracing(true)}
+      onOpenTrace={setOpenTrace}
+      onPractitioner={() => setPractitioner({ suggest: null })}
+      onAddDirector={() => setDirector({ editing: null })}
+      onEditDirector={(d) => setDirector({ editing: d })} />
+  )
+
   const detailsPanel = (
     <div className="space-y-4">
       <DebtorDetailsPanel account={account} name={name} workspace={workspace} onChange={reload}
@@ -886,45 +944,9 @@ export function AccountDetail() {
           const offer = noticeToReissue({ before, after, runs })
           if (offer) setReissuing({ offer, before, after })
         }} />
-      <StandingPanel account={account} standing={standing} position={position}
-        traces={traces}
-        /* OFF THE LEDGER THE PAGE ALREADY HOLDS, so saying what tracing cost needs no request of
-           its own. Counted exactly as the engine counts -- see tracingThisMonth. */
-        tracingMonth={ledgers
-          ? tracingThisMonth(ledgers.fees, new Date().toISOString(),
-              MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)
-          : null}
-        traceAction={(
-          <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-            debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
-            /* For the sources searched on a name rather than a number -- a web search, SARS's VAT
-               vendor search. `name` is the same string the hero draws, so the two cannot differ. */
-            debtorName={name}
-            /* THE FALLBACK KEY, where there is no identity number and the bureau will take one.
-               See TraceButton.mobile. */
-            mobile={traceMobile}
-            label="Do the trace"
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg bg-brand-600 text-white shadow-sm hover:bg-brand-700"
-            onDone={reload} onUpload={(f) => setTracing(f ?? true)}
-            onAskClient={setAskingTrace} />
-        )}
-        traceActionCompact={(
-          /* THE SAME CONTROL, HEADER-SIZED. A second instance rather than a style prop: they are
-             independent controls in independent places, and the picker each opens is its own. */
-          <TraceButton accountId={account.id} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
-            debtorKind={account.debtorKind} idNumber={account.debtorIdNumber}
-            debtorName={name}
-            mobile={traceMobile}
-            label="Do another"
-            className="text-[11px] font-medium px-2 py-1 rounded-lg border border-slate-200 text-slate-700 hover:border-[#c9a052] hover:bg-gold-50 inline-flex items-center gap-1"
-            onDone={reload} onUpload={(f) => setTracing(f ?? true)}
-            onAskClient={setAskingTrace} />
-        )}
-        onUpload={() => setTracing(true)}
-        onOpenTrace={setOpenTrace}
-        onPractitioner={() => setPractitioner({ suggest: null })}
-        onAddDirector={() => setDirector({ editing: null })}
-        onEditDirector={(d) => setDirector({ editing: d })} />
+      {/* UNDER THE DEBTOR'S OWN DETAILS, in the two arrangements that have nowhere else to put
+          it. In three columns it goes under the timeline instead -- see underTimeline above. */}
+      {!underTimeline && standingPanel}
       {/*
         * RECORD A PAYMENT USED TO SIT HERE and the firm moved it: "record a payment, I think should
         * be in this pane. Like you put it on the overview, but it should be in here. On the
@@ -1681,6 +1703,12 @@ export function AccountDetail() {
            */
           side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
             disputesPanel, workflowNowPanel, testClockPanel, positionPanel]}
+          /*
+           * THE TRACE, THE DIRECTORS AND THE JUDGMENTS, under the timeline where the firm asked
+           * for them -- and null in the other two arrangements, where the same panel is already
+           * drawn inside `details`. One panel, one place, whichever arrangement is on.
+           */
+          underMain={underTimeline ? standingPanel : null}
         />
       )}
 

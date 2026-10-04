@@ -477,13 +477,32 @@ function keyed(panels: ReactNode[]): ReactNode[] {
   return panels.map((panel, i) => <Fragment key={i}>{panel}</Fragment>)
 }
 
-export function RecordLayout({ layout, details, main, side }: {
+export function RecordLayout({ layout, details, main, side, underMain }: {
   layout: RecordLayoutId
   details: ReactNode
   /** The long one — a timeline, a list of deals. Gets the width. */
   main: ReactNode
   /** The shorter cards. The first is treated as the summary. */
   side: ReactNode[]
+  /**
+   * A panel that follows `main` down the middle column.
+   *
+   * THE FIRM, drawing a box in the empty half of an account's middle column: "in the three grid
+   * view, put the trace information here."
+   *
+   * THE COLUMNS ARE NOT THE SAME LENGTH AND NOTHING WAS GOING TO MAKE THEM. The details column on
+   * a debtor is the longest thing on the page -- who they are, every number, the money, the
+   * ledger, what is out for signature -- and the timeline beside it ends where the account's
+   * history ends, which on a new account is four lines. The space under it is the only room the
+   * page has, and the panel the firm wanted in it is the one that was making the other column
+   * long.
+   *
+   * ONLY HERE. The other two arrangements have no second column to spill into: `wide` stacks the
+   * details on top of the main panel in one column, and `stacked` is one column by name. A caller
+   * that passes this is expected to keep the panel in its usual place in those two -- which is
+   * the one thing this component cannot do for them, because it never sees inside `details`.
+   */
+  underMain?: ReactNode
 }) {
   const [first, ...rest] = side
 
@@ -556,7 +575,12 @@ export function RecordLayout({ layout, details, main, side }: {
   return (
     <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-[minmax(13rem,1fr)_minmax(0,2fr)_minmax(13rem,1fr)]">
       <div className="lg:order-1 xl:order-none">{details}</div>
-      <div className="lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">{main}</div>
+      {/* space-y-4 rather than a sibling: the grid cell is one track, and two cards in it with no
+          gap between them read as one card with a rule through it. */}
+      <div className="space-y-4 lg:order-3 lg:col-span-2 xl:order-none xl:col-span-1">
+        {main}
+        {underMain}
+      </div>
       <div className="space-y-4 lg:order-2 xl:order-none">{keyed(side)}</div>
     </div>
   )
