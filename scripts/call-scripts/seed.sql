@@ -1,0 +1,915 @@
+insert into public.message_templates
+  (seed_key, scope, kind, name, subject, body, position, language, active, audience, format)
+values
+  ('script-open-individual', 'collections', 'call_script', 'Opening a call — an individual', null,
+   'Kind
+Call script
+Goes to
+Individual
+Pops up
+Automatically, on any outbound or inbound call where the debtor is a natural person. It pops before the workflow script.
+Goal of the call
+Reach the right person and verify them, before a word is said about the account.
+WHAT THE COLLECTOR SAYS
+Good morning / good afternoon, may I speak to {{debtor_name}} please?
+[If the person says it is them]
+Thank you. My name is {{collector_name}}, I am calling from Bredell Ferreira. We are a registered debt collector. Please note that the call is recorded.
+Before I can discuss anything with you I have to confirm that I am speaking to the right person. Could you please confirm your full name, and your date of birth?
+[Check both against the account. If they match, carry on to the workflow script. If either does not match, go to script-verify-failed.]
+Thank you, that matches what we have. I am calling about a legal matter that has been handed to this office.
+IF THEY SAY
+The person asks what it is about before verifying
+I understand. It is a legal matter about an account in your name, and that is as much as I am allowed to say until I know I am speaking to the right person. It is to protect you, not us.
+The person sounds like they are driving or at work
+Is this a convenient time to talk? If not, when would suit you today or tomorrow? [Diarise it and end the call.]
+The person asks if this is a scam
+That is a fair question, and I would rather you check than not. Put the phone down and call our office on {{firm_phone}}. That number is on our website. Ask for {{collector_name}} and quote reference {{reference}}.
+CAPTURE ON THE ACCOUNT
+—  RPC once verified
+—  The verification result
+—  Any better contact number or time
+DO NOT
+Say the creditor, the balance, the word debt or the word collection before the person is verified.',
+   null, 'en', true, 'individual', 'text'),
+  ('script-open-company', 'collections', 'call_script', 'Opening a call — a company', null,
+   'Kind
+Call script
+Goes to
+Company
+Pops up
+Automatically, on any call where the debtor is a company, close corporation or trust.
+Goal of the call
+Reach a director or a person authorised to speak for the company, and confirm the authority.
+WHAT THE COLLECTOR SAYS
+Good morning, I am looking for one of the directors of {{debtor_name}}, or the person who handles the company''s creditors. My name is {{collector_name}} from Bredell Ferreira.
+[If put through]
+Thank you. May I confirm your full name and your position in the company? Are you authorised to discuss the company''s accounts?
+[If yes, carry on. If the person is not authorised, treat them as a third party and go to script-third-party.]
+Thank you. Please note the call is recorded. I am calling about a legal matter concerning the company, reference {{reference}}.
+IF THEY SAY
+Reception asks what it is in connection with
+A legal matter concerning the company. I would rather give the detail to a director.
+The company has an accountant or bookkeeper handling it
+I can speak to them once a director confirms to us in writing, by email, that they are authorised. Could you ask a director to send that to {{collector_email}}?
+CAPTURE ON THE ACCOUNT
+—  RPC once a director or an authorised person is confirmed
+—  The name and position of the person spoken to
+DO NOT
+Discuss the company''s account with a receptionist, a general employee or an unconfirmed third party.',
+   null, 'en', true, 'company', 'text'),
+  ('script-verify-failed', 'collections', 'call_script', 'Verification failed', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When the person on the line will not verify, or the details given do not match the account.
+Goal of the call
+End the call cleanly without disclosing anything, and give the debtor a safe way back to us.
+WHAT THE COLLECTOR SAYS
+I understand, and you are not obliged to give me anything over the phone.
+What I am not able to do is discuss the matter until I know who I am speaking to. That rule protects you.
+What I will do is this. Call our office on {{firm_phone}}. That number is on our website, so you know you are calling the firm and not somebody pretending to be us. Ask for {{collector_name}} and quote reference {{reference}}.
+I will also send an email to the address we have on file. Thank you for your time.
+CAPTURE ON THE ACCOUNT
+—  RPC with a note that verification failed
+—  Send the verification email the same day
+DO NOT
+Press the person, re-ask the same question a third time, or let slip what the call is about to get them talking.',
+   null, 'en', true, null, 'text'),
+  ('script-third-party', 'collections', 'call_script', 'Somebody else answered', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When somebody other than the debtor answers.
+Goal of the call
+Leave a message to call us, and disclose nothing at all.
+WHAT THE COLLECTOR SAYS
+Good morning, may I speak to {{debtor_name}} please?
+[Not available]
+No problem at all. Could you please ask them to call {{collector_name}} at Bredell Ferreira on {{firm_phone}}, and to quote reference {{reference}}. Thank you very much.
+IF THEY SAY
+“What is this regarding?”
+It is a personal matter and I am not able to go into it with anyone else. If you could just pass on the message I would appreciate it.
+“I am their husband / wife / mother, you can tell me”
+I appreciate that, and I am sure that is true. I am still not allowed to discuss it with anyone but {{debtor_name}}. Please just ask them to call us.
+“They do not live here anymore”
+Thank you, that is helpful. Do you perhaps have a current number for them? [Capture it, update the account, do not say why.]
+CAPTURE ON THE ACCOUNT
+—  TPC
+—  Any new contact details
+—  WN if the number is wrong
+DO NOT
+Say debt, account, money, legal, collection, or the name of the creditor. Not even to a spouse.',
+   null, 'en', true, null, 'text'),
+  ('script-voicemail', 'collections', 'call_script', 'Voicemail', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When the call goes to voicemail.
+Goal of the call
+Leave a short message that gets a call back and tells a stranger nothing.
+WHAT THE COLLECTOR SAYS
+Good morning, this is {{collector_name}} from Bredell Ferreira. Please call me back on {{firm_phone}} and quote reference {{reference}}. Thank you.
+CAPTURE ON THE ACCOUNT
+—  VM
+DO NOT
+Leave the creditor''s name, the balance, the word debt, or any detail of the matter on a voicemail. You do not know who listens to it.',
+   null, 'en', true, null, 'text'),
+  ('script-handover-call', 'collections', 'call_script', 'Handover call', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+Day 1, within 24 hours of the handover
+Pops up
+On the handover node, after the handover email and SMS have gone out.
+Goal of the call
+Make first contact, explain who we are and why we are calling, and get payment, an arrangement or a dispute on the same call.
+WHAT THE COLLECTOR SAYS
+[After verification]
+You should have had an email and an SMS from us yesterday about a legal matter. This is the call we promised you.
+The matter is an account with {{client_name}}, account number {{account_number}}. The balance that has been handed to us is {{balance}}.
+My job is to sort this out with you rather than let it go further, so let me ask you straight: are you in a position to settle the full amount today?
+[Pause. Let them answer. Do not fill the silence.]
+IF THEY SAY
+Yes, can pay today
+Thank you. I will send you the payment details by email now. The money must go into our legal practitioner trust account and the reference is {{reference}}. Please email the proof of payment to {{firm_email}} the moment you have paid. [Capture PIF pending, send the details, diarise to confirm receipt.]
+Cannot pay it all
+That is fine, most people cannot. What can you realistically do? [Go to script-ptp-setup.]
+Says the amount is wrong or the account is not theirs
+Go to script-dispute-raised.
+Asks for proof before paying anything
+That is reasonable. I will send you a summary of the account showing how the balance is made up. [Fire the summary of account.] Can I call you back on {{respond_by}} once you have had a look?
+Refuses outright
+I hear you. I am obliged to tell you what follows, and then I will leave it with you. [State only the next step that is actually scheduled.] Capture RTP with the reason in their words.
+CAPTURE ON THE ACCOUNT
+—  PIF, PTP, DISP, RTP or RPC
+—  The reason for non-payment in the debtor''s own words
+—  Employer and income details if volunteered
+DO NOT
+Promise that paying stops a listing that has already been made.
+Name a settlement figure. Nothing has been approved at this stage.',
+   null, 'en', true, null, 'text'),
+  ('script-s129-call', 'collections', 'call_script', 'Section 129 call', null,
+   'Kind
+Call script
+Goes to
+Individual
+Workflow day
+Day 2 to 6, after the Section 129 notice
+Pops up
+On the Section 129 node once the notice has been sent.
+Goal of the call
+Make sure the debtor understands the notice, the period, and the three ways out of it.
+WHAT THE COLLECTOR SAYS
+[After verification]
+I am calling about the legal notice we sent you on your account with {{client_name}}. Did you receive it?
+That notice is in terms of Section 129 of the National Credit Act. It is a formal step, and the Act requires it before a creditor can take a matter to court.
+It gives you until {{respond_by}} to respond. That is {{dispute_days_left}}.
+There are three things you can do, and any one of them stops the clock.
+One. Pay the balance of {{balance}} into our trust account, reference {{reference}}.
+Two. Arrange to pay it off. Tell me what you can manage and I will put it up.
+Three. Dispute it. If you think the amount is wrong, or that you are not liable, send it to me in writing with whatever supports it, and collection stops while we look at it.
+Which of those three is closest to where you are?
+IF THEY SAY
+Did not receive the notice
+I will resend it now, to {{collector_email}}''s copy on file. The period runs from delivery, so let me confirm the email address with you.
+Wants more time
+The period in the notice is set by the Act, so I cannot move it. What I can do is put an arrangement in place before it runs out, which has the same effect for you.
+Asks what happens after {{respond_by}}
+If nothing has come in by then, a final notice goes out giving you twenty business days. If that also passes, the default is reported to the registered credit bureaus and the file is prepared for one of our attorneys.
+CAPTURE ON THE ACCOUNT
+—  PTP, DISP, PIF or RPC
+—  Whether the notice was received, and at which address
+DO NOT
+Say the matter is already in court.
+Describe the notice as a summons.',
+   null, 'en', true, 'individual', 'text'),
+  ('script-demand-call-company', 'collections', 'call_script', 'Letter of demand call — a company', null,
+   'Kind
+Call script
+Goes to
+Company
+Workflow day
+Day 2 to 6, after the letter of demand
+Pops up
+On the letter of demand node for a company debtor.
+Goal of the call
+Get a director to deal with it, and make the company consequences concrete.
+WHAT THE COLLECTOR SAYS
+[After verification of a director or authorised person]
+I am calling about the letter of demand we sent to the company on its account with {{client_name}}. The balance is {{balance}}.
+The letter gives the company until {{respond_by}}.
+I want to be clear about what sits behind this, because it is not only the company that is exposed. If this is not resolved, the file goes to one of our attorneys, and the route from there is a statutory demand and winding-up proceedings.
+Where there has been reckless trading, directors can be held personally liable for the company''s debts. If any director signed surety, that surety is called up in their personal name.
+So, what can the company do about this?
+IF THEY SAY
+“Cash flow is tight”
+Then let us structure it. Send me the latest management accounts and the bank statements for the last three months and I will put a proposal to the client. [Fire the financial information set.]
+“Speak to our attorney”
+Gladly. Ask them to email {{collector_email}} confirming they act, and I will deal with them from there. Until that comes in I have to keep dealing with the company.
+“The company is being wound down anyway”
+Then I need to know that formally. Who is the practitioner, and what is the case number? [Capture INS, route to the manager.]
+CAPTURE ON THE ACCOUNT
+—  PTP, DISP, RTP or RPC
+—  Director names and whether any signed surety
+—  Any insolvency or business rescue information
+DO NOT
+Threaten liquidation as a certainty. It follows a statutory demand and a court, in that order.
+Discuss the account with staff who are not authorised.',
+   null, 'en', true, 'company', 'text'),
+  ('script-reminder-call', 'collections', 'call_script', 'Reminder call', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+Day 7, with the soft reminder
+Pops up
+On the day 7 reminder node, where no payment, arrangement or dispute has been logged.
+Goal of the call
+A light touch. Reopen the conversation without escalating.
+WHAT THE COLLECTOR SAYS
+[After verification]
+I am just following up on the notice we sent you about your account with {{client_name}}. I have not heard back, and I would rather check in than assume.
+Is there something stopping you from dealing with it? Sometimes it is simpler than people think.
+[Listen. The point of this call is to find the obstacle, not to push.]
+The balance is {{balance}}, and we still have room to work something out before the next step.
+IF THEY SAY
+“I have been meaning to call”
+No problem. Let us do it now while we are on the phone. What can you manage?
+“I am waiting for money”
+When do you expect it? [Capture a PTP for that date rather than leaving it open.]
+“I threw the letter away”
+I will send it again. Which email works best for you?
+CAPTURE ON THE ACCOUNT
+—  PTP, DISP or RPC
+—  The obstacle, in the debtor''s words
+DO NOT
+Mention costs, legal steps or listing on this call. It is deliberately a soft one.',
+   null, 'en', true, null, 'text'),
+  ('script-final-notice-call', 'collections', 'call_script', 'Final notice call', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+Day 12, with the final notice
+Pops up
+On the final notice node.
+Goal of the call
+Make the twenty business days and what follows them unmistakable, and still leave a way out.
+WHAT THE COLLECTOR SAYS
+[After verification]
+I am calling about the final notice we sent you on {{reference}}. I want to make sure you have seen it, because the position changes after this one.
+The notice gives you until {{respond_by}}, which is twenty business days.
+If the account is not paid or an arrangement is not in place by then, two things happen. The default is reported to the registered credit bureaus. And the file is prepared for one of our attorneys for legal action.
+A listing sits on your credit profile for a long time, and it affects any credit you apply for. I would much rather we avoided it.
+Can we agree something today?
+IF THEY SAY
+“I can pay something but not all of it”
+Tell me the number. An arrangement that starts before {{respond_by}} holds the listing. [Go to script-ptp-setup.]
+“Do what you have to do”
+I will note that. For what it is worth, the door stays open until {{respond_by}}, and you can call me on {{collector_phone}} any time before then. [Capture RTP.]
+“Will paying remove the listing?”
+No, and I will not tell you otherwise. If the account is listed and you then pay, the record is updated to show it was paid up, but the listing itself stays. That is why it is worth dealing with it before {{respond_by}}, not after.
+CAPTURE ON THE ACCOUNT
+—  PTP, PIF, DISP or RTP
+—  Confirm the debtor understood the date
+DO NOT
+Say the listing is permanent, or quote a number of years. Give the date and leave it there.
+Promise to hold the listing unless an arrangement is actually captured.',
+   null, 'en', true, null, 'text'),
+  ('script-listing-prep-call', 'collections', 'call_script', 'Before we list the default', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+Day 22, preparing for listing
+Pops up
+On the preparing-for-listing node.
+Goal of the call
+Last call before the listing is submitted.
+WHAT THE COLLECTOR SAYS
+[After verification]
+I am calling because your file is now being prepared for listing with the registered credit bureaus. The submission goes in on {{respond_by}}.
+This is the last point at which that can be stopped, so I wanted to speak to you myself rather than leave it on an email.
+Paying the balance of {{balance}} stops it. An arrangement agreed and captured before that date stops it.
+Is there anything you can do before {{respond_by}}?
+IF THEY SAY
+“I need a few more days”
+Tell me the date and the amount and I will capture it as an arrangement. An arrangement holds the submission. A promise without a date does not.
+Becomes angry
+I understand, and I am not enjoying this call either. I am telling you before it happens rather than after, which is the only useful thing I can do. [Stay level. Do not match the tone.]
+CAPTURE ON THE ACCOUNT
+—  PTP, PIF or RTP
+—  Note explicitly that the debtor was warned on this date
+DO NOT
+Submit the listing earlier than the date you gave on the call.
+Imply the listing can be traded away for a part payment.',
+   null, 'en', true, null, 'text'),
+  ('script-listed-call', 'collections', 'call_script', 'The default has been listed', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+Day 32, after the listing
+Pops up
+On the listing confirmation node, after submission.
+Goal of the call
+Confirm it is done, be honest about what payment now achieves, and keep the file moving toward resolution.
+WHAT THE COLLECTOR SAYS
+[After verification]
+I am calling to confirm that the default on this account has been reported to the registered credit bureaus. That was done on {{listing_date}}, and the listing reference is {{listing_reference}}.
+I am not going to pretend paying now undoes it. It does not. What it does is update the record to show the account was paid up or settled, which is what a credit provider looks at.
+The file is now being prepared for one of our attorneys. That is the part that is still in your hands.
+The balance is {{balance}}. What can you do?
+IF THEY SAY
+“Then why would I pay?”
+Two reasons. A paid-up record reads very differently from an unpaid default, and it keeps the matter out of court, where the costs land on you on top of the balance.
+“I want the listing removed”
+If the listing is wrong, tell me why in writing and I will investigate it, and if we got it wrong we remove it ourselves. If it is correct, I cannot remove it and neither can anyone who phones you offering to.
+CAPTURE ON THE ACCOUNT
+—  PTP, PIF, SETL or RTP
+—  Any challenge to the listing goes straight into the dispute workflow
+DO NOT
+Offer to remove a correct listing in exchange for payment. It is the single fastest way to a complaint to the Council.',
+   null, 'en', true, null, 'text'),
+  ('script-intended-summons-call', 'collections', 'call_script', 'Intended summons call', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+Day 37, intended summons
+Pops up
+On the intended summons node.
+Goal of the call
+The last call this office makes before the file leaves it.
+WHAT THE COLLECTOR SAYS
+[After verification]
+This is the last call you will get from me on this matter. The file is being handed to one of our attorneys to issue summons.
+Once that happens the legal costs are added to what you owe, and the matter is out of my hands and into a court process.
+The balance today is {{balance}}. If anything is going to be done, it has to be done now.
+Is there anything at all you can put on the table?
+IF THEY SAY
+Offers a lump sum less than the balance
+I can put that to the client as a settlement. I cannot accept it myself and I am not going to promise you they will take it. What is the amount and by when can you pay it? [Capture SETL, open a settlement ticket.]
+“I will deal with it in court”
+That is your right. I will note it and the file goes through. [Capture RTP.]
+CAPTURE ON THE ACCOUNT
+—  SETL, PTP, PIF or RTP
+—  Note that the debtor was told the file is leaving this office
+DO NOT
+Say a summons has been issued when it has not.
+Give legal advice about what a court will or will not do.
+Send the debtor anything that looks like a court document. The Debt Collectors Act prohibits it.',
+   null, 'en', true, null, 'text'),
+  ('script-ptp-setup', 'collections', 'call_script', 'Setting up an arrangement', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+From any call where the debtor says they cannot pay in full. Reached from the handover, Section 129, reminder, final notice and listing scripts.
+Goal of the call
+Capture an arrangement that is affordable, that settles in six instalments or fewer, and that the debtor has said out loud they can keep.
+WHAT THE COLLECTOR SAYS
+Let us work out what is realistic rather than what sounds good.
+What do you earn in a month, after deductions?
+And what goes out, roughly, on rent, food, transport and any other accounts?
+[Do the arithmetic with them out loud. An arrangement that breaks in month two helps nobody.]
+So that leaves about R___ a month. Can you commit to that?
+One thing you need to know before you commit, because it affects you. Every payment on this arrangement is reported to the registered credit bureaus. A payment missed is reported as not met. A short payment is reported as not met. A late payment is reported as late.
+And if the arrangement takes more than six instalments to settle the account, the profile is classified as slow paying. That is an adverse classification. So if we can get this done in six payments or fewer, you come out of it far better.
+On that basis, what can you do?
+[Once agreed, read it back:]
+So that is {{ptp_amount}} on {{ptp_date}}, and then the same on that date each month until the balance of {{balance}} is settled. Into our trust account, reference {{reference}}. Have I got that right?
+IF THEY SAY
+The offer settles in more than six instalments
+I can capture that, but I have to tell you it will be reported as slow paying. Is there anything that gets us to six? A larger first payment often does it.
+“Can I pay when I can?”
+I need a date and an amount, otherwise it is not an arrangement and it does not hold anything. Pick the date you are surest of.
+The amount offered is unrealistically low
+I am not going to capture something I can see will break. [If it genuinely cannot work, route it as a settlement ticket instead.]
+Asks what happens if they miss one
+The arrangement lapses and the account carries on from where it was paused. You would get forty-eight hours to put it right before that happens.
+CAPTURE ON THE ACCOUNT
+—  PTP with the amount, the date and the number of instalments
+—  The income and expense figures given
+—  Start the payment arrangement workflow, which pauses collections
+DO NOT
+Invite the debtor to call back and renegotiate later. Agree it now or do not agree it.
+Capture an arrangement the debtor has not said out loud that they accept.
+Promise that an arrangement removes an existing listing.',
+   null, 'en', true, null, 'text'),
+  ('script-settlement-call', 'collections', 'call_script', 'A settlement offer', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When a settlement has been approved on the account and the offer letter has gone out, or when a debtor offers a lump sum.
+Goal of the call
+Either put a debtor''s offer up for approval, or get an approved offer paid before it expires.
+WHAT THE COLLECTOR SAYS
+[Where the client has approved an offer]
+{{client_name}} has agreed to accept {{settlement_amount}} in full and final settlement, instead of the {{balance}} that is owing. That is {{settlement_saving}} written off.
+There are two conditions and they are not negotiable. It must be one payment, in full, and it must reach our trust account by {{settlement_expiry}}.
+A part payment does not settle it. It goes against the balance and the account carries on.
+If it is paid, the account closes and I send you a settlement confirmation letter in writing.
+One thing to be straight with you about: a settled account does not read on a credit profile the same way as an account paid in full. It shows that it was settled for less than the full balance.
+Can you do {{settlement_amount}} by {{settlement_expiry}}?
+[Where the debtor is making the offer]
+I hear you. I cannot accept that myself, and I am not going to tell you it will be accepted. What I will do is put it to {{client_name}} with a recommendation and come back to you. What is the amount, and by when could you pay it?
+IF THEY SAY
+“Can I pay the settlement off over two months?”
+Not as a settlement. A settlement is a single payment. If you need to spread it, that is an arrangement on the full balance instead, and I can set that up.
+“Can you do better than that?”
+I can put a further number to the client, but I am not able to agree it on this call, and the current offer stands only until {{settlement_expiry}}.
+Misses the expiry date and then calls
+The offer lapsed on {{settlement_expiry}} and the full balance of {{balance}} is owing again. I can ask the client whether they will look at it again. I cannot revive the old offer myself.
+CAPTURE ON THE ACCOUNT
+—  SETL with the amount and the date
+—  PIF pending once payment is promised
+DO NOT
+Quote a settlement figure that is not approved on the account.
+Extend an expiry date yourself.
+Call a part payment a settlement.',
+   null, 'en', true, null, 'text'),
+  ('script-ptp-due-call', 'collections', 'call_script', 'An instalment is due today', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+On the due date, where nothing has been receipted
+Pops up
+On the arrangement due-date node, where no payment has reached the trust account.
+Goal of the call
+Get today''s instalment in today. Short call.
+WHAT THE COLLECTOR SAYS
+[After verification]
+I am calling about the payment of {{ptp_amount}} that is due today on {{reference}}. It has not come through to our trust account yet.
+Has it been paid?
+[If yes] Could you email the proof of payment to {{firm_email}} now, while we are on the phone?
+[If not yet] Is it going in today?
+IF THEY SAY
+“I will pay on Friday”
+Noted, but I need to be clear: the arrangement is for today. If it is not in today it is reported as a payment not met, even if it comes on Friday.
+“I cannot pay this month”
+Then let us not let it lapse quietly. What can you pay? Even a reduced amount captured properly is better than a missed one. [Route to the collector to restructure, do not simply cancel.]
+CAPTURE ON THE ACCOUNT
+—  Payment confirmed, or the reason
+—  Any restructure goes back through script-ptp-setup
+DO NOT
+Accept a vague promise without a date.
+Tell the debtor a late payment will not be reported.',
+   null, 'en', true, null, 'text'),
+  ('script-ptp-default-call', 'collections', 'call_script', 'A broken arrangement', null,
+   'Kind
+Call script
+Goes to
+Any
+Workflow day
+3 days after the missed instalment
+Pops up
+On the arrangement default node, with the notice of default.
+Goal of the call
+Use the forty-eight hours to save the arrangement.
+WHAT THE COLLECTOR SAYS
+[After verification]
+The payment of {{ptp_amount}} that was due on {{ptp_date}} has not reached our trust account, and the arrangement has lapsed.
+We have sent you a notice of default. It gives you forty-eight hours from the date of that letter to put the missed payment in.
+If it comes in within those forty-eight hours, the arrangement is revived and nothing else happens.
+If it does not, the hold falls away, the default is reported to the credit bureaus, and the account goes back to the legal process from the point where it was paused.
+Can you get {{ptp_amount}} in within forty-eight hours?
+IF THEY SAY
+“I can pay half”
+Half does not revive the arrangement. It goes against the balance. Is there any way to find the rest in the next two days?
+“I have lost my job”
+I am sorry to hear that, and it changes what is realistic. Let us look at the whole thing again rather than patch this one payment. [Route to script-ptp-setup, and to the financial information request.]
+CAPTURE ON THE ACCOUNT
+—  Whether the forty-eight hours were explained and on what date
+—  PTP if revived, otherwise the account resumes
+DO NOT
+Extend the forty-eight hours on the call. That is the collector''s manager''s call, noted on the account.',
+   null, 'en', true, null, 'text'),
+  ('script-dispute-raised', 'collections', 'call_script', 'A dispute on the call', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+The moment a debtor says the amount is wrong, that they already paid, or that the account is not theirs.
+Goal of the call
+Get the dispute in writing. Nothing else on this call matters.
+WHAT THE COLLECTOR SAYS
+Thank you for telling me. If something is wrong I would rather fix it than chase you for it.
+I do need it from you in writing, and I will tell you why. Telling me on the phone does not, on its own, stop anything. Collection is suspended only once we have your dispute in writing.
+Send me an email to {{collector_email}} with three things. What you dispute and why. Anything that supports it, proof of payment or correspondence with {{client_name}}. And if it is not your account at all, a copy of your identity document so I can check the account against you.
+Quote reference {{reference}}. You have {{dispute_days_left}}, that is by {{respond_by}}.
+Once it is in, collection stops while it is investigated, and I will acknowledge it the same day.
+IF THEY SAY
+“I do not have email”
+Then WhatsApp it to our office number, {{firm_phone}}, or come in to the office. A photograph of a handwritten note with your signature is enough to start it.
+“Why must I prove it, you are the ones claiming”
+Fair point. I am not asking you to prove a case, I am asking for enough to open the investigation with the client. Even one line saying what is wrong gets it started.
+Already sent it
+Let me check. [Search the account.] If we have it and it is not logged, that is our error and I will log it now and stop the account.
+CAPTURE ON THE ACCOUNT
+—  DISP, with the alleged dispute in the debtor''s own words
+—  Start the dispute workflow at stage A
+—  Nothing is paused yet, and the Section 129 clock keeps running
+DO NOT
+Tell the debtor the account is on hold before the written dispute is in.
+Argue the merits. You are not the person who decides it.',
+   null, 'en', true, null, 'text'),
+  ('script-debt-review', 'collections', 'call_script', 'Under debt review', null,
+   'Kind
+Call script
+Goes to
+Individual
+Pops up
+When a debtor says they are under debt review or have applied for it.
+Goal of the call
+Stop collecting, get the detail, and hand it to the manager.
+WHAT THE COLLECTOR SAYS
+Thank you for telling me, that changes things and I am going to stop here.
+Could you give me your debt counsellor''s name and contact number, and the NCRDC number if you have it?
+I am taking this account off the calling list today. Our manager will deal with your counsellor directly from here.
+You do not need to do anything else on this call.
+IF THEY SAY
+“I applied but it is not finalised”
+Understood. I still need the counsellor''s details, and I still stop here. The manager will establish exactly where it stands.
+CAPTURE ON THE ACCOUNT
+—  DRV
+—  The counsellor''s name, number and NCRDC reference
+—  Stop every workflow on the account and route to the manager
+DO NOT
+Keep negotiating.
+Tell the debtor debt review does not count.
+Press for a payment on this call.',
+   null, 'en', true, null, 'text'),
+  ('script-deceased', 'collections', 'call_script', 'The debtor has died', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When the call reveals that the debtor has died.
+Goal of the call
+Stop immediately, take the minimum detail, and be decent about it.
+WHAT THE COLLECTOR SAYS
+I am very sorry, I did not know, and I apologise for the call.
+I am going to stop everything on this account today.
+When you are able to, could you let us have a copy of the death certificate, and the name and contact details of the executor if one has been appointed? Our email is {{firm_email}}.
+There is nothing you need to do right now, and nobody will call you about it again.
+IF THEY SAY
+The person asks whether they have to pay it
+No. You are not personally liable for it. The account becomes a claim against the estate, and that is dealt with by the executor, not by you.
+CAPTURE ON THE ACCOUNT
+—  DEC
+—  Date of death if given, and the executor''s details
+—  Stop every workflow and route to the manager
+DO NOT
+Ask a grieving person for payment, for an arrangement, or for anything beyond the certificate and the executor.
+Call that number again before the manager has dealt with it.',
+   null, 'en', true, null, 'text'),
+  ('script-insolvency', 'collections', 'call_script', 'Insolvent, sequestrated or in business rescue', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When a debtor says they are sequestrated, liquidated, or in business rescue.
+Goal of the call
+Capture the formal detail and route it. The claim changes form entirely.
+WHAT THE COLLECTOR SAYS
+Thank you, I need to stop and take that down properly.
+What is the case number, and who is the trustee, liquidator or business rescue practitioner?
+Which court, and what date was the order granted?
+I am stopping the account today and handing it to our manager. The claim would now be proved in the estate rather than collected here.
+IF THEY SAY
+“I am about to apply”
+That is not the same thing, and I cannot stop the account on an intention. Once an order is granted, send it to {{firm_email}} and we stop immediately.
+CAPTURE ON THE ACCOUNT
+—  INS
+—  Case number, court, date and practitioner
+—  Stop every workflow and route to the manager
+DO NOT
+Continue collecting after an order has been confirmed.
+Accept a payment from a sequestrated debtor.',
+   null, 'en', true, null, 'text'),
+  ('script-not-my-account', 'collections', 'call_script', '“This is not my account”', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+When the person says the account is not theirs, or that they have never heard of the creditor.
+Goal of the call
+Separate a wrong number or a trace error from identity theft, and stop the right thing.
+WHAT THE COLLECTOR SAYS
+Let me check that properly rather than argue with you.
+Can I confirm the details I have? [Read the name and the masked identity number only. Never read a full identity number out.]
+[If they do not match] Then I have the wrong person and I apologise. I am removing this number from the file now.
+[If they do match but the person still says it is not theirs] Then I need it in writing, because this may be identity theft and that is serious. Send me an email to {{collector_email}} saying the account is not yours, with a copy of your identity document so I can compare it. Collection stops as soon as that is in.
+If you believe your identity has been used, you should also report it to the South African Fraud Prevention Service and to the bank concerned.
+IF THEY SAY
+“That is my ex-husband / my son”
+Then I have the wrong number, not the wrong account. I am taking this number off. I am not able to discuss their account with you.
+CAPTURE ON THE ACCOUNT
+—  WN where the details do not match, DISP where they do
+—  Remove the number immediately where it is wrong
+DO NOT
+Read a full identity number aloud to anyone.
+Keep calling a number the person has told you is not the debtor''s.',
+   null, 'en', true, null, 'text'),
+  ('script-next-of-kin-living', 'collections', 'call_script', 'A relative of a living debtor', null,
+   'Kind
+Call script
+Goes to
+A relative of a living debtor
+Pops up
+When a relative calls in about the debtor, or when a relative the collector has reached starts asking about the account.
+Goal of the call
+Be useful without disclosing anything, and show them the one route that fixes it in a day.
+WHAT THE COLLECTOR SAYS
+Thank you for calling, and let me be straight with you about what I can and cannot do.
+I am not allowed to discuss this with anyone but {{debtor_name}}. That is the law rather than our policy, and it is there to protect them. I would say the same to anyone who phoned about you.
+What I can do is take your message and make sure {{debtor_name}} knows we need to hear from them.
+And if {{debtor_name}} wants you to deal with this for them, that is easy. They send us one email, from their own address, saying that we may discuss the account with you and giving your full name. A signed letter with a copy of their identity document does the same job.
+Send it to {{firm_email}} with reference {{reference}}. The moment it is on file I can talk to you as freely as I would talk to them.
+IF THEY SAY
+“I am the one paying it, so I have a right to know”
+I can take a payment from you and I would be grateful for it. I still cannot tell you the balance without their say-so. That one email solves it in a day.
+“They are in hospital and cannot speak”
+I am sorry to hear that. If they cannot give the mandate themselves, there are two routes: a power of attorney signed before this happened, or a curator appointed by the court if they cannot manage their affairs at all. Send me whatever exists and I will work with it.
+“They are avoiding you, I am trying to help”
+I appreciate that, and you probably are the reason this gets sorted out. Ask them to call {{collector_name}} on {{collector_phone}}. If they call before {{respond_by}} there is far more room to work with.
+“I already know all about it, so just tell me”
+I believe you, and it still does not change what I am allowed to do. Knowing something is not the same as being authorised, and I have no way to tell the difference on a phone call.
+Becomes angry
+I understand, and I am not trying to be difficult. If I discussed it with you on your word alone, I would do the same for the next person who phoned about you. That is the part that would worry you.
+CAPTURE ON THE ACCOUNT
+—  TPC
+—  The caller''s name, relationship and contact number
+—  MAND where a mandate has been asked for, and diarise 3 days
+DO NOT
+Confirm or deny that the account exists.
+Name the creditor, give the balance, or confirm the debtor''s address, identity number or employer.
+Discuss it because the relative appears to know the details already. Knowledge is not consent.',
+   null, 'en', true, null, 'text'),
+  ('script-third-party-paying', 'collections', 'call_script', 'Somebody else wants to pay', null,
+   'Kind
+Call script
+Goes to
+Anyone paying for the debtor
+Pops up
+When somebody who is not the debtor offers to pay the account.
+Goal of the call
+Take the money without disclosing anything.
+WHAT THE COLLECTOR SAYS
+Thank you, that is good of you, and I can certainly accept a payment from you.
+What I cannot do is tell you the balance, or anything else about the account, unless {{debtor_name}} has authorised it in writing.
+So there are two ways to do this. Either {{debtor_name}} tells you the amount and you pay that, or {{debtor_name}} sends us one email from their own address saying we may discuss it with you.
+If you want to pay now, it goes into our legal practitioner trust account and the reference is {{reference}}. That reference is the only thing you need, and it is what tells us where to put the money.
+Please email the proof of payment to {{firm_email}}.
+IF THEY SAY
+“How much must I pay?”
+I am not able to tell you that without their authority. Pay what the two of you have agreed, and it goes against the account on the day it reaches us.
+“Will this settle it?”
+I cannot tell you whether it settles it. I can tell you it will be allocated on the day it arrives, and {{debtor_name}} will get written confirmation of it.
+“I want the receipt in my name”
+I will send you confirmation of the payment showing the amount and the date. It will not show the balance, for the same reason.
+“Then I am not paying”
+That is entirely your right, and I understand it. If it helps, one email from {{debtor_name}} and I can go through the whole thing with you.
+CAPTURE ON THE ACCOUNT
+—  The expected payment, the payer''s name and relationship
+—  Do NOT replace the debtor''s contact details with the payer''s
+DO NOT
+Tell a payer the balance, the arrears or the creditor.
+Take the payment and then say how much is left. That is a disclosure, made late.',
+   null, 'en', true, null, 'text'),
+  ('script-mandate-check', 'collections', 'call_script', 'Somebody claims authority', null,
+   'Kind
+Call script
+Goes to
+Anyone claiming authority
+Pops up
+When anyone claims authority to act for the debtor: an attorney, a bookkeeper, a debt counsellor, a relative with a power of attorney, an employer.
+Goal of the call
+Get the authority onto the file before a word is said about the account.
+WHAT THE COLLECTOR SAYS
+Before we go further I need to put your authority on file. It takes a day and then we can deal with the whole matter properly.
+May I take your full name, the firm or the capacity you act in, and a contact number and email address?
+[Read the row below that applies to this caller.]
+Send it to {{collector_email}} with reference {{reference}}. The moment it is on file I will call you back.
+[Until it arrives, say nothing about the account. Not the creditor, not the balance, not whether the account exists.]
+IF THEY SAY
+An attorney
+A letter on your firm''s letterhead confirming that you act for {{debtor_name}} in this matter.
+A debt counsellor
+Your form 17.1 or 17.2 and your NCRDC number. [Then stop and go to script-debt-review.]
+A power of attorney
+The signed power of attorney, with copies of both identity documents.
+A curator
+The court order appointing you.
+An executor
+Your Letters of Executorship, or the section 18(3) appointment where the estate is a small one. [Then go to script-estate-executor.]
+A relative, friend or bookkeeper
+An email from {{debtor_name}}''s own address naming you, or a signed letter from them with a copy of their identity document.
+An employer
+Nothing. An employer is never given access to an employee''s account. We only ever ask an employer to confirm employment, in writing, on our own letter.
+CAPTURE ON THE ACCOUNT
+—  MAND, with the capacity claimed and what was requested
+—  Diarise 3 days
+—  Once the proof is in, record it on the authorised contacts list with the date it was verified
+DO NOT
+Discuss the account on a verbal claim of authority, however convincing the caller is.
+Accept a mandate that names the caller but is not from the debtor''s own address or signature.',
+   null, 'en', true, null, 'text'),
+  ('script-estate-next-of-kin', 'collections', 'call_script', 'The family of a deceased debtor', null,
+   'Kind
+Call script
+Goes to
+Family of a deceased debtor
+Pops up
+When a relative calls about a deceased debtor and no executor has been confirmed on the account.
+Goal of the call
+Take the pressure off the family, take the estate details, and disclose nothing.
+WHAT THE COLLECTOR SAYS
+I am very sorry for your loss, and thank you for calling us rather than leaving it.
+Let me explain how this works, because most of it takes the weight off you.
+You are not personally liable for this account. A debt does not pass to the family. It becomes a claim against the deceased estate, and the estate is dealt with by an executor.
+Until an executor has been appointed by the Master of the High Court, there is nobody I am allowed to discuss the account with. That includes me telling you the balance, and I am sorry about that. It is the same rule that protected them while they were alive.
+What I need, whenever you are able: a copy of the death certificate, and the estate number once the Master has issued it. If an executor has already been appointed, the Letters of Executorship, or the section 18(3) appointment where it is a smaller estate.
+Send it to {{firm_email}}, reference {{reference}}. The account stays stopped in the meantime, and nobody will call you.
+IF THEY SAY
+“I want to pay it myself”
+You are under no obligation to, and I would rather you did not decide that on this call. Speak to whoever is handling the estate first. We are not going anywhere.
+“How do I report the estate?”
+The death is reported to the Master of the High Court in the area where they lived, within fourteen days. The Master''s office will guide you through it and there is no charge to report it.
+“Can you not just tell me what he owed?”
+I cannot, and I know how unhelpful that sounds. The executor is entitled to the full detail and will have it from us the day they are appointed.
+“There is nothing in the estate”
+That happens often, and it is not a disaster. If the estate cannot pay the claim, the claim is not paid. It does not come back to the family.
+“He had insurance on the account”
+That is worth checking and I am glad you raised it. If there was credit life or funeral cover on the agreement, the balance may be met by the insurer and the estate pays nothing. Tell the executor to look for it, and we will raise it with the client.
+CAPTURE ON THE ACCOUNT
+—  DEC, with the date of death
+—  The caller''s name, relationship and contact details
+—  Stop every workflow, remove the account from all dialler campaigns, route to the manager
+DO NOT
+Give the balance to a relative who is not the confirmed executor.
+Ask a grieving relative for a payment or an arrangement.
+Call the number again before the manager has dealt with the estate.',
+   null, 'en', true, null, 'text'),
+  ('script-estate-executor', 'collections', 'call_script', 'A confirmed executor', null,
+   'Kind
+Call script
+Goes to
+A confirmed executor
+Pops up
+When an executor or Master''s Representative contacts us, or we contact them, with the appointment on file.
+Goal of the call
+Lodge the claim properly and within the period, and keep the family out of it entirely.
+WHAT THE COLLECTOR SAYS
+Thank you. I have your appointment on file, so I can deal with you fully on this.
+The account is {{account_number}} with {{client_name}}, and the balance as at the date of death is {{balance}}.
+I will send you our claim in writing today, with a statement of the account and the supporting documents.
+Could you confirm the estate number, which Master''s office the estate is reported at, and whether the notice to creditors has been advertised? If it has, I need that date, because the claim has to be lodged within the period in the notice.
+Would you also let us know when the liquidation and distribution account lies for inspection, so that we can check the claim has been reflected?
+If there is going to be a shortfall, tell me early rather than late and I will take instruction from the client.
+IF THEY SAY
+“The estate is insolvent”
+Then I need that from you in writing and I will take instruction from the client. We would not pursue a family member for the shortfall.
+“Was there credit life cover?”
+Please check the agreement for credit life or funeral cover. If there was, the outstanding balance may be met by the insurer and the estate pays nothing. We will put the same question to the client.
+“Do not contact the family again”
+Understood, and that is already how we work from this point. Everything comes to you.
+“The estate will take a long time”
+That is normal and it is not a problem. Give me a date to come back to you and I will diarise it rather than chase you.
+CAPTURE ON THE ACCOUNT
+—  EXEC
+—  Estate number, Master''s office, executor''s details, advertisement date
+—  Diarise the claim lodgement deadline. A claim that misses the period in the notice to creditors is lost
+DO NOT
+Contact the family once an executor is on file.
+Pursue a relative personally for the balance.
+Let the period in the notice to creditors run out without lodging the claim.',
+   null, 'en', true, null, 'text'),
+  ('script-surety', 'collections', 'call_script', 'A surety', null,
+   'Kind
+Call script
+Goes to
+A surety
+Pops up
+When a signed deed of suretyship is on file and the surety is being called in their own name.
+Goal of the call
+Deal with a surety as what they are: a debtor in their own right.
+WHAT THE COLLECTOR SAYS
+[Have the signed deed of suretyship open in front of you before you dial. If it is not on file, do not make this call.]
+[Verify the surety exactly as you would verify a debtor. On this call they are the debtor.]
+I am calling about a suretyship you signed for {{debtor_name}} in favour of {{client_name}}.
+The principal debt is {{balance}}, and under the deed you signed you are liable for it in your own name.
+I would far rather deal with this with you directly than through a court. What can you do?
+IF THEY SAY
+“I never signed anything”
+Then I will send you a copy of what we hold, today, and you tell me in writing if that is not your signature. Collection against you stops while that is checked.
+“Go after them first”
+[Read the deed before answering. Only where it says ''as surety and co-principal debtor'':] The deed you signed is as surety and co-principal debtor, which means the creditor is not required to exhaust the main debtor first. If your copy reads differently, send it to me and I will look at it.
+“I resigned as a director years ago”
+A suretyship stays in force until it is cancelled in writing. Resigning does not cancel it by itself. If you have a written release, send it to me and that ends it.
+“We are divorced now”
+I understand, and a divorce does not cancel a suretyship either. If the order dealt with it, send me the relevant page.
+CAPTURE ON THE ACCOUNT
+—  Treat the surety as a debtor record in their own name
+—  DISP where the signature is denied, and stop collection against the surety while it is checked
+DO NOT
+Call a surety without the signed deed in front of you.
+Tell a surety anything about the main debtor beyond the debt they stood surety for.
+Threaten a step against a surety that the client has not instructed.',
+   null, 'en', true, null, 'text'),
+  ('script-spouse', 'collections', 'call_script', 'A spouse', null,
+   'Kind
+Call script
+Goes to
+The debtor''s spouse
+Pops up
+When a spouse is on the line, or the account shows a marriage in community of property.
+Goal of the call
+Get this one right. It is the rule collectors most often get wrong.
+WHAT THE COLLECTOR SAYS
+[The rule is simple even though the law is not. A spouse gets nothing unless they are a party to the account, have signed surety, or hold the debtor''s written mandate. Marriage in community of property does not, by itself, entitle a spouse to be told anything.]
+I am not able to discuss the account with you, and I know that sounds strange when you are married to them.
+The information belongs to {{debtor_name}}, not to the marriage. If {{debtor_name}} sends us one email from their own address saying we may speak to you, that solves it the same day.
+IF THEY SAY
+“We are married in community of property, it is my debt too”
+Liability and information are two separate questions. You may well be affected by it, and that is exactly why I would rather deal with it properly. One email from {{debtor_name}} and I will go through the whole thing with you.
+“I want to pay it”
+[Go to script-third-party-paying. You may take the money without disclosing anything.]
+The spouse signed surety, or is named on the account
+Then you are a party in your own name and we can deal with it fully. Let me verify you properly first. [Go to script-surety or verify as a co-debtor.]
+CAPTURE ON THE ACCOUNT
+—  TPC unless the spouse is a party to the account
+—  MAND where a mandate has been asked for
+DO NOT
+Assume that a marriage in community of property entitles a spouse to the account.
+Discuss it because the spouse already seems to know.
+Give an opinion on whether the joint estate is liable. That is for the attorneys at the legal stage, not for this call.',
+   null, 'en', true, null, 'text'),
+  ('script-close-agreed', 'collections', 'call_script', 'Closing a call where something was agreed', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+At the end of any call where something was agreed.
+Goal of the call
+Read it back, so there is no argument about it later.
+WHAT THE COLLECTOR SAYS
+Let me just read that back so we both have it the same way.
+[Read the amount, the date and the method. Then:]
+The money goes into our legal practitioner trust account, reference {{reference}}. I will email you the details now. Please send the proof of payment to {{firm_email}} on the day.
+If anything changes before then, call me on {{collector_phone}} rather than let the date pass.
+Thank you for dealing with this. I will send the confirmation through in the next few minutes.
+CAPTURE ON THE ACCOUNT
+—  The disposition and the full terms, the same day
+—  Send the confirming email before the end of the call where possible
+DO NOT
+End a call on an agreement that has not been read back and confirmed out loud.',
+   null, 'en', true, null, 'text'),
+  ('script-close-no-agreement', 'collections', 'call_script', 'Closing a call where nothing was agreed', null,
+   'Kind
+Call script
+Goes to
+Any
+Pops up
+At the end of any call where nothing was agreed.
+Goal of the call
+Leave the door open and the record clean.
+WHAT THE COLLECTOR SAYS
+I understand where you are. Let me leave it like this.
+My name is {{collector_name}} and my direct line is {{collector_phone}}. The reference is {{reference}}.
+If anything changes, even partly, call me before {{respond_by}} rather than after. Before that date I have room to work with. After it, I have less.
+Thank you for taking my call.
+IF THEY SAY
+The debtor asks us to stop calling
+I will take this number off the calling list today. I am still obliged to send you the written notices, and those will come by email and SMS. [Capture DNC.]
+CAPTURE ON THE ACCOUNT
+—  RTP or RPC with the reason
+—  DNC where the debtor has asked not to be called
+DO NOT
+Leave a hostile call hostile. Close it politely whatever was said to you.',
+   null, 'en', true, null, 'text')
+on conflict (seed_key) do nothing;

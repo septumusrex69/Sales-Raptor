@@ -21018,3 +21018,130 @@ begin
       for each row execute function public.signing_file_signed();
   end if;
 end $do$;
+
+-- ---------------------------------------------------------------------------
+-- WHO MAY BE SPOKEN TO ABOUT THIS ACCOUNT, AND WHAT PROOF IS HELD FOR IT.
+--
+-- THE FIRM: "this is the part that cannot live in a collector's head. Every account needs an
+-- authorised contacts table, and the opening script's verification tick must read from it."
+--
+-- WHY A TABLE AND NOT A NOTE. A note is read by whoever opens the account; this is read by the
+-- panel at the moment a call connects, and it decides whether a collector is allowed to say the
+-- word "account" to the person on the line. Three of the nine lines that found a complaint to the
+-- Council for Debt Collectors are disclosure to somebody who was never verified.
+--
+-- PROOF IS A FACT ABOUT THE ROW, NOT ABOUT ITS AGE. The firm: "a row with no proof on file is not
+-- an authorised contact, however long it has been there." So proof_on_file is a column and the
+-- panel reads it -- a row added on a call, with nothing behind it, authorises nothing.
+--
+-- `capacity` IS THE CLOSED LIST IN src/lib/callScripts.ts (CAPACITIES), and it is a check
+-- constraint rather than free text because what a person MAY BE TOLD is looked up on it. Free
+-- text would mean "Wife" and "spouse" reading as two capacities, one of which is not in the
+-- matrix and would fall through to whatever the code's default is.
+--
+-- A SPOUSE IS IN THE LIST AS `anyone_else`, which tells a collector nothing may be said. That is
+-- the firm's first enforced rule: marriage in community of property changes who is LIABLE and
+-- what the attorneys do at the legal stage. It entitles a spouse to be told nothing.
+create table if not exists public.account_authorised_contacts (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  name text not null,
+  capacity text not null check (capacity in (
+    'debtor', 'co_debtor', 'surety', 'executor', 'attorney', 'curator', 'power_of_attorney',
+    'mandated', 'debt_counsellor', 'anyone_else'
+  )),
+  -- A number, an email, or both in the words somebody wrote them. One column because this is read
+  -- aloud off a screen, not dialled from -- the account's own contact rows are what gets dialled.
+  contact text,
+  -- WHAT IS ACTUALLY HELD, in the words of the document: "Letters of Executorship", "email from
+  -- the debtor dated 3 March". The required proof per capacity is in CAPACITIES; this is the
+  -- evidence for THIS row, which is the thing a weekly exception report has to be able to read.
+  proof text,
+  -- THE GATE. False, or a row with no proof named, authorises nothing whatever its capacity says.
+  proof_on_file boolean not null default false,
+  verified_by uuid references public.profiles (id) on delete set null,
+  verified_at timestamptz,
+  -- WHERE ONE APPLIES: a power of attorney with an end date, a mandate the debtor may revoke. Null
+  -- is the ordinary case and means it does not expire by itself.
+  expires_on date,
+  notes text,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists account_authorised_contacts_account_idx
+  on public.account_authorised_contacts (account_id);
+
+comment on table public.account_authorised_contacts is
+  'Who may be told anything about this account, and what proof is held. Read by the call panel '
+  'before a collector may disclose. A row with proof_on_file false authorises nothing.';
+
+alter table public.account_authorised_contacts enable row level security;
+
+-- GUARDED RATHER THAN DROP-AND-CREATE, and that is not a style choice: a `drop policy` through
+-- the Supabase MCP tool hangs and times out at sixty seconds with the object still in place, so
+-- the migration that carried one never ran at all. An existence check on pg_policies is the same
+-- idempotence without the drop. The same workaround is on signing_file_signed's trigger.
+do $do$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'account_authorised_contacts'
+      and policyname = 'account_authorised_contacts_read'
+  ) then
+    create policy account_authorised_contacts_read on public.account_authorised_contacts
+      for select to authenticated using (true);
+  end if;
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'account_authorised_contacts'
+      and policyname = 'account_authorised_contacts_write'
+  ) then
+    create policy account_authorised_contacts_write on public.account_authorised_contacts
+      for all to authenticated using (true) with check (true);
+  end if;
+end
+$do$;
+
+-- ---------------------------------------------------------------------------
+-- THE ESTATE ROUTE: THE THREE DATES AND THE OFFICE.
+--
+-- THE FIRM: "when a debtor dies the account does not end, it changes form. It becomes a claim
+-- against the deceased estate, and the family is not liable for it."
+--
+-- THE EXECUTOR IS ALREADY HELD. debtor_accounts.practitioner_kind has carried 'executor' with a
+-- name, a firm, a reference and an appointment date since the practitioner work -- so
+-- {{executor_name}} is practitioner_name and {{estate_number}} is practitioner_reference, which
+-- is exactly what that column was for ("their reference for the estate, which every claim
+-- submission has to quote back"). Three columns beside it would be a second executor on one
+-- account, and the two would disagree the first time somebody filled in the other one.
+--
+-- THESE THREE ARE GENUINELY NEW:
+alter table public.debtor_accounts add column if not exists date_of_death date;
+
+-- WHICH MASTER'S OFFICE THE ESTATE IS REPORTED AT. Not derivable from the address: the estate is
+-- reported where the deceased LIVED, and a claim lodged at the wrong office is a claim nobody has
+-- received. The executor is asked for it on the call.
+alter table public.debtor_accounts add column if not exists master_office text;
+
+-- WHEN THE NOTICE TO CREDITORS WAS ADVERTISED, which is the only date the claim deadline can be
+-- counted from.
+--
+-- THE FIRM: "the executor advertises a notice to creditors, and a claim lodged after the period in
+-- that notice is lost. This is the one date on an estate file that actually costs the client money
+-- if it is missed, so it needs a hard task, not a note."
+--
+-- NULL UNTIL THE EXECUTOR SAYS SO. A deadline computed from the statutory minimum would put a date
+-- on a diary entry that the Master's own notice may contradict, and the firm would work to ours.
+-- estateClaimDeadline() takes this column and returns null without it.
+alter table public.debtor_accounts add column if not exists notice_to_creditors_on date;
+
+comment on column public.debtor_accounts.master_office is
+  'Which Master of the High Court office the deceased estate is reported at. The estate is '
+  'reported where the deceased lived, so it is not derivable from the account address.';
+comment on column public.debtor_accounts.date_of_death is
+  'Set with the DEC disposition. Everything automated stops on the account from this point and '
+  'the balance as at this date is what the claim against the estate is for.';
+comment on column public.debtor_accounts.notice_to_creditors_on is
+  'The day the executor advertised the notice to creditors. The claim lodgement deadline is '
+  'counted from it; a claim lodged after the period in the notice is lost.';

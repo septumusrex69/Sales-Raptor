@@ -184,13 +184,21 @@ ok('the picker filters by the debtor in front of the collector',
 ok('...keeps the wording that suits either', /r\.audience === null/.test(picker))
 ok('...and hides nothing when the caller has no debtor to hand', /!audience \|\|/.test(picker))
 
-for (const [what, file] of [
-  ['the SMS box', 'src/pages/accounts/SmsModal.tsx'],
-  ['the call script', 'src/pages/accounts/CallScriptModal.tsx'],
-]) {
-  ok(`${what} is told which kind of debtor it is on`,
-    /audience=\{debtorKind\}/.test(readFileSync(file, 'utf8')))
-}
+ok('the SMS box is told which kind of debtor it is on',
+  /audience=\{debtorKind\}/.test(readFileSync('src/pages/accounts/SmsModal.tsx', 'utf8')))
+/*
+ * THE CALL PANEL IS TOLD THE SAME THING AND DOES MORE WITH IT.
+ *
+ * It takes `debtorKind` rather than passing an `audience` down to a picker, because the script it
+ * opens with is DECIDED by it -- script-open-individual or script-open-company -- rather than
+ * filtered by it. See openingScript and scriptFor, where a company at the demand stage gets a
+ * letter of demand call and not a section 129 call: the NCA's notice belongs to a credit
+ * agreement, and a company is written to under the common law.
+ */
+ok('the call panel is told which kind of debtor it is on',
+  /debtorKind=\{account\.debtorKind\}/.test(readFileSync('src/pages/accounts/AccountDetail.tsx', 'utf8')))
+ok('...and chooses the opening script with it',
+  /openingScript\(debtorKind\)/.test(readFileSync('src/components/collections/CallScriptPanel.tsx', 'utf8')))
 ok('the email composer is told through the account context it already takes',
   /audience=\{letterContext\.audience\}/.test(readFileSync('src/components/ComposeEmailModal.tsx', 'utf8')))
 

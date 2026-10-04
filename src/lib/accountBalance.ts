@@ -864,3 +864,29 @@ function periodLabel(from: string, to: string): string {
 }
 
 const money = (n: number) => `R${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/**
+ * THE LAST PAYMENT ON THE STATEMENT, for the one sentence that settles "I already paid".
+ *
+ * THE FIRM'S BRIEF FOR THE CALL SCRIPTS: "the most common objection on a call is 'I already paid'.
+ * Having the last receipt on screen settles it in seconds instead of a call back."
+ *
+ * OFF THE STATEMENT AND NOT OFF THE ACCOUNT ROW, for the reason every figure here is: the column
+ * `payments_to_date` is null on 20 473 of 23 782 accounts, including 1 243 that have received
+ * money. The statement is built from the payments ledger, so the last `payment` line on it IS the
+ * last payment -- and the same arithmetic that produces the balance a collector is quoting.
+ *
+ * THE LAST BY POSITION, NOT BY DATE. buildStatement has already ordered the lines, ties and all --
+ * see its `rank` -- and re-sorting here by date would be a second opinion about which of two
+ * payments on one day came last.
+ *
+ * NULL WHERE NOTHING HAS BEEN PAID, which is the honest answer. "R 0.00" on no date is a sentence
+ * that means the opposite of what it says when a collector reads it out.
+ */
+export function lastPayment(lines: StatementLine[]): { date: string; amount: number } | null {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const l = lines[i]
+    if (l.kind === 'payment' && l.credit > 0) return { date: l.date, amount: l.credit }
+  }
+  return null
+}

@@ -88,6 +88,17 @@ export interface DebtorAccount {
   /** Claims run on deadlines counted from the appointment, not from our handover. */
   practitionerAppointedOn: string | null
   /*
+   * THE ESTATE, WHICH IS WHAT THE ACCOUNT BECOMES WHEN THE DEBTOR DIES.
+   *
+   * THE EXECUTOR IS THE PRACTITIONER ABOVE -- practitioner_kind 'executor', with their name and
+   * the estate number in practitioner_reference. These three are what that structure does not
+   * hold, and the last of them is the one that costs the client money if it is missed: a claim
+   * lodged after the period in the notice to creditors is lost. See estateClaimDeadline.
+   */
+  dateOfDeath: string | null
+  masterOffice: string | null
+  noticeToCreditorsOn: string | null
+  /*
    * A freeze is three facts, not a label. Carried on the account because "why has this not
    * moved" is asked of a single account far more often than it is reported in bulk.
    */
@@ -187,6 +198,9 @@ const toAccount = (r: any): DebtorAccount => ({
   practitionerPhone: r.practitioner_phone ?? null,
   practitionerEmail: r.practitioner_email ?? null,
   practitionerAppointedOn: r.practitioner_appointed_on ?? null,
+  dateOfDeath: r.date_of_death ?? null,
+  masterOffice: r.master_office ?? null,
+  noticeToCreditorsOn: r.notice_to_creditors_on ?? null,
   /*
    * THIS MAPPER IS HAND-WRITTEN, so a column added to debtor_accounts does not arrive here on
    * its own — it has to be listed. A field present in the database, in the type and in the

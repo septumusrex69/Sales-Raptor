@@ -63,7 +63,9 @@ import { TraceUploadModal } from './TraceUploadModal'
 import { PractitionerModal } from './PractitionerModal'
 import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
-import { CallScriptModal } from './CallScriptModal'
+import { CallScriptPanel } from '../../components/collections/CallScriptPanel'
+import { AuthorisedContactsPanel } from './AuthorisedContactsPanel'
+import { EstatePanel } from './EstatePanel'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
 import { fetchQueries, openDisputeOn, raiseQuery, type AccountQuery } from '../../lib/accountQueries'
@@ -100,6 +102,14 @@ import { liveArrangement, nextUnpaid } from '../../lib/ptpSchedule.ts'
 import { RepaymentCalculator } from '../../components/collections/RepaymentCalculator.tsx'
 import { AccountDocuments } from '../../components/collections/AccountDocuments.tsx'
 import { todayIso } from '../../lib/reminderTime.ts'
+import { lastPayment } from '../../lib/accountBalance.ts'
+import {
+  dispositionNote, needsMore, nodeReached, outcomeFor, type CallState,
+} from '../../lib/callScripts.ts'
+import { recordOutcome } from '../../lib/recordOutcome.ts'
+import {
+  fetchAuthorisedContacts, suretyName, type AuthorisedContact,
+} from '../../lib/authorisedContacts.ts'
 import { needsAttention } from '../../lib/runSteps.ts'
 import { debtorKey, type OtherAccount } from '../../lib/sameDebtor'
 import { fetchOtherAccounts } from '../../lib/accountBook'
@@ -569,6 +579,32 @@ export function AccountDetail() {
     return { ...buildStatement(input), input }
   }, [account, ledgers])
 
+  /*
+   * THE LAST RECEIPT, off the statement that was just assembled -- see lastPayment.
+   *
+   * ONE ARITHMETIC. It is the figure a collector reads out when a debtor says "I already paid",
+   * and it comes from the same ledger as the balance beside it; read off the account row it would
+   * be null on 20 473 accounts, 1 243 of which have had money.
+   */
+  const lastPaid = useMemo(() => lastPayment(statement?.lines ?? []), [statement?.lines])
+
+  /*
+   * WHO MAY BE TOLD ANYTHING, which the call panel reads before a collector may disclose.
+   *
+   * FETCHED HERE RATHER THAN IN THE PANEL, like the workflow runs: the panel only mounts when a
+   * call starts, and the verification tick inside it cannot wait on a request. The account page
+   * has the rows before the telephone rings.
+   */
+  const [authorised, setAuthorised] = useState<AuthorisedContact[]>([])
+  const loadAuthorised = useCallback(async () => {
+    if (!id) return
+    try { setAuthorised(await fetchAuthorisedContacts(id)) } catch { setAuthorised([]) }
+  }, [id])
+  useEffect(() => { void loadAuthorised() }, [loadAuthorised])
+  /* ONLY OFF A ROW WITH THE DEED ON FILE. See suretyName: naming a surety on the strength of a
+     row nobody has evidence for is the firm asserting a liability it cannot prove. */
+  const suretyOnFile = useMemo(() => suretyName(authorised, firmToday()), [authorised])
+
   const timeline = useMemo(
     () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? [], account && {
       handoverDate: account.handoverDate,
@@ -653,6 +689,25 @@ export function AccountDetail() {
           clientReference: account.clientReference,
           capitalOutstanding: account.capitalOutstanding,
           preferredLanguage: account.preferredLanguage,
+          /*
+           * THE LAST RECEIPT, OFF THE STATEMENT. It answers "I already paid" on a call -- the
+           * firm's own reason for the field -- and it comes off the same ledger the balance beside
+           * it does, so the collector is not quoting two different arithmetics down one telephone.
+           */
+          lastPaymentAmount: lastPaid?.amount ?? null,
+          lastPaymentDate: lastPaid?.date ?? null,
+          /*
+           * THE ESTATE. The executor IS the practitioner, and only where the appointment on file
+           * says `executor`: a liquidator's name in {{executor_name}} would put the wrong office
+           * on a claim against a deceased estate. Null on every living debtor.
+           */
+          dateOfDeath: account.dateOfDeath,
+          executorName: account.practitionerKind === 'executor' ? account.practitionerName : null,
+          estateNumber: account.practitionerKind === 'executor' ? account.practitionerReference : null,
+          masterOffice: account.masterOffice,
+          /* THE SURETY, off the one row that records a signed deed of suretyship as being held.
+             A surety with no deed on file is not a surety we may name to anybody. */
+          suretyName: suretyOnFile,
         },
         balance: statement?.breakdown?.balance ?? null,
         /*
@@ -810,6 +865,94 @@ export function AccountDetail() {
     }
   }, [statement, workspace])
 
+  /*
+   * WHAT RAPTOR KNOWS AT THE MOMENT A CALL CONNECTS, which decides which script pops.
+   *
+   * ASSEMBLED HERE AND NOT IN THE PANEL, because every one of these facts is already on this page
+   * -- the practitioner on the account, the open dispute, the arrangement, the workflow runs -- and
+   * a panel that fetched them would be a second opinion about whether this account may be rung.
+   *
+   * THE ORDER IS NOT HERE EITHER. scriptFor decides it, in the firm's own order, and these are
+   * only the facts. See callScripts.ts.
+   */
+  const callState = useMemo((): CallState => {
+    if (!account) return { debtorKind: 'individual' }
+    const written = queries.find((q) => q.kind === 'dispute' && q.status !== 'closed'
+      && q.inWriting && q.receivedOn !== null) ?? null
+    const live = liveArrangement(workspace?.promises ?? [])
+    const next = nextUnpaid(live)
+    const today = firmToday()
+    /* THE LAST NOTICE THE DEBTOR ACTUALLY RECEIVED, across every live sequence -- see nodeReached.
+       A held run's steps still count: the debtor is holding the letter either way. */
+    const node = nodeReached(runs.flatMap((r) => r.steps.map((st) => ({
+      label: st.label, sentAt: st.sentAt,
+    }))))
+    return {
+      debtorKind: account.debtorKind,
+      /*
+       * THE FOUR HARD STOPS, off the practitioner structure the book already carries rather than
+       * off a sub-status somebody typed. A curator is deliberately NOT one of them: a curator is
+       * somebody to deal with, and the account is still collectable through them.
+       */
+      deceased: account.dateOfDeath !== null || account.practitionerKind === 'executor',
+      underDebtReview: account.practitionerKind === 'debt_counsellor',
+      insolvent: account.practitionerKind === 'liquidator' || account.practitionerKind === 'trustee'
+        || account.practitionerKind === 'business_rescue',
+      /* IN WRITING AND RECEIVED. A verbal dispute suspends nothing -- that rule is the firm's and
+         is already load-bearing in the workflow triggers. */
+      writtenDisputeOpen: written !== null,
+      /* AN INSTALMENT DUE TODAY, AND ONE ALREADY MISSED, which are different calls. */
+      instalmentDueToday: next !== null && next.dueOn === today,
+      arrangementInDefault: next !== null && next.dueOn < today,
+      workflowNode: node,
+    }
+  }, [account, queries, workspace?.promises, runs])
+
+  /*
+   * THE CALL IS RECORDED, AND ONLY WHAT IS KNOWN IS WRITTEN.
+   *
+   * THE FIRM'S EIGHTH RULE: "record the outcome on the account the same day... an uncaptured call
+   * did not happen." So the code always goes on the timeline, in the firm's own words -- see
+   * dispositionNote.
+   *
+   * THE ACCOUNT ONLY MOVES WHERE THE BUTTON IS ENOUGH TO MOVE IT. A promise needs an amount and a
+   * date, a dispute needs a classification, and "cannot pay" needs the reason in the debtor's own
+   * words; recordOutcome refuses without them, and it is right to. A button that invented them
+   * would rebuild the imported book's problem -- 58 accounts claiming a promise to pay, 43
+   * promises behind them -- so the note lands, the account does not move, and the collector is
+   * told which thing is still outstanding. See needsMore.
+   */
+  const [callFollowUp, setCallFollowUp] = useState<string | null>(null)
+  const recordDisposition = useCallback(async (code: string) => {
+    if (!account) return
+    const actor = { id: currentUser?.id ?? null, name: currentUser?.name ?? null }
+    try {
+      await addNote({
+        accountId: account.id,
+        body: dispositionNote(code),
+        /* RAPTOR'S WORDS, NOT A PERSON'S -- the collector's own note about what was said goes in
+           the note box. Hidden when the timeline is set to show only what people wrote. */
+        source: 'system',
+        authorName: actor.name,
+        createdBy: actor.id,
+      })
+    } catch (e) {
+      setCallFollowUp(`The call was not recorded on the account: ${
+        e instanceof Error ? e.message : String(e)}`)
+    }
+    const outcome = outcomeFor(code)
+    const more = needsMore(code)
+    if (outcome && !more) {
+      const done = await recordOutcome({ accountId: account.id, outcome, actor })
+      setCallFollowUp(done.failed.length > 0
+        ? `The call was recorded, but ${done.failed.join(' and ')} could not be written.`
+        : null)
+    } else if (more) {
+      setCallFollowUp(`${code} is on the timeline. ${more}`)
+    }
+    await reload()
+  }, [account, currentUser?.id, currentUser?.name, reload])
+
   if (loading) return <div className="p-10 grid place-items-center text-slate-400"><Loader2 size={20} className="animate-spin" /></div>
   if (error) return <Card className="border-negative-100 bg-negative-50"><p className="text-sm text-negative-700">{error}</p></Card>
   if (!account) return <Card><p className="text-sm text-slate-600">That account is not in the book.</p></Card>
@@ -961,6 +1104,22 @@ export function AccountDetail() {
       {/* UNDER THE DEBTOR'S OWN DETAILS, in the two arrangements that have nowhere else to put
           it. In three columns it goes under the timeline instead -- see underTimeline above. */}
       {!underTimeline && standingPanel}
+      {/*
+        WHO MAY BE TOLD ANYTHING, under the debtor's own details because that is what it is about:
+        the contacts above are people to DIAL, and this is permission. The call panel reads the
+        same rows before a collector may disclose anything.
+      */}
+      <AuthorisedContactsPanel accountId={account.id} contacts={authorised}
+        actorId={currentUser?.id ?? null} onChange={loadAuthorised} />
+      {/*
+        AND THE ESTATE, WHERE THERE IS ONE. Absent on a living debtor, which is nearly every
+        account -- a panel of empty estate fields on 23 000 files would be the column of dashes
+        this app keeps getting rid of.
+      */}
+      {(account.dateOfDeath !== null || account.practitionerKind === 'executor') && (
+        <EstatePanel account={account} actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onChange={reload} />
+      )}
       {/*
         * RECORD A PAYMENT USED TO SIT HERE and the firm moved it: "record a payment, I think should
         * be in this pane. Like you put it on the overview, but it should be in here. On the
@@ -1485,6 +1644,25 @@ export function AccountDetail() {
         </div>
       )}
 
+      {/*
+        WHAT A CALL CODE STILL NEEDS, said where the press was -- beside the action row rather than
+        inside the panel that has just closed.
+
+        GOLD RATHER THAN RED: nothing has failed. The call IS recorded; what is outstanding is the
+        half of it a button cannot carry, and a red box would teach people to dismiss it.
+      */}
+      {callFollowUp && (
+        <div className="flex items-start gap-2 rounded-lg border border-[#c9a052] bg-gold-50
+          px-3 py-2.5 text-[13px] text-slate-700">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-[var(--c-gold-deep)]" />
+          <span className="min-w-0">
+            {callFollowUp}
+            <button type="button" onClick={() => setCallFollowUp(null)}
+              className="ml-2 underline underline-offset-2">Dismiss</button>
+          </span>
+        </div>
+      )}
+
       <MainComment account={account} busy={savingComment}
         onSave={(text) => runComment(
           // The name goes with it so the timeline note says who changed it.
@@ -1995,7 +2173,23 @@ export function AccountDetail() {
       )}
 
       {scriptOpen && (
-        <CallScriptModal debtorKind={account.debtorKind} values={letterContext.values}
+        <CallScriptPanel
+          values={letterContext.values}
+          debtorKind={account.debtorKind}
+          state={callState}
+          authorised={authorised}
+          /*
+           * OPENED BY HAND, SO NO DISPOSITION IS DEMANDED.
+           *
+           * THE FIRM'S RULE IS ABOUT A CALL: "the call cannot be closed without a disposition
+           * code." A collector reading a script before they dial, or to see what the firm says at
+           * a stage, has had no call -- and demanding a record of one is how the book filled with
+           * 58 promises to pay that have 43 promises behind them. The dialler opens it live.
+           */
+          live={false}
+          /* THE REFERENCE IS ALL THE PANEL MAY SHOW BEFORE THE VERIFICATION TICK. */
+          reference={account.caseNumber}
+          onDisposition={(code) => { void recordDisposition(code) }}
           onClose={() => setScriptOpen(false)} />
       )}
 

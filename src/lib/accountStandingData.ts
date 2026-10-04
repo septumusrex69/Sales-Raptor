@@ -210,3 +210,36 @@ export async function removeDirector(directorId: string): Promise<void> {
   const { error } = await supabase.from('account_directors').delete().eq('id', directorId)
   if (error) throw new Error(error.message)
 }
+
+/**
+ * THE THREE ESTATE FACTS THE PRACTITIONER COLUMNS DO NOT HOLD.
+ *
+ * THE EXECUTOR IS A PRACTITIONER -- savePractitioner above writes the name, the firm and the
+ * estate number (`practitioner_reference`, whose own comment is "their reference for the estate,
+ * which every claim submission has to quote back"). These three are the ones with nowhere to go:
+ * when the debtor died, which Master's office the estate is reported at, and the day the notice to
+ * creditors was advertised.
+ *
+ * THE LAST OF THEM IS THE ONE THAT COSTS MONEY. The firm: "a claim lodged after the period in that
+ * notice is lost. This is the one date on an estate file that actually costs the client money if
+ * it is missed, so it needs a hard task, not a note." estateClaimDeadline counts from it, and
+ * returns null without it rather than guessing -- a date computed from the statutory minimum would
+ * put a deadline in the diary that the Master's own notice may contradict, and the firm would work
+ * to ours.
+ *
+ * A BLANK DATE INPUT READS AS '' and Postgres will not take that for a date, which is why every
+ * one of them goes through `trim`. savePractitioner learned that the hard way.
+ */
+export async function saveEstate(accountId: string, input: {
+  dateOfDeath: string | null
+  masterOffice: string | null
+  noticeToCreditorsOn: string | null
+}): Promise<void> {
+  const trim = (v: string | null) => (v ?? '').trim() || null
+  const { error } = await supabase.from('debtor_accounts').update({
+    date_of_death: trim(input.dateOfDeath),
+    master_office: trim(input.masterOffice),
+    notice_to_creditors_on: trim(input.noticeToCreditorsOn),
+  }).eq('id', accountId)
+  if (error) throw new Error(error.message)
+}

@@ -461,9 +461,56 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
      */
     { key: 'handover_date', label: 'The day the account was handed to us', sample: '14 August 2026' },
     { key: 'paid_to_date', label: 'Paid since the handover', sample: 'R 0.00' },
+    /*
+     * THE LAST RECEIPT, WHICH EXISTS FOR ONE SENTENCE ON A TELEPHONE CALL.
+     *
+     * THE FIRM'S OWN REASON, out of the call-script brief: "the most common objection on a call is
+     * 'I already paid'. Having the last receipt on screen settles it in seconds instead of a call
+     * back." Without it the collector promises to check and rings back tomorrow, by which time the
+     * debtor has stopped answering.
+     *
+     * TWO FIELDS RATHER THAN ONE SENTENCE, because the two halves of the answer are different
+     * kinds of thing: "R500 on 3 September" is an amount and a date, and a template that wants
+     * only the date ("our last receipt from you was on {{last_payment_date}}") must not have to
+     * print the amount to get it.
+     *
+     * NOT {{paid_to_date}}, WHICH IS THE TOTAL. A debtor who has paid four times is answered by
+     * the LAST one -- the total says nothing about whether the payment they are arguing about
+     * arrived. Off the ledger like every other figure here; null where the account has never paid,
+     * which is 20 473 of the book and is the honest answer rather than R 0,00 on a date.
+     */
+    { key: 'last_payment_amount', label: 'The last payment we received', sample: 'R 1,200.00' },
+    { key: 'last_payment_date', label: 'The day that payment reached us', sample: '3 September 2026' },
     { key: 'listing_date', label: 'The day the default was reported to the bureaus', sample: '1 December 2026' },
     { key: 'listing_reference', label: 'Our listing reference, to quote at a bureau', sample: 'BFL-2026-11482' },
     { key: 'bureaus_listed', label: 'Which bureaus it went to', sample: 'TransUnion, Experian and XDS' },
+    /*
+     * THE ESTATE, WHICH IS WHAT AN ACCOUNT BECOMES WHEN THE DEBTOR DIES.
+     *
+     * THE FIRM: "when a debtor dies the account does not end, it changes form. It becomes a claim
+     * against the deceased estate, and the family is not liable for it." The claim is lodged in
+     * writing with the executor and every one of these five is on it.
+     *
+     * {{executor_name}} AND {{estate_number}} READ THE PRACTITIONER COLUMNS the book has carried
+     * since the practitioner work -- `practitioner_name` and `practitioner_reference`, whose own
+     * comment is "their reference for the estate, which every claim submission has to quote back".
+     * Three new columns beside them would be a second executor on one account, and the two would
+     * disagree the first time somebody filled in the other one.
+     *
+     * {{surety_name}} IS NOT AN ESTATE FIELD AND SITS HERE BECAUSE IT IS THE SAME CONVERSATION. A
+     * surety is a debtor in their own right -- script-surety says exactly that -- and the name is
+     * read off the authorised contacts row whose capacity is `surety`, which is the only place a
+     * deed of suretyship is recorded as being on file.
+     *
+     * NONE OF THEM IS OPTIONAL in the MergeField sense: see `optional` below, which is for a field
+     * whose LINE may leave with it. An estate letter with the estate number dropped out of it is
+     * not a thinner letter, it is a claim the Master cannot file.
+     */
+    { key: 'date_of_death', label: 'The day the debtor died', sample: '12 April 2026' },
+    { key: 'executor_name', label: "The executor or Master's Representative", sample: 'Mr T Mokoena' },
+    { key: 'estate_number', label: 'The estate number', sample: '004521/2026' },
+    { key: 'master_office', label: "Which Master's office the estate is reported at", sample: 'Pretoria' },
+    { key: 'surety_name', label: 'The surety, where a signed deed is on file', sample: 'Mrs A Botha' },
     /*
      * THE DISPUTE, AND THE ONE FIELD OF THE FOUR THAT MUST NEVER REACH A DEBTOR.
      *
@@ -574,8 +621,15 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
     'debtor_reg_no'] },
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
   { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
-    'paid_to_date', 'listing_date', 'listing_reference', 'bureaus_listed', 'balance_handover',
+    'paid_to_date', 'last_payment_amount', 'last_payment_date', 'listing_date',
+    'listing_reference', 'bureaus_listed', 'balance_handover',
     'balance', 'capital', 'position_as_at', 'respond_by'] },
+  /* THE ESTATE, APART FROM THE ACCOUNT. A writer reaching for "the reference" on an ordinary
+     notice must not be offered {{estate_number}} beside {{reference}}; and a group of its own is
+     how somebody writing to an executor finds all five at once. {{surety_name}} is here because
+     it is the same kind of fact -- somebody other than the debtor who is liable. */
+  { title: 'The estate, and a surety', keys: ['date_of_death', 'executor_name', 'estate_number',
+    'master_office', 'surety_name'] },
   /*
    * THE WORKING BEHIND THE BALANCE, APART FROM IT, and the acknowledgement of debt is why the
    * group exists: item 6 prints the whole sum -- handed over, plus interest, plus fees and VAT,
@@ -968,6 +1022,28 @@ export interface TemplateAccount {
   listingDate: string | null
   listingReference: string | null
   bureausListed: string | null
+  /**
+   * THE LAST RECEIPT, FOR ONE SENTENCE ON A TELEPHONE CALL -- see {{last_payment_amount}}.
+   *
+   * OFF THE PAYMENTS LEDGER, like paymentsToDate above and for the identical reason: the account
+   * row cannot answer it. Null where the debtor has never paid, which is most of the book, and
+   * null is right -- "R 0.00 on no date" is not an answer to "when did I pay?".
+   */
+  lastPaymentAmount?: number | null
+  lastPaymentDate?: string | null
+  /**
+   * THE ESTATE. All five are null on a living debtor, which is the ordinary case.
+   *
+   * `executorName` and `estateNumber` ARE THE PRACTITIONER COLUMNS, read by the caller off
+   * `practitioner_name` and `practitioner_reference` where `practitioner_kind` is 'executor' --
+   * see the note on these fields in MERGE_FIELDS for why there is not a second executor here.
+   */
+  dateOfDeath?: string | null
+  executorName?: string | null
+  estateNumber?: string | null
+  masterOffice?: string | null
+  /** The surety named on the authorised contacts row that holds the signed deed. */
+  suretyName?: string | null
   debtorKind: 'individual' | 'company'
   debtorTitle: string | null
   debtorFirstName: string | null
@@ -1229,6 +1305,17 @@ export function mergeValuesFor(input: {
      */
     paid_to_date: a.paymentsToDate === null || a.paymentsToDate === undefined
       ? null : input.money(a.paymentsToDate),
+    /* ZERO IS NOT AN ANSWER HERE, unlike paid_to_date above: a debtor arguing "I already paid"
+       is answered by a receipt or by nothing at all, and "R 0.00" on no date would be a sentence
+       the collector reads out that means the opposite of what it says. */
+    last_payment_amount: a.lastPaymentAmount === null || a.lastPaymentAmount === undefined
+      ? null : input.money(a.lastPaymentAmount),
+    last_payment_date: a.lastPaymentDate ? longDate(a.lastPaymentDate) : null,
+    date_of_death: a.dateOfDeath ? longDate(a.dateOfDeath) : null,
+    executor_name: (a.executorName ?? '').trim() || null,
+    estate_number: (a.estateNumber ?? '').trim() || null,
+    master_office: (a.masterOffice ?? '').trim() || null,
+    surety_name: (a.suretyName ?? '').trim() || null,
     listing_date: a.listingDate ? longDate(a.listingDate) : null,
     listing_reference: (a.listingReference ?? '').trim() || null,
     bureaus_listed: (a.bureausListed ?? '').trim() || null,

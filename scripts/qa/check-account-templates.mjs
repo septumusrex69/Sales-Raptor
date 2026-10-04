@@ -52,7 +52,7 @@ const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/
 const picker = read('components/library/UseTemplate.tsx')
 const compose = read('components/ComposeEmailModal.tsx')
 const sms = read('pages/accounts/SmsModal.tsx')
-const script = read('pages/accounts/CallScriptModal.tsx')
+const script = read('components/collections/CallScriptPanel.tsx')
 const account = read('pages/accounts/AccountDetail.tsx')
 /* The assembly the page hands its rows to -- see the note on the address below. */
 const merge = read('lib/accountMergeValues.ts')
