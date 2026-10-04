@@ -163,18 +163,27 @@ interface MailRow {
  * The other four have one key each and resolve by name. Add a second to any of them and it must
  * be spelled out the same way.
  */
+/*
+ * AND NOT ONE WORD OF PROSE INSIDE IT.
+ *
+ * THIS IS A STRING THAT GOES TO PostgREST, not code. A `/* ... *\/` written between two column
+ * names is sent as part of the select, and PostgREST answers "failed to parse select parameter"
+ * and refuses the WHOLE request -- every tab of the mailbox, blank, with the comment printed
+ * across the screen as the error. It shipped exactly that way: a note explaining body_cached_at,
+ * written where it reads best and where it could not possibly work.
+ *
+ * Every word about these columns belongs above this line.
+ *
+ * `body_cached_at` IS THE STAMP ONLY -- never the body, which is the whole reason this list is
+ * fast: fifty bodies is megabytes and the list shows a snippet. It is carried so the page knows
+ * which rows are already instant and which are still a trip to the mail server, which is what
+ * lets it read ahead for the rest.
+ */
 const COLUMNS = `
   id, folder, is_sent, to_address, to_name, to_recipients, cc_recipients,
   uid, message_id, from_address, from_name, subject, snippet,
   attachment_names, is_junk, occurred_at, read_at, is_filed, is_settled, no_record_at,
-  invite_response,
-  /*
-   * WHETHER RAPTOR ALREADY HOLDS THE MESSAGE. The stamp only -- never the body, which is the
-   * whole reason this list is fast: fifty bodies is megabytes and the list shows a snippet.
-   * Carried so the page knows which rows are already instant and which are still a trip to the
-   * mail server, which is what lets it warm the rest in the background. See warmBodies.
-   */
-  body_cached_at,
+  invite_response, body_cached_at,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
   leads ( first_name, last_name, company_name ),

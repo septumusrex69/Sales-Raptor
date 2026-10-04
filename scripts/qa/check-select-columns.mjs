@@ -176,23 +176,49 @@ function splitTopLevel(body) {
 function parseSelect(select) {
   const own = []
   const embeds = []
+  /*
+   * ANYTHING THAT IS NOT A COLUMN, AN EMBED OR A STAR.
+   *
+   * THIS USED TO BE DROPPED ON THE FLOOR and that is how the mailbox went down. A select is a
+   * STRING sent to PostgREST, and somebody (me) wrote a `/* ... *\/` between two column names to
+   * explain one of them. It is not code there -- it is sent verbatim, PostgREST answers "failed
+   * to parse select parameter" and refuses the WHOLE request, so every tab of the mailbox was
+   * blank with the comment printed across the screen as the error.
+   *
+   * THIS FILE SAID PASS THROUGHOUT. The old rule was "push it if it looks like a column", so a
+   * piece that looked like nothing was silently ignored -- the one shape of input that is
+   * GUARANTEED to break the request was the one shape this check had no opinion about. A checker
+   * that skips what it cannot parse is a checker that passes on exactly the broken code it exists
+   * to catch.
+   */
+  const junk = []
   let depth = 0
   let current = ''
   const flush = () => {
     const piece = current.trim()
     current = ''
     if (!piece) return
-    const embed = piece.match(/^([\w]+)(!\w+)?\s*\(([\s\S]*)\)$/)
+    /*
+     * `alias:table!fk(cols)` as well as `table!fk(cols)`. The alias was not matched before, so an
+     * aliased embed fell through to the column test, failed it, and was skipped -- its columns
+     * unchecked. accountBook's `assigned:profiles!..._fkey(name)` is one.
+     */
+    const embed = piece.match(/^(?:\w+\s*:\s*)?([\w]+)(![\w]+)?\s*\(([\s\S]*)\)$/)
     if (embed) {
       const inner = parseSelect(embed[3])
       embeds.push({ table: embed[1], columns: inner.own, named: !!embed[2] })
       // A nested embed's own embeds are checked against their own table, recursively.
       embeds.push(...inner.embeds)
+      junk.push(...inner.junk)
       return
     }
     // `alias:real_column` — the real column is the half that has to exist.
     const aliased = piece.includes(':') ? piece.split(':').pop().trim() : piece
-    if (aliased && aliased !== '*' && /^\w+$/.test(aliased)) own.push(aliased)
+    if (aliased === '*') return
+    if (/^\w+$/.test(aliased)) { own.push(aliased); return }
+    /* Not a column, not an embed, not a star. PostgREST will refuse the request over it, so it is
+       reported rather than ignored -- one line of it, because a stray comment is a paragraph. */
+    junk.push(piece.replace(/\s+/g, ' ').slice(0, 90))
   }
   for (const ch of select) {
     if (ch === '(') depth += 1
@@ -201,7 +227,7 @@ function parseSelect(select) {
     current += ch
   }
   flush()
-  return { own, embeds }
+  return { own, embeds, junk }
 }
 
 /** Every .ts/.tsx under a directory, skipping node_modules and build output. */
@@ -281,7 +307,14 @@ for (const file of files) {
   for (const { table, select, index } of findSelects(source, consts)) {
     const line = source.slice(0, index).split('\n').length
     const where = `${relative(ROOT, file)}:${line}`
-    const { own, embeds } = parseSelect(select)
+    const { own, embeds, junk } = parseSelect(select)
+    /*
+     * REPORTED BEFORE ANY COLUMN IS LOOKED UP, because this is not a wrong column -- it is a
+     * select PostgREST cannot read at all, and the whole request dies rather than one field.
+     */
+    for (const bad of junk) {
+      problems.push(`${where}  not a column, an embed or *: ${JSON.stringify(bad)}`)
+    }
 
     const check = (tableName, columns) => {
       const known = schema.get(tableName)
