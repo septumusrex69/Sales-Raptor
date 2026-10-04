@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { BarChart3, CalendarDays, Coins, Target, TrendingDown, TrendingUp } from 'lucide-react'
 import { useAuth } from '../../store/AuthContext'
+import { useTheme } from '../../store/ThemeContext'
 import { targetLaps } from '../../lib/collectionPace.ts'
 import { greetingLine } from '../../lib/greeting.ts'
 import { formatCurrency } from '../../data/mockData'
@@ -73,6 +74,8 @@ export function CollectionsHero({ figures, filters, action, progress }: {
   progress?: ReactNode
 }) {
   const { currentUser } = useAuth()
+  /* The brand line is the skin's, not this component's — see the headline below. */
+  const { theme } = useTheme()
   const ahead = (figures.againstPace ?? 0) >= 0
 
   return (
@@ -105,11 +108,12 @@ export function CollectionsHero({ figures, filters, action, progress }: {
               two lines. That only works as a deliberate break: left to wrap, the break lands
               wherever the window is wide and the colour change falls mid-phrase.
 
-              THE WORDS ARE THE FIRM'S AND THEY HAVE CHANGED ONCE. It read "The sky is only / the
-              beginning." until they sent a reference of their own: "instead of saying the sky is
-              only the beginning, put the one that I put up there for you, which says our world
-              doesn't end at the horizon." The break falls after "end", so the champagne half is
-              the phrase that names the horizon rather than two words of it.
+              THE WORDS BELONG TO THE SKIN, NOT TO THIS COMPONENT. They were written here, and a
+              line the firm wrote for the desert then appeared over the mountain at dawn. The
+              firm: "for the first theme, it should say the sky thing about the sky, it's only the
+              beginning. But the desert theme has something else, another saying. So each place
+              will have its own saying." So the sentence comes off the active theme — see
+              heroLine in themes.ts, which is also where the next photograph's line goes.
 
               AND THE WEIGHT WENT THE OTHER WAY WITH THEM. This was font-light, and the note that
               used to sit here argued the case: at 52px a weight chosen for body copy reads as
@@ -128,8 +132,8 @@ export function CollectionsHero({ figures, filters, action, progress }: {
               leading-[1.06] text-white">
               {/* Each LINE is its own span, which is not decoration: it makes the two halves
                   addressable as two things, by a stylesheet and by anything reading the page. */}
-              <span>Our world doesn&rsquo;t end</span><br />
-              <span className="text-[var(--ch-champagne)]">at the horizon.</span>
+              <span>{theme.heroLine.first}</span><br />
+              <span className="text-[var(--ch-champagne)]">{theme.heroLine.second}</span>
             </h1>
             <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
               Discipline drives results

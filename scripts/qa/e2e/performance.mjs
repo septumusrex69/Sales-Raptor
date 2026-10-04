@@ -290,7 +290,7 @@ try {
    * fixture written twice is a fixture that drifts.
    */
   await page.goto(`http://localhost:${PORT}/`)
-  await page.getByRole('heading', { name: /Our world doesn/ }).waitFor({ timeout: 20000 })
+  await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
   await t.shot(page, '39-company')
 
   /*
@@ -374,8 +374,9 @@ try {
    * capitals — which is the assertion worth making. Reading textContent instead would return
    * the sentence-case source and pass whether the transform applied or not.
    */
+  /* THE DEFAULT SKIN'S line -- each skin carries its own now, and the browser is on raptor. */
   t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'Our world doesn’t end at the horizon.')
+    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
   /*
    * SIZED TO THE BRIEF, at both ends. "Do NOT make the headline enormous" is half the instruction
    * and 48-56px is the other half, so a lower bound alone would pass on the 72px version this
@@ -452,7 +453,7 @@ try {
    */
   t.check('...broken across two lines where the firm breaks it',
     heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
-    'Our world doesn’t end | at the horizon.')
+    'The sky is only | the beginning.')
   /*
    * Each line is its own span, so the two halves are addressable as two things. They were not at
    * first — the stressed words are spans too, and a bare `h1 span` matched three elements, which
@@ -465,7 +466,7 @@ try {
   /* Joined, not compared as arrays: this harness's check() uses Object.is, so two arrays with
      identical contents are never equal and the failure prints two lines that look the same. */
   t.check('the line is in two halves', halves.map((l) => l.text).join(' | '),
-    'Our world doesn’t end | at the horizon.')
+    'The sky is only | the beginning.')
   t.ok(`...the first in white (${halves[0]?.colour})`, /255, 255, 255/.test(halves[0]?.colour ?? ''))
   t.ok(`...and the second in champagne (${halves[1]?.colour})`,
     !/255, 255, 255/.test(halves[1]?.colour ?? '') && halves[1]?.colour !== halves[0]?.colour)

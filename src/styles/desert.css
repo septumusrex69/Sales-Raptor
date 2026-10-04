@@ -171,30 +171,52 @@ html[data-theme='desert'] {
   --skin-hero-radius: 18px;
 
   /*
-   * THE COMPANY DASHBOARD'S PHOTOGRAPH. Positioned low rather than centred: the dune crest and
-   * the sun are in the lower half of the frame, and `cover` on a panel that is 700px tall and
-   * 1320px wide crops a 1920x640 picture hard. Centred, the hero would be mostly storm cloud.
+   * THE COMPANY DASHBOARD'S PHOTOGRAPH, 2172x724 and therefore 3:1. The panel it goes in is
+   * nothing like that shape, so the crop is the whole question — see the background-position
+   * rule below, which is the only part of it anything can choose.
    */
   --skin-collections-hero-image: url('/brand/desert-hero.webp');
   --skin-collections-hero-ground: #0d0b07;
   /*
-   * THE WASH, WARM AND ASYMMETRIC. Heaviest on the left under the headline and the four figures,
-   * almost nothing through the middle where the light runs along the ridge, and coming back on
-   * the right so the rail of small caps has something to sit on — over the sun, white type at
-   * that size disappears.
+   * THE WASH, AND IT IS DRAWN AROUND THE WIDGETS RATHER THAN ACROSS THE PICTURE.
    *
-   * THE TWO PASSES COMPOUND. 0.84 across and 0.34 down meet at 0.89 in the bottom-left corner,
-   * which is where the figures are and is the one place this panel needs to be legible.
+   * THE FIRM SENT A DRAWING OVER THE PHOTOGRAPH ITSELF: "the layout of this is not that nice...
+   * you put all of the widgets over the desert and the nice part of the picture." On it the four
+   * figures and the controls sit LOW, on the shadowed near dune, and the lit crest and the sun
+   * are left alone. The panel's own layout already puts them there -- the spacer above the tiles
+   * is flexible, so they ride the floor -- so what was wrong was the wash, which ran heavy from
+   * the left edge straight across the ridge.
+   *
+   * SO THE HEAVY PASS IS THE VERTICAL ONE NOW, and it starts below the middle. Nothing above 46%
+   * is touched by it at all: that band holds the storm cloud, the ridge line and the sun, which
+   * is the half of the frame the firm is protecting. Underneath it comes down hard, because that
+   * is where the glass tiles are and white type at 10px has to read on lit sand.
+   *
+   * AND THE HORIZONTAL PASS CAME OFF. It was 0.84 at the left edge, tuned when this panel was
+   * short and the headline sat close to the top-left corner. The photograph is already near-black
+   * cloud there, so 0.84 was spending the dune field the firm asked to see -- "so we see more of
+   * the desert on the left" -- to darken something that was dark. 0.52 holds the headline and
+   * gives the left-hand dunes back. The right edge keeps a little, because the rail of small caps
+   * sits over the brightest sky on the panel.
+   *
+   * THE TWO PASSES COMPOUND, and that is what the figures below are chosen against: 0.52 across
+   * and 0.60 down meet at 0.81 in the bottom-left corner, where the first tile is.
    */
   --skin-collections-scrim:
     linear-gradient(
       90deg,
-      rgba(13, 11, 7, 0.84) 0%,
-      rgba(13, 11, 7, 0.46) 40%,
-      rgba(13, 11, 7, 0.16) 68%,
-      rgba(13, 11, 7, 0.4) 100%
+      rgba(13, 11, 7, 0.52) 0%,
+      rgba(13, 11, 7, 0.24) 38%,
+      rgba(13, 11, 7, 0.08) 66%,
+      rgba(13, 11, 7, 0.3) 100%
     ),
-    linear-gradient(to bottom, rgba(13, 11, 7, 0) 0%, rgba(13, 11, 7, 0.14) 52%, rgba(13, 11, 7, 0.34) 100%);
+    linear-gradient(
+      to bottom,
+      rgba(13, 11, 7, 0) 0%,
+      rgba(13, 11, 7, 0) 46%,
+      rgba(13, 11, 7, 0.26) 70%,
+      rgba(13, 11, 7, 0.6) 100%
+    );
 
   /*
    * THE DUNES AND NOT THE WING, which is the one place the two photographs swap roles.
@@ -239,42 +261,38 @@ html[data-theme='desert'] .app-hero {
  *
  * THE FIRM: "move the picture a little bit more right and up, so we see more of the desert on the
  * left and then the wind that takes the sands on the right." Moving the PICTURE right means
- * showing more of its LEFT edge, which is a position below 50%; moving it up means showing more of
- * its BOTTOM, which is a position above 50%.
+ * showing more of its LEFT edge, which is a position below 50%.
  *
  * 38% RATHER THAN FURTHER. The sun and the blowing sand sit at about 78% across the frame, and the
  * window is only 63% of it wide — below about 35% the sun falls off the right-hand edge, and the
  * firm asked for both halves. 38% is as far left as the picture goes while the wind is still in it.
  *
- * 90% RATHER THAN 100%, because the very bottom of the frame is the near dune in shadow: anchored
- * hard to the floor the panel fills its lower half with unlit sand, and the ridge — which is the
- * subject — rides up out of the top.
+ * AND THE VERTICAL HALF IS 50% BECAUSE IT CANNOT DO ANYTHING ELSE. It read 90% for a version, with
+ * a note explaining what that bought. It bought nothing: `cover` fits whichever axis runs short,
+ * and a 3:1 photograph in a panel that is never wider than about 2:1 is always fitted to the
+ * HEIGHT — the whole vertical frame is on screen, and there is no overflow for a vertical position
+ * to choose from. Said plainly here because the next person to move this picture will reach for
+ * the second number first, and it will do nothing while appearing to be the control.
  */
 html[data-theme='desert'] .collections-hero {
-  background-position: 38% 90%;
+  background-position: 38% 50%;
 }
 
 /*
- * AND THE PANEL IS SHAPED FOR THE PHOTOGRAPH IT CARRIES.
+ * AND THE PANEL IS THE SAME HEIGHT AS EVERY OTHER SKIN'S, which is where it started.
  *
- * THE FIRM SENT A MOCKUP OF THEIR OWN -- "make it like the one that I gave you" -- and the hero on
- * it is a wide band about 3:1, which is the aspect of the picture. The tall panel is a 1.3:1 box
- * on an iPad, and `cover` throws away two thirds of a 3:1 frame to fill it: the dune field on the
- * left and the blowing sand on the right, which are the two things they asked to see.
+ * It was given 460/560 of its own for one version, reasoning from the mockup the firm sent that
+ * the photograph is 3:1 and a band suits it better than a tall box. The firm looked at it: "you
+ * made this picture very small and the whole thing very small. I think it should be bigger
+ * everything like the first one." So the override is gone and this skin inherits 540/700 from
+ * :root with the rest of them, and check-themes now holds a floor under the token so the next
+ * skin cannot quietly do the same thing again.
  *
- * SCOPED TO THIS SKIN, which is the whole point of the token. The firm's "you made the picture
- * smaller, keep that" was about the Raptor hero and the mountain photograph in it, and that panel
- * is untouched at 540/700 -- a skin changes its own picture and its own frame, not everyone's.
- *
- * 460 AND 560 RATHER THAN THE MOCKUP'S OWN PROPORTIONS. At 1320 wide a true 3:1 band is 440px and
- * the four figures, the controls and the month bar all live inside this panel -- below about 540
- * on a desktop they stop having room and start touching. This is as close to the picture's shape
- * as the contents allow.
+ * NOTHING IS LOST BY IT. `cover` on a 1320x700 box fits a 3:1 frame to the HEIGHT -- the panel is
+ * 1.9:1 and the picture is wider than that, so the whole vertical frame is on screen either way
+ * and the crop was only ever horizontal. The tall panel buys open sky above the figures, which is
+ * the thing the firm's drawing is asking for.
  */
-html[data-theme='desert'] {
-  --skin-collections-hero-min: 460px;
-  --skin-collections-hero-min-lg: 560px;
-}
 
 /*
  * The hero's own palette. These five are declared inside `.collections-hero` in index.css

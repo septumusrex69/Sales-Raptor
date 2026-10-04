@@ -164,6 +164,31 @@ check('the baseline-imagery exemption is still needed',
   BASELINE_IMAGERY.some((t) => [...bySkin.values()].some((v) => v.includes(t))
     && [...bySkin.values()].some((v) => !v.includes(t))), true)
 
+/*
+ * AND NO SKIN MAY SHRINK THE COMPANY HERO.
+ *
+ * THE FIRM HAS SENT THIS BACK TWICE, about two different pictures. First the mountain: "you
+ * changed some shit... you made the picture smaller. Keep that." Then the desert, which was given
+ * 460/560 of its own on the reasoning that a 3:1 photograph suits a band better than a tall box:
+ * "you made this picture very small and the whole thing very small. I think it should be bigger
+ * everything like the first one."
+ *
+ * SO THE TOKEN STAYS, AND IT HAS A FLOOR. A skin may still bring its own frame -- a photograph
+ * with an aspect of its own is the reason the token exists -- but not a shorter one than the
+ * height the firm fought for. A skin that sets nothing inherits 540/700 and passes by not
+ * appearing here at all.
+ */
+const FLOOR = { '--skin-collections-hero-min': 540, '--skin-collections-hero-min-lg': 700 }
+for (const id of SKINS) {
+  const css = read(skinFile(id))
+  for (const [token, floor] of Object.entries(FLOOR)) {
+    const m = new RegExp(`${token}: (\\d+)px`).exec(css)
+    if (!m) continue
+    ok(`${id}: ${token} is not below the height the firm asked for (${m[1]}px)`,
+      Number(m[1]) >= floor)
+  }
+}
+
 /* ------------------------------------------------ the pictures */
 
 /*

@@ -185,24 +185,59 @@ ok('...and the line at the foot went with the redesign', !/Built for a higher st
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
 /*
- * THE FIRM'S OWN LINE, AND IT HAS CHANGED ONCE.
+ * THE FIRM'S OWN LINE, AND IT IS THE SKIN'S RATHER THAN THIS COMPONENT'S.
  *
- * It read "The sky is only / the beginning." until they sent a reference of their own: "instead
- * of saying the sky is only the beginning, put the one that I put up there for you, which says
- * our world doesn't end at the horizon."
+ * It read "The sky is only / the beginning." here, in the markup, until the firm sent a desert
+ * photograph with a line of its own -- and that line then appeared over the mountain at dawn too.
+ * The firm: "for the first theme, it should say the sky thing about the sky, it's only the
+ * beginning. But the desert theme has something else, another saying. So each place will have its
+ * own saying."
  *
- * THE OLD LINE IS ASSERTED AGAINST, not merely replaced. Both halves of it are still sitting in
- * this file's own comments and in the component's, which is exactly how a sentence comes back:
- * somebody reads the history, takes it for the instruction, and puts it back.
+ * SO WHAT IS ASSERTED HERE IS THAT THE COMPONENT HAS NO WORDS OF ITS OWN. A sentence written back
+ * into this file is the whole of the fault, and it would look completely normal: the default skin
+ * would read correctly and only the other skins would be wrong.
  */
-ok('the firm’s first half is on it', /<span>Our world doesn&rsquo;t end<\/span>/.test(title))
-ok('...and the second half is the second line', /<br \/>[\s\S]*at the horizon\./.test(title))
+ok('the headline is the skin\u2019s line, not this file\u2019s',
+  /<span>\{theme\.heroLine\.first\}<\/span>/.test(title))
+ok('...and the second half is the second line',
+  /<br \/>[\s\S]*\{theme\.heroLine\.second\}/.test(title))
 ok('...in champagne rather than white',
-  /text-\[var\(--ch-champagne\)\]"\s*>\s*at the horizon\./.test(title))
-check('...and the line it replaced is gone', /The sky is only|the beginning\./.test(title), false)
-/* THE APOSTROPHE IS THE TYPOGRAPHIC ONE. A straight quote in a 52px display line is the one
-   character on this panel that reads as unfinished. */
-ok('...with a real apostrophe, not a typewriter one', !/doesn't/.test(title))
+  /text-\[var\(--ch-champagne\)\]"\s*>\s*\{theme\.heroLine\.second\}/.test(title))
+/* Both of the real lines asserted against, because either one hard-coded here is the bug. */
+check('...with neither skin\u2019s words hard-coded into it',
+  /The sky is only|the beginning\.|at the horizon\./.test(title), false)
+ok('...and it reads the active skin rather than a fixed one',
+  /const \{ theme \} = useTheme\(\)/.test(hero))
+
+/*
+ * AND THE SAYINGS THEMSELVES, held in themes.ts.
+ *
+ * ONE SKIN'S LINE MISSING IS A HERO WITH `undefined` ACROSS IT at 52px, so every skin is required
+ * to carry both halves rather than the two that happen to have photographs of their own.
+ */
+const themes = read('../../src/lib/themes.ts')
+const sayings = [...themes.matchAll(/id: '([a-z-]+)'[\s\S]*?heroLine: \{ first: '([^']+)', second: '([^']+)' \}/g)]
+check('every skin carries a saying of its own',
+  sayings.length, (themes.match(/^    id: '/gm) || []).length)
+ok('the mountain keeps the line the firm wrote for it',
+  sayings.some(([, id, a, b]) => id === 'raptor' && a === 'The sky is only' && b === 'the beginning.'))
+ok('...and the baseline skin with it',
+  sayings.some(([, id, a, b]) => id === 'original' && a === 'The sky is only' && b === 'the beginning.'))
+ok('the desert carries the one they sent with the photograph',
+  sayings.some(([, id, a, b]) => id === 'desert'
+    && a === 'Our world doesn\\u2019t end' && b === 'at the horizon.'))
+/*
+ * THE APOSTROPHE IS THE TYPOGRAPHIC ONE. A straight quote in a 52px display line is the one
+ * character on this panel that reads as unfinished.
+ *
+ * READ OFF THE RAW LINE RATHER THAN THE CAPTURED HALVES, and that is the difference between a
+ * check and a check-shaped thing: the halves are captured out of single quotes, so they CANNOT
+ * contain a straight apostrophe and a test on them passes whatever anybody writes. What a
+ * typewriter apostrophe actually looks like in this file is an escaped one.
+ */
+const sayingLines = themes.match(/^\s*heroLine: \{ first: '.*$/gm) || []
+check('...and every one of them was read', sayingLines.length, sayings.length)
+ok('...with a real apostrophe, not a typewriter one', !sayingLines.some((l) => /\\'/.test(l)))
 /*
  * ORDINARY SENTENCE CASE, AND THE CASE HAS BEEN ROUND THE HOUSES. The whole line was set in
  * capitals once, then SKY and BEGINNING alone were lifted into them, and the firm settled on
