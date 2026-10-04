@@ -99,6 +99,82 @@ export function signingLink(token: string, origin: string): string {
 }
 
 /**
+ * ONLY THE ACKNOWLEDGEMENT OF DEBT IS SIGNED FROM A DEBTOR'S FILE.
+ *
+ * THE FIRM, twice and in as many words: "the acknowledgement of debt that's sent to signature is
+ * the only thing that needs to be signed from the debtor's pane. You don't have to sign any other
+ * document." And again: "the only document, and I repeat myself, is the acknowledgement of debt
+ * that can be signed within the debtor's pane. All of the other ones are not in."
+ *
+ * A LETTER IS NOT AN AGREEMENT. A section 129, a final notice and a listing notice are things the
+ * firm SENDS; offering a debtor a signature pad under one invites them to sign a notice, which
+ * means nothing and muddies what a signature on this account is for. The AoD is the only
+ * instrument among them -- the one the firm would sue on.
+ *
+ * MATCHED ON THE NAME because that is what the firm edits and what they called it. The seed keys
+ * are checked first and are the reliable half; the name is the half that still works when somebody
+ * writes a third AoD for a particular client.
+ */
+export const SIGNABLE_SEED_KEYS = ['aod-individual', 'aod-company']
+
+export function isSignable(template: { seedKey?: string | null; name: string }): boolean {
+  if (template.seedKey && SIGNABLE_SEED_KEYS.includes(template.seedKey)) return true
+  return /acknowledgement of debt/i.test(template.name)
+}
+
+/**
+ * THE EMAIL THAT CARRIES THE LINK, AS A BUTTON RATHER THAN A BLUE LINE OF TEXT.
+ *
+ * THE FIRM: "if you send from an email the acknowledgement of debt to be signed, it should have
+ * the link in the email somehow, so that the guy can click on it... and in the link, make it nice
+ * and big, like just don't make it a link and highlight it blue -- make it like a picture, or like
+ * a button that you can see, like sign the acknowledgement of debt."
+ *
+ * A TABLE AND INLINE STYLES, WHICH IS NOT A STYLE CHOICE. Outlook on Windows renders mail through
+ * Word, which ignores padding on an anchor and most of a stylesheet -- a `<a style="padding">` is a
+ * blue line of text there, which is the exact thing being replaced. A single-cell table with the
+ * colour on the cell and the anchor filling it is the one construction every mail client draws
+ * alike, and it has been for twenty years.
+ *
+ * AND THE ADDRESS IS UNDERNEATH IT IN PLAIN TEXT. A button is an image-shaped thing to a client
+ * that blocks images and to a debtor reading on a feature phone; the link spelled out is what makes
+ * it work anyway, and it is what somebody telephoning the firm can read out.
+ */
+export function signingButtonHtml(url: string, label = 'Sign the acknowledgement of debt'): string {
+  const safe = url.replace(/"/g, '&quot;')
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" `
+    + `style="margin:20px 0"><tr><td align="center" bgcolor="#0f2744" `
+    + `style="border-radius:8px"><a href="${safe}" `
+    + `style="display:inline-block;padding:14px 28px;font-family:Georgia,serif;font-size:16px;`
+    + `font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px">${label}</a>`
+    + `</td></tr></table>`
+    + `<p style="margin:0 0 16px;font-size:12px;color:#667085">`
+    + `Or copy this address into your browser:<br>${safe}</p>`
+}
+
+/**
+ * WHAT THE EMAIL SAYS, WHICH IS NEARLY NOTHING.
+ *
+ * THE FIRM: "maybe make the script or the writing for the acknowledgement of debt very short.
+ * That's quite a little bit long right now. So just reduce that."
+ *
+ * THE DOCUMENT IS THE DOCUMENT. Everything that matters -- the amount, the terms, the consequences
+ * of signing and of not signing -- is in the acknowledgement itself, which they are about to read.
+ * A covering email that explains the agreement is a second version of the agreement, and the two
+ * can disagree.
+ */
+export function signingEmailBody(debtorName: string | null, caseNumber: string | null): string {
+  const who = debtorName?.trim() ? `Dear ${debtorName.trim()},` : 'Good day,'
+  const ref = caseNumber?.trim() ? ` Our reference is ${caseNumber.trim()}.` : ''
+  return `${who}
+
+Please read and sign the acknowledgement of debt below.${ref}
+
+`
+    + 'The agreement itself sets out what is owed and how it will be paid.'
+}
+
+/**
  * WHAT THE PAGE SAYS WHEN THERE IS NOTHING TO SIGN.
  *
  * Each of these is an ordinary thing for a signer to meet rather than a fault, and the sentence

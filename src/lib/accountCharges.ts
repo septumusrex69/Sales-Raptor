@@ -130,3 +130,57 @@ export const OTHER_EXPENSES_ITEM_ID = '3'
 
 /** What the debtor reads on the statement. The firm's own words for it. */
 export const PTC_CONFIRMATION_DESCRIPTION = 'PTC confirmation'
+
+/**
+ * AN ACKNOWLEDGEMENT OF DEBT, ISSUED.
+ *
+ * THE FIRM: "it should charge the fee in accordance with acknowledgement of debt... the moment
+ * that thing is issued, or sent via an email, it charges on top of the email or any necessary
+ * correspondence -- it charges the acknowledgement of debt. And the two different fees that I
+ * added, it depends on the amount: it's below 50,000 and over 50,000 for the claim amount."
+ *
+ * ON ISSUE, NOT ON SIGNATURE, which is the firm's own word and is also the only defensible
+ * moment. Item 4(a) prices "acknowledgement of debt and undertaking to pay (section 57 or 58),
+ * INCLUDING THE NECESSARY CONSULTATION" -- the work it pays for is drawing the instrument and
+ * talking the debtor through it, all of which has happened by the time the link goes out. A
+ * debtor who reads it and refuses has still had the consultation.
+ *
+ * ON TOP OF THE EMAIL, not instead of it. Sending it is item 1(a) at R25 and is charged by the
+ * composer exactly as any other email is; this is a second, different piece of work and the
+ * firm said so in as many words ("it charges on top of the email").
+ *
+ * BANDED ON THE CLAIM, which the caller passes -- see ChargeInput.debtAmount for why it is not
+ * read off the account here.
+ *
+ * NEVER THROWS, for the reason chargePerusal does not: the document has been issued and the link
+ * is in somebody's hands. A fee that would not write is something to report afterwards, never a
+ * reason to pretend the acknowledgement was not sent.
+ */
+export async function chargeAcknowledgementOfDebt(input: {
+  accountId: string
+  /** The claim the acknowledgement states. Decides which of the two bands applies. */
+  claimAmount: number
+  createdBy?: string | null
+  at?: Date
+}): Promise<ChargeResult | null> {
+  try {
+    return await chargeItem({
+      accountId: input.accountId,
+      itemId: ACKNOWLEDGEMENT_OF_DEBT_ITEM_ID,
+      actionCode: 'acknowledgement_of_debt',
+      description: ACKNOWLEDGEMENT_OF_DEBT_DESCRIPTION,
+      debtAmount: input.claimAmount,
+      createdBy: input.createdBy ?? null,
+      at: input.at,
+    })
+  } catch (e) {
+    console.error('[aod] the document was issued but the fee was not raised:', e)
+    return null
+  }
+}
+
+/** Item 4(a). Priced by the Magistrates' Courts Rules rather than by the Annexure itself. */
+export const ACKNOWLEDGEMENT_OF_DEBT_ITEM_ID = '4a'
+
+/** What the debtor reads on the statement. The gazette's own words, shortened to fit a line. */
+export const ACKNOWLEDGEMENT_OF_DEBT_DESCRIPTION = 'Acknowledgement of debt and undertaking to pay'

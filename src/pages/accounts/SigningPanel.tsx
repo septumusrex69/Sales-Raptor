@@ -9,6 +9,9 @@ import { blanksFor, FILLABLE } from '../../lib/signingBlanks.ts'
 import {
   createSigningRequest, listSigningRequests, signingLink, type SigningState,
 } from '../../lib/signing.ts'
+import { isSignable, signingButtonHtml, signingEmailBody } from '../../lib/signingRules.ts'
+import { chargeAcknowledgementOfDebt } from '../../lib/accountCharges.ts'
+
 
 /**
  * SEND A DOCUMENT OUT TO BE SIGNED, AND SEE WHAT CAME BACK.
@@ -16,16 +19,29 @@ import {
  * THE FIRM: "building the online signature for the AOD... you can basically build in an online
  * signature platform. Forget about the OTP for now. Just anyone with a link can open it."
  *
- * THE LINK IS THE DELIVERABLE, and it is shown rather than sent. Emailing it automatically is the
- * obvious next step and is deliberately not this: the firm asked for something they can test, and
- * a link on the screen can be pasted into WhatsApp, into an email somebody writes themselves, or
- * read to a colleague -- all of which is how the first week of a new workflow actually goes.
+ * IT GOES OUT BY EMAIL, and the link is shown as well rather than instead.
+ *
+ * THE FIRM, twice: "if you send from an email the acknowledgement of debt to be signed, it should
+ * have the link in the email somehow, so that the guy can click on it" -- and then, when it still
+ * had not: "my instruction was you have to send it from email." So creating the request opens the
+ * composer with the covering words and the button already in it; see signingRules.ts for why the
+ * button is a table and why the wording is three lines long.
+ *
+ * THE LINK STAYS ON THE SCREEN TOO. A debtor who answers on WhatsApp, a collector reading it to a
+ * colleague, a second copy to an attorney -- all of that is a copy of the same address, and taking
+ * it away would mean the only way to send one twice is to issue a second document.
+ *
+ * AND ISSUING ONE RAISES ITEM 4(a). See chargeAcknowledgementOfDebt: the gazette prices the
+ * instrument and the consultation behind it, both of which have happened by the time the link
+ * exists, and the firm asked for it "the moment that thing is issued".
  *
  * WHAT IS STORED IS THE ANSWERED DOCUMENT, not the template. See fillLetter: an acknowledgement of
  * debt is the instrument the firm would sue on, and a signed copy that re-merged itself would show
  * the court a different balance from the one the debtor agreed to.
  */
-export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
+export function SigningPanel({
+  accountId, values, debtorName, debtorKind, claimAmount, caseNumber, onEmail,
+}: {
   accountId: string
   /** The merge values for this account, resolved by the page. Same ones the composer uses. */
   values: Record<string, string>
@@ -39,13 +55,42 @@ export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
    * number -- asking both makes the form read as something nobody looked at.
    */
   debtorKind: 'individual' | 'company'
+  /**
+   * THE CLAIM THE ACKNOWLEDGEMENT STATES, which decides which of the two item 4(a) bands applies.
+   *
+   * Off the ledger, like every other figure on this screen -- it is the same balance the document
+   * itself quotes, so the fee and the instrument cannot disagree about what is owed. Null where
+   * the statement has not loaded; then nothing is charged and the panel says so, because a band
+   * guessed at is a fee the firm cannot defend.
+   */
+  claimAmount: number | null
+  /** Raptor's own reference, for the covering email. See CLAUDE.md on which of the three it is. */
+  caseNumber: string | null
+  /** Where the email would go, so the button can say whether there is anywhere to send it. */
+  /** Reserved for the composer's own address line; kept so the panel's props name the recipient. */
+  debtorEmail?: string | null
+  /**
+   * HAND THE COVERING EMAIL TO THE PAGE'S OWN COMPOSER.
+   *
+   * Not a second compose box in here. The account's composer already knows the mailbox, the
+   * recipients, the signature, the attachment limit and how to record a sent message against the
+   * account -- a box of our own would be a second set of all of it, and the one that charged item
+   * 1(a) would be whichever got remembered.
+   */
+  onEmail: (message: { subject: string; body: string; appendHtml: string; note: string }) => void
 }) {
   const [rows, setRows] = useState<Awaited<ReturnType<typeof listSigningRequests>> | null>(null)
   const [choosing, setChoosing] = useState(false)
   const [letters, setLetters] = useState<LibraryTemplate[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [made, setMade] = useState<{ title: string; url: string } | null>(null)
+  const [made, setMade] = useState<{
+    title: string
+    url: string
+    /** What item 4(a) earned, or null where there was no claim figure to band it on. */
+    fee: Awaited<ReturnType<typeof chargeAcknowledgementOfDebt>>
+    claimAmount: number | null
+  } | null>(null)
   const [copied, setCopied] = useState(false)
 
   const load = useCallback(async () => {
@@ -75,9 +120,22 @@ export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
     if (letters !== null) return
     try {
       const library = await fetchLibrary('collections')
-      /* THE SAME FILTER AttachLetter USES. A template stored as text has no blocks to freeze, and
-         a signing link built from one would open on an empty sheet. */
-      setLetters(library.filter((r) => r.kind === 'letter' && r.format === 'document' && r.active))
+      /*
+       * THE SAME FILTER AttachLetter USES, AND TWO MORE. A template stored as text has no blocks
+       * to freeze, and a signing link built from one would open on an empty sheet.
+       *
+       * ONLY THE ACKNOWLEDGEMENT OF DEBT. See isSignable, which carries the firm's words: "the
+       * only document, and I repeat myself, is the acknowledgement of debt that can be signed
+       * within the debtor's pane. All of the other ones are not in." The picker offered the whole
+       * collections library -- a section 129, a final notice, a listing notice -- each of which a
+       * debtor could then have put their signature on, which means nothing.
+       *
+       * AND ONLY THE HALF WRITTEN FOR THIS DEBTOR. The library is written twice all the way down;
+       * offering a company's acknowledgement on a person's file is the choice between two rows
+       * whose names differ by one word in brackets. Anything written for either side still shows.
+       */
+      setLetters(library.filter((r) => r.kind === 'letter' && r.format === 'document' && r.active
+        && isSignable(r) && (r.audience === null || r.audience === debtorKind)))
     } catch (e) {
       setLetters([])
       setError(e instanceof Error ? e.message : String(e))
@@ -122,9 +180,39 @@ export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
         blanks,
         signerName: debtorName,
       })
-      setMade({ title: template.name, url: signingLink(token, window.location.origin) })
+      const url = signingLink(token, window.location.origin)
+      /*
+       * THE FEE, RAISED ON ISSUE AND BEFORE THE COMPOSER OPENS.
+       *
+       * Item 4(a), banded on the claim -- see chargeAcknowledgementOfDebt for the firm's words and
+       * for why the band comes from the figure on the document rather than from the account's
+       * capital. It never throws: the document exists and the link is real either way.
+       *
+       * REPORTED EITHER WAY, which is why the result is kept. A cap can leave nothing to charge,
+       * and "issued, nothing charged" is a sentence somebody needs to be able to read off the
+       * screen rather than discover on a statement at month end.
+       */
+      const fee = claimAmount === null ? null : await chargeAcknowledgementOfDebt({
+        accountId, claimAmount,
+      })
+      setMade({ title: template.name, url, fee, claimAmount })
       setChoosing(false)
       setCopied(false)
+      /*
+       * AND STRAIGHT INTO THE COMPOSER, because sending it is the point.
+       *
+       * THE FIRM: "my instruction was you have to send it from email." The panel used to stop at a
+       * link on the screen and leave the sending to whoever remembered -- which on their first run
+       * meant a signing request nobody ever sent. The box opens prefilled and is still a box: the
+       * address, the wording and the button can all be changed before it goes, and closing it
+       * leaves the request standing with its link on the screen.
+       */
+      onEmail({
+        subject: `Acknowledgement of debt${caseNumber ? ` - ${caseNumber}` : ''}`,
+        body: signingEmailBody(debtorName, caseNumber),
+        appendHtml: signingButtonHtml(url),
+        note: 'The button in this message opens the acknowledgement of debt for signature.',
+      })
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -147,17 +235,34 @@ export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
   return (
     <Card>
       <CardHeader title="Signing"
-        subtitle="Send a document out to be signed online. Anyone with the link can open it." />
+        subtitle="Email the acknowledgement of debt out to be signed. Anyone with the link can open it." />
 
       <button type="button" onClick={() => void openPicker()}
         className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg
           border border-slate-200 text-slate-700 hover:bg-slate-50">
-        <PenLine size={12} /> Send for signature
+        <PenLine size={12} /> Send the acknowledgement of debt
       </button>
 
       {made && (
         <div className="mt-3 rounded-lg border border-[#c9a052] bg-gold-50 px-3 py-2.5">
           <p className="text-xs font-medium text-slate-700">{made.title} is ready to sign.</p>
+          {/*
+            WHAT IT EARNED, said on the screen where it was raised.
+
+            A fee a debtor will be asked for should be visible to the person who caused it at the
+            moment they caused it -- and the three sentences are three different facts, not one
+            with hedging: it charged, a cap left nothing, or there was no claim figure to band it
+            on. The last one is the firm's to notice: it means the statement had not loaded, and
+            the fee has to be raised by hand.
+          */}
+          <p className="mt-1 text-[11px] text-slate-500">
+            {made.fee && made.fee.exclVat > 0
+              ? `Charged ${rand(made.fee.exclVat)} under item 4(a), on a claim of ${rand(made.claimAmount ?? 0)}.`
+              : made.fee
+                ? 'Nothing was charged under item 4(a) — a cap left no room on this account.'
+                : 'Nothing was charged under item 4(a): the balance had not loaded, so the band '
+                  + 'could not be decided. Raise it by hand.'}
+          </p>
           <p className="mt-1 text-[11px] text-slate-500 break-all select-all">{made.url}</p>
           <button type="button" onClick={() => void copy(made.url)}
             className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
@@ -199,8 +304,13 @@ export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
           )}
           {letters?.length === 0 && (
             <p className="text-sm text-slate-500">
-              There are no letters in the library yet. An acknowledgement of debt is seeded by
-              scripts/letters/seed-aod.sql.
+              {/* NAMED, because the list is now narrow on purpose and an empty one would otherwise
+                  read as a broken library. Only the acknowledgement of debt is ever offered here
+                  -- see isSignable -- so the thing that is missing is the acknowledgement of debt
+                  written for {debtorKind === 'company' ? 'a company' : 'a person'}. */}
+              There is no acknowledgement of debt in the library for
+              {debtorKind === 'company' ? ' a company' : ' a person'} yet. One is seeded by
+              scripts/letters/seed-aod.sql. Nothing else is signed from a debtor&rsquo;s file.
             </p>
           )}
           <div className="space-y-2">
@@ -242,6 +352,9 @@ export function SigningPanel({ accountId, values, debtorName, debtorKind }: {
     </Card>
   )
 }
+
+/** Rands, the way every other figure on this screen is written. */
+const rand = (n: number) => `R${n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 /** What a row says. Kept out of the markup so the four states read as one list. */
 function stateWords(r: { state: SigningState; signedAt: string | null; signedName: string | null }): string {

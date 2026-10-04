@@ -15,7 +15,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { isCurrentState, railEvents, workflowHeadline, workflowStory } from '../../src/lib/workflowStory.ts'
+import { workflowHeadline, workflowStory } from '../../src/lib/workflowStory.ts'
 
 let pass = 0
 const failures = []
@@ -180,129 +180,68 @@ ok('...and the strip from the headline', /workflowHeadline\(runs\)/.test(panel))
 ok('...under the firm’s own heading', /Follow what is active, paused, and next/.test(panel))
 
 /*
- * THE TRACK IS DRAWN ONCE PER RUN, NOT ONCE PER EVENT. A section 129 started, paused and resumed
- * is three rows; eleven dots three times is the wall of steps this redesign exists to stop being.
- * Only the card that IS the run's state today carries the track.
+ * THE PANE IS ONE ROW PER RUN, GROUPED BY STATE -- not one row per event on a dated rail.
+ *
+ * THE FIRM: "the current workflow should be on top. And then the workflow queued, or waiting,
+ * right below that. And then other workflows that have been completed, chronological order below
+ * that -- from the newest to the oldest going down. Also, that's really bulky and big. Can we make
+ * it smaller so you don't have to scroll all the way down?"
+ *
+ * THE ORDER ITSELF IS HELD IN check-workflow-groups.mjs, which can import it. What is asserted
+ * here is that the pane draws THOSE lists and not a stream of its own -- the failure this guards
+ * against is the two coming back: a grouped pane plus a rail saying the same thing twice.
  */
-ok('only the current-state card carries the track',
-  /\{latest && run && run\.steps\.length > 0 && <RunBlock/.test(panel))
-/* AND A RUN WITH NO STEPS DRAWS NOTHING BUT ITS CARD. The handover on an imported account is a
-   row with no steps -- the sequence was written after the account arrived -- and the block under
-   it read "Every step (0)" over an empty track, which is a control that opens nothing. */
-ok('...and a run with no steps draws no track at all', /run\.steps\.length > 0 && <RunBlock/.test(panel))
-/* DECIDED BY ONE FUNCTION, WHICH NOW LIVES BESIDE THE STORY rather than inside the panel --
-   railEvents has to ask the same question, and a rule a check cannot import is a rule that
-   drifts. The panel imports it. */
-ok('...decided by one function', /export function isCurrentState/.test(storyLib))
-ok('...and the panel asks that one', /isCurrentState\(run, event\)/.test(panel)
-  && /isCurrentState[\s\S]{0,120}?from '\.\.\/\.\.\/lib\/workflowStory\.ts'/.test(panel))
-/*
- * AND THAT CARD IS TITLED WITH THE RUN, not the event, or it says the state twice — "Section 129
- * paused" beside a chip reading "Paused", which is what the first build did.
- */
-ok('the live card is titled with the run and chipped with the state',
-  /\{latest && run \? run\.workflowName : event\.title\}/.test(panel))
+ok('the pane draws the three groups', /const groups = groupRuns\(runs\)/.test(panel))
+ok('...in the firm’s order',
+  panel.indexOf('GROUP_HEADINGS.running') < panel.indexOf('GROUP_HEADINGS.waiting')
+  && panel.indexOf('GROUP_HEADINGS.waiting') < panel.indexOf('GROUP_HEADINGS.done'))
+/* ASSERTED PRESENT BEFORE ASSERTED IN ORDER. indexOf returns -1, so an order-only assertion passes
+   vacuously the moment the thing it orders is deleted -- see CLAUDE.md. */
+ok('...and all three are actually drawn',
+  /GROUP_HEADINGS\.running/.test(panel) && /GROUP_HEADINGS\.waiting/.test(panel)
+  && /GROUP_HEADINGS\.done/.test(panel))
+/* AND NO DATED RAIL LEFT BEHIND. The echo the firm complained about -- "it says letter of demand
+   started, but why is it necessary to have like two of these things?" -- was a property of drawing
+   one row per event, and the fold that papered over it is gone with it. */
+/* ASSERTED ON THE EXPORT, not on the word. The note left in workflowStory.ts names railEvents in
+   order to say why it is gone and why the fold must not come back, which is exactly the comment
+   this codebase wants kept -- a check that forbade the NAME would forbid the explanation. */
+ok('the folded rail is gone',
+  !/export function railEvents/.test(storyLib) && !/railEvents\(/.test(panel))
 
-/* Both halves read the SAME stream, reversed, so they cannot disagree about what happened. */
+/*
+ * ONLY A LIVE RUN CARRIES ITS TRACK. Eleven dots and a step detail under a sequence that ended in
+ * March is most of the bulk the firm asked to lose, and nothing on it can be acted on.
+ */
+ok('the track is drawn only on a live run', /\{live && run\.steps\.length > 0 && <RunBlock/.test(panel))
+/* AND A RUN WITH NO STEPS DRAWS NO TRACK. The handover on an imported account is a row with no
+   steps -- the sequence was written after the account arrived -- and the block under it read
+   "Every step (0)" over an empty track, which is a control that opens nothing. */
+ok('...and a run with no steps draws none at all', /run\.steps\.length > 0 && <RunBlock/.test(panel))
+/* A COMPLETED ROW IS STILL DATED, by the last thing that happened on it -- there is no ended_on
+   column, and "Finished" with no date is a row nobody can place. */
+ok('a completed row says when it ended', /lastActivityOn\(run\)/.test(panel))
+
+/* Both the headline and the history read the SAME stream, so they cannot disagree. */
 ok('the history is the same stream, oldest first', /\[\.\.\.story\]\.reverse\(\)/.test(panel))
 ok('...under the firm’s own heading', /Past workflow history/.test(panel))
-
-/* ------------------------------------------------ the rail does not say it twice */
-
-/*
- * THE FIRM, READING THE PANE BACK: "the order of how things lie here doesn't make sense to me.
- * Like, it says letter of demand started, but why is it necessary to have like two of these
- * things? Because it's already there."
- *
- * EVERYTHING ON THEIR ACCOUNT HAPPENED ON ONE DAY, so the rail drew a bare "Section 129 / letter
- * of demand started" row and, below it, the Section 129 card with a Paused chip whose own second
- * line reads "Started 27 Sep 2026 · paused since 27 Sep 2026". The same fact in the same date
- * group, twice. The Handover did it too.
- */
-/* SENT THE SAME DAY THEY STARTED, which is what makes this the firm's account: everything on it
-   happened on 27 September. lastTouched dates an ending by its newest sent step, so a fixture
-   whose step went out a week before the run began would date the ending into that week and the
-   fold would correctly leave the start alone -- proving nothing. */
-const onDay = (id) => step({ id, sentAt: '2026-09-27T18:30:00Z', dueOn: '2026-09-27' })
-const oneDayRuns = [
-  { id: 'r-promise', workflowName: 'Promise to pay', state: 'running', leftReason: null,
-    startedOn: '2026-09-27', dayUnit: 'calendar', steps: [onDay('a')], holds: [] },
-  { id: 'r-129', workflowName: 'Section 129', state: 'held', leftReason: null,
-    startedOn: '2026-09-27', dayUnit: 'business', steps: [onDay('b')],
-    holds: [{ id: 'h1', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-09-27', endedOn: null }] },
-  { id: 'r-hand', workflowName: 'Handover', state: 'finished', leftReason: null,
-    startedOn: '2026-09-27', dayUnit: 'calendar', steps: [onDay('c')], holds: [] },
-]
-const wholeStory = workflowStory(oneDayRuns)
-const rail = railEvents(wholeStory, oneDayRuns)
-/* THE PREMISE FIRST: the stream really does carry the echoes, or the fold below proves nothing. */
-check('the stream carries a start for every run', wholeStory.filter((e) => e.kind === 'started').length, 3)
-check('...five rows in all', wholeStory.length, 5)
-/* AND THE RAIL DRAWS THREE: one card per sequence, and no bare "started" beside any of them. */
-check('the rail folds the rows that echo the card beside them', rail.length, 3)
-check('...leaving one row per run',
-  rail.map((e) => e.runId).sort().join(','), 'r-129,r-hand,r-promise')
-/*
- * AND EVERY ROW LEFT IS A CARD. This is the assertion that says the fold took the right ones: a
- * fold that removed a run's CURRENT state would make the sequence vanish from the pane, track,
- * held steps, Send it now button and all.
- */
-for (const e of rail) {
-  const run = oneDayRuns.find((r) => r.id === e.runId)
-  ok(`${e.runId} is still on the rail as its current state`, isCurrentState(run, e))
-}
-/*
- * ONLY THE SAME DAY. A sequence that started in March and paused in May is two facts on two days
- * and both belong on the rail -- that is the shape the firm drew, and folding it would lose the
- * day the sequence began.
- */
-const spread = [{
-  ...oneDayRuns[1], startedOn: '2026-03-02',
-  holds: [{ id: 'h2', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-05-11', endedOn: null }],
-}]
-const apart = railEvents(workflowStory(spread), spread)
-check('a start on another day stays on the rail', apart.length, 2)
-check('...with the pause above it', apart.map((e) => e.kind).join(','), 'paused,started')
-/*
- * AND NOTHING BUT A START IS EVER FOLDED. A pause and a resume on one day are two real facts about
- * an account -- the firm's own case, where an arrangement is agreed and then cancelled the same
- * afternoon -- and collapsing those would hide why a sequence moved.
- */
-const oneDayResume = [{
-  ...oneDayRuns[1], state: 'running', startedOn: '2026-03-02',
-  holds: [{ id: 'h3', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-05-11', endedOn: '2026-05-11' }],
-}]
-const resumedRail = railEvents(workflowStory(oneDayResume), oneDayResume)
-check('a pause and a resume on one day are both kept',
-  resumedRail.map((e) => e.kind).join(','), 'resumed,paused,started')
-
 /*
  * THE HISTORY IS NOT FOLDED AND MUST NOT BE. It is a log, one line per event, collapsed until
  * somebody opens it -- and "started, then paused" on one day is exactly what a log is for.
- */
-/* ASSERTED ON WHAT IS HANDED TO IT, not on what it calls the prop inside itself -- the component
-   names it `story` either way, so reading its body cannot tell the two streams apart. */
-ok('the history below is handed the unfolded stream', /<PastHistory story=\{story\}/.test(panel))
-ok('...and the rail draws the folded one', /\{rail\.map\(\(e\) =>/.test(panel))
-ok('...which are two different lists', /const rail = railEvents\(story, runs\)/.test(panel))
-
-/*
- * AND THE ROW A RUN STANDS ON IS NEVER FOLDED, WHATEVER SHARES ITS DAY.
  *
- * NOT REACHABLE FROM CONSISTENT DATA, which is why it is written down. A `running` run whose
- * current event is its start has no other event that day -- an open hold would make it `held`. But
- * a half-applied resume leaves exactly this row behind: state running, hold still open. Folded
- * there, the sequence would vanish from the pane -- track, held steps, Send it now and all -- on
- * the one account where somebody is looking for it.
+ * ASSERTED ON WHAT IS HANDED TO IT rather than on what it calls the prop inside itself.
  */
-const halfResumed = [{
-  id: 'r-odd', workflowName: 'Section 129', state: 'running', leftReason: null,
-  startedOn: '2026-09-27', dayUnit: 'business', steps: [onDay('d')],
+ok('the history below is handed the whole stream', /<PastHistory story=\{story\}/.test(panel))
+const twoOnADay = workflowStory([{
+  id: 'r-odd', workflowName: 'Section 129', state: 'held', leftReason: null,
+  startedOn: '2026-09-27', dayUnit: 'business',
+  steps: [step({ id: 'd', sentAt: '2026-09-27T18:30:00Z', dueOn: '2026-09-27' })],
   holds: [{ id: 'h4', cause: 'promise', reason: 'A promise to pay was made', startedOn: '2026-09-27', endedOn: null }],
-}]
-const oddRail = railEvents(workflowStory(halfResumed), halfResumed)
-ok('a run whose current state IS its start keeps that row',
-  oddRail.some((e) => e.kind === 'started' && isCurrentState(halfResumed[0], e)))
+}])
+/* NEWEST FIRST and the start read before the pause it caused -- see the tiebreak above: a live
+   sequence is read before the thing that stopped it, and a start is what makes a pause possible. */
+check('a start and a pause on one day are both in the stream',
+  twoOnADay.map((e) => e.kind).join(','), 'started,paused')
 
 /* ------------------------------------------------ ends it vs pauses it */
 
@@ -357,7 +296,7 @@ ok('the runner’s accepted-name list is left alone', /export const EXIT_EVENTS/
 /* THE WHOLE CONDITION, FROM ITS OPENING BRACE. Matched on the tail alone, the assertion passes
    on `{false && latest && run && ...}` -- a guard switched off and a check that never noticed. */
 ok('a run still being dated says so rather than drawing nothing',
-  /\{latest && run && run\.steps\.length === 0 && run\.state === 'running' && \(/.test(panel))
+  /\{live && run\.steps\.length === 0 && run\.state === 'running' && \(/.test(panel))
 ok('...in words that say what is happening', /Working out the dates/.test(panel))
 ok('...and a run with steps still draws its track',
   /run\.steps\.length > 0 && <RunBlock/.test(panel))

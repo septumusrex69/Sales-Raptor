@@ -11,9 +11,10 @@ import { NOT_SERVED_REASONS, RUN_STEP_WORDS, needsAttention, shapeOf, stepInFocu
 import { dayLabel, dayNumberOn } from '../../lib/workflowBuilder.ts'
 import { shortDate } from '../../lib/dateLabels.ts'
 import {
-  isCurrentState, railEvents, workflowHeadline, workflowStory,
+  workflowHeadline, workflowStory,
   type StoryEvent, type StoryKind, type WorkflowHeadline,
 } from '../../lib/workflowStory.ts'
+import { GROUP_HEADINGS, groupRuns, lastActivityOn } from '../../lib/workflowRunGroups.ts'
 import { todayIso } from '../../lib/reminderTime.ts'
 import { startSentence } from '../../lib/workflowStart.ts'
 import { followerOf } from '../../lib/stepPairs.ts'
@@ -29,9 +30,21 @@ import { followerOf } from '../../lib/stepPairs.ts'
  * dropped. Given the page it keeps all three — the same component, the same container query,
  * more room. Nothing about the track changed to move house.
  *
- * RUNNING FIRST, THEN WHAT IS OVER, under headings that say which is which. A finished handover
- * and a live section 129 drawn one after another in the same weight is how somebody reads a
- * sequence that stopped in March as the one they are working today.
+ * RUNNING NOW, THEN WAITING, THEN COMPLETED NEWEST FIRST -- the firm's own order, read off their
+ * own screen: "the current workflow should be on top. And then the workflow queued, or waiting,
+ * right below that. And then other workflows that have been completed, chronological order below
+ * that, from the newest to the oldest going down. Also, that's really bulky and big -- can we make
+ * it smaller so you don't have to scroll all the way down?"
+ *
+ * SO IT IS ONE ROW PER RUN AND NOT ONE PER EVENT. The dated rail this replaced drew a row for
+ * every start, pause and resume, each in a card with a date gutter beside it -- a section 129 that
+ * had been paused and let go was three of them, and the live one sat wherever its latest event fell
+ * among a finished handover's. Grouping by state answers the question the pane is opened for and
+ * costs two thirds of its height. The event stream is kept, shut, under Past workflow history,
+ * which is where a story belongs. workflowRunGroups.ts holds the order so a check can read it.
+ *
+ * ONLY WHAT IS LIVE CARRIES ITS TRACK. A completed sequence is a line: its name, when it ended and
+ * why. Eleven dots and a step detail on a run nobody can act on was most of the bulk.
  *
  * THE HELD STEPS ARE STILL THE POINT. They are gold on the track, counted over it in words, and
  * marked on the TAB itself — because the one thing on this page that is somebody's work must not
@@ -66,12 +79,13 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, as
 }) {
   const head = workflowHeadline(runs)
   /*
-   * TWO READINGS OF ONE STREAM. The rail draws what is happening and folds the rows that echo the
-   * card beside them; the history below is the log and keeps every event. See railEvents.
+   * THE EVENT STREAM, WHICH IS NOW ONLY THE HISTORY. The pane itself is drawn from the runs,
+   * grouped; this is the log at the bottom, one line per event. See workflowStory.
    */
   const story = workflowStory(runs)
-  const rail = railEvents(story, runs)
-  const byId = new Map(runs.map((r) => [r.id, r]))
+  /* The three lists the pane is drawn in. The story above is kept for the history at the bottom,
+     which is the one place the event stream is still the right shape. */
+  const groups = groupRuns(runs)
 
   return (
     <Card>
@@ -86,17 +100,21 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, as
       {runs.length > 0 && <Headline head={head} />}
 
       {/*
-        THE DATED RAIL. One row per thing that HAPPENED, which is not one row per run: a paused
-        section 129 and the promise that paused it are one row each on the day it happened, and
-        the same section 129 is a third row on the day it was let go. workflowStory makes that
-        stream; this draws it.
+        THE THREE GROUPS, IN THE FIRM'S ORDER. See workflowRunGroups.ts, which decides both which
+        group a run is in and how the completed ones are sorted.
+
+        A GROUP WITH NOTHING IN IT IS ABSENT, not an empty heading. "Waiting -- none" on the
+        thousands of accounts where nothing is paused is the column of dashes this pane spent a
+        redesign getting rid of.
       */}
-      {rail.length > 0 && (
-        <ol className="mt-5 space-y-4">
-          {rail.map((e) => (
-            <StoryRow key={e.id} event={e} run={byId.get(e.runId) ?? null} onSent={onChanged} />
-          ))}
-        </ol>
+      {groups.running.length > 0 && (
+        <RunGroupSection heading={GROUP_HEADINGS.running} runs={groups.running} live onSent={onChanged} />
+      )}
+      {groups.waiting.length > 0 && (
+        <RunGroupSection heading={GROUP_HEADINGS.waiting} runs={groups.waiting} live onSent={onChanged} />
+      )}
+      {groups.done.length > 0 && (
+        <RunGroupSection heading={GROUP_HEADINGS.done} runs={groups.done} live={false} onSent={onChanged} />
       )}
 
       {/*
@@ -207,75 +225,78 @@ const STORY_MARK: Record<StoryKind, { icon: typeof Play; tone: string }> = {
 }
 
 /**
- * ONE THING THAT HAPPENED: the date on the left, a mark on the line, the card on the right.
+ * ONE GROUP: its heading, then a row per run.
  *
- * THE TRACK IS ONLY ON THE CARD THAT IS STILL THE RUN'S LATEST STATE. A section 129 that was
- * started, paused and resumed is three rows, and drawing all eleven dots three times would be
- * the wall of steps this pane was redesigned to stop being. The event that IS where the run
- * stands today carries the track; the others are a line each.
+ * `live` IS A PROPERTY OF THE GROUP, NOT OF EACH ROW. Running and waiting both carry their track
+ * -- a paused sequence's steps are the thing somebody checks before letting it go -- and nothing in
+ * the completed group does. Passed down rather than worked out per run so the two cannot disagree
+ * about what is drawn under a heading.
  */
-function StoryRow({ event, run, onSent }: {
-  event: StoryEvent
-  run: AccountRun | null
+function RunGroupSection({ heading, runs, live, onSent }: {
+  heading: string
+  runs: AccountRun[]
+  live: boolean
   onSent: () => Promise<void>
 }) {
-  const mark = STORY_MARK[event.kind]
-  const latest = run !== null && isCurrentState(run, event)
   return (
-    <li className="flex gap-3">
-      <div className="w-[72px] shrink-0 pt-1 text-right sm:w-[86px]">
-        <p className="text-[11px] font-medium text-slate-600 tabular-nums">{shortDate(event.on)}</p>
-        <p className="text-[10px] text-slate-400">{weekdayOf(event.on)}</p>
-      </div>
-      <div className={`mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full border ${mark.tone}`}>
-        <mark.icon size={13} />
-      </div>
-      <div className={`min-w-0 flex-1 rounded-xl border px-4 py-3 ${
-        latest ? 'border-gold-200 bg-gold-50/40' : 'border-slate-200 bg-white'}`}>
-        {/*
-          THE CARD THAT IS THE RUN'S STATE TODAY IS TITLED WITH THE RUN, and the chip says the
-          state; every other card is titled with the EVENT. That is what the firm drew: the live
-          card reads "Section 129 / letter of demand" + Paused, and the card above it reads
-          "Section 129 resumed" with no chip at all.
+    <section className="mt-4">
+      <Heading>{heading}</Heading>
+      <ul className="mt-2 space-y-2">
+        {runs.map((r) => <RunCard key={r.id} run={r} live={live} onSent={onSent} />)}
+      </ul>
+    </section>
+  )
+}
 
-          Titled by the event, the live card said it twice -- "Section 129 paused" beside a chip
-          reading "Paused".
-        */}
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[14px] font-semibold text-slate-800">
-            {latest && run ? run.workflowName : event.title}
-          </p>
-          {latest && run && <StateChip state={run.state} />}
-        </div>
-        {event.detail && (
-          <p className="mt-1 text-[12px] leading-snug text-slate-600">{event.detail}</p>
+/**
+ * ONE RUN: its name, its state, and -- while it is live -- its track.
+ *
+ * THE DATE GUTTER IS GONE. Every row used to carry a 86px column with a date and a weekday in it,
+ * which on a narrow account pane was a tenth of the width spent on the one fact the card already
+ * says ("Started 4 Mar"). The firm asked for smaller, and this was the cheapest third of it.
+ *
+ * A COMPLETED ROW SAYS WHEN AND WHY, in one line. "Ended 12 Jun · promise to pay" is the whole of
+ * what anybody reads a finished sequence for; the steps behind it are in the history below and on
+ * the timeline.
+ */
+function RunCard({ run, live, onSent }: {
+  run: AccountRun
+  live: boolean
+  onSent: () => Promise<void>
+}) {
+  return (
+    <li className={`rounded-xl border px-3.5 py-2.5 ${
+      live ? 'border-gold-200 bg-gold-50/40' : 'border-slate-200 bg-white'}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[13px] font-semibold text-slate-800">{run.workflowName}</p>
+        <StateChip state={run.state} />
+        {!live && (
+          <span className="text-[11px] text-slate-500 tabular-nums">
+            {run.state === 'left' ? 'Ended' : 'Finished'} {shortDate(lastActivityOn(run))}
+            {/* THE REASON IT LEFT, in the words the trigger wrote -- a promise, a dispute, payment
+                in full. The three things that take an account out of a workflow are the firm's own
+                list and each of them is why nothing more went out. */}
+            {run.state === 'left' && run.leftReason ? ` · ${run.leftReason}` : ''}
+          </span>
         )}
-        {/*
-        A RUN WITH NO STEPS DRAWS NOTHING BUT ITS CARD. The handover on an imported account is a
-        row with no steps on it -- the sequence was written after the account arrived -- and the
-        block under it read "Every step (0)" over an empty track, which is a control that opens
-        nothing. Said by the card's own title and state instead.
-      */}
-        {/*
-          EXCEPT WHILE IT IS BEING DATED, WHICH IS A DIFFERENT THING AND LOOKS THE SAME.
-          
-          A run is created by a database trigger the moment an arrangement is agreed, and it
-          arrives with NO STEPS: dating them needs the working-day calendar, which lives in the
-          app. The app asks for it immediately, so the gap is a few seconds -- and the firm opened
-          the tab inside it. What they saw was a card headed "Promise to pay · Active" with
-          nothing at all under it, which reads as a workflow that has started and does nothing.
-          
-          SAID RATHER THAN LEFT BLANK, and only for a run that is still going: a finished or left
-          run with no steps is the imported-handover case above, where there is genuinely nothing
-          to draw and nothing coming.
-        */}
-        {latest && run && run.steps.length === 0 && run.state === 'running' && (
-          <p className="mt-2 text-[12px] leading-snug text-slate-500">
-            Working out the dates. The steps appear here in a moment.
-          </p>
-        )}
-      {latest && run && run.steps.length > 0 && <RunBlock run={run} onSent={onSent} />}
       </div>
+      {/*
+        A RUN WITH NO STEPS, WHILE IT IS BEING DATED.
+
+        A run is created by a database trigger the moment an arrangement is agreed, and it arrives
+        with NO STEPS: dating them needs the working-day calendar, which lives in the app. The gap
+        is a few seconds -- and the firm opened the tab inside it, and saw a card headed "Promise to
+        pay · Active" with nothing under it, which reads as a workflow that does nothing.
+
+        ONLY WHILE IT IS RUNNING. A finished run with no steps is the imported handover -- the
+        sequence was written after the account arrived -- where there is genuinely nothing coming.
+      */}
+      {live && run.steps.length === 0 && run.state === 'running' && (
+        <p className="mt-1.5 text-[12px] leading-snug text-slate-500">
+          Working out the dates. The steps appear here in a moment.
+        </p>
+      )}
+      {live && run.steps.length > 0 && <RunBlock run={run} onSent={onSent} />}
     </li>
   )
 }
@@ -347,12 +368,6 @@ function Heading({ children }: { children: React.ReactNode }) {
   return (
     <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{children}</h4>
   )
-}
-
-/** "Thu", off a yyyy-mm-dd, without dragging a date library in for three letters. */
-function weekdayOf(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] ?? ''
 }
 
 /**

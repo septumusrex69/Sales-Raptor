@@ -92,6 +92,23 @@ export interface ChargeInput {
   /** Defaults to now. Passed in by tests. */
   at?: Date
   /**
+   * THE SIZE OF THE DEBT, for the one item whose price depends on it.
+   *
+   * Item 4(a) -- an acknowledgement of debt -- is priced by the Magistrates' Courts Rules in two
+   * bands: R161 while the claim is under R50,000 and R209 from R50,000 up, both excluding VAT.
+   * THE FIRM: "the two different fees that I added -- it depends on the amount, it's below 50,000
+   * and over 50,000 for the claim amount."
+   *
+   * PASSED IN RATHER THAN READ OFF THE ACCOUNT, and that is deliberate. The engine already knows
+   * the account's CAPITAL, which is close enough to be tempting and is not the same number: the
+   * Rules band on the claim, and what the firm is suing for is the balance the acknowledgement
+   * itself states. The caller is holding that figure -- it is the one on the document the debtor
+   * is about to sign -- so it comes from there, and the fee cannot disagree with the instrument.
+   *
+   * ABSENT ON EVERY OTHER ITEM. See itemAmountFor: nothing else looks at it.
+   */
+  debtAmount?: number
+  /**
    * WHO RAISED IT: 'raptor' for a person doing something, 'workflow' for the sweep.
    *
    * Defaulted rather than required, because every caller but one is a person. The runner passes
@@ -157,8 +174,8 @@ export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<
   const closed = isWrittenOff((acct as { status?: string | null } | null)?.status)
 
   const quantity = Math.max(1, Math.floor(input.quantity ?? 1))
-  const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule)
-  const asked = itemAmountFor(input.itemId, quantity, spentOnItem, schedule)
+  const remainingOnItem = itemTotalRemaining(input.itemId, spentOnItem, schedule, input.debtAmount)
+  const asked = itemAmountFor(input.itemId, quantity, spentOnItem, schedule, input.debtAmount)
 
   /*
    * The monthly allowance, for the two items that have one.

@@ -489,8 +489,41 @@ export function settlementReceiptFee(
  * The boundary is confirmed: exactly R50,000 falls in the higher band.
  */
 export function acknowledgementOfDebtFee(debtAmount: number): number {
-  const band = ACKNOWLEDGEMENT_OF_DEBT_BANDS.find((b) => b.below !== undefined && debtAmount < b.below)
-  return band?.amount ?? ACKNOWLEDGEMENT_OF_DEBT_BANDS[ACKNOWLEDGEMENT_OF_DEBT_BANDS.length - 1].amount
+  return bandAmount(ACKNOWLEDGEMENT_OF_DEBT_BANDS, debtAmount)
+}
+
+/**
+ * WHICH BAND A DEBT FALLS IN, FOR ANY BANDED ITEM.
+ *
+ * Pulled out of acknowledgementOfDebtFee so that the arithmetic reading `below` lives in ONE
+ * place: the charge engine now has to resolve a banded item too, and a second copy of this
+ * comparison is a second chance to get the boundary wrong. Exactly R50,000 falls in the higher
+ * band, which is `<` and not `<=`, and is the whole of what there is to get wrong.
+ *
+ * THE LAST BAND HAS NO CEILING by construction -- see FeeBand -- so it is the answer whenever
+ * nothing matched rather than a default written out here.
+ */
+export function bandAmount(bands: FeeBand[], debtAmount: number): number {
+  const band = bands.find((b) => b.below !== undefined && debtAmount < b.below)
+  return band?.amount ?? bands[bands.length - 1].amount
+}
+
+/**
+ * WHAT ONE UNIT OF AN ITEM COSTS, WHICH FOR TWO ITEMS IS NOT A SINGLE FIGURE.
+ *
+ * Items 1(b) and 4(a) carry `amount: null` because the Magistrates' Courts Rules price them, not
+ * this Annexure. 4(a) is BANDED by the size of the debt, so it has an answer the moment somebody
+ * says what the debt is -- and before this existed it had none, which meant an acknowledgement of
+ * debt went out and the ledger recorded R0,00 for it.
+ *
+ * NULL RATHER THAN ZERO where there is still no answer. A zero reads as "this action is free",
+ * which for item 1(b) -- a registered letter under section 57 -- is exactly the wrong thing for a
+ * statement to say. The caller has to decide, which is what itemAmountFor then does.
+ */
+export function unitAmountFor(item: AnnexureBItem, debtAmount?: number): number | null {
+  if (item.amount !== null) return item.amount
+  if (item.bandedAmounts && debtAmount !== undefined) return bandAmount(item.bandedAmounts, debtAmount)
+  return null
 }
 
 export function annexureBItem(id: AnnexureBItemId, schedule: AnnexureBSchedule = ANNEXURE_B_2026): AnnexureBItem | undefined {
@@ -584,22 +617,33 @@ export function itemAmountFor(
   quantity: number,
   alreadyChargedUnderItem: number,
   schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+  /**
+   * The size of the debt, for the one item whose price depends on it.
+   *
+   * OPTIONAL, AND IGNORED BY EVERY OTHER ITEM, so the forty existing callers are unchanged. Only
+   * item 4(a) reads it, and without it 4(a) still comes out at nought -- which is the honest
+   * answer to "what does an acknowledgement of debt cost" asked without saying of what.
+   */
+  debtAmount?: number,
 ): number {
   const item = schedule.items.find((i) => i.id === itemId)
-  if (!item || item.amount === null) return 0
+  const unit = item ? unitAmountFor(item, debtAmount) : null
+  if (!item || unit === null) return 0
   const units = Math.max(1, Math.floor(quantity))
-  const asked = roundToCents(item.amount * units)
+  const asked = roundToCents(unit * units)
   if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return asked
-  return roundToCents(Math.max(0, Math.min(asked, item.amount - alreadyChargedUnderItem)))
+  return roundToCents(Math.max(0, Math.min(asked, unit - alreadyChargedUnderItem)))
 }
 
 export function itemTotalRemaining(
   itemId: string,
   alreadyChargedUnderItem: number,
   schedule: AnnexureBSchedule = ANNEXURE_B_2026,
+  debtAmount?: number,
 ): number {
   const item = schedule.items.find((i) => i.id === itemId)
-  if (!item || item.amount === null) return 0
-  if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return item.amount
-  return roundToCents(Math.max(0, item.amount - alreadyChargedUnderItem))
+  const unit = item ? unitAmountFor(item, debtAmount) : null
+  if (!item || unit === null) return 0
+  if (!item.isTotal || !ENFORCE_ITEM_TOTALS) return unit
+  return roundToCents(Math.max(0, unit - alreadyChargedUnderItem))
 }

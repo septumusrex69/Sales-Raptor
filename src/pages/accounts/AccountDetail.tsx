@@ -198,6 +198,16 @@ export function AccountDetail() {
    */
   const [forwardOf, setForwardOf] = useState<AccountEmail | null>(null)
   /**
+   * THE COVERING EMAIL FOR A DOCUMENT JUST SENT FOR SIGNATURE.
+   *
+   * THE FIRM: "my instruction was you have to send it from email." Shaped like `simulation` below
+   * and for the same reason: the composer is the one place that knows the mailbox, the recipients
+   * and how a sent message is recorded against the account, so the panel hands it a message rather
+   * than growing a send button of its own. `appendHtml` is the big button -- see signingRules.ts.
+   */
+  const [signingEmail, setSigningEmail] = useState<
+    { subject: string; body: string; appendHtml: string; note: string } | null>(null)
+  /**
    * A PAYMENT SIMULATION ON ITS WAY OUT, where the calculator has just drawn one.
    *
    * THE FIRM: "if you click on that, it sends it to the debtor as an email and it charges it as
@@ -235,6 +245,10 @@ export function AccountDetail() {
     /* Cleared with everything else. Left behind, the next ordinary email to this debtor would
        open with a simulation attached to it -- the exact class of bug this function exists for. */
     setSimulation(null)
+    /* And the same for the signing button: an ordinary email carrying a Sign the acknowledgement
+       of debt button for a document sent an hour ago is the worst version of that bug, because the
+       link still works. */
+    setSigningEmail(null)
   }
 
   // The action bar drives the panels below it rather than opening modals of its own: "Add Note"
@@ -963,7 +977,17 @@ export function AccountDetail() {
           signing ABOUT -- an acknowledgement of debt is an admission of a balance, and whoever
           sends one has just been looking at it. */}
       <SigningPanel accountId={account.id} values={letterContext.values} debtorName={name}
-        debtorKind={account.debtorKind} />
+        debtorKind={account.debtorKind}
+        /* OFF THE LEDGER, like the balance beside it and like the figure the document itself
+           quotes -- so the item 4(a) band and the instrument cannot disagree. */
+        claimAmount={statement?.breakdown?.balance ?? null}
+        caseNumber={account.caseNumber}
+        debtorEmail={emailContact?.value ?? null}
+        onEmail={(message) => {
+          startCompose()
+          setSigningEmail(message)
+          setComposeTo(emailContact?.value ?? '')
+        }} />
     </div>
   )
   const timelinePanel = (
@@ -1987,7 +2011,9 @@ export function AccountDetail() {
           recipients={(workspace?.contacts ?? [])
             .filter((c) => c.kind === 'email' && !c.retiredAt)
             .map((c) => ({ email: c.value, label: c.label ?? undefined }))}
-          initialSubject={simulation
+          initialSubject={signingEmail
+            ? signingEmail.subject
+            : simulation
             ? simulation.subject
             : forwardOf
               ? forwardSubject(forwardOf.subject)
@@ -2000,7 +2026,9 @@ export function AccountDetail() {
            * conversation, so without the original quoted under it they are reading an answer to
            * a question they never saw.
            */
-          initialBody={simulation
+          initialBody={signingEmail
+            ? signingEmail.body
+            : simulation
             ? simulation.body
             : forwardOf
             ? forwardBody(
@@ -2016,6 +2044,10 @@ export function AccountDetail() {
             )
             : undefined}
           initialCc={composeCc}
+          /* THE BUTTON, under whatever they type. See ComposeEmailModal.appendHtml for why it
+             cannot travel in the body. */
+          appendHtml={signingEmail?.appendHtml}
+          appendNote={signingEmail?.note}
           /*
            * THE SIMULATION, ALREADY DRAWN AND ALREADY ON THE MESSAGE. It cannot come through the
            * template picker like every other attachment: a stored letter is merged against the
@@ -2035,7 +2067,9 @@ export function AccountDetail() {
            * word. The message being answered is on the page behind this modal anyway.
            */
           inReplyTo={replyTo?.messageId ?? null}
-          contextNote={simulation
+          contextNote={signingEmail
+            ? `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). The acknowledgement of debt has already been issued and charged under item 4(a); this is the covering message.`
+            : simulation
             ? `The payment simulation is attached. Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). It is a simulation, so nothing is recorded as an arrangement until you record one.`
             : `Goes out from ${mailbox ?? 'your mailbox'} and is charged R25 under item 1(a). Their reply comes back to this account on its own and is charged R13 under item 6.`}
           onClose={() => { setComposeTo(null); startCompose() }}

@@ -49,6 +49,8 @@ export function ComposeEmailModal({
   initialAttachments,
   initialMissing,
   quotedHtml,
+  appendHtml,
+  appendNote,
   contextNote,
   inReplyTo,
   initialCc,
@@ -144,6 +146,25 @@ export function ComposeEmailModal({
    * Already sanitised by the caller -- see forwardQuoteHtml.
    */
   quotedHtml?: string
+  /**
+   * MARKUP TO PUT UNDER WHAT SOMEBODY TYPES -- a button, not a quoted message.
+   *
+   * THE FIRM, of the acknowledgement of debt going out for signature: "in the link, make it nice
+   * and big, like just don't make it a link and highlight it blue -- make it like a picture, or
+   * like a button that you can see."
+   *
+   * IT CANNOT COME THROUGH `body`. The box is prose and emailBodyHtml ESCAPES it, which is a fix
+   * that stays (a debtor called "Smit & Seun" put a raw ampersand into the markup of a legal
+   * notice) -- so a table typed into the message would arrive as the text of a table.
+   *
+   * SEPARATE FROM quotedHtml although both are appended markup, because the two are different
+   * things to the person sending: one is the message being passed on and the sentence under the
+   * box says so, and this is something Raptor is adding. Sharing the prop would have the composer
+   * telling somebody their acknowledgement of debt "is included below, exactly as it was written".
+   */
+  appendHtml?: string
+  /** One line saying what was added, so nobody wonders what is going out under their words. */
+  appendNote?: string
   /**
    * The Message-ID being replied to, where this is a reply.
    *
@@ -390,7 +411,10 @@ export function ComposeEmailModal({
           /* A blank line is a paragraph and a single newline is a line -- see emailBodyHtml. It
              was one <br> for every newline, which drew a four-paragraph statutory notice as one
              unbroken block, and it did not escape what somebody typed. */
-          bodyHtml: emailBodyHtml(body) + (quotedHtml ?? ''),
+          /* The typed prose, then whatever Raptor added (a signing button), then the original on
+             a forward. In that order because the button is about the message above it and the
+             quoted history is underneath everything. */
+          bodyHtml: emailBodyHtml(body) + (appendHtml ?? '') + (quotedHtml ?? ''),
           ...(files.length > 0
             ? { attachments: files.map(({ filename, contentType, content }) => ({ filename, contentType, content })) }
             : {}),
@@ -543,6 +567,11 @@ export function ComposeEmailModal({
           <p className="-mt-2 mb-3 text-xs text-slate-500">
             The original message is included below, exactly as it was written.
           </p>
+        )}
+        {/* SAID FOR THE SAME REASON the quoted original is said: something is going out under
+            what they typed, and nobody should have to send one to find out what. */}
+        {appendHtml && appendNote && (
+          <p className="-mt-2 mb-3 text-xs text-slate-500">{appendNote}</p>
         )}
 
         {/*
