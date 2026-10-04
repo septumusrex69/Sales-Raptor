@@ -45,7 +45,34 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(() => ({ themeId, theme: themeById(themeId), setTheme }), [themeId, setTheme])
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  return (
+    <ThemeContext.Provider value={value}>
+      {/*
+       * GLASS MOUNTAIN: a real DOM node, not a CSS pseudo-element or a background on html.
+       *
+       * backdrop-filter blurs the GPU compositor layer BEHIND the element. A z-index:-1
+       * pseudo-element or background-attachment:fixed on html both end up below the root paint
+       * layer and are unreachable by any child's backdrop-filter. A position:fixed div that is a
+       * DOM sibling rendered BEFORE the app content is a separate compositor layer at z-index 0;
+       * every backdrop-filter element above it in the DOM (sidebar, topbar, cards) can blur it.
+       */}
+      {themeId === 'glass-mountain' && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 0,
+            backgroundImage: "linear-gradient(rgba(5,18,27,0.24), rgba(5,18,27,0.42)), url('/brand/glass-mountain-bg.jpg')",
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      {children}
+    </ThemeContext.Provider>
+  )
 }
 
 export function useTheme(): ThemeContextValue {

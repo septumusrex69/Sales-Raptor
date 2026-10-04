@@ -137,25 +137,23 @@ html[data-theme='glass-mountain'] {
 
 /* ── Full-viewport mountain background ───────────────────────────────────── */
 /*
- * Background sits on <html> with background-attachment:fixed. <html> itself has
- * no overflow container above it, so fixed attachment works correctly and stays
- * pinned while inner scroll areas (app-main: overflow-y:auto) scroll over it.
- *
- * Crucially, backdrop-filter on child elements (sidebar, topbar, cards) can
- * only blur what is in the same compositor layer — a z-index:-1 pseudo-element
- * on <html> is below the root paint layer and unreachable. Painting directly on
- * <html> puts the image in the layer every backdrop-filter draws from.
+ * The background is a real DOM node rendered by ThemeProvider — see ThemeContext.tsx.
+ * CSS approaches (html::before z-index:-1, background-attachment:fixed on html) both
+ * end up below the root paint layer and are invisible to backdrop-filter. A
+ * position:fixed div that is the first sibling of the app content sits at z-index 0
+ * as its own compositor layer; every backdrop-filter above it (sidebar, cards, topbar)
+ * can sample and blur it.
  */
-html[data-theme='glass-mountain'] {
-  background:
-    linear-gradient(rgba(5, 18, 27, 0.24), rgba(5, 18, 27, 0.42)),
-    url('/brand/glass-mountain-bg.jpg') center / cover no-repeat fixed;
-  min-height: 100vh;
-}
-
+html[data-theme='glass-mountain'],
 html[data-theme='glass-mountain'] body {
   background: transparent;
   min-height: 100vh;
+}
+
+/* App content sits above the z-index:0 background div */
+html[data-theme='glass-mountain'] #root {
+  position: relative;
+  z-index: 1;
 }
 
 /* ── Make the entire app shell transparent ───────────────────────────────── */
