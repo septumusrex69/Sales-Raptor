@@ -232,11 +232,48 @@ html[data-theme='desert'] .app-hero {
  * The company dashboard's hero, which is the one screen with a photograph of its own.
  *
  * ONLY THE POSITION IS SET HERE; the image, the ground and the wash all arrive as tokens above.
- * `center 72%` puts the dune crest and the sun in the lower third of a tall panel, which is where
- * the figures are not.
+ *
+ * THE CROP IS THE WHOLE PROBLEM, AND IT IS ARITHMETIC RATHER THAN TASTE. The photograph is 3:1
+ * (2172x724) and the panel is close to 2:1, so `cover` scales to fill the height and throws away
+ * about a third of the width. Where that third is taken from is this declaration.
+ *
+ * THE FIRM: "move the picture a little bit more right and up, so we see more of the desert on the
+ * left and then the wind that takes the sands on the right." Moving the PICTURE right means
+ * showing more of its LEFT edge, which is a position below 50%; moving it up means showing more of
+ * its BOTTOM, which is a position above 50%.
+ *
+ * 38% RATHER THAN FURTHER. The sun and the blowing sand sit at about 78% across the frame, and the
+ * window is only 63% of it wide — below about 35% the sun falls off the right-hand edge, and the
+ * firm asked for both halves. 38% is as far left as the picture goes while the wind is still in it.
+ *
+ * 90% RATHER THAN 100%, because the very bottom of the frame is the near dune in shadow: anchored
+ * hard to the floor the panel fills its lower half with unlit sand, and the ridge — which is the
+ * subject — rides up out of the top.
  */
 html[data-theme='desert'] .collections-hero {
-  background-position: center 72%;
+  background-position: 38% 90%;
+}
+
+/*
+ * AND THE PANEL IS SHAPED FOR THE PHOTOGRAPH IT CARRIES.
+ *
+ * THE FIRM SENT A MOCKUP OF THEIR OWN -- "make it like the one that I gave you" -- and the hero on
+ * it is a wide band about 3:1, which is the aspect of the picture. The tall panel is a 1.3:1 box
+ * on an iPad, and `cover` throws away two thirds of a 3:1 frame to fill it: the dune field on the
+ * left and the blowing sand on the right, which are the two things they asked to see.
+ *
+ * SCOPED TO THIS SKIN, which is the whole point of the token. The firm's "you made the picture
+ * smaller, keep that" was about the Raptor hero and the mountain photograph in it, and that panel
+ * is untouched at 540/700 -- a skin changes its own picture and its own frame, not everyone's.
+ *
+ * 460 AND 560 RATHER THAN THE MOCKUP'S OWN PROPORTIONS. At 1320 wide a true 3:1 band is 440px and
+ * the four figures, the controls and the month bar all live inside this panel -- below about 540
+ * on a desktop they stop having room and start touching. This is as close to the picture's shape
+ * as the contents allow.
+ */
+html[data-theme='desert'] {
+  --skin-collections-hero-min: 460px;
+  --skin-collections-hero-min-lg: 560px;
 }
 
 /*

@@ -19,7 +19,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-themes.mjs
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { BASE_THEME, DEFAULT_THEME, THEMES, themeById } from '../../src/lib/themes.ts'
 
 let pass = 0
@@ -168,6 +168,29 @@ for (const [id, file] of Object.entries(SKIN_FILES)) {
     ok(`${id}: ${m[1]} is on disk`, existsSync(new URL(`../../public${m[1]}`, import.meta.url)))
   }
 }
+/*
+ * AND A SKIN'S HERO PICTURE IS BIG ENOUGH TO BE MAGNIFIED INTO A HERO.
+ *
+ * THIS EXACT MISTAKE IS ON THE RECORD TWICE NOW. The Collections photograph was once "encoded at
+ * 1800px wide from a 2048px source and then magnified into a panel 700px tall", and the firm's
+ * word for it was "pixelated" -- see the floor check-collections-hero puts on that file. The
+ * desert hero was then encoded at 1920 from a 2172px source, and the firm asked the same question
+ * about the same artefacts: "are you sure that's 8K, the resolution looks a bit shitty?"
+ *
+ * A FLOOR ON THE FILE SIZE IS A CRUDE PROXY for "it was not encoded down", and crude is the point:
+ * it is the one check that would have caught both. The ceiling is the other half -- a hero that
+ * costs two megabytes on the screen people open first thing every morning is a hero that gets
+ * deleted.
+ */
+const HERO_ART = ['/brand/desert-hero.webp', '/brand/desert-band.webp']
+for (const art of HERO_ART) {
+  const bytes = statSync(new URL(`../../public${art}`, import.meta.url)).size
+  const kb = Math.round(bytes / 1024)
+  ok(`${art} is over 150KB, which is what stops it being re-encoded down to mush (${kb}KB)`,
+    bytes > 150 * 1024)
+  ok(`...and under 400KB (${kb}KB)`, bytes < 400 * 1024)
+}
+
 /* AND SO IS EVERY PICTURE index.css NAMES, which is where the baseline's own art lives. */
 for (const m of indexCss.matchAll(/url\('(\/[^']+)'\)/g)) {
   ok(`index.css: ${m[1]} is on disk`, existsSync(new URL(`../../public${m[1]}`, import.meta.url)))

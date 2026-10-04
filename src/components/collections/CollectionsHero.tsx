@@ -105,19 +105,31 @@ export function CollectionsHero({ figures, filters, action, progress }: {
               two lines. That only works as a deliberate break: left to wrap, the break lands
               wherever the window is wide and the colour change falls mid-phrase.
 
-              THE CASE HAS BEEN ROUND THE HOUSES AND LANDED BACK HERE. The whole line was set in
-              capitals once, then SKY and BEGINNING alone were lifted into them, and the firm
-              settled on neither — "change it all back to small letters, it'll look better". They
-              are right, and the reason is the weight: at font-light there are no ascenders or
-              descenders in a capital to give the line any shape, so caps at this weight flatten
-              it however they are arranged. The two tones and the break carry it instead.
+              THE WORDS ARE THE FIRM'S AND THEY HAVE CHANGED ONCE. It read "The sky is only / the
+              beginning." until they sent a reference of their own: "instead of saying the sky is
+              only the beginning, put the one that I put up there for you, which says our world
+              doesn't end at the horizon." The break falls after "end", so the champagne half is
+              the phrase that names the horizon rather than two words of it.
+
+              AND THE WEIGHT WENT THE OTHER WAY WITH THEM. This was font-light, and the note that
+              used to sit here argued the case: at 52px a weight chosen for body copy reads as
+              advertising, and it is the LACK of weight that carries a display line. The firm
+              looked at both and asked for the heavy one — "make the font thicker like the other
+              one" — which is their call to make about their own brand line, and on a photograph
+              this dark the heavier setting does hold the panel better than the hairline did.
+
+              THE CASE HAS BEEN ROUND THE HOUSES AND STAYS WHERE IT LANDED. The whole line was set
+              in capitals once, then two words alone were lifted into them, and the firm settled on
+              neither — "change it all back to small letters, it'll look better". That is still
+              right and is a separate question from the weight: capitals have no ascenders or
+              descenders to give a line shape however heavily they are set.
             */}
-            <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-light
+            <h1 className="mt-4 text-[32px] sm:text-[44px] lg:text-[52px] font-bold
               leading-[1.06] text-white">
               {/* Each LINE is its own span, which is not decoration: it makes the two halves
                   addressable as two things, by a stylesheet and by anything reading the page. */}
-              <span>The sky is only</span><br />
-              <span className="text-[var(--ch-champagne)]">the beginning.</span>
+              <span>Our world doesn&rsquo;t end</span><br />
+              <span className="text-[var(--ch-champagne)]">at the horizon.</span>
             </h1>
             <p className="mt-5 text-[11px] font-medium uppercase tracking-[0.34em] text-[var(--ch-gold)]">
               Discipline drives results

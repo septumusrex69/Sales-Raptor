@@ -245,6 +245,20 @@
    */
   --skin-collections-hero-image: url('/brand/collections-hero.webp');
   --skin-collections-hero-ground: #07141d;
+  /*
+   * HOW TALL THE PANEL STANDS, and the default is the height the firm fought for.
+   *
+   * They sent back a version with the photograph shortened -- "you changed some shit... you made
+   * the picture smaller. Keep that." -- so 540 and 700 are an instruction, not a layout choice,
+   * and nothing may quietly reduce them.
+   *
+   * IT IS A TOKEN BECAUSE A PHOTOGRAPH HAS AN ASPECT AND THIS PANEL DOES NOT. `cover` on a box
+   * 1.3:1 shows barely a third of a picture that is 3:1, and which third is all a background
+   * position can decide. A skin that brings its own photograph has to be able to bring the shape
+   * that suits it, or it is choosing between a crop and a stretch.
+   */
+  --skin-collections-hero-min: 540px;
+  --skin-collections-hero-min-lg: 700px;
   --skin-collections-scrim:
     linear-gradient(
       90deg,
@@ -445,6 +459,27 @@ select:autofill {
  * unremarkable apart and reach 0.89 where they meet, which is the darkest corner of the panel and
  * is under the KPI row rather than under the picture.
  */
+/*
+ * THE PANEL'S HEIGHT, OFF THE TOKEN ABOVE.
+ *
+ * ON THE CHILD, not on `.collections-hero` itself, because the child is what carries the padding
+ * and the max-width the brief caps the content at -- the same element the Tailwind `min-h-`
+ * classes are on.
+ *
+ * `.collections-hero > div` RATHER THAN A CLASS, and the specificity is the reason: an arbitrary
+ * Tailwind utility is one class (0,1,0) and this is a class plus an element (0,1,1), so it wins
+ * outright rather than on source order. `.collections-hero > *` next door already addresses the
+ * same child the same way.
+ */
+.collections-hero > div {
+  min-height: var(--skin-collections-hero-min);
+}
+@media (min-width: 1024px) {
+  .collections-hero > div {
+    min-height: var(--skin-collections-hero-min-lg);
+  }
+}
+
 .collections-hero::before {
   content: '';
   position: absolute;

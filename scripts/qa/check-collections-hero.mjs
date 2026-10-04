@@ -66,6 +66,23 @@ const hook = read('../../src/hooks/useCollectionsMonth.ts')
 const controls = read('../../src/components/collections/MonthControls.tsx')
 const floor = read('../../src/pages/CollectorDashboard.tsx')
 const css = read('../../src/index.css')
+/*
+ * THE STYLESHEET WITH ITS COMMENTS OUT. Two different assertions need it and both learned the
+ * same lesson from opposite ends.
+ *
+ * ANYTHING THAT SLICES BY POSITION. This file carves `.collections-hero` into pieces with
+ * indexOf, and the moment a comment mentions one of those selectors the boundary lands inside
+ * the prose instead of on the rule. It happened: a note explaining that `.collections-hero > *`
+ * addresses the same child was written ABOVE the rule it was explaining, which moved the end of
+ * the scrim's slice above its start and emptied it.
+ *
+ * AND ANYTHING THAT ASSERTS AN ABSENCE. The rule about image-set has to be read over the CODE,
+ * because the explanation of why image-set is gone necessarily says "image-set" several times --
+ * and the first version of that line failed on the fixed stylesheet for exactly that reason. The
+ * usual trap runs the other way, a check passing because of the comment about the fix; this is
+ * the same mistake reflected.
+ */
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '')
 
 /*
  * ONE SCREEN WEARS THE PHOTOGRAPH, and that is the firm's instruction: "all of the other
@@ -167,10 +184,25 @@ ok('...and the line at the foot went with the redesign', !/Built for a higher st
  */
 const title = hero.slice(hero.indexOf('<h1'), hero.indexOf('</h1>'))
 ok('there is a heading to read', title.length > 40)
-ok('the firm’s first half is on it', /<span>The sky is only<\/span>/.test(title))
-ok('...and the second half is the second line', /<br \/>[\s\S]*the beginning\./.test(title))
+/*
+ * THE FIRM'S OWN LINE, AND IT HAS CHANGED ONCE.
+ *
+ * It read "The sky is only / the beginning." until they sent a reference of their own: "instead
+ * of saying the sky is only the beginning, put the one that I put up there for you, which says
+ * our world doesn't end at the horizon."
+ *
+ * THE OLD LINE IS ASSERTED AGAINST, not merely replaced. Both halves of it are still sitting in
+ * this file's own comments and in the component's, which is exactly how a sentence comes back:
+ * somebody reads the history, takes it for the instruction, and puts it back.
+ */
+ok('the firm’s first half is on it', /<span>Our world doesn&rsquo;t end<\/span>/.test(title))
+ok('...and the second half is the second line', /<br \/>[\s\S]*at the horizon\./.test(title))
 ok('...in champagne rather than white',
-  /text-\[var\(--ch-champagne\)\]"\s*>\s*the beginning\./.test(title))
+  /text-\[var\(--ch-champagne\)\]"\s*>\s*at the horizon\./.test(title))
+check('...and the line it replaced is gone', /The sky is only|the beginning\./.test(title), false)
+/* THE APOSTROPHE IS THE TYPOGRAPHIC ONE. A straight quote in a 52px display line is the one
+   character on this panel that reads as unfinished. */
+ok('...with a real apostrophe, not a typewriter one', !/doesn't/.test(title))
 /*
  * ORDINARY SENTENCE CASE, AND THE CASE HAS BEEN ROUND THE HOUSES. The whole line was set in
  * capitals once, then SKY and BEGINNING alone were lifted into them, and the firm settled on
@@ -204,18 +236,21 @@ ok('...at a specificity that beats the skin’s own h1 rule',
 ok('...with no utility class left on the element pretending to do it',
   !/<h1[\s\S]{0,200}tracking-\[/.test(title))
 /*
- * LIGHT, NOT BOLD. It was set at 600 first — the brief asked for "medium/semi-bold" — and the firm
- * read it back as thick. At 52px a weight chosen for body copy reads as advertising, and the whole
- * direction here is restraint: in a display line it is the LACK of weight that carries the money.
+ * BOLD, AND THIS REVERSED.
  *
- * Asserted as a floor and a ceiling. A ceiling alone would pass on a hairline that disappears over
- * the cloud, and a floor alone is what let 600 through in the first place.
+ * It was set at 600 once, the firm read it back as thick, and it went to font-light with a note
+ * arguing that at 52px it is the LACK of weight that carries a display line. They have now looked
+ * at both against their own reference and asked for the heavy one: "make the font thicker like the
+ * other one."
+ *
+ * THAT IS THEIR CALL AND THE CHECK FOLLOWS IT. What a check is for here is stopping it drifting
+ * back on its own — the light setting is still argued for at length in this file's history and in
+ * the component's comment, and a sentence that persuasive is one somebody re-applies.
  */
-ok('...at a light weight', /font-light\b/.test(title))
-/* And the helper that set them is gone rather than left behind unused. */
+ok('...at the weight the firm asked for', /font-bold\b/.test(title))
+check('...and not back at the hairline', /font-light\b/.test(title), false)
+/* And the helper that lifted individual words into capitals is gone rather than left unused. */
 ok('the helper that lifted them is gone too', !/function Stress\(/.test(hero))
-ok('...and nothing heavier crept back in',
-  !/font-(medium|semibold|bold|black|extrabold)\b/.test(title))
 
 /*
  * AND IT DOES NOT NAME THE SCREEN. The panel carried "Collections" twice at one point — a gold
@@ -261,7 +296,7 @@ ok('the hero renders it', /greetingLine\(new Date\(\), currentUser\?\.name\)/.te
  * browsers take image-set, Safari 14-16 the -webkit- form, anything older the plain JPEG.
  */
 ok('the photograph is a background', /\.collections-hero \{/.test(css))
-const heroRule = css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))
+const heroRule = cssCode.slice(cssCode.indexOf('.collections-hero {'), cssCode.indexOf('.collections-hero::before'))
 /*
  * THE PICTURE AND THE WASH ARE TOKENS NOW, and what is asserted moved with them.
  *
@@ -296,13 +331,7 @@ ok('...as one plain url, never an image-set', !/image-set/.test(baseImage))
  * identical bug and nobody had seen it, because that panel is hidden below lg. A check scoped to
  * the hero would have left it there.
  */
-/*
- * Comments stripped first. The rule has to be asserted over the CODE, because the explanation of
- * why image-set is gone necessarily says "image-set" several times -- and the first version of
- * this line failed on the fixed stylesheet for exactly that reason. The usual trap runs the other
- * way, a check passing because of the comment about the fix; this is the same mistake reflected.
- */
-const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '')
+/* Over the CODE, for the reason given where cssCode is built. */
 ok('image-set is not used anywhere in the stylesheet', !/image-set\(/.test(cssCode))
 ok('...including the sign-in photograph, which had the same bug',
   /\.login-photo \{[\s\S]{0,200}background-image: url\('\/brand\/raptor-login\.webp'\);/.test(css))
@@ -357,7 +386,7 @@ ok('...and nothing in the stylesheet asks for one', !/collections-hero\.jpg/.tes
  */
 ok('the scrim is declared off a token',
   /background: var\(--skin-collections-scrim\);/
-    .test(css.slice(css.indexOf('.collections-hero::before'), css.indexOf('.collections-hero > *'))))
+    .test(cssCode.slice(cssCode.indexOf('.collections-hero::before'), cssCode.indexOf('.collections-hero > *'))))
 const scrim = css.match(/--skin-collections-scrim:([\s\S]*?);\n/)?.[1] ?? ''
 ok('there is a scrim to read', scrim.length > 200)
 const darkest = Math.max(...[...scrim.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1])))
@@ -386,6 +415,31 @@ ok(`the heavy pass is the one across (${worst[0]} vs ${worst[1]})`, worst[0] > w
  * finish. A hard-coded 18px would pass a check for "round" and still drift the day a skin moves
  * the token, so what is asserted is that this reads the SAME token .app-hero does.
  */
+/*
+ * AND IT STANDS AS TALL AS THE FIRM INSISTED, FOR EVERY SKIN BUT ONE THAT ASKS.
+ *
+ * THE FIRM SENT BACK A SHORTENED VERSION ONCE: "you changed some shit... I asked you not to change
+ * that. You put the progress bar below the thing. You made the picture smaller. Keep that." So 540
+ * and 700 are an instruction.
+ *
+ * THE HEIGHT IS A TOKEN NOW, because a skin that brings its own photograph has to be able to bring
+ * the shape that suits it -- `cover` on a 1.3:1 box shows barely a third of a 3:1 frame. What is
+ * asserted is that the DEFAULT is untouched: a skin may shorten its own panel, and nothing may
+ * quietly shorten everybody's by editing the baseline.
+ */
+const heights = css.match(/--skin-collections-hero-min: (\d+)px;[\s\S]*?--skin-collections-hero-min-lg: (\d+)px;/)
+ok('the panel’s height is a token', Boolean(heights))
+/* TWO PRIMITIVES, NOT A PAIR. This file's check() is Object.is, so two arrays with the same
+   numbers in them are never equal and the assertion fails on correct code -- which is exactly
+   what it did when it was written as one comparison. */
+check('...and the baseline short side is the height the firm asked for', Number(heights?.[1]), 540)
+check('...and the tall side too', Number(heights?.[2]), 700)
+/* AND THE CHILD READS IT AT A SPECIFICITY THAT BEATS THE UTILITY CLASS ON THE ELEMENT. An
+   arbitrary Tailwind min-h- is one class; this is a class plus an element, so it wins outright
+   rather than on source order -- which is how the tracking rule was lost once already. */
+ok('...read by the child that carries the padding',
+  /\.collections-hero > div \{\s*\n\s*min-height: var\(--skin-collections-hero-min\);/.test(cssCode))
+
 ok('the panel is rounded off the shared token', /border-radius: var\(--skin-hero-radius\);/.test(heroRule))
 ok('...the same one every other hero uses',
   /\.app-hero \{[\s\S]*?border-radius: var\(--skin-hero-radius\);/.test(css))

@@ -290,7 +290,7 @@ try {
    * fixture written twice is a fixture that drifts.
    */
   await page.goto(`http://localhost:${PORT}/`)
-  await page.getByRole('heading', { name: /The sky is only/ }).waitFor({ timeout: 20000 })
+  await page.getByRole('heading', { name: /Our world doesn/ }).waitFor({ timeout: 20000 })
   await t.shot(page, '39-company')
 
   /*
@@ -375,7 +375,7 @@ try {
    * the sentence-case source and pass whether the transform applied or not.
    */
   t.check('the title is the firm’s own line',
-    heading.text.replace(/\s+/g, ' ').trim(), 'The sky is only the beginning.')
+    heading.text.replace(/\s+/g, ' ').trim(), 'Our world doesn’t end at the horizon.')
   /*
    * SIZED TO THE BRIEF, at both ends. "Do NOT make the headline enormous" is half the instruction
    * and 48-56px is the other half, so a lower bound alone would pass on the 72px version this
@@ -384,13 +384,18 @@ try {
   t.ok(`...set between 48 and 56px (${heading.size})`,
     parseFloat(heading.size) >= 48 && parseFloat(heading.size) <= 56)
   /*
-   * LIGHT, NOT BOLD, and measured as the weight the browser RESOLVED rather than read off the
-   * class. A font-light class on a family that ships no light cut renders at 400 and looks almost
-   * right; asserting the class would pass on that and the firm would be looking at the same line
-   * they just sent back.
+   * BOLD, AND MEASURED AS THE WEIGHT THE BROWSER RESOLVED rather than read off the class. A
+   * font-bold class on a family that ships no bold cut renders synthesised or at 400 and looks
+   * almost right; asserting the class would pass on that and the firm would be looking at the
+   * same line they just sent back.
+   *
+   * IT WAS A LIGHT WEIGHT UNTIL THE FIRM ASKED FOR THE OTHER ONE -- "make the font thicker like
+   * the other one" -- against a reference of their own. The argument for the light setting is
+   * still on the component, which is why the floor matters: a sentence that persuasive is one
+   * somebody re-applies.
    */
-  t.ok(`...at a light weight (${heading.weight})`,
-    Number(heading.weight) >= 250 && Number(heading.weight) <= 400)
+  t.ok(`...at the weight the firm asked for (${heading.weight})`,
+    Number(heading.weight) >= 600)
   t.ok('...in white on the dark panel', /255, 255, 255/.test(heading.colour))
 
   /*
@@ -447,7 +452,7 @@ try {
    */
   t.check('...broken across two lines where the firm breaks it',
     heading.text.trim().split('\n').map((l) => l.trim()).join(' | '),
-    'The sky is only | the beginning.')
+    'Our world doesn’t end | at the horizon.')
   /*
    * Each line is its own span, so the two halves are addressable as two things. They were not at
    * first — the stressed words are spans too, and a bare `h1 span` matched three elements, which
@@ -460,7 +465,7 @@ try {
   /* Joined, not compared as arrays: this harness's check() uses Object.is, so two arrays with
      identical contents are never equal and the failure prints two lines that look the same. */
   t.check('the line is in two halves', halves.map((l) => l.text).join(' | '),
-    'The sky is only | the beginning.')
+    'Our world doesn’t end | at the horizon.')
   t.ok(`...the first in white (${halves[0]?.colour})`, /255, 255, 255/.test(halves[0]?.colour ?? ''))
   t.ok(`...and the second in champagne (${halves[1]?.colour})`,
     !/255, 255, 255/.test(halves[1]?.colour ?? '') && halves[1]?.colour !== halves[0]?.colour)
@@ -469,7 +474,7 @@ try {
    * ORDINARY SENTENCE CASE, MEASURED AS RENDERED. The line has been set in full capitals, then
    * with two words lifted into them, and the firm settled on neither. innerText reports what is
    * on the screen, so a text-transform sneaking back in fails here even though the source still
-   * reads "The sky is only" — which is exactly how a capitals version would return.
+   * reads in sentence case — which is exactly how a capitals version would return.
    */
   const transform = await page.locator('.collections-hero h1').evaluate((el) =>
     [el, ...el.querySelectorAll('span')].map((n) => getComputedStyle(n).textTransform).join(','))
