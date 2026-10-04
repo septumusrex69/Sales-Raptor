@@ -6,7 +6,7 @@
  * in the stylesheet — no component changes, which is the whole point of the arrangement.
  */
 
-export type ThemeId = 'original' | 'raptor' | 'desert'
+export type ThemeId = 'original' | 'raptor' | 'desert' | 'glass-mountain'
 
 export interface ThemeDefinition {
   id: ThemeId
@@ -54,6 +54,14 @@ export const THEMES: ThemeDefinition[] = [
     /* Ground, surface, accent -- the three the preview tile stands on. Read off the skin's own
        --color-navy-950, --color-surface and --c-gold, so the tile cannot drift from the skin. */
     swatch: { ground: '#12100b', surface: '#f7f4ee', accent: '#d99f3f' },
+  },
+  {
+    id: 'glass-mountain',
+    name: 'Glass Mountain',
+    description: 'Cinematic alpine landscape with premium frosted glass surfaces.',
+    productName: 'Raptor',
+    lockupLight: '/brand/raptor-lockup-light.png',
+    swatch: { ground: '#071722', surface: 'rgba(10,24,34,0.62)', accent: '#dcaf59' },
   },
 ]
 

@@ -1,0 +1,634 @@
+/*
+ * GLASS MOUNTAIN — a visual skin.
+ *
+ * Cinematic alpine landscape with premium frosted glass surfaces.
+ * All selectors are qualified as `html[data-theme='glass-mountain']` so nothing
+ * here touches any other theme.
+ *
+ * Design language: restrained glassmorphism over a fixed mountain photograph.
+ * Think executive CRM + mountain lodge + premium fintech — not gaming UI or neon.
+ */
+
+/* ── Design tokens ───────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] {
+  --color-surface: transparent;
+  --color-card: rgba(10, 24, 34, 0.62);
+
+  --color-slate-50:  rgba(244, 246, 247, 0.06);
+  --color-slate-100: rgba(244, 246, 247, 0.10);
+  --color-slate-200: rgba(255, 255, 255, 0.13);
+  --color-slate-300: rgba(255, 255, 255, 0.20);
+  --color-slate-400: #718796;
+  --color-slate-500: #aeb8c0;
+  --color-slate-600: #c8d2da;
+  --color-slate-700: #dde4ea;
+  --color-slate-800: #eef1f4;
+  --color-slate-900: #f4f6f7;
+
+  --color-navy-950: #071722;
+  --color-navy-900: #0b1f2e;
+  --color-navy-800: #0d2030;
+  --color-navy-700: #122840;
+  --color-navy-600: #1a3550;
+
+  --color-gold-600: #b8912a;
+  --color-gold-500: #dcaf59;
+  --color-gold-400: #eac375;
+  --color-gold-300: #f5dfa0;
+
+  --color-brand-50:  rgba(220, 175, 89, 0.08);
+  --color-brand-100: rgba(220, 175, 89, 0.15);
+  --color-brand-500: #dcaf59;
+  --color-brand-600: #c9a052;
+  --color-brand-700: #b08030;
+
+  --color-positive: #2e9e7d;
+  --color-negative: #ed6170;
+
+  --color-red-50:  rgba(237, 97, 112, 0.08);
+  --color-red-100: rgba(237, 97, 112, 0.15);
+  --color-red-200: rgba(237, 97, 112, 0.25);
+  --color-red-500: #ed6170;
+  --color-red-600: #d94f5e;
+  --color-red-700: #c03d4c;
+
+  /* Categorical palette */
+  --c-navy-deep:    #071722;
+  --c-navy:         #0b2030;
+  --c-navy-mid:     #122840;
+  --c-navy-slate:   #1a3550;
+  --c-navy-ink:     #0d2030;
+  --c-navy-steel:   #1e3f5c;
+  --c-steel:        #2e5472;
+  --c-steel-soft:   #3a6480;
+  --c-steel-bright: #4a7494;
+  --c-steel-deep:   #264a68;
+  --c-steel-light:  #7fa8c8;
+  --c-steel-pale:   #aec8da;
+  --c-gold:         #dcaf59;
+  --c-gold-brand:   #dcaf59;
+  --c-gold-bright:  #eac375;
+  --c-gold-light:   #f5dfa0;
+  --c-gold-deep:    #b8912a;
+  --c-gold-dark:    #9a7820;
+  --c-gold-bronze:  #b8912a;
+  --c-gold-deep-hover:  #9a7820;
+  --c-green:        #2e9e7d;
+  --c-green-bright: #38b890;
+  --c-green-muted:  #5aaa96;
+  --c-rust:         #ed6170;
+  --c-rust-deep:    #d94f5e;
+  --c-rust-hover:   #d94f5e;
+  --c-rust-deep-hover: #c03d4c;
+  --c-grey:         #718796;
+  --c-grey-warm:    #8a9aaa;
+  --c-grey-light:   #aeb8c0;
+  --c-grey-blue:    #8598ad;
+  --c-grey-pale:    #c8d2da;
+  --c-ink:          #071722;
+
+  --tint-steel:      rgba(255,255,255,0.06);
+  --tint-steel-soft: rgba(255,255,255,0.04);
+  --tint-steel-alt:  rgba(255,255,255,0.05);
+  --tint-gold:       rgba(220,175,89,0.12);
+  --tint-gold-deep:  rgba(220,175,89,0.10);
+  --tint-gold-dark:  rgba(220,175,89,0.08);
+  --tint-gold-pale:  rgba(220,175,89,0.06);
+  --tint-green:      rgba(46,158,125,0.12);
+  --tint-green-bright: rgba(56,184,144,0.10);
+  --tint-rust:       rgba(237,97,112,0.12);
+  --tint-rust-deep:  rgba(237,97,112,0.10);
+  --tint-neutral:    rgba(255,255,255,0.06);
+  --tint-neutral-soft: rgba(255,255,255,0.04);
+
+  --stage-new-deal:       rgba(255,255,255,0.10);
+  --stage-quotation-sent: #dcaf59;
+  --stage-mandate-sent:   #c9a052;
+  --stage-won:            #2e9e7d;
+  --stage-rejected:       #ed6170;
+
+  --outcome-won:      #dcaf59;
+  --outcome-open:     #718796;
+  --outcome-rejected: #718796;
+  --outcome-value:    #f4f6f7;
+
+  /* Surfaces */
+  --skin-card-radius:       14px;
+  --skin-card-border:       rgba(255,255,255,0.14);
+  --skin-card-shadow:
+    0 8px 30px rgba(0,0,0,0.18),
+    inset 0 1px 0 rgba(255,255,255,0.07);
+  --skin-card-shadow-hover:
+    0 12px 40px rgba(0,0,0,0.24),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+  --skin-body-text:   #f4f6f7;
+  --skin-scrollbar:   rgba(255,255,255,0.15);
+
+  --skin-hero-background: transparent;
+  --skin-hero-image:  none;
+  --skin-hero-radius: 20px;
+
+  --skin-sidebar-art:         none;
+  --skin-sidebar-art-opacity: 0;
+
+  --skin-gold-gradient: linear-gradient(135deg, #b8912a 0%, #eac375 50%, #b8912a 100%);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #9a7820 0%, #dcaf59 100%);
+}
+
+/* ── Full-viewport mountain background — fixed layer ─────────────────────── */
+/*
+ * background-attachment:fixed breaks through overflow:auto scroll containers.
+ * A position:fixed pseudo-element on <html> is the only reliable cross-browser
+ * way to pin a background image behind everything including scrolling areas.
+ */
+html[data-theme='glass-mountain']::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(rgba(5, 18, 27, 0.24), rgba(5, 18, 27, 0.42)),
+    url('/brand/glass-mountain-bg.jpg') center / cover no-repeat;
+  pointer-events: none;
+}
+
+html[data-theme='glass-mountain'],
+html[data-theme='glass-mountain'] body {
+  background: transparent;
+  min-height: 100vh;
+}
+
+/* ── Make the entire app shell transparent ───────────────────────────────── */
+html[data-theme='glass-mountain'] #root,
+html[data-theme='glass-mountain'] .app-layout,
+html[data-theme='glass-mountain'] .app-content,
+html[data-theme='glass-mountain'] .app-main {
+  background: transparent !important;
+}
+
+/* Kill every Tailwind bg utility that would paint over the mountain */
+html[data-theme='glass-mountain'] .bg-white,
+html[data-theme='glass-mountain'] .bg-surface,
+html[data-theme='glass-mountain'] .bg-slate-50,
+html[data-theme='glass-mountain'] .bg-slate-100,
+html[data-theme='glass-mountain'] .bg-gray-50,
+html[data-theme='glass-mountain'] .bg-gray-100 {
+  background-color: transparent !important;
+}
+
+/* ── Topbar ──────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] header {
+  background: rgba(5, 16, 24, 0.55) !important;
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  border-bottom: 1px solid rgba(255,255,255,0.10) !important;
+  color: #f4f6f7;
+}
+
+html[data-theme='glass-mountain'] header h1 {
+  color: #f4f6f7 !important;
+}
+
+/* Search bar inside topbar */
+html[data-theme='glass-mountain'] header input,
+html[data-theme='glass-mountain'] header [class*='bg-slate'] {
+  background: rgba(255,255,255,0.10) !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+  color: #f4f6f7 !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 10px !important;
+}
+
+html[data-theme='glass-mountain'] header input::placeholder {
+  color: rgba(255,255,255,0.50) !important;
+}
+
+html[data-theme='glass-mountain'] header svg {
+  color: rgba(255,255,255,0.60);
+}
+
+html[data-theme='glass-mountain'] header button {
+  color: rgba(255,255,255,0.70);
+}
+
+html[data-theme='glass-mountain'] header button:hover {
+  background: rgba(255,255,255,0.08) !important;
+  color: #f4f6f7;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] .app-sidebar {
+  background: transparent !important;
+  backdrop-filter: blur(14px) saturate(110%);
+  -webkit-backdrop-filter: blur(14px) saturate(110%);
+  border-right: 1px solid rgba(255,255,255,0.09) !important;
+  position: relative;
+  isolation: isolate;
+}
+
+html[data-theme='glass-mountain'] .app-sidebar::after {
+  display: none;
+}
+
+/* Sidebar — logo / brand area */
+html[data-theme='glass-mountain'] .app-sidebar [class*='bg-navy'],
+html[data-theme='glass-mountain'] .app-sidebar [class*='bg-brand'] {
+  background: transparent !important;
+}
+
+/* Nav items — inactive */
+html[data-theme='glass-mountain'] .app-sidebar nav a {
+  color: rgba(244, 246, 247, 0.62);
+  border-radius: 10px;
+  transition: all 180ms ease;
+}
+
+html[data-theme='glass-mountain'] .app-sidebar nav a:hover {
+  background: rgba(255,255,255,0.07) !important;
+  color: #f4f6f7;
+}
+
+/* Nav items — active: warm gold glass, not solid fill */
+html[data-theme='glass-mountain'] .app-sidebar nav a[aria-current='page'] {
+  background: linear-gradient(
+    135deg,
+    rgba(214, 166, 79, 0.28),
+    rgba(170, 123, 45, 0.16)
+  ) !important;
+  border: 1px solid rgba(229, 190, 111, 0.60) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    0 3px 12px rgba(0,0,0,0.14);
+  color: #f5dfa0 !important;
+}
+
+html[data-theme='glass-mountain'] .app-sidebar nav a[aria-current='page'] svg {
+  color: #dcaf59 !important;
+}
+
+/* Sidebar footer / user area */
+html[data-theme='glass-mountain'] .app-sidebar [class*='border-t'] {
+  border-color: rgba(255,255,255,0.08) !important;
+}
+
+html[data-theme='glass-mountain'] .app-sidebar [class*='text-slate'] {
+  color: rgba(244,246,247,0.60) !important;
+}
+
+/* ── Hero — fully transparent so the fixed mountain shows through ────────── */
+html[data-theme='glass-mountain'] .app-hero {
+  background: transparent !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  overflow: visible !important;
+}
+
+/* Collections / Company hero — same principle, different class name */
+html[data-theme='glass-mountain'] .collections-hero {
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+}
+
+/* ── Cards and panels ────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] .card {
+  background: rgba(8, 20, 30, 0.64) !important;
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  border: 1px solid rgba(255,255,255,0.13) !important;
+  border-top-color: rgba(255,255,255,0.22) !important;
+  box-shadow:
+    0 8px 30px rgba(0,0,0,0.18),
+    inset 0 1px 0 rgba(255,255,255,0.06) !important;
+  border-radius: 16px !important;
+  color: #f4f6f7;
+  transition: box-shadow 180ms ease, border-color 180ms ease;
+}
+
+html[data-theme='glass-mountain'] .card:hover {
+  border-color: rgba(255,255,255,0.20) !important;
+  border-top-color: rgba(255,255,255,0.28) !important;
+  box-shadow:
+    0 12px 40px rgba(0,0,0,0.22),
+    inset 0 1px 0 rgba(255,255,255,0.10) !important;
+}
+
+/* ── Text colours — light on dark glass ──────────────────────────────────── */
+html[data-theme='glass-mountain'] .text-slate-900,
+html[data-theme='glass-mountain'] .text-slate-800,
+html[data-theme='glass-mountain'] .text-slate-700 {
+  color: #f4f6f7 !important;
+}
+
+html[data-theme='glass-mountain'] .text-slate-600,
+html[data-theme='glass-mountain'] .text-slate-500 {
+  color: #aeb8c0 !important;
+}
+
+html[data-theme='glass-mountain'] .text-slate-400 {
+  color: #718796 !important;
+}
+
+/* ── Borders ─────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] .border-slate-100,
+html[data-theme='glass-mountain'] .border-slate-200,
+html[data-theme='glass-mountain'] .border-b {
+  border-color: rgba(255,255,255,0.09) !important;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] button {
+  transition: all 180ms ease;
+}
+
+/* Ghost / default buttons */
+html[data-theme='glass-mountain'] button:not([class*='bg-brand']):not([class*='bg-gold']):not([class*='bg-red']):not([class*='bg-green']) {
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.16) !important;
+  color: #f4f6f7 !important;
+  backdrop-filter: blur(10px);
+}
+
+html[data-theme='glass-mountain'] button:not([class*='bg-brand']):not([class*='bg-gold']):not([class*='bg-red']):not([class*='bg-green']):hover {
+  background: rgba(255,255,255,0.13) !important;
+  border-color: rgba(224,177,87,0.45) !important;
+  transform: translateY(-1px);
+}
+
+/* Primary / brand buttons — gold-tinted glass */
+html[data-theme='glass-mountain'] button[class*='bg-brand'],
+html[data-theme='glass-mountain'] button[class*='bg-gold'] {
+  background: linear-gradient(
+    135deg,
+    rgba(214,166,79,0.32),
+    rgba(170,123,45,0.20)
+  ) !important;
+  border: 1px solid rgba(229,190,111,0.62) !important;
+  color: #f5dfa0 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 3px 12px rgba(0,0,0,0.14);
+}
+
+html[data-theme='glass-mountain'] button[class*='bg-brand']:hover,
+html[data-theme='glass-mountain'] button[class*='bg-gold']:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(214,166,79,0.44),
+    rgba(170,123,45,0.30)
+  ) !important;
+  transform: translateY(-1px);
+}
+
+/* Focus ring */
+html[data-theme='glass-mountain'] button:focus-visible,
+html[data-theme='glass-mountain'] input:focus-visible,
+html[data-theme='glass-mountain'] select:focus-visible,
+html[data-theme='glass-mountain'] a:focus-visible {
+  outline: 2px solid rgba(220, 175, 89, 0.55);
+  outline-offset: 1px;
+}
+
+/* ── Inputs, selects, textareas ──────────────────────────────────────────── */
+html[data-theme='glass-mountain'] input:not([type='checkbox']):not([type='radio']),
+html[data-theme='glass-mountain'] select,
+html[data-theme='glass-mountain'] textarea {
+  background: rgba(255,255,255,0.09) !important;
+  border: 1px solid rgba(255,255,255,0.16) !important;
+  border-radius: 10px !important;
+  color: #f4f6f7 !important;
+  backdrop-filter: blur(10px);
+}
+
+html[data-theme='glass-mountain'] input::placeholder,
+html[data-theme='glass-mountain'] textarea::placeholder {
+  color: rgba(255,255,255,0.40) !important;
+}
+
+html[data-theme='glass-mountain'] select option {
+  background: #0b2030;
+  color: #f4f6f7;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] table {
+  color: #f4f6f7;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-theme='glass-mountain'] thead th {
+  background: rgba(255,255,255,0.04) !important;
+  color: #aeb8c0 !important;
+  border-bottom: 1px solid rgba(255,255,255,0.09) !important;
+}
+
+html[data-theme='glass-mountain'] tbody tr {
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+}
+
+html[data-theme='glass-mountain'] tbody tr:hover {
+  background: rgba(255,255,255,0.04) !important;
+}
+
+/* ── Charts ──────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] .recharts-cartesian-grid line {
+  stroke: rgba(255,255,255,0.07) !important;
+}
+
+html[data-theme='glass-mountain'] .recharts-text,
+html[data-theme='glass-mountain'] .recharts-label {
+  fill: #718796 !important;
+}
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] [class*='badge'],
+html[data-theme='glass-mountain'] .badge {
+  border-radius: 6px;
+}
+
+/* ── Modals and dropdowns ────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] [role='dialog'],
+html[data-theme='glass-mountain'] [class*='modal'] {
+  background: rgba(6, 18, 28, 0.90) !important;
+  backdrop-filter: blur(24px) saturate(130%);
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  border: 1px solid rgba(255,255,255,0.14) !important;
+  border-top: 1px solid rgba(255,255,255,0.24) !important;
+  box-shadow:
+    0 16px 48px rgba(0,0,0,0.34),
+    inset 0 1px 0 rgba(255,255,255,0.07);
+  color: #f4f6f7;
+}
+
+/* ── Dropdown menus (popovers) ───────────────────────────────────────────── */
+html[data-theme='glass-mountain'] [class*='dropdown'],
+html[data-theme='glass-mountain'] [class*='popover'],
+html[data-theme='glass-mountain'] [class*='menu'] > div {
+  background: rgba(6, 18, 28, 0.88) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.12) !important;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] ::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+html[data-theme='glass-mountain'] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html[data-theme='glass-mountain'] ::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.14);
+  border-radius: 3px;
+}
+
+html[data-theme='glass-mountain'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.24);
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] h1,
+html[data-theme='glass-mountain'] h2,
+html[data-theme='glass-mountain'] h3,
+html[data-theme='glass-mountain'] h4 {
+  letter-spacing: -0.02em;
+  color: #f4f6f7;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────────── */
+html[data-theme='glass-mountain'] button,
+html[data-theme='glass-mountain'] a {
+  transition-timing-function: ease;
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='glass-mountain'] *,
+  html[data-theme='glass-mountain'] *::before,
+  html[data-theme='glass-mountain'] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ── Auth / Login shell ──────────────────────────────────────────────────── */
+
+/* Outer wrapper — let the body background show through */
+html[data-theme='glass-mountain'] .h-dvh.w-full.flex {
+  background: transparent !important;
+}
+
+/* The photo panel behind the left side — transparent so the body bg shows */
+html[data-theme='glass-mountain'] .login-photo {
+  background: transparent !important;
+}
+
+/* The right-side form card — frosted glass */
+html[data-theme='glass-mountain'] [class*='rounded-2xl'][class*='bg-white'],
+html[data-theme='glass-mountain'] [class*='rounded-2xl'][class*='border-slate-200'] {
+  background: rgba(8, 20, 30, 0.68) !important;
+  backdrop-filter: blur(20px) saturate(125%);
+  -webkit-backdrop-filter: blur(20px) saturate(125%);
+  border: 1px solid rgba(255,255,255,0.16) !important;
+  border-top-color: rgba(255,255,255,0.26) !important;
+  box-shadow:
+    0 8px 32px rgba(0,0,0,0.22),
+    inset 0 1px 0 rgba(255,255,255,0.08) !important;
+}
+
+/* Auth title text */
+html[data-theme='glass-mountain'] [class*='text-\[#12233a\]'] {
+  color: #f4f6f7 !important;
+}
+
+/* Auth field inputs */
+html[data-theme='glass-mountain'] [class*='authFieldClass'],
+html[data-theme='glass-mountain'] [class*='rounded-lg'][class*='border-slate-200'][class*='bg-white'] {
+  background: rgba(255,255,255,0.09) !important;
+  border-color: rgba(255,255,255,0.18) !important;
+  color: #f4f6f7 !important;
+}
+
+/* ── RecordTabs strip (Account / Deal / Company / Contact / Lead detail) ─── */
+
+/* The tab strip container */
+html[data-theme='glass-mountain'] .border-b.border-slate-200:has(> div > button[class*='border-b-2']) {
+  background: rgba(6, 18, 28, 0.60);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom-color: rgba(255, 255, 255, 0.10) !important;
+  border-radius: 12px 12px 0 0;
+  padding: 0 6px;
+}
+
+/* Active tab */
+html[data-theme='glass-mountain'] button[class*='border-gold-500'],
+html[data-theme='glass-mountain'] button[aria-current='true'] {
+  color: #f5dfa0 !important;
+}
+
+/* Inactive tabs */
+html[data-theme='glass-mountain'] button[class*='border-b-2'][class*='border-transparent'] {
+  color: rgba(244, 246, 247, 0.55) !important;
+}
+
+html[data-theme='glass-mountain'] button[class*='border-b-2'][class*='border-transparent']:hover {
+  color: rgba(244, 246, 247, 0.85) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-radius: 6px 6px 0 0;
+}
+
+/* ── Disputes kanban board ───────────────────────────────────────────────── */
+
+/* Kanban column containers — override the global bg-slate-50→transparent rule */
+html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl {
+  background: rgba(6, 18, 28, 0.58) !important;
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+}
+
+/* Sticky column header - darker glass so cards can scroll under it */
+html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl > div:first-child {
+  background: rgba(4, 12, 20, 0.72) !important;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px 12px 0 0;
+}
+
+/* Column label text */
+html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl .text-slate-700 {
+  color: #f4f6f7 !important;
+}
+
+/* Dispute cards inside the columns */
+html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl .bg-white {
+  background: rgba(10, 24, 34, 0.68) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl .bg-white:hover {
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22) !important;
+}
+
+/* Empty column placeholder */
+html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl .border-dashed {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  html[data-theme='glass-mountain'] .card {
+    background: rgba(6, 18, 28, 0.80) !important;
+  }
+
+  html[data-theme='glass-mountain'] .app-sidebar {
+    background: rgba(4, 14, 22, 0.65) !important;
+  }
+}
