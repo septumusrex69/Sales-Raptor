@@ -150,11 +150,6 @@ html[data-theme='glass-mountain'] body {
   min-height: 100vh;
 }
 
-/* App content sits above the z-index:0 background div */
-html[data-theme='glass-mountain'] #root {
-  position: relative;
-  z-index: 1;
-}
 
 /* ── Make the entire app shell transparent ───────────────────────────────── */
 html[data-theme='glass-mountain'] #root,

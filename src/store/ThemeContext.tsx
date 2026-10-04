@@ -62,11 +62,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 0,
             backgroundImage: "linear-gradient(rgba(5,18,27,0.24), rgba(5,18,27,0.42)), url('/brand/glass-mountain-bg.jpg')",
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             pointerEvents: 'none',
+            /* will-change:transform promotes this to its own GPU compositor layer.
+             * backdrop-filter on sibling elements (sidebar, topbar, cards) can then
+             * blur it. Without this the browser may batch it with app content into
+             * one layer, making backdrop-filter blur nothing visible. */
+            willChange: 'transform',
           }}
         />
       )}
