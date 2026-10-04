@@ -204,23 +204,50 @@ for (const id of SKINS) {
 /*
  * AND A SKIN'S HERO PICTURE IS BIG ENOUGH TO BE MAGNIFIED INTO A HERO.
  *
- * THIS EXACT MISTAKE IS ON THE RECORD TWICE NOW. The Collections photograph was once "encoded at
+ * THIS EXACT MISTAKE IS ON THE RECORD TWICE. The Collections photograph was once "encoded at
  * 1800px wide from a 2048px source and then magnified into a panel 700px tall", and the firm's
  * word for it was "pixelated" -- see the floor check-collections-hero puts on that file. The
  * desert hero was then encoded at 1920 from a 2172px source, and the firm asked the same question
  * about the same artefacts: "are you sure that's 8K, the resolution looks a bit shitty?"
  *
- * A FLOOR ON THE FILE SIZE IS A CRUDE PROXY for "it was not encoded down", and crude is the point:
- * it is the one check that would have caught both. The ceiling is the other half -- a hero that
- * costs two megabytes on the screen people open first thing every morning is a hero that gets
- * deleted.
+ * IT WAS A FLOOR ON THE FILE SIZE AND THAT WAS THE WRONG MEASURE. 150KB was a crude proxy for "it
+ * was not encoded down", and the first correctly encoded picture it met failed it: the dune
+ * photograph the firm sent is 1672x941 of smooth sand and sky, which is 116KB at q0.92 because
+ * there is almost no detail in it to spend bytes on. A check that fails on right code is worse
+ * than none -- somebody raises the quality to get past it, which is the opposite of the saving.
+ *
+ * SO IT MEASURES THE PICTURE INSTEAD, which is what it was always trying to ask: a hero must be
+ * at least as large as the panel it fills, or the layout is magnifying it before anybody's screen
+ * gets involved. 1320x700 is that panel -- the width the brief caps the content at and
+ * --skin-collections-hero-min-lg -- and a wider window magnifies from there, which is a judgement
+ * about the picture rather than a rule a check can make.
+ *
+ * THE CEILING STAYS. A hero that costs two megabytes on the screen people open first thing every
+ * morning is a hero that gets deleted.
+ *
+ * READ OUT OF THE FILE. Every picture here is an extended WebP, whose VP8X chunk carries the
+ * canvas size as two 24-bit little-endian values, each one less than the real dimension. The
+ * offsets are fixed by the format: RIFF header (12 bytes), chunk tag and size (8), flags and
+ * reserved (4), then width and height.
  */
+const PANEL = { wide: 1320, tall: 700 }
+function webpSize(file) {
+  const d = readFileSync(file)
+  if (d.subarray(0, 4).toString() !== 'RIFF' || d.subarray(12, 16).toString() !== 'VP8X') return null
+  const at = (o) => (d[o] | (d[o + 1] << 8) | (d[o + 2] << 16)) + 1
+  return { width: at(24), height: at(27) }
+}
+
 const HERO_ART = ['/brand/desert-hero.webp', '/brand/desert-band.webp']
 for (const art of HERO_ART) {
-  const bytes = statSync(new URL(`../../public${art}`, import.meta.url)).size
+  const file = new URL(`../../public${art}`, import.meta.url)
+  const bytes = statSync(file).size
   const kb = Math.round(bytes / 1024)
-  ok(`${art} is over 150KB, which is what stops it being re-encoded down to mush (${kb}KB)`,
-    bytes > 150 * 1024)
+  const size = webpSize(file)
+  ok(`${art} is a WebP whose size can be read`, Boolean(size))
+  ok(`...at least as wide as the panel it fills (${size?.width}px)`,
+    (size?.width ?? 0) >= PANEL.wide)
+  ok(`...and at least as tall (${size?.height}px)`, (size?.height ?? 0) >= PANEL.tall)
   ok(`...and under 400KB (${kb}KB)`, bytes < 400 * 1024)
 }
 

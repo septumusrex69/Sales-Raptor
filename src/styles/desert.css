@@ -171,51 +171,58 @@ html[data-theme='desert'] {
   --skin-hero-radius: 18px;
 
   /*
-   * THE COMPANY DASHBOARD'S PHOTOGRAPH, 2172x724 and therefore 3:1. The panel it goes in is
-   * nothing like that shape, so the crop is the whole question — see the background-position
-   * rule below, which is the only part of it anything can choose.
+   * THE COMPANY DASHBOARD'S PHOTOGRAPH, 1672x941 and therefore 16:9.
+   *
+   * THE FIRM SENT A SECOND ONE and it is a better fit than the picture it replaces in every way
+   * that matters here. The first was 3:1, which `cover` had to throw two thirds of the width away
+   * to fill this panel; 16:9 is close enough to the panel's own shape that almost nothing is lost
+   * on a desktop and about a quarter of the width on an iPad.
+   *
+   * AND THE COMPOSITION IS THE ONE THEY DREW. The storm sky and the sun are the top half, the lit
+   * crest runs across the middle, and the bottom third is near-black sand in shadow -- which is
+   * exactly where the four figures and the controls sit. The wash below barely has to work.
    */
   --skin-collections-hero-image: url('/brand/desert-hero.webp');
-  --skin-collections-hero-ground: #0d0b07;
+  /* The photograph's own shadowed foreground, so a frame that loads late is the same colour as
+     the picture arriving rather than a warm brown flashing to blue-black. */
+  --skin-collections-hero-ground: #0b0e14;
   /*
-   * THE WASH, AND IT IS DRAWN AROUND THE WIDGETS RATHER THAN ACROSS THE PICTURE.
+   * THE WASH, AND IT IS NEARLY NOTHING NOW.
    *
-   * THE FIRM SENT A DRAWING OVER THE PHOTOGRAPH ITSELF: "the layout of this is not that nice...
-   * you put all of the widgets over the desert and the nice part of the picture." On it the four
-   * figures and the controls sit LOW, on the shadowed near dune, and the lit crest and the sun
-   * are left alone. The panel's own layout already puts them there -- the spacer above the tiles
-   * is flexible, so they ride the floor -- so what was wrong was the wash, which ran heavy from
-   * the left edge straight across the ridge.
+   * THE FIRM DREW THE LAYOUT THEY WANTED over the photograph: the four figures and the controls
+   * LOW, on the shadowed near dune, with the lit crest and the sun left alone. The picture they
+   * then sent does most of that by itself -- its bottom third is already near-black sand and its
+   * top-left is already storm cloud, which are the two places type sits.
    *
-   * SO THE HEAVY PASS IS THE VERTICAL ONE NOW, and it starts below the middle. Nothing above 46%
-   * is touched by it at all: that band holds the storm cloud, the ridge line and the sun, which
-   * is the half of the frame the firm is protecting. Underneath it comes down hard, because that
-   * is where the glass tiles are and white type at 10px has to read on lit sand.
+   * SO THESE NUMBERS CAME DOWN HARD, from 0.84 across and 0.60 down. Over this photograph those
+   * were spending the dune field and the crest to darken something that was already dark, which
+   * is the "you put all of the widgets over the desert and the nice part of the picture" the firm
+   * objected to, done with a gradient instead of a widget.
    *
-   * AND THE HORIZONTAL PASS CAME OFF. It was 0.84 at the left edge, tuned when this panel was
-   * short and the headline sat close to the top-left corner. The photograph is already near-black
-   * cloud there, so 0.84 was spending the dune field the firm asked to see -- "so we see more of
-   * the desert on the left" -- to darken something that was dark. 0.52 holds the headline and
-   * gives the left-hand dunes back. The right edge keeps a little, because the rail of small caps
-   * sits over the brightest sky on the panel.
+   * WHAT IS LEFT IS DOING TWO JOBS AND NOTHING ELSE. Across: enough on the left for the headline,
+   * nothing through the middle where the ridge is, and a good deal back on the right because the
+   * rail of small caps sits over the sun itself. 0.22 was tried there first and the four words
+   * were champagne on cream; the right-hand stop is the one number on this gradient chosen for a
+   * piece of type rather than for the photograph. Down: untouched above 55%, and
+   * coming on gently under it so the glass tiles have a floor to stand on at any window width.
    *
-   * THE TWO PASSES COMPOUND, and that is what the figures below are chosen against: 0.52 across
-   * and 0.60 down meet at 0.81 in the bottom-left corner, where the first tile is.
+   * THE TWO PASSES COMPOUND: 0.34 across and 0.30 down meet at 0.54 in the bottom-left corner,
+   * over sand that is already almost black, and 0.38 and 0.30 meet at 0.57 in the bottom-right.
    */
   --skin-collections-scrim:
     linear-gradient(
       90deg,
-      rgba(13, 11, 7, 0.52) 0%,
-      rgba(13, 11, 7, 0.24) 38%,
-      rgba(13, 11, 7, 0.08) 66%,
-      rgba(13, 11, 7, 0.3) 100%
+      rgba(8, 11, 16, 0.34) 0%,
+      rgba(8, 11, 16, 0.14) 38%,
+      rgba(8, 11, 16, 0.04) 62%,
+      rgba(8, 11, 16, 0.38) 100%
     ),
     linear-gradient(
       to bottom,
-      rgba(13, 11, 7, 0) 0%,
-      rgba(13, 11, 7, 0) 46%,
-      rgba(13, 11, 7, 0.26) 70%,
-      rgba(13, 11, 7, 0.6) 100%
+      rgba(8, 11, 16, 0) 0%,
+      rgba(8, 11, 16, 0) 55%,
+      rgba(8, 11, 16, 0.14) 76%,
+      rgba(8, 11, 16, 0.3) 100%
     );
 
   /*
@@ -255,27 +262,25 @@ html[data-theme='desert'] .app-hero {
  *
  * ONLY THE POSITION IS SET HERE; the image, the ground and the wash all arrive as tokens above.
  *
- * THE CROP IS THE WHOLE PROBLEM, AND IT IS ARITHMETIC RATHER THAN TASTE. The photograph is 3:1
- * (2172x724) and the panel is close to 2:1, so `cover` scales to fill the height and throws away
- * about a third of the width. Where that third is taken from is this declaration.
+ * THE CROP IS ARITHMETIC RATHER THAN TASTE, AND IT CHANGED WITH THE PICTURE. The photograph is
+ * 16:9 (1672x941) and the panel is between 1.3:1 on an iPad and about 1.9:1 on a desktop -- so
+ * `cover` fits it to the WIDTH on a wide window, losing about forty pixels off the height, and to
+ * the HEIGHT on a narrow one, losing about a quarter of the width.
  *
- * THE FIRM: "move the picture a little bit more right and up, so we see more of the desert on the
- * left and then the wind that takes the sands on the right." Moving the PICTURE right means
- * showing more of its LEFT edge, which is a position below 50%.
+ * WHICH IS WHY IT IS CENTRED, and that is a decision rather than a default. The firm asked for
+ * both halves of the frame -- "more of the desert on the left and then the wind that takes the
+ * sands on the right" -- and on this picture, unlike the 3:1 one it replaces, they can have them:
+ * the quarter the iPad loses comes evenly off the far edges, which are the empty end of the dune
+ * field and the outer edge of the sun's glow. Pulled either way, one of the two things they named
+ * goes off the screen.
  *
- * 38% RATHER THAN FURTHER. The sun and the blowing sand sit at about 78% across the frame, and the
- * window is only 63% of it wide — below about 35% the sun falls off the right-hand edge, and the
- * firm asked for both halves. 38% is as far left as the picture goes while the wind is still in it.
- *
- * AND THE VERTICAL HALF IS 50% BECAUSE IT CANNOT DO ANYTHING ELSE. It read 90% for a version, with
- * a note explaining what that bought. It bought nothing: `cover` fits whichever axis runs short,
- * and a 3:1 photograph in a panel that is never wider than about 2:1 is always fitted to the
- * HEIGHT — the whole vertical frame is on screen, and there is no overflow for a vertical position
- * to choose from. Said plainly here because the next person to move this picture will reach for
- * the second number first, and it will do nothing while appearing to be the control.
+ * AND BOTH HALVES OF THE VALUE NOW DO SOMETHING. Under the old 3:1 photograph the vertical half
+ * was inert -- there was never any vertical overflow for it to choose from -- and a note here
+ * said so. That stopped being true the moment the picture became 16:9, which is the sort of thing
+ * that quietly outlives the file it was written about.
  */
 html[data-theme='desert'] .collections-hero {
-  background-position: 38% 50%;
+  background-position: 50% 50%;
 }
 
 /*
