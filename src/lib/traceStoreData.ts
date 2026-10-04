@@ -32,7 +32,11 @@ const toItem = (r: any): TraceItem => ({
 
 const TRACE_COLUMNS =
   'id,account_id,subject_kind,director_id,report_kind,subject_name,id_number,registration_number,'
-  + 'company_status,contact_score,risk_score,enquired_on,document_id,created_at'
+  /* `pulled_by` IS WHO WORKED THE ROUND. It is who paid for the report and then went down its
+     list, and it is the only person the data names -- see roundsSpentBy, which counts rounds per
+     person because the firm's rule is per person: "if an individual has worked through a trace
+     twice, it could go to the next person." */
+  + 'company_status,contact_score,risk_score,enquired_on,document_id,pulled_by,created_at'
 
 const ITEM_COLUMNS =
   'id,trace_id,account_id,kind,value,label,people_linked,seen_on,amount,status,outcome,'
@@ -52,6 +56,7 @@ const toTrace = (r: any, items: TraceItem[]): FiledTrace => ({
   riskScore: r.risk_score ?? null,
   enquiredOn: r.enquired_on ?? null,
   documentId: r.document_id ?? null,
+  pulledBy: r.pulled_by ?? null,
   createdAt: r.created_at,
   items,
 })

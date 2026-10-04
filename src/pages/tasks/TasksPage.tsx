@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarClock, CalendarDays, MapPin, Plus, Search, Users, Video } from 'lucide-react'
+import {
+  CalendarClock, CalendarDays, MapPin, MessageSquare, Plus, Search, Users, Video,
+} from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -14,8 +16,9 @@ import { fetchCalendarEvents, type CalendarEvent } from '../../lib/calendarEvent
 import {
   dayCounts, dayHeadline, joinLink, localDay, meetingTime, meetingWith, planDay,
   prepareOn, prepareTitle, shiftDay,
-  taskTime, weekStrip,
+  taskTime, weekStrip, type DayTicket,
 } from '../../lib/dayPlan.ts'
+import { fetchOpenQueries } from '../../lib/accountQueries.ts'
 import { TaskDayPicker } from '../../components/tasks/TaskDayPicker'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
@@ -171,9 +174,55 @@ export function TasksPage() {
    * see dayPlan.ts on why a meeting stays in calendar_events and is merged at the read instead of
    * being copied into `tasks`.
    */
+  /*
+   * THE THIRD THING A DAY IS MADE OF, AND THE ONE THAT WAS MISSING.
+   *
+   * THE FIRM ASKED FOR THE LIAISON'S DAY -- meetings, tasks AND tickets. A client liaison's work
+   * is mostly tickets: a dispute to answer, a client to chase, a request to put. This page showed
+   * them meetings and tasks only, so the one place they could see their work was a board they had
+   * to go and look at, and their day said they had nothing on.
+   *
+   * THEIR OWN, AND OPEN. fetchOpenQueries returns the whole queue -- it is what the board is drawn
+   * from -- and the day is one person's: a ticket on somebody else's desk is not on your Tuesday.
+   * dayPlan then keeps only the ones with a chase date landing on the day.
+   *
+   * NOT COPIED INTO `tasks`. The rule a meeting already follows, for the reason written out at
+   * length in dayPlan.ts: two things to complete for one obligation, and nothing keeps them in
+   * step.
+   */
+  const [tickets, setTickets] = useState<DayTicket[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void fetchOpenQueries()
+      .then((rows) => {
+        if (cancelled) return
+        setTickets(rows.map((r) => ({
+          id: r.id,
+          description: r.description,
+          kind: r.kind,
+          chaseOn: r.chaseOn,
+          status: r.status,
+          ownerId: r.ownerId,
+          accountId: r.accountId,
+          debtorName: r.debtorName,
+        })))
+      })
+      /* A QUEUE THAT WILL NOT LOAD COSTS THE TICKETS, not the day. The meetings and the tasks are
+         on the screen and are what most people open this page for. */
+      .catch(() => { if (!cancelled) setTickets([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  const myTickets = useMemo(
+    () => tickets.filter((t) => t.ownerId === currentUser?.id),
+    [tickets, currentUser?.id],
+  )
+
   const plan = useMemo(
-    () => (dayShown ? planDay({ day: dayShown, meetings, tasks: scopedTasks }) : null),
-    [dayShown, meetings, scopedTasks],
+    () => (dayShown
+      ? planDay({ day: dayShown, meetings, tasks: scopedTasks, tickets: myTickets })
+      : null),
+    [dayShown, meetings, scopedTasks, myTickets],
   )
 
   function selectView(v: View) {
@@ -220,8 +269,11 @@ export function TasksPage() {
     () => dayCounts({
       meetings,
       tasks: scopedTasks.filter((t) => t.ownerId === currentUser?.id),
+      /* THE SAME THREE LISTS THE DAY ITSELF IS DRAWN FROM, or the number under the 8th is not the
+         number of rows the 8th shows -- which is the drift dayPlan exists to prevent. */
+      tickets: myTickets,
     }),
-    [meetings, scopedTasks, currentUser],
+    [meetings, scopedTasks, currentUser, myTickets],
   )
 
   const counts = useMemo(() => {
@@ -428,6 +480,50 @@ export function TasksPage() {
                   Prepare
                 </button>
                 <Link to="/calendar" className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+                  Open
+                </Link>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/*
+        THE TICKETS DUE TO BE COME BACK TO TODAY.
+
+        AFTER THE MEETINGS AND BEFORE THE TASKS, which is the order of how much of the day is
+        already spoken for: a meeting is an hour you have given away, a ticket is a conversation
+        somebody else is waiting on, and a task is your own.
+
+        ABSENT RATHER THAN EMPTY, like the meetings card above and for the same reason -- a card
+        headed "Tickets" over a line saying none is furniture.
+
+        AND IT LINKS TO THE TICKET, not to the account: the ticket is where the work is done, which
+        is what the ticket screen was built for.
+      */}
+      {plan && plan.tickets.length > 0 && (
+        <Card padded={false}>
+          <div className="px-5 py-2.5 border-b border-slate-100 flex items-center gap-2">
+            <MessageSquare size={14} className="text-[var(--c-steel)]" />
+            <span className="text-xs font-medium text-slate-500">
+              {plan.tickets.length === 1 ? 'Ticket' : 'Tickets'} — what somebody is waiting on
+            </span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {plan.tickets.map((t) => (
+              <div key={t.id} className="flex items-center gap-3 px-5 py-3">
+                {/* WHAT KIND, in its own column so the eye can skip the disputes -- they are the
+                    ones with a clock on them. */}
+                <span className="w-20 shrink-0 text-[11px] font-semibold uppercase tracking-wide
+                  text-slate-400">
+                  {t.kind === 'dispute' ? 'Dispute' : t.kind === 'request' ? 'Request' : 'Help'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-700 truncate">{t.description}</p>
+                  {t.debtorName && <p className="text-xs text-slate-400 truncate">{t.debtorName}</p>}
+                </div>
+                <Link to={`/queries/${t.id}`}
+                  className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Open
                 </Link>
               </div>

@@ -52,7 +52,8 @@ const ICONS: Record<TraceCategoryId, typeof Phone> = {
 const PAGE = 6
 
 export function TraceWorkspaceModal({
-  traces, openId, onOpen, actor, onClose, onChanged, onUploadNew,
+  traces, openId, onOpen, actor, onClose, onChanged, onUploadNew, onPark, onAskWriteOff,
+  reallocation,
 }: {
   /** Every trace on the account, so a collector can move between them without closing this. */
   traces: FiledTrace[]
@@ -63,6 +64,21 @@ export function TraceWorkspaceModal({
   onChanged: () => Promise<void>
   /** Offered where this round is spent: a fresh bureau search, which is a new round. */
   onUploadNew?: () => void
+  /**
+   * THE TWO ENDINGS A SPENT TRACE HAS, offered from where somebody finds out it is spent.
+   *
+   * Before these there were two buttons and a shrug: work the ones that rang, buy another report,
+   * or leave the account on a desk consuming a diary slot every few weeks for a review nobody can
+   * act on. See dormancy.ts -- park it with a date to come back and re-trace, or ask the client
+   * for the instruction to write it off as uncontactable.
+   *
+   * OPTIONAL, because this modal is also opened to READ a trace from the client-facing side where
+   * neither action belongs.
+   */
+  onPark?: () => void
+  onAskWriteOff?: () => void
+  /** The reallocation sentence, or null. Drawn, not acted on -- see reallocationLine. */
+  reallocation?: string | null
 }) {
   const trace = traces.find((t) => t.id === openId) ?? traces[0]
   const [busy, setBusy] = useState<string | null>(null)
@@ -377,7 +393,44 @@ export function TraceWorkspaceModal({
                 Upload a new trace
               </button>
             )}
+            {/*
+              AND THE TWO ENDINGS, which did not exist.
+
+              A SPENT ROUND IS A DECISION and the screen used to offer none: the account went back
+              on a desk and consumed a diary slot every few weeks for a review nobody could act
+              on. Park it with a date to come back and trace again, or ask the client for the
+              instruction to stop. Neither happens here -- both open a box where somebody confirms
+              it. See dormancy.ts.
+            */}
+            {round.state === 'spent' && onPark && (
+              <button type="button" onClick={onPark}
+                title="Set it aside with a date to come back and trace again. Costs the client nothing."
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
+                Park it and re-trace later
+              </button>
+            )}
+            {round.state === 'spent' && onAskWriteOff && (
+              <button type="button" onClick={onAskWriteOff}
+                title="The client decides whether to stop. This asks them, with the account of the work."
+                className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50">
+                Ask the client to write it off
+              </button>
+            )}
           </div>
+        )}
+
+        {/*
+          AND WHOSE DESK IT SHOULD BE ON, where the firm's limit has been reached.
+
+          THE FIRM: "if an individual has worked through a trace twice, it could go to the next
+          person." Said here because this is the screen where the second round is finished, and
+          said rather than done -- who it goes to is a team leader's decision about a team leader's
+          workload, and the collector who spent two rounds on the file is the person most entitled
+          to be told why it left their desk. See reallocationLine.
+        */}
+        {reallocation && (
+          <p className="mb-4 rounded-lg border border-[#c9a052] bg-gold-50 px-3 py-2 text-xs
+            text-slate-700">{reallocation}</p>
         )}
 
         {/*

@@ -154,3 +154,79 @@ export function roundLine(r: TraceRound): string {
     : ''
   return `Worked through — all ${r.workable} tried, and none of it reached the debtor.${got}${left}`
 }
+
+/* =================================================================================================
+ * TWO ROUNDS A PERSON, AND THEN IT IS SOMEBODY ELSE'S TURN
+ * ============================================================================================== */
+
+/**
+ * THE FIRM: "if an individual has worked through a trace twice, it could go to the next person."
+ *
+ * WHY TWO AND NOT THREE. A trace costs the client money under item 4(c), and a second one that
+ * reaches nobody is not evidence that the debtor cannot be found -- it is evidence that this
+ * collector has run out of ideas on this file. The firm's own experience is that a fresh pair of
+ * eyes on the same report finds the number: somebody rings at a different hour, reads the township
+ * differently, telephones the employer rather than the mobile.
+ *
+ * SPENT ROUNDS ONLY. A round that REACHED the debtor did its job, however hard it was, and must
+ * not count towards a limit that means "this person is not getting anywhere" -- see TraceRound,
+ * where worked_through and spent are deliberately not collapsed.
+ *
+ * COUNTED PER PERSON, which is the firm's own unit, not per account. Three collectors who have
+ * each spent one round between them have not spent anybody's two: the account has been looked at
+ * from three directions, which is exactly the thing reallocation is for.
+ */
+export const ROUNDS_BEFORE_REALLOCATION = 2
+
+/** Only the parts of a filed trace this needs. See FiledTrace.pulledBy. */
+export interface RoundableTrace {
+  pulledBy: string | null
+  items: readonly TraceItem[]
+}
+
+/**
+ * HOW MANY ROUNDS THIS PERSON HAS WORKED THROUGH AND GOT NOTHING FROM.
+ *
+ * A TRACE WITH NO `pulledBy` COUNTS FOR NOBODY. Every trace imported before that column existed,
+ * and anything the migration brought in, has none -- and attributing those to whoever is on the
+ * account today would reallocate a file on the strength of somebody else's work.
+ */
+export function roundsSpentBy(traces: readonly RoundableTrace[], personId: string | null): number {
+  if (!personId) return 0
+  return traces.filter((t) => t.pulledBy === personId && traceRound(t.items).state === 'spent').length
+}
+
+/**
+ * HAS THIS PERSON HAD THEIR TWO?
+ *
+ * SAID AND NOT DONE. Nothing moves an account on its own here: the firm said "it COULD go to the
+ * next person", and who it goes to is a team leader's decision about a team leader's workload.
+ * Reallocating automatically would also be reallocating silently, and the collector who has just
+ * spent two rounds on a file is the person most entitled to be told why it left their desk.
+ */
+export function reallocationDue(
+  traces: readonly RoundableTrace[],
+  personId: string | null,
+  limit = ROUNDS_BEFORE_REALLOCATION,
+): boolean {
+  return roundsSpentBy(traces, personId) >= limit
+}
+
+/**
+ * THE SENTENCE A TEAM LEADER READS, or null where there is nothing to say.
+ *
+ * NAMES THE NUMBER AND WHAT IT MEANS, because "reallocation due" on its own is a label somebody
+ * has to go and work out. And it says what reallocation IS for -- a fresh pair of eyes on the same
+ * report -- so it does not read as a mark against the collector.
+ */
+export function reallocationLine(
+  traces: readonly RoundableTrace[],
+  personId: string | null,
+  limit = ROUNDS_BEFORE_REALLOCATION,
+): string | null {
+  const spent = roundsSpentBy(traces, personId)
+  if (spent < limit) return null
+  return `${spent} traces have been worked right through on this account and none of them reached `
+    + 'the debtor. The firm’s rule is two to a person — hand it to somebody else and let '
+    + 'them read the same report with fresh eyes.'
+}

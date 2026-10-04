@@ -561,8 +561,8 @@ function Merged({ text, values }: { text: string; values: Record<string, string>
         : (
           <span key={i}
             className="rounded bg-negative-50 px-1 font-semibold text-negative-700"
-            title="This account cannot answer this. Do not improvise it.">
-            {fieldLabel(s.field)}
+            title={`${fieldLabel(s.field)} — this account cannot answer it. Do not improvise it.`}>
+            no {gapName(s.field)}
           </span>
         )))}
     </>
@@ -570,7 +570,7 @@ function Merged({ text, values }: { text: string; values: Record<string, string>
 }
 
 /**
- * THE FIELD IN THE FIRM'S WORDS, not its key.
+ * THE FIELD IN THE FIRM'S WORDS, not its key. For the line ABOVE the script.
  *
  * Off MERGE_FIELDS, which is the same list the composer's own missing-field warning reads, so a
  * gap is named the same way wherever somebody meets it. The key is the fallback rather than
@@ -579,4 +579,26 @@ function Merged({ text, values }: { text: string; values: Record<string, string>
 function fieldLabel(key: string): string {
   const f = MERGE_FIELDS.collections.find((x) => x.key === key)
   return f ? f.label : key
+}
+
+/**
+ * AND THE GAP ITSELF IS NAMED SHORT, which is a different job from the line above the script.
+ *
+ * THE CATALOGUE'S LABELS ARE WRITTEN FOR SOMEBODY CHOOSING A FIELD, and they are long because
+ * that is what helps there: {{debtor_address}} reads "Where the notice is posted, on its own
+ * lines". Dropped into the middle of a sentence a collector is reading aloud, that is a clause
+ * they would read out -- "I have you at Where the notice is posted, on its own lines" -- which is
+ * the exact failure the gap exists to prevent.
+ *
+ * SO THE GAP CARRIES THE FIELD'S NAME, which is what the firm asked for in as many words: "show
+ * the field name in red rather than an empty space." Underscores out, because it is being read by
+ * a person and not by a parser, and the catalogue's own label is on the title so the long version
+ * is a hover away.
+ *
+ * A SECOND SHORT LABEL IN THE CATALOGUE WOULD HAVE BEEN THE OTHER WAY, and CLAUDE.md is clear
+ * about what two names for one thing costs: the day they disagree, two screens describe one field
+ * differently.
+ */
+function gapName(key: string): string {
+  return key.replace(/_/g, ' ')
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, Send, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { PhoneLink } from '../../components/PhoneLink'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -23,7 +23,9 @@ import {
 } from '../../lib/accountWorkspace'
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
-import { canFreezeAccounts, canHandOutAccounts, canViewClients } from '../../lib/permissions'
+import {
+  canFreezeAccounts, canHandOutAccounts, canLeadCollections, canViewClients, isAssignableOwner,
+} from '../../lib/permissions'
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
@@ -65,6 +67,8 @@ import { TraceButton } from './TraceButton'
 import { SmsModal } from './SmsModal'
 import { CallScriptPanel } from '../../components/collections/CallScriptPanel'
 import { AuthorisedContactsPanel } from './AuthorisedContactsPanel'
+import { ParkTraceModal } from './ParkTraceModal'
+import { ReferAccountModal } from './ReferAccountModal'
 import { EstatePanel } from './EstatePanel'
 import { DiaryWorkBar } from '../../components/diary/DiaryWorkBar'
 import { DiariseModal } from '../../components/diary/DiariseModal'
@@ -118,7 +122,7 @@ import { compareTraceReports } from '../../lib/traceCompare.ts'
 import {
   newFindingWord, reportsLine, traceSubjects, type TraceSubject,
 } from '../../lib/traceSubjects.ts'
-import { roundLine, traceRound } from '../../lib/traceRound.ts'
+import { reallocationLine, roundLine, traceRound } from '../../lib/traceRound.ts'
 import {
   hasProgress, instalmentProgress, moneyProgress, progressPercent, type PaymentProgress,
 } from '../../lib/paymentProgress.ts'
@@ -172,6 +176,12 @@ export function AccountDetail() {
   const [otherAccounts, setOtherAccounts] = useState<OtherAccount[]>([])
   /** Which filed trace is open for working. See TraceWorkspaceModal. */
   const [openTrace, setOpenTrace] = useState<string | null>(null)
+  /** Which of the two endings a spent trace is being given, or null. See ParkTraceModal. */
+  const [parking, setParking] = useState<'park' | 'write_off' | null>(null)
+  /** Referring the account, or transferring a caller on the line. See ReferAccountModal. */
+  const [referring, setReferring] = useState<'refer' | 'transfer' | null>(null)
+  /** What the referral did, said where the press was. */
+  const [referred, setReferred] = useState<string | null>(null)
   /** Whether the signed-in agent has a mailbox connected at all. Null while we are asking. */
   const [mailbox, setMailbox] = useState<string | null>(null)
   /** Set when writing a reply, so the debtor's client threads our answer under their message. */
@@ -1645,6 +1655,25 @@ export function AccountDetail() {
       )}
 
       {/*
+        WHAT A REFERRAL DID, said where the press was.
+
+        A REFERRAL THAT QUIETLY SUCCEEDED LOOKS EXACTLY LIKE ONE THAT QUIETLY FAILED, and this one
+        also says what did NOT happen -- the account has not moved -- so nobody refers a file
+        believing they have handed it over. See referralDone.
+      */}
+      {referred && (
+        <div className="flex items-start gap-2 rounded-lg border border-[var(--c-green)]/30
+          bg-[var(--c-green)]/5 px-3 py-2.5 text-[13px] text-slate-700">
+          <Check className="w-4 h-4 mt-0.5 shrink-0 text-[var(--c-green)]" />
+          <span className="min-w-0">
+            {referred}
+            <button type="button" onClick={() => setReferred(null)}
+              className="ml-2 underline underline-offset-2">Dismiss</button>
+          </span>
+        </div>
+      )}
+
+      {/*
         WHAT A CALL CODE STILL NEEDS, said where the press was -- beside the action row rather than
         inside the panel that has just closed.
 
@@ -1695,6 +1724,14 @@ export function AccountDetail() {
         onTraced={reload}
         onUpload={() => setTracing(true)}
         onAskClient={setAskingTrace}
+        /*
+         * REFERRING IS A TEAM LEADER'S ACT. canLeadCollections rather than canReassign, which is
+         * the same choice the floor's own screens make and for the firm's own reason: the
+         * pre-legal team leader leads a team and cannot reassign, and they are exactly the person
+         * who reads a file and wants somebody to ring the employer.
+         */
+        onRefer={canLeadCollections(currentUser) ? () => setReferring('refer') : null}
+        onTransfer={() => setReferring('transfer')}
         startable={startable}
         onStartWorkflow={(versionId) => {
           /*
@@ -2092,7 +2129,64 @@ export function AccountDetail() {
           /* A SPENT ROUND OFFERS A FRESH SEARCH, from inside the trace that is spent -- which is
              where somebody is standing when they find out. See traceRound. */
           onUploadNew={() => { setOpenTrace(null); setTracing(true) }}
+          /*
+           * AND THE TWO ENDINGS A SPENT TRACE HAS, which it had none of: park it with a date to
+           * come back and trace again, or ask the client for the instruction to write it off as
+           * uncontactable. Both open the same box; neither does anything on its own. See
+           * dormancy.ts.
+           */
+          onPark={() => { setOpenTrace(null); setParking('park') }}
+          onAskWriteOff={() => { setOpenTrace(null); setParking('write_off') }}
+          /*
+           * AND WHOSE DESK IT SHOULD BE ON. THE FIRM: "if an individual has worked through a trace
+           * twice, it could go to the next person." Counted on the person who PULLED the reports,
+           * which is who worked them, and only on rounds that reached nobody -- a hard trace that
+           * found the debtor is not a reason to take a file away. See reallocationLine.
+           */
+          reallocation={reallocationLine(traces, currentUser?.id ?? null)}
         />
+      )}
+
+      {/*
+        THE BOX THAT ENDS A SPENT TRACE. Opened from inside the trace, confirmed here, because one
+        of its two answers takes the account off the floor and the other asks a client to give up
+        money.
+      */}
+      {parking !== null && (
+        <ParkTraceModal
+          accountId={account.id}
+          accountLabel={`${name} · ${account.caseNumber ?? account.accountNumber ?? ''}`.trim()}
+          mode={parking}
+          /* ROUNDS THAT REACHED NOBODY, across every trace on the account rather than per person:
+             this is what the CLIENT is told, and the client does not care whose desk it was on. */
+          rounds={traces.filter((t) => traceRound(t.items).state === 'spent').length}
+          /* WHAT THE ACCOUNT HAS ACTUALLY BEEN CHARGED FOR, off the fee ledger the page already
+             holds -- never a count of reports, because a report somebody uploaded twice is one
+             search and the client is quoted what they paid for. */
+          searches={(ledgers?.fees ?? []).filter((f) => f.annexureItem === '4c' && f.billed).length}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          onClose={() => setParking(null)}
+          onDone={reload} />
+      )}
+
+      {/*
+        PUTTING THE ACCOUNT ON SOMEBODY ELSE'S DAY. One box for both, because they are one act with
+        two sentences and two dates -- see accountReferral.ts.
+      */}
+      {referring !== null && (
+        <ReferAccountModal
+          accountId={account.id}
+          accountLabel={`${name} \u00b7 ${account.caseNumber ?? account.accountNumber ?? ''}`.trim()}
+          kind={referring}
+          /* WHO IT CAN GO TO: the people who work accounts. A referral to somebody who never
+             opens the diary is a referral into a drawer. */
+          users={users.filter((u) => isAssignableOwner(u.role))}
+          actor={{ id: currentUser?.id ?? null, name: currentUser?.name ?? null }}
+          /* THE NUMBER THE CALLER IS ON, so a dropped transfer is recoverable. The same contact
+             the Call button dials, which is the one reception would have answered. */
+          callerNumber={callContact?.value ?? null}
+          onClose={() => setReferring(null)}
+          onDone={async (message) => { setReferred(message); await reload() }} />
       )}
 
       {/* Who to deal with when it is no longer the debtor. Typed by a person — it is not on a PDF. */}
@@ -2331,7 +2425,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow, onRefer, onTransfer }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -2364,6 +2458,17 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   /** The cell number a bureau can be searched on where there is no ID. See TraceButton.mobile. */
   traceMobile: string | null
   onTraced: () => Promise<void>
+  /**
+   * REFER IT, which only somebody who runs the floor is offered.
+   *
+   * THE FIRM: a team leader refers an account, and the referral IS the diary entry. Null for
+   * everybody else -- a collector referring their own account to a colleague is reallocating
+   * work, which is a team leader's decision.
+   */
+  onRefer: (() => void) | null
+  /** Transfer a caller who is on the line now. Offered to everybody: reception has no role of
+      its own, and the person who answers the switchboard is whoever picked up. */
+  onTransfer: () => void
   /** Offered the moment the search comes back, which is when the PDFs are on the machine. */
   onUpload: () => void
   /** Opens the Escalate box on a request for what the trace needs. See TraceButton.onAskClient. */
@@ -2464,6 +2569,20 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
         <Action icon={Gavel} label="Start workflow" onClick={() => onStartWorkflow('')}
           title={`${startable.length} sequences can be started on this account`} />
       )}
+      {/*
+        REFERRING IT, AND TRANSFERRING A CALLER -- two presses that put this account on somebody
+        else's day. See accountReferral.ts: the diary entry is the referral, and nothing else is
+        written.
+
+        REFER IS A TEAM LEADER'S and the button is absent for everybody else; TRANSFER is
+        everybody's, because the person who answered the telephone is whoever picked it up.
+      */}
+      {onRefer && (
+        <Action icon={Send} label="Refer" onClick={onRefer}
+          title="Put this account on somebody's diary with what you want done. It does not hand the account over." />
+      )}
+      <Action icon={PhoneForwarded} label="Transfer" onClick={onTransfer}
+        title="The caller is on the line: hand the account to whoever you are putting them through to." />
       <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
         debtorName={debtorName} mobile={traceMobile}
         className={`${ACTION_BASE} ${ACTION_ENABLED}`}

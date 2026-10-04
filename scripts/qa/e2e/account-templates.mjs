@@ -108,12 +108,54 @@ const TEMPLATES = [
      * address contact on it. That is the state a real account is in until a client sends one, and
      * it is the one a section 129 cannot be posted from.
      */
-    id: 'tpl-script-1', scope: 'collections', kind: 'call_script', name: 'Opening the call',
+    /*
+     * TWO SCRIPTS, WITH THE FIRM'S OWN SEED KEYS, because the panel resolves them BY key rather
+     * than offering a picker: the opening script pops first and the workflow script is behind the
+     * verification tick. A fixture with a made-up key would leave the panel saying the script is
+     * not in the library -- which is honest and tests nothing.
+     *
+     * AND THEY ARE SHAPED LIKE THE REAL ONES: the headings are what callScriptParts reads to tell
+     * the words from the directions, the branches and the DO NOT list.
+     */
+    id: 'tpl-script-1', scope: 'collections', kind: 'call_script',
+    name: 'Opening a call — an individual',
     subject: null, format: 'text',
-    body: 'Good day, may I speak to {{debtor_name}}? I am calling about {{balance}} outstanding. '
-      + 'I have you at {{debtor_address}} — is that still right?',
+    body: 'Goes to\nIndividual\nGoal of the call\nReach the right person and verify them.\n'
+      + 'WHAT THE COLLECTOR SAYS\nGood day, may I speak to {{debtor_name}}?\n'
+      + '[Check the name and the date of birth against the account.]\n'
+      + 'CAPTURE ON THE ACCOUNT\n—  RPC once verified\n'
+      + 'DO NOT\nSay the creditor or the balance before the person is verified.',
     position: null, language: 'en', active: true, attachment_id: null,
-    seed_key: null, updated_at: '2026-09-01T08:00:00Z',
+    seed_key: 'script-open-individual', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    id: 'tpl-script-2', scope: 'collections', kind: 'call_script', name: 'Handover call',
+    subject: null, format: 'text',
+    body: 'Goes to\nAny\nGoal of the call\nMake first contact and ask for the money.\n'
+      + 'WHAT THE COLLECTOR SAYS\n[After verification]\n'
+      + 'I am calling about {{balance}} outstanding. I have you at {{debtor_address}} — is that '
+      + 'still right?\n'
+      + 'IF THEY SAY\nCannot pay it all\nWhat can you realistically do?\n'
+      + 'CAPTURE ON THE ACCOUNT\n—  PTP, RTP or RPC\n'
+      + 'DO NOT\nName a settlement figure. Nothing has been approved at this stage.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'script-handover-call', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * A BRANCH SCRIPT, so the row of one-tap branches is a real row. The firm: "branch scripts are
+     * one tap away at all times... a collector must be able to jump to any of them mid-call
+     * without losing the panel." With none of them in the library the row is correctly absent and
+     * the rule is untested.
+     */
+    id: 'tpl-script-3', scope: 'collections', kind: 'call_script', name: 'A dispute on the call',
+    subject: null, format: 'text',
+    body: 'Goes to\nAny\nGoal of the call\nGet the dispute in writing.\n'
+      + 'WHAT THE COLLECTOR SAYS\nThank you for telling me. I need it in writing.\n'
+      + 'CAPTURE ON THE ACCOUNT\n—  DISP\n'
+      + 'DO NOT\nTell the debtor the account is on hold before the written dispute is in.',
+    position: null, language: 'en', active: true, attachment_id: null,
+    seed_key: 'script-dispute-raised', updated_at: '2026-09-01T08:00:00Z',
   },
 ]
 
@@ -329,39 +371,89 @@ try {
 
   await page.getByRole('button', { name: 'Call script' }).first().click()
   await page.waitForTimeout(600)
-  t.ok('a call script can be opened from the account',
-    await page.getByRole('button', { name: 'Choose a script' }).first().isVisible())
+  /*
+   * SCOPED TO THE PANEL, AND THAT IS NOT TIDINESS. The account page BEHIND this modal draws the
+   * balance in its own figures, so an unscoped "the balance is nowhere on the screen" passes or
+   * fails on the page rather than on the panel -- and the rule being tested is about what the
+   * PANEL draws before the verification tick.
+   */
+  const panel = page.locator('[role="dialog"]').first()
+  /*
+   * THE OPENING SCRIPT POPS FIRST, WITH NO PICKER. The panel chooses by debtor type and by where
+   * the account stands -- the firm: "the opening script pops first, always." A picker was what it
+   * had, and a collector choosing a script while a debtor is talking is the thing being removed.
+   *
+   * READ OFF THE PARAGRAPH, not off the text node. Every merged value is its own span -- see
+   * Merged -- so getByText lands on the span holding the words before the name, and the name
+   * itself is the next one. The <p> is the line.
+   */
+  const opening = await panel.locator('p', { hasText: /may I speak to/ }).first().innerText()
+  t.ok(`the opening script is on screen without being asked for (${JSON.stringify(opening)})`,
+    /may I speak to Mhlongo/.test(opening))
   /* Reading charges nothing, and the screen says so — every other button in that row does. */
   t.ok('...saying plainly that reading charges nothing',
     await page.getByText(/Reading this charges nothing/).first().isVisible())
+  /*
+   * AND NOTHING IDENTIFYING IS DRAWN UNTIL THE TICK. The firm: "confirming the account exists is
+   * itself a disclosure. The panel must not display the debtor's name, the creditor or the balance
+   * until the verification tick is set, because a collector reads what is on the screen."
+   *
+   * ASSERTED ON THE BALANCE, which is the thing a collector would read out. The debtor's name is
+   * in the opening script's own words -- asking for them by name is how a call starts -- so the
+   * balance is what separates the locked state from the unlocked one.
+   */
+  t.check('the balance is nowhere in the panel before the person is verified',
+    await panel.getByText(/R\s?180,000\.00/).count(), 0)
+  t.ok('...and the panel says why', await panel.getByText(/until the person is verified/).first().isVisible())
+  t.ok('...and that the rest is locked',
+    await panel.getByText(/locked until you have verified who you are speaking to/).first().isVisible())
+  /* THE DIRECTIONS ARE DRAWN APART FROM THE WORDS and are never read aloud. */
+  t.ok('a bracketed direction is on screen as a direction',
+    await panel.getByText(/Check the name and the date of birth/).first().isVisible())
+  /* AND THE DO NOT LIST IS THERE, always visible: the firm's own audit line. */
+  t.ok('the DO NOT list is drawn with the script',
+    await panel.getByText(/Say the creditor or the balance before the person is verified/).first().isVisible())
+  await t.shot(page, '81-account-call-script-locked')
 
-  await page.getByRole('button', { name: 'Choose a script' }).first().click()
-  await page.waitForTimeout(500)
-  await page.getByRole('button', { name: /Opening the call/ }).first().click()
-  await page.waitForTimeout(500)
+  /* ---------- the tick, and what it unlocks ---------- */
 
-  const script = await page.getByText(/may I speak to/).first().innerText()
+  await panel.getByRole('button', { name: /It is the debtor, and they verified/ }).first().click()
+  await page.waitForTimeout(500)
+  const script = await panel.locator('p', { hasText: /I am calling about/ }).first().innerText()
   /* The figure, not the absence of a placeholder: "does not contain {{balance}}" would also pass
      on a script that lost the sentence entirely. */
-  t.ok(`the script carries this debtor's balance (${JSON.stringify(script)})`,
+  t.ok(`the workflow script carries this debtor's balance (${JSON.stringify(script)})`,
     /R\s?180,000\.00/.test(script))
   /*
-   * AND THE FIELD THIS ACCOUNT COULD NOT ANSWER IS NAMED. {{debtor_address}} is left STANDING in
-   * the words by renderTemplate — visible, but visible as a mistake somebody made rather than as
-   * a field the app could not answer. The sentence is what turns it into an instruction.
+   * AND THE FIELD THIS ACCOUNT COULD NOT ANSWER IS A NAMED GAP, not braces and not a blank.
+   *
+   * THE FIRM: "if a field is empty, show the field name in red rather than an empty space." Both
+   * of the alternatives get read out loud on a recorded call -- the braces, or a sentence that
+   * stops mid-air. This fixture's account has no address contact, which is the state a real
+   * account is in until a client sends one.
    */
-  t.ok('...and what could not be filled is still standing in it', script.includes('{{debtor_address}}'))
-  t.ok('...and is named, rather than left to be spotted',
-    await page.getByText(/\{\{debtor_address\}\} could not be filled from this account/).first().isVisible())
-  /*
-   * AND {{respond_by}} IS NOT IN THAT LIST ANY MORE. The firm: "{{respond_by}} exists, but Raptor
-   * doesn't fill it yet. The s129 letters use it." It does now — ten WORKING days — so the screen
-   * must have stopped reporting it as unanswerable, or the warning is crying wolf on the one
-   * screen where a warning has to mean something.
-   */
-  t.check('the date to respond by is no longer reported as unfillable',
-    await page.getByText(/\{\{respond_by\}\} could not be filled/).count(), 0)
-  await t.shot(page, '81-account-call-script')
+  t.check('no merge field survives onto the screen as braces',
+    await panel.getByText(/\{\{debtor_address\}\}/).count(), 0)
+  /* NAMED SHORT, because this one is read out loud mid-sentence: the catalogue's label for
+     {{debtor_address}} is "Where the notice is posted, on its own lines", which a collector would
+     read as prose. See gapName. */
+  t.ok(`...and the gap names the field, short (${JSON.stringify(script)})`,
+    /no debtor address/.test(script))
+  t.ok('...and said once at the top as well',
+    await panel.getByText(/do not improvise a figure on a recorded call/i).first().isVisible())
+  /* EVERY BRANCH IS ONE TAP AWAY -- what the debtor just said, and who is on the line. */
+  t.ok('the branches are one tap away',
+    await panel.getByText(/What they just said/).first().isVisible())
+  /* AND THE CALL CANNOT BE CLOSED WITHOUT A CODE -- on a live call. Opened by hand from the
+     account, as here, there has been no call and none is demanded. */
+  t.ok('the sixteen codes are on the screen',
+    await panel.getByRole('button', { name: 'PTP', exact: true }).first().isVisible())
+  await panel.getByRole('button', { name: 'PIF', exact: true }).first().click()
+  await page.waitForTimeout(300)
+  /* PIF MOVES NOTHING, AND SAYS SO: money is recorded off money, never off a call. */
+  t.ok('...and a code that records no position says what does',
+    await panel.getByText(/recorded off the money/).first().isVisible())
+  await t.shot(page, '82-account-call-script-verified')
   await page.locator('button[aria-label="Close"]').first().click()
   await page.waitForTimeout(400)
 

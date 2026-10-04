@@ -207,6 +207,15 @@ export interface FiledTrace {
   riskScore: string | null
   enquiredOn: string | null
   documentId: string | null
+  /**
+   * WHO PULLED IT, AND THEREFORE WHO WORKED IT.
+   *
+   * The same person does both: a trace is bought by the collector who is stuck, and they are the
+   * one who then rings down its list. It is the only person the data names, and the firm's limit
+   * is per person -- "if an individual has worked through a trace twice, it could go to the next
+   * person" -- so this is what roundsSpentBy counts on.
+   */
+  pulledBy: string | null
   createdAt: string
   items: TraceItem[]
 }

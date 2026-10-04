@@ -131,6 +131,38 @@ export function taskTime(t: DayTask): string | null {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/**
+ * A TICKET DUE TODAY -- the third thing a day is made of, and the one that was missing.
+ *
+ * THE FIRM, OF THE LIAISON: "their own statistics is important, their team statistics is
+ * important..." and, of the day: "what do you need to do for the day?" A client liaison's day is
+ * mostly TICKETS -- a dispute to answer, a client to chase, a request to put -- and the day page
+ * showed them meetings and tasks only. So the one place they could see their work was a board they
+ * had to go and look at, and the day said they had nothing on.
+ *
+ * ITS DATE IS `chaseOn`, which is when the firm said it would come back to it. A ticket with no
+ * chase date is open work with no day attached and belongs on the queue, not on a Tuesday.
+ *
+ * NOT COPIED INTO `tasks`. The same rule a meeting follows and for the same reason, written out at
+ * length in this file's own header: two things to complete for one obligation, and nothing keeps
+ * them in step. The ticket stays in account_queries and the day merges it at the read.
+ */
+export interface DayTicket {
+  id: string
+  /** What it is about, in the words somebody wrote. */
+  description: string
+  /** dispute | request | help -- what the escalation is. */
+  kind: string
+  /** The day the firm said it would come back to it. Only a ticket with one is on a day. */
+  chaseOn: string | null
+  status: string
+  /** Whose it is. A ticket on somebody else's desk is not on your day. */
+  ownerId: string | null
+  /** For the link, and for saying which debtor it is about. */
+  accountId: string | null
+  debtorName?: string | null
+}
+
 export interface DayPlan {
   /** Sorted: the whole-day ones first, then by the clock. */
   meetings: DayMeeting[]
@@ -138,7 +170,16 @@ export interface DayPlan {
   timed: DayTask[]
   /** Everything else due that day. The ordinary case. */
   anytime: DayTask[]
-  /** Meetings plus tasks. What "you have 6 things on Tuesday" counts. */
+  /**
+   * TICKETS TO COME BACK TO ON THIS DAY, oldest first.
+   *
+   * AFTER THE TASKS AND NOT MIXED INTO THEM, because they are a different obligation: a task is
+   * something one person owes, and a ticket is a conversation with a client or a colleague that is
+   * waiting on somebody. Mixed in, the day reads as longer than it is and the liaison cannot see
+   * at a glance how much of it is other people's.
+   */
+  tickets: DayTicket[]
+  /** Meetings plus tasks plus tickets. What "you have 6 things on Tuesday" counts. */
   total: number
 }
 
@@ -153,7 +194,16 @@ export interface DayPlan {
  * A CANCELLED TASK IS NOT WORK. Left in to match the calendar, which excludes them too -- the two
  * views have to show the same day or the drilldown reads as broken.
  */
-export function planDay(input: { day: string; meetings: DayMeeting[]; tasks: DayTask[] }): DayPlan {
+export function planDay(input: {
+  day: string
+  meetings: DayMeeting[]
+  tasks: DayTask[]
+  /**
+   * The person's own tickets. Optional, because the calendar's counts are drawn before the
+   * tickets have loaded and a day that waits for all three shows nothing for a moment.
+   */
+  tickets?: DayTicket[]
+}): DayPlan {
   const meetings = input.meetings
     .filter((m) => meetingDay(m) === input.day)
     .sort((a, b) => {
@@ -175,7 +225,26 @@ export function planDay(input: { day: string; meetings: DayMeeting[]; tasks: Day
     .sort((a, b) => (taskTime(a) ?? '').localeCompare(taskTime(b) ?? ''))
   const anytime = onTheDay.filter((t) => taskTime(t) === null)
 
-  return { meetings, timed, anytime, total: meetings.length + onTheDay.length }
+  /*
+   * TICKETS DUE TO BE CHASED ON THE DAY.
+   *
+   * OPEN ONES ONLY. A closed ticket's chase date is the day somebody was going to come back to it
+   * before it was answered, and drawing it would put finished work on a future Tuesday.
+   *
+   * OLDEST FIRST, by the day it was chased to -- there is no time on a chase date, so the clock
+   * cannot order them and the longest-waiting one is the one to do first.
+   */
+  const tickets = (input.tickets ?? [])
+    .filter((t) => t.status !== 'closed' && t.chaseOn === input.day)
+    .sort((a, b) => a.description.localeCompare(b.description))
+
+  return {
+    meetings,
+    timed,
+    anytime,
+    tickets,
+    total: meetings.length + onTheDay.length + tickets.length,
+  }
 }
 
 /**
@@ -195,6 +264,11 @@ export function dayHeadline(plan: DayPlan): string {
   }
   const tasks = plan.timed.length + plan.anytime.length
   if (tasks) bits.push(tasks === 1 ? '1 task' : `${tasks} tasks`)
+  /* THE THIRD KIND, named as what it is. "6 things" would hide the one fact a liaison needs,
+     which is how much of the day is a conversation somebody else is waiting on. */
+  if (plan.tickets.length) {
+    bits.push(plan.tickets.length === 1 ? '1 ticket' : `${plan.tickets.length} tickets`)
+  }
   if (bits.length === 0) return 'Nothing booked'
   return bits.join(' · ')
 }
@@ -259,11 +333,19 @@ const long = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString('en
 export interface DayCount {
   meetings: number
   tasks: number
+  /**
+   * TICKETS TO COME BACK TO ON THAT DAY.
+   *
+   * COUNTED APART FROM TASKS for the reason the meetings are: a liaison choosing a day needs to
+   * know how much of it is already other people's. Folded into `tasks` the square would say five
+   * and the day would show two of their own.
+   */
+  tickets: number
   /** What "you have 6 things on Tuesday" counts. */
   total: number
 }
 
-export const NO_DAY_COUNT: DayCount = { meetings: 0, tasks: 0, total: 0 }
+export const NO_DAY_COUNT: DayCount = { meetings: 0, tasks: 0, tickets: 0, total: 0 }
 
 /**
  * COUNT A RANGE IN ONE PASS, rather than calling planDay once per square.
@@ -277,12 +359,14 @@ export const NO_DAY_COUNT: DayCount = { meetings: 0, tasks: 0, total: 0 }
 export function dayCounts(input: {
   meetings: DayMeeting[]
   tasks: DayTask[]
+  /** Optional, like planDay's: the calendar draws before the tickets have loaded. */
+  tickets?: DayTicket[]
 }): Map<string, DayCount> {
   const out = new Map<string, DayCount>()
   const at = (day: string): DayCount => {
     const got = out.get(day)
     if (got) return got
-    const made = { meetings: 0, tasks: 0, total: 0 }
+    const made = { meetings: 0, tasks: 0, tickets: 0, total: 0 }
     out.set(day, made)
     return made
   }
@@ -304,6 +388,14 @@ export function dayCounts(input: {
     c.tasks += 1
     c.total += 1
   }
+  /* THE SAME TWO RULES planDay applies, or the number under the 8th is not the number of rows the
+     8th then shows: open tickets only, and only those with a chase date. */
+  for (const t of input.tickets ?? []) {
+    if (t.status === 'closed' || !t.chaseOn) continue
+    const c = at(t.chaseOn)
+    c.tickets += 1
+    c.total += 1
+  }
   return out
 }
 
@@ -322,6 +414,7 @@ export function dayCountSentence(c: DayCount): string {
   const bits: string[] = []
   if (c.meetings) bits.push(c.meetings === 1 ? '1 meeting' : `${c.meetings} meetings`)
   if (c.tasks) bits.push(c.tasks === 1 ? '1 task' : `${c.tasks} tasks`)
+  if (c.tickets) bits.push(c.tickets === 1 ? '1 ticket' : `${c.tickets} tickets`)
   return bits.length ? bits.join(' · ') : 'Nothing booked'
 }
 
