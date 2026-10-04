@@ -1,3 +1,4 @@
+import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, Send, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
@@ -226,7 +227,11 @@ export function AccountDetail() {
    * than growing a send button of its own. `appendHtml` is the big button -- see signingRules.ts.
    */
   const [signingEmail, setSigningEmail] = useState<
-    { subject: string; body: string; appendHtml: string; note: string } | null>(null)
+    {
+      subject: string; body: string; appendHtml: string; note: string
+      /** The signed copy going back to the debtor, already drawn. See SigningPanel. */
+      attachments?: AttachedFile[]
+    } | null>(null)
   /**
    * A PAYMENT SIMULATION ON ITS WAY OUT, where the calculator has just drawn one.
    *
@@ -2342,7 +2347,9 @@ export function AccountDetail() {
            * account, and this one is ARITHMETIC whose length is the answer -- only the calculator
            * has the figures. Removable in the box like anything else.
            */
-          initialAttachments={simulation ? [simulation.file] : undefined}
+          /* The signed copy wins where there is one: it is the message's whole reason. */
+          initialAttachments={signingEmail?.attachments
+            ?? (simulation ? [simulation.file] : undefined)}
           /* And whatever the firm's own covering template asked for that this account could
              not answer, named rather than left standing in the middle of a sentence. */
           initialMissing={simulation?.missing}

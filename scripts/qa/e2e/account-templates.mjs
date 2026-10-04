@@ -68,17 +68,33 @@ const TEMPLATES = [
      * THE COVERING EMAIL, WHICH CARRIES THE LETTER ABOVE. attachment_id is what makes its "please
      * find the enclosed document" true.
      *
-     * AN ACKNOWLEDGEMENT OF DEBT RATHER THAN A SECTION 129, and the swap is the point rather than
-     * a detail. The firm asked that the compose box offer only what a person sends BY HAND -- "the
-     * other stuff works with workflows" -- and a section 129 covering email is the clearest case
-     * of what must NOT be in it: a statutory notice a collector could issue a second time, on a
-     * second clock. The AoD is the by-hand email that posts a document, so it is the honest
-     * fixture for proving an attachment travels with its message.
+     * A STATEMENT OF ACCOUNT, AND IT USED TO BE THE ACKNOWLEDGEMENT OF DEBT. The swap is the point
+     * rather than a detail. An AoD covering email cannot be sent by hand any more -- it would go
+     * out with no way to open anything, which is exactly what the firm met: "there's no link to
+     * open it in the email that goes out." So the by-hand email that posts a document is now the
+     * statement, and it is the honest fixture for proving an attachment travels with its message.
      */
     id: 'tpl-email-1', scope: 'collections', kind: 'email',
+    name: 'Statement of account (individual)',
+    subject: 'Statement of account - account {{reference}}', format: 'text',
+    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed document. The balance is {{balance}}.',
+    position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
+    seed_key: 'email-account-statement-individual', updated_at: '2026-09-01T08:00:00Z',
+  },
+  {
+    /*
+     * AND THE ACKNOWLEDGEMENT OF DEBT, WHICH EXISTS HERE ONLY TO BE ABSENT.
+     *
+     * It was offered by hand until the firm sent one and it arrived with nothing to open. The
+     * covering email is half a message: the other half is a token made at the moment of sending,
+     * which no template saved weeks earlier can hold. It goes out from the Signing panel now, with
+     * the button under it. Kept in the fixture so the assertion below has something that could
+     * have appeared and did not.
+     */
+    id: 'tpl-email-aod', scope: 'collections', kind: 'email',
     name: 'Acknowledgement of debt - covering email (individual)',
     subject: 'Acknowledgement of debt - account {{reference}}', format: 'text',
-    body: 'Dear {{debtor_name}},\n\nPlease find the enclosed document. The balance is {{balance}}.',
+    body: 'Dear {{debtor_name}},\n\nPlease read and sign the attached.',
     position: null, language: 'en', active: true, attachment_id: 'tpl-letter-1',
     seed_key: 'email-aod-individual', updated_at: '2026-09-01T08:00:00Z',
   },
@@ -491,13 +507,24 @@ try {
    */
   t.ok('a notice the workflow sends is not offered by hand',
     await page.getByRole('button', { name: /Section 129 covering email/ }).count() === 0)
+  /*
+   * NOR THE ACKNOWLEDGEMENT OF DEBT, WHICH REVERSED.
+   *
+   * It was offered, and the firm sent one: "there's no link to open it in the email that goes out.
+   * The link is copied in another place and then you have to email it." The link is a token made
+   * at the moment of sending, so a covering email picked from a list can never carry one -- it
+   * goes out from the Signing panel instead, which issues the document and puts the button under
+   * these same words.
+   */
+  t.ok('...nor the acknowledgement of debt, which would go without its link',
+    await page.getByRole('button', { name: /Acknowledgement of debt/ }).count() === 0)
 
-  await page.getByRole('button', { name: /Acknowledgement of debt/ }).first().click()
+  await page.getByRole('button', { name: /Statement of account/ }).first().click()
   await page.waitForTimeout(2500)
 
   t.check('picking it fills the subject',
     await page.getByLabel(/Subject/).first().inputValue(),
-    'Acknowledgement of debt - account REF/0')
+    'Statement of account - account REF/0')
   t.ok('...and the body, merged against this debtor',
     (await page.locator('textarea').first().inputValue()).includes('Mhlongo'))
   /*

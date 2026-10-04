@@ -22,6 +22,7 @@
 import { documentWithoutOptional } from './letterDocument.js'
 import type { Block, LetterDocument, PageSetup, Span } from './letterDocument.ts'
 import { autoColumnWidths } from './tableWidths.js'
+import { markBox, marked, stampLine, type SignedMark } from './signedMark.js'
 import { renderTemplate } from './messageTemplates.js'
 
 /** A run of text on a line, already positioned. */
@@ -70,7 +71,29 @@ export interface RectOp {
   strokeMm: number
 }
 
-export type DrawOp = TextOp | LineOp | RectOp
+/**
+ * A PICTURE DRAWN ON THE PAGE: the signer's own mark, on the rule they signed.
+ *
+ * ITS OWN OP RATHER THAN SOMETHING THE DRAWER WORKS OUT. Every decision in this file is made in
+ * the plan and the drawer is deliberately dumb -- so where a signature sits, how big it is and
+ * which rule it belongs to are all settled here, and letterPdf only embeds bytes and places them.
+ *
+ * `src` IS A data: URL and nothing else. The signature came out of a canvas and travels in JSON
+ * next to the document it belongs to; a PDF embeds its images, so a http:// URL here would be a
+ * signature that is only there while the reader is online.
+ *
+ * yMm IS THE TOP, like every other measurement here.
+ */
+export interface ImageOp {
+  op: 'image'
+  xMm: number
+  yMm: number
+  wMm: number
+  hMm: number
+  src: string
+}
+
+export type DrawOp = TextOp | LineOp | RectOp | ImageOp
 
 export interface PlannedPage {
   ops: DrawOp[]
@@ -235,8 +258,14 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
   measure: Measure
   filled: boolean
   values: Record<string, string>
+  /**
+   * THE MARK, WHERE THERE IS ONE. Null on everything the firm SENDS; set only when the signed copy
+   * is being drawn. See signedMark.ts.
+   */
+  signed?: SignedMark | null
 }): LetterPlan {
   const { measure, filled, values } = input
+  const signed = input.signed ?? null
   /*
    * THE SAME REMOVAL THE SCREEN DOES, and before the page breaks are planned.
    *
@@ -555,17 +584,39 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
          * A RULE TO SIGN ABOVE, then the name under it. Its own block rather than a row of
          * underscores, which wrap, break across a page and print at whatever width the font gives
          * them. 10mm of air above the rule is room for a pen.
+         *
+         * AND THE MARK GOES IN THAT AIR, which is the point of measuring it rather than adding
+         * space for it: a signed copy has to paginate exactly as the unsigned one did, or the
+         * document somebody read and the document they signed break in different places.
          */
         const lines = wrap(pieces(fill(block.spans), base, measure), textWidth, lineHeight)
         const ruleW = block.widthMm ?? 70
-        room(10 + 2 + lines.reduce((n, l) => n + l.heightMm, 0))
+        const mark = marked(block, signed) && signed ? markBox(signed, ruleW) : null
+        const stamp = marked(block, signed) && signed
+          ? wrap(pieces([{ text: stampLine(signed), size: base.sizePt * 0.82, colour: '#6b7280' }],
+            base, measure), textWidth, lineHeight)
+          : []
+        room(10 + 2 + lines.reduce((n, l) => n + l.heightMm, 0)
+          + stamp.reduce((n, l) => n + l.heightMm, 0))
         y += 10
+        if (mark) {
+          /* Sitting ON the line: its BOTTOM is the rule, less a fifth of a millimetre so the ink
+             does not merge into the rule itself. Clamped into the air above rather than allowed to
+             ride up into the paragraph before it -- markBox caps the height at exactly that. */
+          at().ops.push({
+            op: 'image', src: signed!.signaturePng,
+            xMm: left, yMm: y - mark.hMm - 0.2, wMm: mark.wMm, hMm: mark.hMm,
+          })
+        }
         at().ops.push({
           op: 'line', x1Mm: left, y1Mm: y, x2Mm: left + ruleW, y2Mm: y,
           widthMm: 0.3, colour: '#4b5563',
         })
         y += 2
         drawLines(lines, left, textWidth, 'left')
+        /* Who signed and when, under their name: a drawing identifies nobody, and ECTA s13 wants
+           a method that identifies as well as one that assents. See stampLine. */
+        if (stamp.length > 0) { y += 0.8; drawLines(stamp, left, textWidth, 'left') }
         y += spacing?.after ?? PARA_AFTER_MM
         break
       }

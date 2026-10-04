@@ -34,6 +34,7 @@
 import {
   footTextFor, mmToPt, planLetter, type DrawOp, type LetterPlan, type Measure,
 } from './letterLayout.js'
+import type { SignedMark } from './signedMark.ts'
 import type { LetterDocument, PageSetup } from './letterDocument.ts'
 import { printableForPdf, unprintableMessage, type FaceGaps } from './winAnsi.js'
 import { CHARTER_GAPS, isCharter, type CharterBytes } from './charter.js'
@@ -80,6 +81,14 @@ export interface LetterPdfInput {
    * set in Charter prints in Times, which is the fallback its own font stack names anyway.
    */
   charter?: CharterBytes | null
+  /**
+   * THE SIGNER'S MARK, where this is the signed copy.
+   *
+   * ABSENT ON EVERYTHING THE FIRM SENDS. A notice going out carries empty signature rules, which
+   * is what an unsigned document has; this is set only when the agreement that came back is being
+   * drawn as the copy that goes on file. See signedMark.ts.
+   */
+  signed?: SignedMark | null
 }
 
 type Pdf = Awaited<ReturnType<typeof import('pdf-lib').PDFDocument.create>>
@@ -186,7 +195,7 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
     faceFor(bold, italic).widthOfTextAtSize(printableForPdf(text, gaps).text, sizePt) / (72 / 25.4)
 
   const plan = planLetter(input.doc, input.page, {
-    measure, filled: input.filled, values: input.values,
+    measure, filled: input.filled, values: input.values, signed: input.signed ?? null,
   })
 
   /*
@@ -220,6 +229,26 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
       : await pdf.embedJpg(input.letterhead.bytes)
     : null
 
+  /*
+   * EVERY PICTURE IN THE PLAN, EMBEDDED ONCE, BEFORE ANY PAGE IS DRAWN.
+   *
+   * pdf-lib's embed is asynchronous and the drawer is not -- deliberately, because every decision
+   * was made in the plan. So the bytes are brought in here and the drawer is handed a map.
+   *
+   * ONCE PER DISTINCT PICTURE, not once per use: the debtor's signature appears on two rules of an
+   * acknowledgement of debt, and embedding it twice would put two copies of the same image in the
+   * file. A mark that will not embed -- a truncated data URL, something that is not a PNG -- is
+   * left out of the map and the op draws nothing, which is better than refusing to produce a copy
+   * of an agreement that has already been signed.
+   */
+  const images = new Map<string, Awaited<ReturnType<typeof pdf.embedPng>>>()
+  for (const planned of plan.pages) {
+    for (const op of planned.ops) {
+      if (op.op !== 'image' || images.has(op.src)) continue
+      try { images.set(op.src, await pdf.embedPng(op.src)) } catch { /* see above */ }
+    }
+  }
+
   const wPt = mmToPt(input.page.widthMm)
   const hPt = mmToPt(input.page.heightMm)
   /* mm from the TOP to PDF's points from the BOTTOM. The one place the two systems meet. */
@@ -245,7 +274,7 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
       })
     }
 
-    for (const op of planned.ops) draw(sheet, op, { faceFor, rgb, yPt, gaps })
+    for (const op of planned.ops) draw(sheet, op, { faceFor, rgb, yPt, gaps, images })
   })
 
   return pdf.save()
@@ -265,6 +294,8 @@ function draw(sheet: Sheet, op: DrawOp, k: {
   rgb: (r: number, g: number, b: number) => import('pdf-lib').RGB
   yPt: (mm: number) => number
   gaps?: FaceGaps
+  /** Every picture in the plan, embedded once before any page was drawn. Keyed by its data URL. */
+  images?: Map<string, import('pdf-lib').PDFImage>
 }) {
   /*
    * THE RECTANGLE FIRST, because it is the one op with two colours and no single `colour` to read.
@@ -284,6 +315,28 @@ function draw(sheet: Sheet, op: DrawOp, k: {
       ...(f ? { color: k.rgb(f.r, f.g, f.b) } : {}),
       ...(b ? { borderColor: k.rgb(b.r, b.g, b.b), borderWidth: mmToPt(op.strokeMm) } : {}),
     })
+    return
+  }
+
+  /*
+   * AND THE PICTURE NEXT, for the same reason: it has no `colour` to read either, and it is the
+   * only op whose bytes were embedded before the pages were drawn -- see the map built in
+   * letterToPdf. An op whose image is missing from it draws NOTHING rather than throwing: the mark
+   * is on a document that has already been signed, and refusing to produce the PDF at all would
+   * leave the firm with no copy of an agreement that exists.
+   *
+   * pdf-lib's y IS THE BOTTOM EDGE while the layout measures from the top, hence yMm + hMm.
+   */
+  if (op.op === 'image') {
+    const embedded = k.images?.get(op.src)
+    if (embedded) {
+      sheet.drawImage(embedded, {
+        x: mmToPt(op.xMm),
+        y: k.yPt(op.yMm + op.hMm),
+        width: mmToPt(op.wMm),
+        height: mmToPt(op.hMm),
+      })
+    }
     return
   }
 

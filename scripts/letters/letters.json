@@ -5586,6 +5586,7 @@
    {
     "kind": "signature",
     "widthMm": 70,
+    "signer": "debtor",
     "spans": [
      {
       "text": "The Debtor — {{debtor_name}}"
@@ -5595,6 +5596,7 @@
    {
     "kind": "signature",
     "widthMm": 70,
+    "signer": "creditor",
     "spans": [
      {
       "text": "for the Creditor — {{firm_name}}, duly authorised agent"
@@ -5740,6 +5742,7 @@
    {
     "kind": "signature",
     "widthMm": 70,
+    "signer": "debtor",
     "spans": [
      {
       "text": "The Defendant — {{debtor_name}}"
@@ -6612,6 +6615,7 @@
    {
     "kind": "signature",
     "widthMm": 70,
+    "signer": "debtor",
     "spans": [
      {
       "text": "for the Debtor — {{debtor_name}} ({{debtor_reg_no}}), duly authorised"
@@ -6621,6 +6625,7 @@
    {
     "kind": "signature",
     "widthMm": 70,
+    "signer": "creditor",
     "spans": [
      {
       "text": "for the Creditor — {{firm_name}}, duly authorised agent"
@@ -6766,6 +6771,7 @@
    {
     "kind": "signature",
     "widthMm": 70,
+    "signer": "debtor",
     "spans": [
      {
       "text": "for the Defendant — {{debtor_name}}, duly authorised"

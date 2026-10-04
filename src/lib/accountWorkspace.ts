@@ -10,6 +10,7 @@
  * about a phone number without being wrong about a balance.
  */
 import { supabase } from './supabase'
+import { fileSignedCopy, tokenOfPlaceholder } from './signedCopy.ts'
 import { chargePerusal, type ChargeResult } from './accountCharges.ts'
 import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.ts'
 import { parseWindows, type ContactWindow } from './contactWindows.ts'
@@ -635,6 +636,10 @@ export const DOCUMENT_KINDS = [
 
 const BUCKET = 'account-documents'
 
+/* Drawing the signed copy lives in its own file: it reaches pdf-lib, the letterhead and the
+   signing request, none of which the rest of this module has any business knowing about. */
+
+
 export async function fetchDocuments(accountId: string): Promise<AccountDocument[]> {
   const { data, error } = await supabase
     .from('account_documents')
@@ -725,24 +730,44 @@ export async function uploadDocument(input: {
  * THE URL FIRST. A document that cannot be opened has not been perused.
  */
 export async function openDocument(
-  doc: { accountId: string; storagePath: string },
+  doc: { id: string; accountId: string; storagePath: string },
   by: string | null,
 ): Promise<{ url: string; charge: ChargeResult | null }> {
   /*
-   * A SIGNED DOCUMENT IS NOT IN THE BUCKET. It is the signing request, and the token opens the
-   * same page the debtor signed on -- which shows the signed copy, their mark and the date. Asking
-   * storage for it would hand a collector "object not found" on a document that plainly exists.
+   * A SIGNED DOCUMENT IS DRAWN THE FIRST TIME SOMEBODY OPENS IT, and is a file from then on.
    *
-   * THE PERUSAL FEE IS RAISED EITHER WAY. Item 6 is for reading a document on the account, and
-   * where it is kept is not the debtor's business.
+   * THE FIRM: "it saves now, but it saves like the online version. It doesn't save a PDF." The
+   * database files the ROW the moment a request is signed, with storage_path = 'signing/<token>'
+   * and nothing behind it -- the signer is anonymous and could never have uploaded a file. This
+   * used to hand the collector the signing PAGE for that token, which is the online version they
+   * are objecting to: a web page is not an instrument, and it cannot be posted to an attorney or
+   * attached to a summons.
+   *
+   * SO THE FIRST AUTHENTICATED OPEN DRAWS IT, on the letterhead, with the mark on the rules it was
+   * made on, and repoints the row. See signedCopy.ts, and the policy comment in schema.sql for why
+   * that update is the only one this table allows.
+   *
+   * AND IT FALLS BACK TO THE PAGE RATHER THAN FAILING. A request that will not draw is still a
+   * request somebody can read; "could not open that document" on an agreement that plainly exists
+   * is the worse answer.
    */
-  if (doc.storagePath.startsWith('signing/')) {
-    return {
-      url: signingPath(doc.storagePath.slice('signing/'.length)),
-      charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }),
+  const token = tokenOfPlaceholder(doc.storagePath)
+  let path = doc.storagePath
+  if (token) {
+    const filed = await fileSignedCopy({
+      documentId: doc.id, accountId: doc.accountId, storagePath: doc.storagePath,
+    }).catch(() => null)
+    if (!filed || filed.startsWith('signing/')) {
+      return {
+        url: signingPath(token),
+        /* THE PERUSAL FEE IS RAISED EITHER WAY. Item 6 is for reading a document on the account,
+           and where it is kept is not the debtor's business. */
+        charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }),
+      }
     }
+    path = filed
   }
-  const url = await documentUrl(doc.storagePath)
+  const url = await documentUrl(path)
   return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
 }
 

@@ -28,6 +28,9 @@
  */
 import { renderTemplate, spanWithoutOptional, unknownFields, type TemplateScope } from './messageTemplates.js'
 import { CHARTER_STACK } from './charter.js'
+/* The mark and where it goes. signedMark imports only this file's TYPES, so the cycle is erased
+   at compile time -- see the header there for why it is a file of its own. */
+import { marked, stampLine, type SignedMark } from './signedMark.js'
 
 /* ------------------------------------------------------------------ inline */
 
@@ -162,6 +165,21 @@ export interface SignatureBlock {
   /** The lines under it: the name, the title, who they sign for. */
   spans: Span[]
   spacing?: Spacing
+  /**
+   * WHOSE RULE IT IS, so a mark made online lands on the right one.
+   *
+   * An acknowledgement of debt carries three: the Debtor's, the Creditor's and the Defendant's on
+   * the consent to judgment. The debtor signs two of them and the firm signs the third, and
+   * stamping one person's drawing on all three would show a court an agreement signed for both
+   * sides by the same hand. See signerOf, which falls back to reading the words for the documents
+   * already frozen onto requests that went out before this existed.
+   *
+   * IT TRAVELS THROUGH THE PAGE EDITOR AS `data-signer`, for the same reason `keepWithNext` does:
+   * it has no appearance to be read back from, so the attribute IS the record of it. Dropped on
+   * the round trip, the debtor's own signature rule would quietly become the creditor's the first
+   * time somebody edited the template.
+   */
+  signer?: 'debtor' | 'creditor'
 }
 
 /** A hard page break. The section 129 does not force one; a two-page annexure would. */
@@ -626,8 +644,14 @@ export function fillLetter(
 export function letterToHtml(doc: LetterDocument, input: {
   filled: boolean
   values: Record<string, string>
+  /**
+   * THE MARK, WHERE THERE IS ONE. Null everywhere but the signed copy: the editor and the library
+   * preview draw empty rules, which is what an unsigned document has.
+   */
+  signed?: SignedMark | null
 }): string {
   const { filled, values } = input
+  const signed = input.signed ?? null
   /* The unanswerable optional lines go before anything is drawn — see documentWithoutOptional.
      Only when the letter is FILLED: unfilled is the editing view, where every field must stand. */
   if (filled) doc = documentWithoutOptional(doc, values)
@@ -688,11 +712,29 @@ export function letterToHtml(doc: LetterDocument, input: {
       case 'spacer':
         out.push(`<div style="height:${b.mm}mm"></div>`)
         break
-      case 'signature':
-        out.push(`<div class="ltr-sig"${attr}>`
-          + `<div class="ltr-rule" style="width:${b.widthMm ?? 70}mm"></div>`
-          + `<div>${inline(b.spans)}</div></div>`)
+      case 'signature': {
+        /*
+         * THE MARK GOES INSIDE THE RULE, not after it. `.ltr-rule` is a 10mm box with a border
+         * along its bottom -- the air a pen would have used -- so an image inside it sits ON the
+         * line exactly where a wet signature would. Drawn after the rule and before the name, in
+         * document order, so a reader with no stylesheet still meets them in the right order.
+         *
+         * AND THE PARSE CANNOT SEE IT. documentHtmlToBlocks reads the TOP-LEVEL children of the
+         * block and takes the width off the rule; the image is a child OF the rule, and the stamp
+         * is only ever drawn on a signed copy, which nothing edits. See the warning in CLAUDE.md
+         * about asserting on children rather than on innerHTML.
+         */
+        const mark = marked(b, signed) && signed
+          ? `<img class="ltr-mark" alt="" src="${esc(signed.signaturePng)}">`
+          : ''
+        const stamp = marked(b, signed) && signed
+          ? `<div class="ltr-stamp">${esc(stampLine(signed))}</div>`
+          : ''
+        out.push(`<div class="ltr-sig"${attr}${b.signer ? ` data-signer="${b.signer}"` : ''}>`
+          + `<div class="ltr-rule" style="width:${b.widthMm ?? 70}mm">${mark}</div>`
+          + `<div>${inline(b.spans)}</div>${stamp}</div>`)
         break
+      }
       case 'progress': {
         /*
          * TWO NESTED DIVS AND A DATA ATTRIBUTE, which is the whole bar.
@@ -793,7 +835,18 @@ export function letterCss(doc: LetterDocument, page: PageSetup): string {
 .ltr-b-all td, .ltr-b-all th { border: 0.2mm solid #d8dee6; padding: 1.4mm 2mm; }
 .ltr-break { break-before: page; page-break-before: always; }
 .ltr-sig { margin: 0 0 3mm; }
-.ltr-rule { border-bottom: 0.3mm solid #4b5563; height: 10mm; margin-bottom: 1.5mm; }
+.ltr-rule { border-bottom: 0.3mm solid #4b5563; height: 10mm; margin-bottom: 1.5mm;
+  position: relative; }
+/* THE MARK SITS ON THE LINE. Anchored to the bottom of the rule's box rather than centred in it,
+   because a signature is written ON a line and not above one; max-height keeps it inside the 10mm
+   of air the block already reserves, so a signed copy paginates exactly as the unsigned one did.
+   width:auto with a max of the rule itself keeps the drawing's own proportions -- a stretched
+   signature on an instrument the firm would sue on is worse than a small one. */
+.ltr-mark { position: absolute; bottom: 0.4mm; left: 0; max-height: 9mm; max-width: 100%;
+  width: auto; }
+/* Who signed and when, under their name. Smaller and grey: it is the system's sentence about the
+   signature, not the firm's words, and it should not read as a clause of the agreement. */
+.ltr-stamp { font-size: ${(d.size * 0.82).toFixed(1)}pt; color: #6b7280; margin-top: 0.8mm; }
 /* THE DRAWN BAR. Monochrome, because a schedule gets photocopied and a bar that differs from its
    track only in hue disappears the first time it does -- and the track keeps a hairline border so
    the UNPAID part of it is still visibly part of a bar rather than white paper. The two heights and
@@ -1159,10 +1212,16 @@ export function documentHtmlToBlocks(html: string): Block[] {
       const rule = topLevelBlocks(raw.inner).find((b) => classOf(b.attrs).includes('ltr-rule'))
       const rest = topLevelBlocks(raw.inner).filter((b) => !classOf(b.attrs).includes('ltr-rule'))
       const widthPc = styleProp(rule?.attrs ?? '', 'width')
+      /* The role comes back off the attribute it went out on -- see SignatureBlock.signer. Only
+         the two values the type allows: anything else is a hand-edited attribute, and a signature
+         rule whose owner is a typo is one nothing will stamp. */
+      const who = /data-signer="(debtor|creditor)"/.exec(raw.attrs)?.[1] as
+        'debtor' | 'creditor' | undefined
       out.push({
         kind: 'signature',
         widthMm: mmOf(widthPc) ?? 70,
         spans: editableHtmlToSpans(rest.map((b) => b.inner).join('')),
+        ...(who ? { signer: who } : {}),
         ...(spacing ? { spacing } : {}),
       })
       continue

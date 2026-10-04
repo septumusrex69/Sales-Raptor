@@ -21145,3 +21145,40 @@ comment on column public.debtor_accounts.date_of_death is
 comment on column public.debtor_accounts.notice_to_creditors_on is
   'The day the executor advertised the notice to creditors. The claim lodgement deadline is '
   'counted from it; a claim lodged after the period in the notice is lost.';
+
+-- ---------------------------------------------------------------------------
+-- THE SIGNED COPY IS A PDF, AND THE FIRM'S SIDE IS WHAT PUTS IT THERE.
+--
+-- THE FIRM, having signed one: "it saves now, but it saves like the online version. It doesn't
+-- save a PDF. It should save a PDF and send a PDF to the debtor and save it on the document."
+--
+-- signing_file_signed (above) files the row the moment a request is signed, with
+-- storage_path = 'signing/<token>' and no file behind it -- because the signer is anonymous and
+-- the anon role has no rights on the bucket, so a PDF could never be uploaded from the page the
+-- debtor signs on. Opening that row took a collector to the signing PAGE, which is the online
+-- version the firm is objecting to.
+--
+-- SO THE DRAWING HAPPENS ON THE FIRM'S SIDE, the first time somebody opens it, and the row is
+-- repointed at the file -- see signedCopy.ts. That needs exactly one update, and this is it.
+--
+-- THE `using` CLAUSE IS WHAT KEEPS IT NARROW. Only a row that is a signed document AND still
+-- carries the placeholder path may be updated, so once the PDF is filed the row is frozen again:
+-- a signed acknowledgement of debt cannot be repointed at a different file afterwards, which is
+-- the whole reason this table has no general update policy.
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public'
+                 and tablename='account_documents' and policyname='account_documents_file_signed') then
+    create policy "account_documents_file_signed" on public.account_documents
+      for update to authenticated
+      using (signing_request_id is not null and storage_path like 'signing/%')
+      with check (signing_request_id is not null);
+  end if;
+end $$;
+
+comment on policy "account_documents_file_signed" on public.account_documents is
+  'The one update this table allows: putting the drawn PDF where the placeholder was. The trigger '
+  'that files a signed document writes storage_path = signing/<token>, because the anon signer '
+  'could not upload a file; the firm''s side draws the PDF the first time somebody opens it and '
+  'points the row at it. The USING clause is what keeps this narrow -- once storage_path is a real '
+  'path the row is no longer updatable, so a filed signed agreement cannot be repointed.';

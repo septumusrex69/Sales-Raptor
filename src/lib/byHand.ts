@@ -51,11 +51,22 @@ export const BY_HAND_SEED_KEYS: readonly string[] = [
   'email-account-summary-individual',
   'email-account-summary-company',
   /*
-   * THE ACKNOWLEDGEMENTS OF DEBT, which the firm named in the same breath. An AoD goes out because
-   * a debtor has asked for terms on the telephone -- there is no sequence that could know that.
+   * THE ACKNOWLEDGEMENTS OF DEBT ARE NOT HERE ANY MORE, and that is the point of the list.
+   *
+   * They were, on the firm's own reasoning -- an AoD goes out because a debtor asked for terms on
+   * the telephone, and no sequence could know that. What the firm then met was the consequence:
+   * "there's no link to open it in the email that goes out. The link is copied in another place
+   * and then you have to email it." The covering email is only half a message. The other half is a
+   * 43-character token made at the moment of sending, which cannot be a merge field in a template
+   * saved weeks earlier -- so a covering email sent BY HAND is a covering email with nothing to
+   * open, and that is the one the firm sent.
+   *
+   * SO IT GOES OUT FROM THE SIGNING PANEL AND ONLY FROM THERE. Pressing "Send the acknowledgement
+   * of debt" issues the document, raises item 4(a) and opens the composer with these same words
+   * already in it and the button underneath -- see SigningPanel. Nothing was lost: the wording is
+   * still the firm's, still in the Library, still editable. What went is the way of sending it
+   * that could not work.
    */
-  'email-aod-individual',
-  'email-aod-company',
   /*
    * AND THE PAYMENT SIMULATION, which the firm did not name either way.
    *

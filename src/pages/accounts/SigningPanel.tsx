@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Copy, Loader2, PenLine } from 'lucide-react'
+import { Check, Copy, FileSignature, Loader2, PenLine } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary'
@@ -11,6 +11,25 @@ import {
 } from '../../lib/signing.ts'
 import { isSignable, signingButtonHtml, signingEmailBody } from '../../lib/signingRules.ts'
 import { chargeAcknowledgementOfDebt } from '../../lib/accountCharges.ts'
+import { renderTemplate } from '../../lib/messageTemplates'
+import { drawSignedCopy } from '../../lib/signedCopy.ts'
+import { toBase64 } from '../../lib/letterPdf.ts'
+import type { AttachedFile } from '../../lib/letterAttachment.ts'
+
+/**
+ * THE COVERING EMAIL IS THE FIRM'S, OUT OF THE LIBRARY, and this is how it is found.
+ *
+ * It used to be sendable on its own from the compose box's template picker, and that is exactly
+ * what the firm did: the message went out with "return the signed document to..." in it and no way
+ * to open anything -- "there's no link to open it in the email that goes out. The link is copied in
+ * another place and then you have to email it." So it is no longer offered by hand (see byHand.ts)
+ * and lives here instead, where the button can be put under it.
+ *
+ * THE WORDS STAY IN THE LIBRARY rather than coming back into this file. They are the firm's to
+ * edit, they are written twice -- once for a person and once for a company -- and a sentence
+ * hard-coded here is a sentence they would have to ask somebody to change.
+ */
+const COVERING_KEY = { individual: 'email-aod-individual', company: 'email-aod-company' } as const
 
 
 /**
@@ -77,11 +96,20 @@ export function SigningPanel({
    * account -- a box of our own would be a second set of all of it, and the one that charged item
    * 1(a) would be whichever got remembered.
    */
-  onEmail: (message: { subject: string; body: string; appendHtml: string; note: string }) => void
+  onEmail: (message: {
+    subject: string
+    body: string
+    appendHtml: string
+    note: string
+    /** Already-drawn files to put on the message. The signed copy going back to the debtor. */
+    attachments?: AttachedFile[]
+  }) => void
 }) {
   const [rows, setRows] = useState<Awaited<ReturnType<typeof listSigningRequests>> | null>(null)
   const [choosing, setChoosing] = useState(false)
   const [letters, setLetters] = useState<LibraryTemplate[] | null>(null)
+  /* The covering email, kept beside the letters so sending does not fetch the library twice. */
+  const [covering, setCovering] = useState<LibraryTemplate | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [made, setMade] = useState<{
@@ -136,6 +164,9 @@ export function SigningPanel({
        */
       setLetters(library.filter((r) => r.kind === 'letter' && r.format === 'document' && r.active
         && isSignable(r) && (r.audience === null || r.audience === debtorKind)))
+      /* MATCHED ON THE SEED KEY, which is the one identifier the app never lets anybody edit --
+         so the firm can rename and rewrite the covering email and it is still found. */
+      setCovering(library.find((r) => r.seedKey === COVERING_KEY[debtorKind]) ?? null)
     } catch (e) {
       setLetters([])
       setError(e instanceof Error ? e.message : String(e))
@@ -207,13 +238,66 @@ export function SigningPanel({
        * address, the wording and the button can all be changed before it goes, and closing it
        * leaves the request standing with its link on the screen.
        */
+      /*
+       * THE FIRM'S OWN COVERING WORDS, MERGED, with the button under them.
+       *
+       * OUT OF THE LIBRARY rather than written here, so the sentence the debtor reads is one the
+       * firm can edit in the Library like every other template. signingEmailBody is the fallback
+       * and nothing more: a library row somebody deactivated must not stop an agreement going out,
+       * and three short lines is a better covering note than none.
+       */
+      const words = covering
+        ? renderTemplate(covering.body, values).text
+        : signingEmailBody(debtorName, caseNumber)
+      const subject = covering?.subject
+        ? renderTemplate(covering.subject, values).text
+        : `Acknowledgement of debt${caseNumber ? ` - ${caseNumber}` : ''}`
       onEmail({
-        subject: `Acknowledgement of debt${caseNumber ? ` - ${caseNumber}` : ''}`,
-        body: signingEmailBody(debtorName, caseNumber),
+        subject,
+        body: words,
         appendHtml: signingButtonHtml(url),
         note: 'The button in this message opens the acknowledgement of debt for signature.',
       })
       await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * THE SIGNED COPY, BACK TO THE DEBTOR, AS A PDF.
+   *
+   * THE FIRM: "it should save a PDF and send a PDF to the debtor and save it on the document."
+   * Filing is the database's and the Documents panel's -- a signed request is filed the moment it
+   * is signed and the PDF is drawn the first time somebody opens it, see signedCopy.ts. SENDING is
+   * a press, because it goes to a person outside the firm and because it is charged R25 under item
+   * 1(a) like every other message.
+   *
+   * DRAWN HERE RATHER THAN FETCHED FROM THE BUCKET so this works whether or not anybody has opened
+   * the document yet. The bytes are the same either way: the same request, the same renderer.
+   */
+  async function emailSignedCopy(row: { token: string; title: string }) {
+    setBusy(row.token); setError(null)
+    try {
+      const drawn = await drawSignedCopy(row.token)
+      if (!drawn) throw new Error('That signed copy could not be drawn, so nothing was attached.')
+      const file: AttachedFile = {
+        filename: drawn.filename,
+        contentType: 'application/pdf',
+        size: drawn.bytes.length,
+        content: toBase64(drawn.bytes),
+      }
+      onEmail({
+        subject: `Signed ${row.title.toLowerCase()}${caseNumber ? ` - ${caseNumber}` : ''}`,
+        body: `${debtorName ? `Dear ${debtorName}` : 'Good day'}\n\n`
+          + 'Attached is the signed copy of the acknowledgement of debt, for your records.\n\n'
+          + 'Kind regards',
+        appendHtml: '',
+        note: 'The signed copy is attached.',
+        attachments: [file],
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -284,8 +368,23 @@ export function SigningPanel({
           {rows.map((r) => (
             <li key={r.id} className="flex flex-wrap items-baseline justify-between gap-x-2 text-xs">
               <span className="text-slate-700">{r.title}</span>
-              <span className={r.state === 'signed' ? 'text-[var(--c-green)]' : 'text-slate-400'}>
-                {stateWords(r)}
+              <span className="flex items-baseline gap-2">
+                {/*
+                  SENDING THE SIGNED COPY BACK IS OFFERED ONLY ONCE IT EXISTS, which is the whole
+                  of the condition: a request still waiting has nothing to attach. The copy itself
+                  is on the Documents panel either way -- the database files it on signature.
+                */}
+                {r.state === 'signed' && (
+                  <button type="button" disabled={busy !== null}
+                    onClick={() => void emailSignedCopy(r)}
+                    className="inline-flex items-center gap-1 text-[var(--c-steel)] hover:underline
+                      disabled:opacity-50">
+                    <FileSignature size={11} /> Email the signed copy
+                  </button>
+                )}
+                <span className={r.state === 'signed' ? 'text-[var(--c-green)]' : 'text-slate-400'}>
+                  {stateWords(r)}
+                </span>
               </span>
             </li>
           ))}

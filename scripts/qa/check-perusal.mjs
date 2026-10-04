@@ -222,10 +222,28 @@ const fileBranch = open.slice(open.indexOf('const url = await documentUrl('))
 const atUrl = fileBranch.indexOf('await documentUrl(')
 const atOpenCharge = fileBranch.indexOf('chargePerusal(')
 ok('...after the address is signed', atUrl >= 0 && atOpenCharge > atUrl)
-/* AND THE SIGNED ONE IS CHARGED TOO. Item 6 is for reading a document on the account; where it is
-   kept is not the debtor's business, and a fee that depends on storage is a fee nobody can explain. */
-ok('...and a signed document is perused like any other',
-  /signingPath\(doc\.storagePath\.slice\('signing\/'\.length\)\),\s*\n\s*charge: await chargePerusal\(/.test(open))
+/*
+ * AND THE SIGNED ONE IS CHARGED TOO, ON BOTH OF ITS ROADS.
+ *
+ * Item 6 is for reading a document on the account; where it is kept is not the debtor's business,
+ * and a fee that depends on storage is a fee nobody can explain.
+ *
+ * A SIGNED DOCUMENT NOW HAS TWO WAYS OUT of this function and the regression is forgetting one of
+ * them. The firm's instruction -- "it should save a PDF" -- means the first open DRAWS it and
+ * repoints the row, after which it is an ordinary file and falls through to the branch above. The
+ * other way is the fallback: a request that will not draw still opens as the signing page, because
+ * "could not open that document" on an agreement that plainly exists is the worse answer. Both
+ * charge, so neither is a free read.
+ */
+ok('...a signed copy that will not draw still opens, and is still perused',
+  /url: signingPath\(token\),[\s\S]{0,400}?charge: await chargePerusal\(/.test(open))
+ok('...and the drawn one falls through to the file branch, which charges',
+  /path = filed/.test(open) && /const url = await documentUrl\(path\)[\s\S]{0,120}chargePerusal\(/.test(open))
+/* AND THE DRAWING HAPPENS BEFORE EITHER FEE. A PDF that failed to draw has not been perused --
+   the same rule as the signed address above, applied to the thing that replaced it. */
+const atFile = open.indexOf('fileSignedCopy(')
+ok('...with the PDF drawn before anything is charged',
+  atFile >= 0 && atFile < open.indexOf('chargePerusal('))
 ok('the documents panel opens through it', /await openDocument\(doc, userId\)/.test(panels))
 /* AND SAYS WHAT IT EARNED, where it earned anything -- and only then: "no charge, already charged
    today" on every document anybody opens is a line people stop reading. */

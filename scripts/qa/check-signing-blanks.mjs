@@ -215,24 +215,29 @@ ok('...and the thinning sees it as answered, so its line stays',
  * ------------------------------------------------------------------------------------------- */
 
 /*
- * TWO ROUNDS OF THE FIRM LOOKING AT THIS, and the second reversed half of the first.
+ * THREE ROUNDS OF THE FIRM LOOKING AT THIS, and it has landed back in the middle.
  *
  * "It's not on a letterhead, the letters are all over the place" -- the page drew the blocks with
- * no sheet at all. Then, with the letterhead on: "look at how this displays on the letterhead...
- * I'm not sure if it's necessary to show the entire letterhead and the division of the pages to
- * the person when they are signing online. I think what is important is when it is printed."
+ * no sheet at all. Then, with the letterhead on: "I'm not sure if it's necessary to show the entire
+ * letterhead and the division of the pages to the person when they are signing online." So it came
+ * off entirely. Now: "maybe it doesn't have to be on the letterhead when you don't have to see the
+ * letterhead everywhere. It can just be on the top of that little thing that you've created."
  *
- * AND THE SCREENSHOT SHOWED WHY IT WAS WORSE THAN A PREFERENCE. The letterhead repeats every
- * 297mm; the body on this page is NOT paginated -- planPageBreaks is measured against the editor's
- * own sheet and never ran here -- so the second letterhead landed across the middle of item 3 and
- * the footer strip ran through the creditor's address. A repeating background behind unpaginated
- * text is a guarantee of that rather than a risk.
+ * WHICH IS WHAT letterCss ALREADY DRAWS, and that is the assertion worth making. Its `.ltr-page`
+ * background is `no-repeat`, so on ONE continuous unpaginated sheet the letterhead prints once at
+ * the head of the document. What the firm objected to the second time was the letterhead REPEATING
+ * across the middle of item 3 -- which a repeat-y rule would do, and which nothing here has.
  */
 const page = read('src/pages/sign/SignPage.tsx')
+const css = read('src/lib/letterDocument.ts')
 ok('the signing page keeps the sheet’s measure', /letterCss\(\{ \.\.\.blankLetter\(\), blocks: request\.body \}, page\)/.test(page))
 ok('...at the sheet’s own width', /width: `\$\{page\.widthMm\}mm`/.test(page))
-/* AND NOT THE PAPER ITSELF. The letterhead is the PDF's, where the pagination is real. */
-ok('...and no letterhead behind it', /const page = \{ \.\.\.sheet, backgroundUrl: null \}/.test(page))
+/* AND THE PAPER IS ON IT, which reversed. Asserted as the absence of the strip rather than as the
+   presence of a background, because the background is letterCss's and not this page's. */
+ok('...with the letterhead kept rather than stripped off',
+  !/backgroundUrl: null/.test(page))
+ok('...drawn once at the top and not repeated down the page',
+  /background-repeat: no-repeat;/.test(css))
 ok('...nor a page division drawn across it', !/repeat-y/.test(page))
 /* ONE CONTINUOUS SHEET: letterCss's own page height would otherwise pad a one-paragraph mandate
    out to a full A4 and push the signing controls below the fold. */
@@ -240,7 +245,7 @@ ok('...and it is one continuous document', /minHeight: 0/.test(page))
 /* AND PLAIN A4 WHERE A REQUEST CARRIES NO SHEET: every link sent before the column existed. The
    right width and the right margins is not the firm's paper, but it is a document. */
 ok('...and plain A4 where the request predates the sheet',
-  /const sheet = request\?\.pageSetup \?\? A4_LETTERHEAD/.test(page))
+  /const page = request\?\.pageSetup \?\? A4_LETTERHEAD/.test(page))
 
 const panel = read('src/pages/accounts/SigningPanel.tsx')
 ok('the sender freezes the sheet onto the request', /pageSetup: sheet,/.test(panel))
@@ -305,19 +310,47 @@ ok('the trigger is created behind a catalogue guard',
   /if not exists \(select 1 from pg_trigger where tgname = 'signing_requests_file_signed'\)/.test(sql))
 
 /*
- * AND THE ROW POINTS AT THE REQUEST RATHER THAN AT A FILE. Everything the document is already
- * lives on the signing request -- the frozen body, the sheet, what was filled in, the mark -- so
- * storing a second copy is storing something that can disagree with it.
+ * AND THE FIRST OPEN DRAWS THE PDF AND KEEPS IT.
+ *
+ * THE FIRM: "it saves now, but it saves like the online version. It doesn't save a PDF. It should
+ * save a PDF and send a PDF to the debtor and save it on the document." The row the trigger files
+ * points at the REQUEST -- it has to, because the anon signer could never upload a file -- and
+ * opening it used to hand a collector the signing PAGE for that token. A web page is not an
+ * instrument: it cannot be posted to an attorney or attached to a summons.
+ *
+ * SO THE FIRST AUTHENTICATED OPEN DRAWS IT AND REPOINTS THE ROW, and from then on it is an
+ * ordinary file. Once, and only once: the policy that permits that update requires the path to
+ * still be the placeholder, so the bytes a court would be shown are written once and frozen.
  */
 const store = read('src/lib/accountWorkspace.ts')
-ok('a signed document opens the page it was signed on',
-  /if \(doc\.storagePath\.startsWith\('signing\/'\)\)/.test(store))
-ok('...rather than asking storage for a file that is not there',
-  store.indexOf("doc.storagePath.startsWith('signing/')") < store.indexOf('const url = await documentUrl'))
+ok('a signed document is drawn as a PDF the first time it is opened',
+  /const token = tokenOfPlaceholder\(doc\.storagePath\)/.test(store)
+  && /fileSignedCopy\(\{/.test(store))
+ok('...before storage is asked for a file that is not there yet',
+  store.indexOf('tokenOfPlaceholder(doc.storagePath)') < store.indexOf('const url = await documentUrl'))
+/* AND IT FALLS BACK TO THE PAGE RATHER THAN FAILING. A request that will not draw is still a
+   request somebody can read, and "could not open that document" on an agreement that plainly
+   exists is the worse answer. */
+ok('...and a copy that will not draw still opens as the page it was signed on',
+  /url: signingPath\(token\),/.test(store))
 /* THE PERUSAL FEE IS RAISED EITHER WAY: item 6 is for reading a document on the account, and where
    it is kept is not the debtor's business. */
 const opens = (store.match(/charge: await chargePerusal\(/g) ?? [])
-check('both kinds of document raise the perusal fee', opens.length, 2)
+check('both ways out of openDocument raise the perusal fee', opens.length, 2)
+
+/*
+ * AND THE UPDATE THAT REPOINTS THE ROW IS THE ONLY ONE THIS TABLE ALLOWS.
+ *
+ * account_documents has no general update policy, deliberately: nobody working an account may
+ * quietly rewrite the letter of demand that proves it was sent. The one exception is narrow, and
+ * its `using` clause is what makes it narrow -- a row that already holds a real path is frozen
+ * again, so a filed signed agreement cannot be repointed at a different file afterwards.
+ */
+ok('the one update policy is scoped to a signed document still holding its placeholder',
+  /create policy "account_documents_file_signed"[\s\S]{0,400}?using \(signing_request_id is not null and storage_path like 'signing\/%'\)/
+    .test(sql))
+ok('...and there is no general update policy beside it',
+  !/create policy "account_documents_update" on public\.account_documents/.test(sql))
 
 /* ---------------------------------------------------------------------------------------------
  * AND THE DATE CAME OFF THE ROW

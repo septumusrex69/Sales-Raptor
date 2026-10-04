@@ -134,7 +134,22 @@ ok('...and no reference says nothing about one', !/reference/i.test(bare))
 /* ------------------------------------------------ it actually goes out */
 
 ok('issuing one hands a message to the composer', /onEmail\(\{/.test(panel))
-ok('...with the short wording', /body: signingEmailBody\(debtorName, caseNumber\)/.test(panel))
+/*
+ * AND THE WORDS ARE THE FIRM'S, OUT OF THE LIBRARY.
+ *
+ * signingEmailBody is now the FALLBACK and nothing more. The firm has a covering email for this in
+ * the Library, written twice -- once for a person and once for a company -- and they asked to be
+ * able to rewrite it: "it also just writes a bunch of bullshit in the template... I'll tell you
+ * what to do." A sentence hard-coded in the panel is a sentence they would have to ask somebody to
+ * change, so the panel merges the library row and keeps three short lines for the day the row is
+ * missing: an agreement must not fail to go out because somebody deactivated a template.
+ */
+ok('...in the firm’s own covering words, merged',
+  /renderTemplate\(covering\.body, values\)\.text/.test(panel))
+ok('...found by the seed key, which nobody can edit',
+  /COVERING_KEY = \{ individual: 'email-aod-individual', company: 'email-aod-company' \}/.test(panel))
+ok('...with the short wording kept as the fallback',
+  /: signingEmailBody\(debtorName, caseNumber\)/.test(panel))
 ok('...and the button under it', /appendHtml: signingButtonHtml\(url\)/.test(panel))
 /*
  * THE BUTTON CANNOT TRAVEL IN THE BODY. The box is prose and emailBodyHtml ESCAPES it -- which is

@@ -196,15 +196,26 @@ ok('...and the notices already seeded as text are corrected',
     .test(sql))
 
 /*
- * AND THE KEYS ARE THE KEYS THE COMPOSE BOX IS WRITTEN AGAINST.
+ * AND THE KEYS ARE THE KEYS THE SIGNING PANEL IS WRITTEN AGAINST.
  *
- * BY_HAND_SEED_KEYS decides what a collector may pick by hand, and it names these two. A seeder
- * that wrote a different key would give the firm two templates they can read in the Library and
- * cannot choose -- which is a failure with no error message anywhere.
+ * IT USED TO BE BY_HAND_SEED_KEYS and that is the point of the change. The covering email was
+ * pickable in the compose box, so the firm sent one -- and it went out with no way to open
+ * anything: "there's no link to open it in the email that goes out. The link is copied in another
+ * place and then you have to email it." A covering email sent by hand cannot carry the link,
+ * because the link is a token made at the moment of sending.
+ *
+ * SO IT IS THE SIGNING PANEL THAT NAMES THESE TWO NOW, in COVERING_KEY, and it puts the button
+ * underneath them. A seeder that wrote a different key would give the firm two templates they can
+ * read in the Library and nothing can find -- a failure with no error message anywhere, which is
+ * why the key is asserted on both sides rather than just spelled the same way twice.
  */
+const panel = readFileSync(new URL('../../src/pages/accounts/SigningPanel.tsx', import.meta.url), 'utf8')
 for (const kind of ['individual', 'company']) {
-  ok(`the ${kind} covering email is seeded under the key the picker names`,
-    BY_HAND_SEED_KEYS.includes(`email-aod-${kind}`) && sql.includes(`$q$email-aod-${kind}$q$`))
+  ok(`the ${kind} covering email is seeded under the key the panel names`,
+    panel.includes(`'email-aod-${kind}'`) && sql.includes(`$q$email-aod-${kind}$q$`))
+  /* AND NOT BY HAND. The compose box offering it again is the whole of the regression. */
+  ok(`...and is not offered by hand, where it would go out with no link`,
+    !BY_HAND_SEED_KEYS.includes(`email-aod-${kind}`))
   /* AND THE AGREEMENT IS ATTACHED TO IT, for the same audience on both sides. A covering note
      written to a person that posts the company agreement hands a pensioner a document to be
      signed by a duly authorised representative. */

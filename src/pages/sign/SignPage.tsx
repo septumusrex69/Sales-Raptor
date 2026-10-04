@@ -9,6 +9,7 @@ import {
   A4_LETTERHEAD, blankLetter, letterCss, letterToHtml,
 } from '../../lib/letterDocument.ts'
 import { amountOf, missingBlanks, withFilled } from '../../lib/signingBlanks.ts'
+import type { SignedMark } from '../../lib/signedMark.ts'
 import { formatMoney } from '../../data/mockData'
 
 /**
@@ -68,28 +69,28 @@ export default function SignPage() {
   useEffect(() => { void load() }, [load])
 
   /*
-   * THE SHEET'S MEASURE, WITHOUT THE PAPER ITSELF.
+   * THE FIRM'S PAPER, ONCE, AT THE TOP OF THE SHEET.
    *
-   * TWO ROUNDS OF THE FIRM LOOKING AT THIS. First: "it's not on a letterhead, the letters are all
-   * over the place, it's just not nice" -- the page drew the blocks with no sheet at all, so a
-   * document written for 210mm ran the full width of a browser. Then, with the letterhead on:
-   * "look at how this displays on the letterhead... I'm not sure if it's necessary to show the
-   * entire letterhead and the division of the pages to the person when they are signing online. I
-   * think what is important is when it is printed, then it can be on the letterhead."
+   * THREE ROUNDS OF THE FIRM LOOKING AT THIS, and it has landed back in the middle. First: "it's
+   * not on a letterhead, the letters are all over the place, it's just not nice" -- the page drew
+   * the blocks with no sheet at all, so a document written for 210mm ran the full width of a
+   * browser. Then, with the letterhead on: "I'm not sure if it's necessary to show the entire
+   * letterhead and the division of the pages to the person when they are signing online." So it
+   * came off entirely. Now: "maybe it doesn't have to be on the letterhead when you don't have to
+   * see the letterhead everywhere. It can just be on the top of that little thing that you've
+   * created."
    *
-   * THEY ARE RIGHT, AND THE SCREENSHOT SHOWED WHY IT WAS WORSE THAN A PREFERENCE. The letterhead
-   * repeats every 297mm; the body on this page is NOT paginated -- planPageBreaks is measured
-   * against the editor's own sheet and never ran here -- so the second letterhead landed across
-   * the middle of item 3 and the footer strip ran through the creditor's address. A repeating
-   * background behind unpaginated text is a guarantee of that, not a risk of it.
+   * WHICH IS WHAT letterCss ALREADY DRAWS. Its `.ltr-page` background is `no-repeat`, positioned
+   * top left -- so on this page, which is ONE continuous unpaginated sheet, the letterhead prints
+   * once at the head of the document and the rest is plain. The thing the firm objected to the
+   * second time was the letterhead REPEATING across the middle of item 3, and that was the
+   * editor's own repeating sheet, not this one.
    *
-   * SO THE SCREEN GETS THE MEASURE AND NOT THE PAPER: the same width, the same margins and the
-   * same type as the printed page, with no background and no page divisions. One continuous
-   * document to read and sign. The letterhead is the PDF's -- letterPdf draws it there, where the
-   * pagination is real.
+   * THE PAGE DIVISIONS STILL DO NOT SHOW. planPageBreaks is measured against the editor's sheet
+   * and never ran here; this stays one scroll to read and sign. Where the pagination is real is
+   * the PDF, which is on the full letterhead, every page -- see signedCopy.ts.
    */
-  const sheet = request?.pageSetup ?? A4_LETTERHEAD
-  const page = { ...sheet, backgroundUrl: null }
+  const page = request?.pageSetup ?? A4_LETTERHEAD
 
   /*
    * Drawn once per document rather than on every stroke of the signature pad -- the sheet is the
@@ -98,14 +99,31 @@ export default function SignPage() {
    * THE SIGNER'S OWN ANSWERS ARE MERGED IN AS THEY TYPE, so what they are about to sign is what
    * they are reading. `filled` is a dependency for that reason: the document is the preview.
    */
+  /*
+   * THE MARK, ONCE THERE IS ONE, so the document draws itself signed.
+   *
+   * THE FIRM, looking at the first one somebody signed: "the signature just like randomly hangs
+   * down there. It's not put in the right place. It should be put in the block." This page used to
+   * draw the agreement with empty rules and then put the PNG in a card underneath it -- a document
+   * and a photograph of a squiggle, which is not a signed document. See signedMark.ts.
+   */
+  const mark: SignedMark | null = request?.signaturePng && request.signedName && request.signedAt
+    ? {
+      signaturePng: request.signaturePng,
+      name: request.signedName,
+      signedAt: request.signedAt,
+    }
+    : null
+
   const html = useMemo(() => {
     if (!request) return ''
     const doc = { ...blankLetter(), blocks: request.body }
     return letterToHtml(doc, {
       filled: true,
       values: withFilled({}, request.blanks, filled),
+      signed: mark,
     })
-  }, [request, filled])
+  }, [request, filled, mark])
 
   async function submit() {
     setProblem(null)
@@ -182,15 +200,14 @@ export default function SignPage() {
         </p>
       </div>
 
-      {/* THE DOCUMENT, on the firm's own sheet. Scrolls in its own box so the signing controls
-          below it are reachable without reading to the end first -- a signer who has to scroll
-          four pages to find the button concludes there is not one. */}
       {/*
         ON THE FIRM'S PAPER, AT 1:1. The same `.ltr-page` wrapper and the same letterCss the editor
         and the library preview use -- one renderer, so a debtor reading a notice and a collector
-        writing one are looking at the same document. The letterhead repeats down the sheet rather
-        than printing once at the top, which is what a printer does and what the firm circled when
-        it did not.
+        writing one are looking at the same document.
+
+        THE LETTERHEAD PRINTS ONCE, AT THE HEAD OF IT, which is the firm's third and current
+        instruction and is what letterCss's own `no-repeat` already does on one continuous sheet.
+        See the note on `page` above for how it got here and back.
 
         Scrolls in its own box so the signing controls below are reachable without reading to the
         end first: a signer who has to scroll four pages to find the button concludes there is not
@@ -224,9 +241,9 @@ export default function SignPage() {
               )}
             </span>
           </p>
-          {request.signaturePng && (
-            <img src={request.signaturePng} alt="The signature" className="mt-3 h-20" />
-          )}
+          {/* THE MARK IS NOT REPEATED HERE. It is on the rules it was made on, in the document
+              above -- see the note on `mark`. A second copy of it in a card would be the firm's
+              "it just randomly hangs down there" put back under a different heading. */}
         </div>
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">

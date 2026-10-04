@@ -132,10 +132,19 @@ export function aod(kind) {
 
     { kind: 'spacer', mm: 6 },
     P('Signed at ____________________ on ____________________', { keepWithNext: true }),
-    { kind: 'signature', widthMm: 70, spans: [T(isCo
+    /*
+     * WHOSE RULE IS WHOSE, said on the block rather than worked out from the words.
+     *
+     * The debtor signs TWO of the three rules in this agreement -- their own here and the
+     * Defendant's on the consent to judgment -- and the firm signs the third as the creditor's
+     * agent. A mark made online is stamped on the rules marked 'debtor' and on nothing else:
+     * one person's drawing on all three would show a court an agreement signed for both sides by
+     * the same hand. See signedMark.ts.
+     */
+    { kind: 'signature', widthMm: 70, signer: 'debtor', spans: [T(isCo
       ? 'for the Debtor — {{debtor_name}} ({{debtor_reg_no}}), duly authorised'
       : 'The Debtor — {{debtor_name}}')] },
-    { kind: 'signature', widthMm: 70, spans: [T('for the Creditor — {{firm_name}}, duly authorised agent')] },
+    { kind: 'signature', widthMm: 70, signer: 'creditor', spans: [T('for the Creditor — {{firm_name}}, duly authorised agent')] },
 
     { kind: 'pagebreak' },
     H(2, 'ANNEXURE A — CONSENT TO JUDGMENT'),
@@ -155,7 +164,7 @@ export function aod(kind) {
     P('The Defendant confirms that this consent is given freely, that the Defendant has read and understood it, and that the Defendant has been advised of the right to obtain independent legal advice before signing.'),
     { kind: 'spacer', mm: 6 },
     P('Signed at ____________________ on ____________________', { keepWithNext: true }),
-    { kind: 'signature', widthMm: 70, spans: [T(isCo
+    { kind: 'signature', widthMm: 70, signer: 'debtor', spans: [T(isCo
       ? 'for the Defendant — {{debtor_name}}, duly authorised'
       : 'The Defendant — {{debtor_name}}')] },
   ] }
@@ -179,7 +188,21 @@ export function covering(kind) {
     '',
     'Please read all of it, including Part B and Annexure A, before you sign. You are entitled to obtain independent legal advice first.',
     '',
-    'Return the signed document to {{agent_email}}. If anything in it does not match what we discussed, tell us before you sign and we will correct it.',
+    /*
+     * THE BUTTON, NOT A RETURN ADDRESS.
+     *
+     * THE FIRM, having sent one: "there's no link to open it in the email that goes out. The link
+     * is copied in another place and then you have to email it." This line used to read "Return
+     * the signed document to {{agent_email}}" -- which is a printing-and-posting instruction on a
+     * document that is now signed online by pressing a button in the same message. A debtor
+     * reading both does the slower one.
+     *
+     * THE BUTTON ITSELF IS NOT IN THE TEMPLATE and must not be: the link is a 43-character token
+     * made at the moment of sending, so it cannot be a merge field somebody could leave in a
+     * template that was saved before the request existed. SigningPanel appends it -- see
+     * signingButtonHtml -- and the covering email is no longer sendable without it.
+     */
+    'Open it with the button below, read it and sign it there. If anything in it does not match what we discussed, tell us before you sign and we will correct it.',
     '',
     'Kind regards',
     '{{agent_name}}',

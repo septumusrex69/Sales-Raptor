@@ -35,8 +35,27 @@ const E = (seedKey, kind = 'email') => ({ kind, seedKey })
 
 ok('the statement of account is offered', offeredByHand(E('email-account-statement-individual')))
 ok('...for a company too', offeredByHand(E('email-account-statement-company')))
-ok('the acknowledgement of debt is offered', offeredByHand(E('email-aod-individual')))
-ok('...for a company too', offeredByHand(E('email-aod-company')))
+/*
+ * AND THE ACKNOWLEDGEMENT OF DEBT IS NOT, WHICH REVERSED.
+ *
+ * It was offered, on the firm's own reasoning: an AoD goes out because a debtor asked for terms on
+ * the telephone, and no sequence could know that. Then the firm sent one -- "there's no link to
+ * open it in the email that goes out. The link is copied in another place and then you have to
+ * email it."
+ *
+ * THE COVERING EMAIL IS HALF A MESSAGE. The other half is a token made at the moment of sending,
+ * which no template saved weeks earlier can hold. So it goes out from the Signing panel, which
+ * issues the document and puts the button under these same words -- and the compose box offering
+ * it again is the regression this asserts against, not a tidy-up.
+ */
+ok('the acknowledgement of debt is NOT offered by hand, because it would go without its link',
+  !offeredByHand(E('email-aod-individual')))
+ok('...nor for a company', !offeredByHand(E('email-aod-company')))
+/* AND THE PANEL THAT DOES SEND IT NAMES THEM, so this is a move rather than a removal. */
+const signing = code('src/pages/accounts/SigningPanel.tsx')
+ok('...they are sent from the Signing panel instead',
+  signing.includes("'email-aod-individual'") && signing.includes("'email-aod-company'"))
+ok('...with the button appended to them there', /appendHtml: signingButtonHtml\(url\)/.test(signing))
 
 /*
  * AND WHAT THE WORKFLOWS SEND IS NOT. These are the ones the firm meant by "the other stuff works
