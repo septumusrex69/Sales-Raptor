@@ -16,7 +16,8 @@
         var id = 'raptor'
         try {
           var saved = localStorage.getItem('crm.theme')
-          if (saved === 'original' || saved === 'raptor' || saved === 'desert') id = saved
+          if (saved === 'original' || saved === 'raptor' || saved === 'desert'
+            || saved === 'glass-mountain') id = saved
         } catch (e) {
           // Storage blocked. The default is still the right answer.
         }

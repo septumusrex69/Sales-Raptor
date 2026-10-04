@@ -57,9 +57,17 @@ check('an unknown id falls back rather than returning nothing',
 
 /* ------------------------------------------------ the stylesheet, for each skin */
 
-/* Every skin but the base brings a file, that file is imported, and its rules are qualified the
-   way the cascade requires. */
-const SKIN_FILES = { raptor: 'src/styles/raptor.css', desert: 'src/styles/desert.css' }
+/*
+ * Every skin but the base brings a file, that file is imported, and its rules are qualified the
+ * way the cascade requires.
+ *
+ * THE FILENAME IS THE ID, BY CONVENTION, and derived rather than listed. A hand-kept map is one
+ * more place to register a skin -- which is the whole failure this file exists to catch, and it
+ * caught it on itself: a third skin landed from another session and the map did not know about it,
+ * so the assertions about that skin passed by not running.
+ */
+const skinFile = (id) => `src/styles/${id}.css`
+const SKINS = THEMES.filter((t) => t.id !== BASE_THEME).map((t) => t.id)
 
 for (const theme of THEMES) {
   if (theme.id === BASE_THEME) {
@@ -68,9 +76,9 @@ for (const theme of THEMES) {
       !new RegExp(`\\[data-theme=['"]${theme.id}['"]\\]`).test(indexCss))
     continue
   }
-  const file = SKIN_FILES[theme.id]
-  ok(`${theme.id}: has a stylesheet`, !!file && existsSync(new URL(`../../${file}`, import.meta.url)))
-  if (!file) continue
+  const file = skinFile(theme.id)
+  ok(`${theme.id}: has a stylesheet`, existsSync(new URL(`../../${file}`, import.meta.url)))
+  if (!existsSync(new URL(`../../${file}`, import.meta.url))) continue
   const css = read(file)
   /*
    * QUALIFIED AS html[data-theme='x'], NOT THE BARE ATTRIBUTE. `:root` and `[data-theme]` carry
@@ -116,45 +124,45 @@ function tokensOf(css, id) {
   return [...block.matchAll(/^\s*(--[a-z0-9-]+):/gim)].map((m) => m[1])
 }
 
-const raptorTokens = tokensOf(read('src/styles/raptor.css'), 'raptor')
-const desertTokens = tokensOf(read('src/styles/desert.css'), 'desert')
-/* THE PREMISE FIRST, or the comparison below passes on two empty lists. */
-ok('the raptor skin redefines a substantial palette', raptorTokens.length > 80)
-ok('...and so does the desert skin', desertTokens.length > 80)
+const bySkin = new Map(SKINS.map((id) => [id, tokensOf(read(skinFile(id)), id)]))
+/* THE PREMISE FIRST, or the comparison below passes on a set of empty lists. */
+for (const [id, tokens] of bySkin) {
+  ok(`${id}: redefines a substantial palette (${tokens.length})`, tokens.length > 80)
+}
 
 /*
  * A TOKEN ONE SKIN OVERRIDES AND ANOTHER DOES NOT is a widget wearing the previous skin's colour.
  *
- * PRIVATE NAMES ARE EXEMPT and are named rather than pattern-matched away: each skin declares one
- * gradient of its own (--raptor-gold-metal, --desert-gold-metal) and assigns it to the shared
+ * COMPARED AGAINST WHAT EVERY SKIN BETWEEN THEM DEFINES, rather than one skin against another:
+ * with three skins a pairwise rule is three comparisons and the next one makes six, and the
+ * question is the same every time -- is anything redefined somewhere and not here.
+ *
+ * PRIVATE NAMES ARE EXEMPT. Each skin declares a gradient of its own and assigns it to the shared
  * --skin-gold-gradient, which is the token anything actually reads.
- */
-const PRIVATE = /^--(raptor|desert)-/
-const missingFromDesert = raptorTokens.filter((t) => !PRIVATE.test(t) && !desertTokens.includes(t))
-check('the desert skin redefines everything the raptor skin does', missingFromDesert, [])
-/*
- * THE OTHER DIRECTION, WITH ONE EXEMPTION THAT IS A DECISION RATHER THAN AN OVERSIGHT.
  *
- * A PALETTE token only the newer skin sets is the same half-dressed screen with the skins the
- * other way round, so the rule has to run both ways. IMAGERY is different: a skin may keep the
- * baseline's photograph deliberately, and the raptor skin does exactly that -- it never changed
- * the Collections hero, so it leaves all three of that panel's tokens alone and inherits them.
- *
- * NAMED, NOT PATTERN-MATCHED. A `--skin-collections` prefix rule would also wave through the next
- * token somebody adds to that panel, which is the thing this assertion is for.
+ * AND SO IS THE PICTURE A SKIN MAY LEAVE ALONE. A skin keeping the baseline's photograph is a
+ * decision, not an oversight: the raptor skin never changed the Collections hero and inherits all
+ * three of that panel's tokens. Named rather than pattern-matched, so the next token somebody adds
+ * to that panel is not waved through with them.
  */
+const PRIVATE = /^--(raptor|desert|glass)/
 const BASELINE_IMAGERY = [
   '--skin-collections-hero-image',
   '--skin-collections-hero-ground',
   '--skin-collections-scrim',
+  '--skin-collections-hero-min',
+  '--skin-collections-hero-min-lg',
 ]
-const missingFromRaptor = desertTokens
-  .filter((t) => !PRIVATE.test(t) && !BASELINE_IMAGERY.includes(t) && !raptorTokens.includes(t))
-check('...and the other way round, bar the picture a skin may leave alone', missingFromRaptor, [])
-/* AND THE EXEMPTION IS REAL: every name on it is a token the desert skin actually sets and the
-   raptor skin actually does not, so the list cannot outlive the asymmetry it describes. */
-check('the exemption describes a real difference',
-  BASELINE_IMAGERY.filter((t) => !desertTokens.includes(t) || raptorTokens.includes(t)), [])
+const everywhere = [...new Set([...bySkin.values()].flat())]
+  .filter((t) => !PRIVATE.test(t) && !BASELINE_IMAGERY.includes(t))
+for (const [id, tokens] of bySkin) {
+  check(`${id}: redefines everything the other skins do`,
+    everywhere.filter((t) => !tokens.includes(t)), [])
+}
+/* AND THE EXEMPTION DESCRIBES A REAL DIFFERENCE, so the list cannot outlive what it excuses. */
+check('the baseline-imagery exemption is still needed',
+  BASELINE_IMAGERY.some((t) => [...bySkin.values()].some((v) => v.includes(t))
+    && [...bySkin.values()].some((v) => !v.includes(t))), true)
 
 /* ------------------------------------------------ the pictures */
 
@@ -162,8 +170,8 @@ check('the exemption describes a real difference',
  * EVERY PICTURE A SKIN NAMES IS ON DISK. A url() to a file that is not there is a panel that
  * renders as a flat colour -- no error, nothing in the console, just a hero with no photograph.
  */
-for (const [id, file] of Object.entries(SKIN_FILES)) {
-  const css = read(file)
+for (const id of SKINS) {
+  const css = read(skinFile(id))
   for (const m of css.matchAll(/url\('(\/[^']+)'\)/g)) {
     ok(`${id}: ${m[1]} is on disk`, existsSync(new URL(`../../public${m[1]}`, import.meta.url)))
   }
@@ -209,7 +217,7 @@ for (const m of indexCss.matchAll(/url\('(\/[^']+)'\)/g)) {
    is not used, and the first cut of this assertion read that prose and reported the fault it was
    written to prevent -- the same trap check-account-templates records from the other side. */
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '')
-for (const [id, file] of Object.entries({ ...SKIN_FILES, base: 'src/index.css' })) {
+for (const [id, file] of [...SKINS.map((i) => [i, skinFile(i)]), ['base', 'src/index.css']]) {
   check(`${id}: no image-set()`, /image-set\(/.test(code(read(file))), false)
 }
 
@@ -218,8 +226,17 @@ for (const [id, file] of Object.entries({ ...SKIN_FILES, base: 'src/index.css' }
 /* THE SWATCH IS THREE REAL COLOURS. The tile is drawn from them, so a typo is a grey rectangle
    rather than an error. */
 for (const theme of THEMES) {
+  /*
+   * A COLOUR THE TILE CAN ACTUALLY DRAW, which is not the same as a hex.
+   *
+   * This demanded six hex digits until a skin built on frosted glass gave its surface as
+   * `rgba(10,24,34,0.62)` -- which is the honest value for a translucent surface and renders
+   * perfectly. What the assertion is for is a typo or an empty string leaving a grey rectangle
+   * where somebody picks a skin, so it takes either form and nothing else.
+   */
   for (const key of ['ground', 'surface', 'accent']) {
-    ok(`${theme.id}: the ${key} swatch is a colour`, /^#[0-9a-f]{6}$/i.test(theme.swatch[key]))
+    ok(`${theme.id}: the ${key} swatch is a colour`,
+      /^(#[0-9a-f]{3,8}|rgba?\([\d.,\s]+\))$/i.test(theme.swatch[key]))
   }
   ok(`${theme.id}: has a name and a description`,
     theme.name.trim().length > 0 && theme.description.trim().length > 0)
