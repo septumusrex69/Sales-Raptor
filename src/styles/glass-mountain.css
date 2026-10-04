@@ -319,6 +319,20 @@ html[data-theme='glass-mountain'] .text-slate-400 {
   color: #718796 !important;
 }
 
+/* ── Settings sidebar active nav item ───────────────────────────────────── */
+/* bg-brand-50 at 8% opacity is invisible on the mountain. Give active items
+   the same gold glass treatment as the main sidebar active links. */
+html[data-theme='glass-mountain'] button.bg-brand-50,
+html[data-theme='glass-mountain'] [class~='bg-brand-50'] {
+  background: linear-gradient(
+    135deg,
+    rgba(214, 166, 79, 0.28),
+    rgba(170, 123, 45, 0.16)
+  ) !important;
+  border: 1px solid rgba(229, 190, 111, 0.55) !important;
+  color: #f5dfa0 !important;
+}
+
 /* ── Borders ─────────────────────────────────────────────────────────────── */
 html[data-theme='glass-mountain'] .border-slate-100,
 html[data-theme='glass-mountain'] .border-slate-200,
