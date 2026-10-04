@@ -1,0 +1,224 @@
+/**
+ * THE SKINS, AND THE FOUR PLACES A SKIN HAS TO BE REGISTERED IN BEFORE IT WORKS.
+ *
+ * A skin is cosmetic, which is exactly why it rots quietly: nothing fails, a screen just comes
+ * out half-dressed. The four places are themes.ts, the stylesheet, index.css's import list and
+ * the pre-paint script in index.html, and three of them are easy to forget:
+ *
+ *   THE PRE-PAINT SCRIPT IS A DUPLICATE ON PURPOSE. A module import cannot run before the first
+ *   paint, so index.html repeats the storage key, the ids and the default by hand. Its own
+ *   comment says to keep them in step; this is what makes that more than a hope. Forget a new id
+ *   there and every load of that skin renders the baseline and then snaps to it.
+ *
+ *   THE IMPORT IS WHAT MAKES THE FILE EXIST. A [data-theme] block in a stylesheet nothing imports
+ *   is a file that passes every review and changes nothing on the screen.
+ *
+ *   AND A SKIN HAS TO REDEFINE WHAT THE OTHERS REDEFINE. A token one skin overrides and another
+ *   does not is a widget that keeps the previous skin's colour -- the half-dressed screen, and
+ *   the hardest of these to see, because it is right on the screen somebody happens to open.
+ *
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-themes.mjs
+ */
+import { existsSync, readFileSync } from 'node:fs'
+import { BASE_THEME, DEFAULT_THEME, THEMES, themeById } from '../../src/lib/themes.ts'
+
+let pass = 0
+const failures = []
+const check = (name, actual, expected) => {
+  const a = JSON.stringify(actual); const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
+}
+const ok = (name, actual) => check(name, actual, true)
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+
+const themesLib = read('src/lib/themes.ts')
+const indexCss = read('src/index.css')
+const html = read('index.html')
+
+/* ------------------------------------------------ the register */
+
+/* THE UNION AND THE LIST ARE THE SAME SET. An id in the type with no entry is a skin the picker
+   never offers; an entry with no id does not compile, which is the easy half. */
+const union = (themesLib.match(/export type ThemeId =([^\n]+)/)?.[1] ?? '')
+  .split('|').map((s) => s.trim().replace(/'/g, '')).filter(Boolean)
+check('every id in the type is a skin in the list',
+  union.filter((id) => !THEMES.some((t) => t.id === id)), [])
+check('...and every skin is in the type',
+  THEMES.filter((t) => !union.includes(t.id)).map((t) => t.id), [])
+ok('there is more than one skin to choose between', THEMES.length > 1)
+
+/* THE DEFAULT AND THE BASE ARE BOTH REAL SKINS. The base is the one the stylesheet renders with
+   no attribute set, and it has no [data-theme] block by definition -- see applyTheme. */
+ok('the default is a skin that exists', THEMES.some((t) => t.id === DEFAULT_THEME))
+ok('the base is a skin that exists', THEMES.some((t) => t.id === BASE_THEME))
+check('an unknown id falls back rather than returning nothing',
+  themeById('no-such-skin').id, THEMES[0].id)
+
+/* ------------------------------------------------ the stylesheet, for each skin */
+
+/* Every skin but the base brings a file, that file is imported, and its rules are qualified the
+   way the cascade requires. */
+const SKIN_FILES = { raptor: 'src/styles/raptor.css', desert: 'src/styles/desert.css' }
+
+for (const theme of THEMES) {
+  if (theme.id === BASE_THEME) {
+    /* THE BASE STAMPS NOTHING, so a [data-theme='original'] block would never match. */
+    ok(`${theme.id}: the base skin has no block of its own`,
+      !new RegExp(`\\[data-theme=['"]${theme.id}['"]\\]`).test(indexCss))
+    continue
+  }
+  const file = SKIN_FILES[theme.id]
+  ok(`${theme.id}: has a stylesheet`, !!file && existsSync(new URL(`../../${file}`, import.meta.url)))
+  if (!file) continue
+  const css = read(file)
+  /*
+   * QUALIFIED AS html[data-theme='x'], NOT THE BARE ATTRIBUTE. `:root` and `[data-theme]` carry
+   * identical specificity and the default tokens are declared after the skins in the bundle, so
+   * a bare selector loses every override to source order and the file appears to do nothing.
+   */
+  ok(`${theme.id}: its rules are qualified with html`,
+    new RegExp(`html\\[data-theme='${theme.id}'\\]`).test(css))
+  check(`${theme.id}: and none of them are bare`,
+    new RegExp(`(^|[^a-z\\]])\\[data-theme='${theme.id}'\\]`, 'm').test(css), false)
+  /* AND index.css IMPORTS IT, or the file changes nothing at all. */
+  ok(`${theme.id}: index.css imports it`,
+    indexCss.includes(`@import "./${file.replace('src/', '')}"`))
+}
+
+/* ------------------------------------------------ the pre-paint script */
+
+const preload = html.slice(html.indexOf('<script>'), html.indexOf('</script>'))
+/* EVERY ID IS KNOWN TO IT. A skin missing here renders the baseline for a frame and then snaps. */
+for (const theme of THEMES) {
+  ok(`the pre-paint script knows ${theme.id}`, preload.includes(`'${theme.id}'`))
+}
+/* THE SAME STORAGE KEY AND THE SAME DEFAULT, or the script and the module disagree about what
+   the person chose -- which looks exactly like the choice not being saved. */
+const storageKey = themesLib.match(/const STORAGE_KEY = '([^']+)'/)?.[1]
+check('the storage key is the one the module uses', preload.includes(`'${storageKey}'`), true)
+ok('...and the key is the one in use', !!storageKey)
+check('the pre-paint default is the module default',
+  preload.includes(`var id = '${DEFAULT_THEME}'`), true)
+/* AND IT STRIPS THE ATTRIBUTE FOR THE BASE SKIN ONLY, which is what applyTheme does. Stamping
+   the base would select a block that does not exist; not stamping a skin renders the baseline. */
+ok('...and it stamps everything but the base',
+  new RegExp(`id !== '${BASE_THEME}'`).test(preload))
+
+/* ------------------------------------------------ the tokens each skin redefines */
+
+/** The `--token:` names declared in a file's `html[data-theme='id'] { ... }` root block. */
+function tokensOf(css, id) {
+  const open = css.indexOf(`html[data-theme='${id}'] {`)
+  if (open === -1) return []
+  const end = css.indexOf('\n}', open)
+  const block = css.slice(open, end === -1 ? undefined : end)
+  return [...block.matchAll(/^\s*(--[a-z0-9-]+):/gim)].map((m) => m[1])
+}
+
+const raptorTokens = tokensOf(read('src/styles/raptor.css'), 'raptor')
+const desertTokens = tokensOf(read('src/styles/desert.css'), 'desert')
+/* THE PREMISE FIRST, or the comparison below passes on two empty lists. */
+ok('the raptor skin redefines a substantial palette', raptorTokens.length > 80)
+ok('...and so does the desert skin', desertTokens.length > 80)
+
+/*
+ * A TOKEN ONE SKIN OVERRIDES AND ANOTHER DOES NOT is a widget wearing the previous skin's colour.
+ *
+ * PRIVATE NAMES ARE EXEMPT and are named rather than pattern-matched away: each skin declares one
+ * gradient of its own (--raptor-gold-metal, --desert-gold-metal) and assigns it to the shared
+ * --skin-gold-gradient, which is the token anything actually reads.
+ */
+const PRIVATE = /^--(raptor|desert)-/
+const missingFromDesert = raptorTokens.filter((t) => !PRIVATE.test(t) && !desertTokens.includes(t))
+check('the desert skin redefines everything the raptor skin does', missingFromDesert, [])
+/*
+ * THE OTHER DIRECTION, WITH ONE EXEMPTION THAT IS A DECISION RATHER THAN AN OVERSIGHT.
+ *
+ * A PALETTE token only the newer skin sets is the same half-dressed screen with the skins the
+ * other way round, so the rule has to run both ways. IMAGERY is different: a skin may keep the
+ * baseline's photograph deliberately, and the raptor skin does exactly that -- it never changed
+ * the Collections hero, so it leaves all three of that panel's tokens alone and inherits them.
+ *
+ * NAMED, NOT PATTERN-MATCHED. A `--skin-collections` prefix rule would also wave through the next
+ * token somebody adds to that panel, which is the thing this assertion is for.
+ */
+const BASELINE_IMAGERY = [
+  '--skin-collections-hero-image',
+  '--skin-collections-hero-ground',
+  '--skin-collections-scrim',
+]
+const missingFromRaptor = desertTokens
+  .filter((t) => !PRIVATE.test(t) && !BASELINE_IMAGERY.includes(t) && !raptorTokens.includes(t))
+check('...and the other way round, bar the picture a skin may leave alone', missingFromRaptor, [])
+/* AND THE EXEMPTION IS REAL: every name on it is a token the desert skin actually sets and the
+   raptor skin actually does not, so the list cannot outlive the asymmetry it describes. */
+check('the exemption describes a real difference',
+  BASELINE_IMAGERY.filter((t) => !desertTokens.includes(t) || raptorTokens.includes(t)), [])
+
+/* ------------------------------------------------ the pictures */
+
+/*
+ * EVERY PICTURE A SKIN NAMES IS ON DISK. A url() to a file that is not there is a panel that
+ * renders as a flat colour -- no error, nothing in the console, just a hero with no photograph.
+ */
+for (const [id, file] of Object.entries(SKIN_FILES)) {
+  const css = read(file)
+  for (const m of css.matchAll(/url\('(\/[^']+)'\)/g)) {
+    ok(`${id}: ${m[1]} is on disk`, existsSync(new URL(`../../public${m[1]}`, import.meta.url)))
+  }
+}
+/* AND SO IS EVERY PICTURE index.css NAMES, which is where the baseline's own art lives. */
+for (const m of indexCss.matchAll(/url\('(\/[^']+)'\)/g)) {
+  ok(`index.css: ${m[1]} is on disk`, existsSync(new URL(`../../public${m[1]}`, import.meta.url)))
+}
+
+/*
+ * AND NOT ONE OF THEM IS AN image-set().
+ *
+ * THIS COST A BLANK PANEL ON AN iPAD, and the firm works on one. Lightning CSS reads a stack of
+ * declarations as a single intent, drops the plain url() safety net and emits a prefixed
+ * image-set carrying type() -- which WebKit's prefixed form has never supported and therefore
+ * rejects, leaving the element with no background at all. index.css carries the whole story on
+ * `.login-photo`; this is what stops the next skin reintroducing it.
+ */
+/* COMMENTS STRIPPED FIRST. Every one of these files carries a comment explaining why image-set()
+   is not used, and the first cut of this assertion read that prose and reported the fault it was
+   written to prevent -- the same trap check-account-templates records from the other side. */
+const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '')
+for (const [id, file] of Object.entries({ ...SKIN_FILES, base: 'src/index.css' })) {
+  check(`${id}: no image-set()`, /image-set\(/.test(code(read(file))), false)
+}
+
+/* ------------------------------------------------ the preview tile */
+
+/* THE SWATCH IS THREE REAL COLOURS. The tile is drawn from them, so a typo is a grey rectangle
+   rather than an error. */
+for (const theme of THEMES) {
+  for (const key of ['ground', 'surface', 'accent']) {
+    ok(`${theme.id}: the ${key} swatch is a colour`, /^#[0-9a-f]{6}$/i.test(theme.swatch[key]))
+  }
+  ok(`${theme.id}: has a name and a description`,
+    theme.name.trim().length > 0 && theme.description.trim().length > 0)
+  /* THE LOCKUP IS A FILE THAT EXISTS, for the reason the pictures above do: a sidebar with no
+     wordmark is a skin that looks broken rather than one that looks different. */
+  ok(`${theme.id}: its lockup is on disk`,
+    existsSync(new URL(`../../public${theme.lockupLight}`, import.meta.url)))
+}
+
+/*
+ * AND THE DESERT SWATCH IS THE DESERT SKIN'S OWN COLOURS, not three that merely look warm. The
+ * tile is how somebody picks, and a preview that is not the thing it previews is worse than none.
+ */
+const desert = themeById('desert')
+const desertCss = read('src/styles/desert.css')
+check('the desert ground is its own --color-navy-950',
+  desertCss.includes(`--color-navy-950: ${desert.swatch.ground};`), true)
+check('...its surface is its own --color-surface',
+  desertCss.includes(`--color-surface: ${desert.swatch.surface};`), true)
+check('...and its accent is its own --c-gold',
+  desertCss.includes(`--c-gold: ${desert.swatch.accent};`), true)
+
+if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
+console.log(`check-themes: ${pass} passed, ${failures.length} failed`)
+process.exit(failures.length > 0 ? 1 : 0)

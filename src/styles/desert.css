@@ -1,0 +1,356 @@
+/*
+ * DESERT — a visual skin.
+ *
+ * The firm asked for the dunes: "create me a new theme, like a new skin with the desert theme",
+ * with two photographs — a wing over cloud at sunrise, and a dune ridge with the light running
+ * along its crest.
+ *
+ * SAME BARGAIN AS raptor.css, AND SELECTORS QUALIFIED THE SAME WAY. `html[data-theme='desert']`
+ * rather than the bare attribute: `:root` and `[data-theme]` carry identical specificity and the
+ * default tokens are declared after this file in the bundle, so a bare selector would lose every
+ * override to source order and this file would appear to do nothing at all.
+ *
+ * IT CHANGES NOTHING BUT APPEARANCE. No component knows it exists; it redefines the tokens the
+ * application already draws from. With any other skin selected not one rule here applies.
+ *
+ * THE CHARACTER, AND WHY IT IS NOT JUST "GOLD TURNED UP". The photographs are mostly dark — a
+ * storm sky, a shadowed dune face — with the sun doing the work in one narrow band. So the skin
+ * is warm NEUTRALS carrying the structure, a near-black that is brown rather than blue, and the
+ * gold spent only where something is active, selected or worth the eye. A page of amber would
+ * read as a warning, not as a desert.
+ *
+ * AND THE COOL TONES STAY. Every cloud in both pictures has a blue-grey shadow in it, and the
+ * categorical palette needs a counterpoint to the gold or every chart becomes one hue with a
+ * lightness ramp. The steel family below is that shadow, dustier and warmer than the raptor
+ * skin's but still cool.
+ */
+
+html[data-theme='desert'] {
+  /* ── Structure ─────────────────────────────────────────────────────────── */
+  /* Sand rather than grey. The surface is the page behind every card, and a neutral grey under
+     warm cards is the fastest way to make the warmth look like a mistake. */
+  --color-surface: #f7f4ee;
+  --color-card: #fffdfa;
+
+  /* Neutrals run from pale sand down to the shadow side of a dune, so every grey in the app
+     belongs to the same family as the photographs rather than sitting beside them. */
+  --color-slate-50: #faf8f3;
+  --color-slate-100: #f2ede3;
+  --color-slate-200: #e8e0d2;
+  --color-slate-300: #d9cfbc;
+  --color-slate-400: #a99c86;
+  --color-slate-500: #8c806b;
+  --color-slate-600: #766b58;
+  --color-slate-700: #4c4336;
+  --color-slate-800: #2f2920;
+  --color-slate-900: #1e1811;
+
+  /* The dark ground. Brown-black, not blue-black: it sits under the gold and against the
+     photographs, and a cool near-black beside a warm picture reads as two different blacks. */
+  --color-navy-950: #12100b;
+  --color-navy-900: #181410;
+  --color-navy-800: #211b14;
+  --color-navy-700: #2d251b;
+  --color-navy-600: #3e3325;
+
+  --color-gold-600: #a8742a;
+  --color-gold-500: #d99f3f;
+  --color-gold-400: #e8b85f;
+  --color-gold-300: #f4d79b;
+
+  --color-brand-50: #faf7f1;
+  --color-brand-100: #f1e9db;
+  --color-brand-500: #3e3325;
+  --color-brand-600: #211b14;
+  --color-brand-700: #12100b;
+
+  /* Sage rather than emerald, and terracotta rather than pillar-box: both are colours the
+     landscape actually contains, and both still read as good news and bad at a glance. */
+  --color-positive: #4f7d56;
+  --color-negative: #c0563f;
+
+  --color-red-50: #faeeea;
+  --color-red-100: #f3dad3;
+  --color-red-200: #e8c0b4;
+  --color-red-500: #c0563f;
+  --color-red-600: #ad4b36;
+  --color-red-700: #8f3c2b;
+
+  /* ── Categorical palette ───────────────────────────────────────────────── */
+  /* The names are the application's and are not re-coined per skin: a token called --c-navy-deep
+     is "the darkest structural colour", and renaming it here would mean every component that
+     reads it needing to know which skin it is under. */
+  --c-navy-deep: #12100b;
+  --c-navy: #211b14;
+  --c-navy-mid: #332a1e;
+  --c-navy-slate: #3b3429;
+  --c-navy-ink: #2a2318;
+  --c-navy-steel: #4a4336;
+  --c-steel: #5b6675;
+  --c-steel-soft: #6b7684;
+  --c-steel-bright: #7f8a98;
+  --c-steel-deep: #4a5462;
+  --c-steel-light: #939dab;
+  --c-steel-pale: #bcc4cf;
+  --c-gold: #d99f3f;
+  --c-gold-brand: #d99f3f;
+  --c-gold-bright: #e8b85f;
+  --c-gold-light: #f0cd8a;
+  --c-gold-deep: #a8742a;
+  --c-gold-dark: #8a5d20;
+  --c-gold-bronze: #a8742a;
+  --c-gold-deep-hover: #8a5d20;
+  --c-green: #4f7d56;
+  --c-green-bright: #5d9065;
+  --c-green-muted: #76947a;
+  --c-rust: #c0563f;
+  --c-rust-deep: #a4452f;
+  --c-rust-hover: #a4452f;
+  --c-rust-deep-hover: #8a3827;
+  --c-grey: #7a705f;
+  --c-grey-warm: #8d8171;
+  --c-grey-light: #a99c86;
+  --c-grey-blue: #8d9199;
+  --c-grey-pale: #d4cbba;
+  --c-ink: #12100b;
+
+  --tint-steel: #eef1f5;
+  --tint-steel-soft: #e9eef4;
+  --tint-steel-alt: #eef0f4;
+  --tint-gold: #fbf2e1;
+  --tint-gold-deep: #f8eeda;
+  --tint-gold-dark: #f5e9d0;
+  --tint-gold-pale: #efdcb3;
+  --tint-green: #ecf3ec;
+  --tint-green-bright: #e6f0e7;
+  --tint-rust: #fbeae6;
+  --tint-rust-deep: #f7ded8;
+  --tint-neutral: #f2ede3;
+  --tint-neutral-soft: #faf8f3;
+
+  --stage-new-deal: #5b6675;
+  --stage-quotation-sent: #d99f3f;
+  --stage-mandate-sent: #c08c36;
+  --stage-won: #4f7d56;
+  --stage-rejected: #c0563f;
+
+  /* Won takes the gold, as it does in the raptor skin and for the same reason: it is the outcome
+     the page is about, and gold is what this skin spends on the thing worth looking at. */
+  --outcome-won: #d99f3f;
+  --outcome-open: #7a8694;
+  --outcome-rejected: #5b5346;
+  --outcome-value: #211b14;
+
+  /* ── Surfaces ──────────────────────────────────────────────────────────── */
+  --skin-card-radius: 14px;
+  --skin-card-border: #ebe3d5;
+  /* The shadow is warm. A neutral grey shadow under a warm card is a grey halo, which is what
+     makes a warm palette look dirty rather than lit. */
+  --skin-card-shadow: 0 1px 2px rgba(46, 33, 14, 0.04), 0 6px 18px rgba(46, 33, 14, 0.05);
+  --skin-card-shadow-hover: 0 1px 2px rgba(46, 33, 14, 0.05), 0 12px 30px rgba(46, 33, 14, 0.09);
+  --skin-body-text: #221c14;
+  --skin-scrollbar: #d9cfbc;
+
+  /* ── Imagery ───────────────────────────────────────────────────────────── */
+  /*
+   * THE WING IS THE BAND AND THE DUNES ARE THE HERO, which is how the firm drew it: the dune
+   * ridge under the company dashboard's headline, and the wing running behind a debtor's name.
+   *
+   * ONE PLAIN url() AND NOT image-set(), for the reason written out at length on `.login-photo`
+   * in index.css: Lightning CSS reads a stack of declarations as one intent, drops the plain
+   * url() safety net and emits a prefixed image-set that WebKit rejects, which renders the panel
+   * empty on Safari. That was reported on an iPad once already and the firm works on one.
+   *
+   * GRADIENT AND PHOTOGRAPH ARE ONE BACKGROUND on the band, so the copy's contrast cannot drift
+   * as the image changes behind it. The band is short and the name sits on the left, so the wash
+   * is heaviest there and lifts towards the sun on the right.
+   */
+  --skin-hero-background:
+    linear-gradient(100deg, rgba(14, 11, 7, 0.95) 0%, rgba(18, 14, 9, 0.82) 38%, rgba(24, 18, 11, 0.42) 100%);
+  --skin-hero-image: url('/brand/desert-band.webp');
+  --skin-hero-radius: 18px;
+
+  /*
+   * THE COMPANY DASHBOARD'S PHOTOGRAPH. Positioned low rather than centred: the dune crest and
+   * the sun are in the lower half of the frame, and `cover` on a panel that is 700px tall and
+   * 1320px wide crops a 1920x640 picture hard. Centred, the hero would be mostly storm cloud.
+   */
+  --skin-collections-hero-image: url('/brand/desert-hero.webp');
+  --skin-collections-hero-ground: #0d0b07;
+  /*
+   * THE WASH, WARM AND ASYMMETRIC. Heaviest on the left under the headline and the four figures,
+   * almost nothing through the middle where the light runs along the ridge, and coming back on
+   * the right so the rail of small caps has something to sit on — over the sun, white type at
+   * that size disappears.
+   *
+   * THE TWO PASSES COMPOUND. 0.84 across and 0.34 down meet at 0.89 in the bottom-left corner,
+   * which is where the figures are and is the one place this panel needs to be legible.
+   */
+  --skin-collections-scrim:
+    linear-gradient(
+      90deg,
+      rgba(13, 11, 7, 0.84) 0%,
+      rgba(13, 11, 7, 0.46) 40%,
+      rgba(13, 11, 7, 0.16) 68%,
+      rgba(13, 11, 7, 0.4) 100%
+    ),
+    linear-gradient(to bottom, rgba(13, 11, 7, 0) 0%, rgba(13, 11, 7, 0.14) 52%, rgba(13, 11, 7, 0.34) 100%);
+
+  /*
+   * THE DUNES AND NOT THE WING, which is the one place the two photographs swap roles.
+   *
+   * The wing is a close-up, so at 640px across the sidebar it draws individual feathers -- a
+   * pattern rather than a texture, and a pattern behind the last four nav items is something the
+   * eye keeps going back to. The dune ridge at the same size is three soft bands of light.
+   */
+  --skin-sidebar-art: url('/brand/desert-sidebar.webp');
+  --skin-sidebar-art-opacity: 0.2;
+
+  --desert-gold-metal: linear-gradient(
+    135deg,
+    #8a5d20 0%,
+    #d9a94f 34%,
+    #f4d79b 54%,
+    #c8862f 78%,
+    #7d5420 100%
+  );
+
+  /* Metallic gold, for logo-like decoration only — never body text or a whole button, where it
+     reads as costume jewellery rather than restraint. */
+  --skin-gold-gradient: var(--desert-gold-metal);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #a8742a 0%, #d99f3f 100%);
+}
+
+/* ── The hero band ───────────────────────────────────────────────────────── */
+html[data-theme='desert'] .app-hero {
+  background:
+    var(--skin-hero-background),
+    var(--skin-hero-image) center / cover no-repeat;
+}
+
+/*
+ * The company dashboard's hero, which is the one screen with a photograph of its own.
+ *
+ * ONLY THE POSITION IS SET HERE; the image, the ground and the wash all arrive as tokens above.
+ * `center 72%` puts the dune crest and the sun in the lower third of a tall panel, which is where
+ * the figures are not.
+ */
+html[data-theme='desert'] .collections-hero {
+  background-position: center 72%;
+}
+
+/*
+ * The hero's own palette. These five are declared inside `.collections-hero` in index.css
+ * because that panel is the only thing that wears them — so a skin that changes the photograph
+ * has to reach them there, or the champagne headline and the gold rule stay tuned to a sunrise
+ * that is no longer behind them.
+ */
+html[data-theme='desert'] .collections-hero {
+  --ch-glass: rgba(16, 12, 7, 0.62);
+  --ch-edge: rgba(255, 255, 255, 0.1);
+  --ch-gold: #d9a94f;
+  --ch-champagne: #f0cd8a;
+  --ch-muted: #bdb3a2;
+}
+
+/* ── The sign-in photograph ──────────────────────────────────────────────── */
+/*
+ * THE 2x RULE HAS TO BE OVERRIDDEN TOO. index.css sets the retina file inside a resolution
+ * query, and a media-qualified rule beats an unqualified one of equal specificity whatever the
+ * source order — so without the second block here a dense screen would sign in under the raptor
+ * photograph and then land on a desert dashboard.
+ *
+ * ONE FILE FOR BOTH DENSITIES, because this image is 1920 wide and the panel is a column: there
+ * is nothing a 2x file would add except the download.
+ */
+html[data-theme='desert'] .login-photo {
+  background-image: url('/brand/desert-hero.webp');
+  background-position: 50% 70%;
+}
+@media (min-resolution: 2dppx) {
+  html[data-theme='desert'] .login-photo {
+    background-image: url('/brand/desert-hero.webp');
+  }
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────── */
+html[data-theme='desert'] h1,
+html[data-theme='desert'] h2,
+html[data-theme='desert'] h3 {
+  letter-spacing: -0.012em;
+}
+
+/* Figures line up in columns across the app, so they are set in tabular numerals — ragged digits
+   are the fastest way to make a considered layout look careless. */
+html[data-theme='desert'] table,
+html[data-theme='desert'] .app-hero {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+html[data-theme='desert'] .card {
+  transition: box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+html[data-theme='desert'] .app-sidebar {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Low in the frame and heavily dimmed: it is a texture under the last nav items, not a picture
+   competing with them. */
+html[data-theme='desert'] .app-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, #12100b 0%, rgba(18, 16, 11, 0.7) 38%, rgba(18, 16, 11, 0.92) 100%),
+    var(--skin-sidebar-art) center bottom / cover no-repeat;
+  opacity: var(--skin-sidebar-art-opacity);
+  pointer-events: none;
+}
+
+html[data-theme='desert'] .app-sidebar nav a[aria-current='page'] {
+  background: linear-gradient(180deg, #e8b85f 0%, #d99f3f 100%);
+  color: #16120b;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+html[data-theme='desert'] tbody tr:hover {
+  background-color: #faf8f3;
+}
+
+/* ── Inputs and controls ─────────────────────────────────────────────────── */
+html[data-theme='desert'] input:not([type='checkbox']):not([type='radio']),
+html[data-theme='desert'] select,
+html[data-theme='desert'] textarea {
+  border-radius: 10px;
+}
+
+html[data-theme='desert'] input:focus-visible,
+html[data-theme='desert'] select:focus-visible,
+html[data-theme='desert'] textarea:focus-visible,
+html[data-theme='desert'] button:focus-visible,
+html[data-theme='desert'] a:focus-visible {
+  outline: 2px solid rgba(217, 159, 63, 0.6);
+  outline-offset: 1px;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────────── */
+html[data-theme='desert'] button,
+html[data-theme='desert'] a {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='desert'] *,
+  html[data-theme='desert'] *::before,
+  html[data-theme='desert'] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

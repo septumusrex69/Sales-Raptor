@@ -262,7 +262,22 @@ ok('the hero renders it', /greetingLine\(new Date\(\), currentUser\?\.name\)/.te
  */
 ok('the photograph is a background', /\.collections-hero \{/.test(css))
 const heroRule = css.slice(css.indexOf('.collections-hero {'), css.indexOf('.collections-hero::before'))
-ok('...declared as one plain url', /background-image: url\('\/brand\/collections-hero\.webp'\);/.test(heroRule))
+/*
+ * THE PICTURE AND THE WASH ARE TOKENS NOW, and what is asserted moved with them.
+ *
+ * THEY WERE WRITTEN INTO THE RULE on the reasoning that this photograph never changes. A second
+ * skin with its own dunes falsified that, and the alternative -- a whole second copy of this
+ * panel's geometry under a [data-theme] selector -- is the worse of the two.
+ *
+ * THE RULE THAT MATTERS IS UNCHANGED: whatever is declared, it is ONE PLAIN url(), for the
+ * Safari reason written out on `.login-photo`. So the rule has to read a token, and the token
+ * has to be a plain url.
+ */
+ok('...declared off a token, so a skin can change it',
+  /background-image: var\(--skin-collections-hero-image\);/.test(heroRule))
+const baseImage = css.match(/--skin-collections-hero-image:([^;]+);/)?.[1] ?? ''
+ok('...whose default is this photograph', /url\('\/brand\/collections-hero\.webp'\)/.test(baseImage))
+ok('...as one plain url, never an image-set', !/image-set/.test(baseImage))
 
 /*
  * AND NOT AS image-set(), ANYWHERE IN THE STYLESHEET. This is the bug the firm found on an iPad
@@ -331,7 +346,19 @@ ok('...and nothing in the stylesheet asks for one', !/collections-hero\.jpg/.tes
  * almost solid navy and the photograph may as well not have been there — which is exactly what
  * the first version did. Each has to be read as half of what reaches the eye.
  */
-const scrim = css.slice(css.indexOf('.collections-hero::before'), css.indexOf('.collections-hero > *'))
+/*
+ * THE SCRIM IS A TOKEN TOO, and for a reason beyond tidiness: it is tuned to the photograph
+ * behind it. A cold blue wash over a warm dune reads as a screen with its colour wrong, so a skin
+ * that changes the picture has to be able to change the wash with it.
+ *
+ * READ FROM THE TOKEN'S DEFAULT rather than from the rule, which now says only `background:
+ * var(--skin-collections-scrim)`. What follows -- two passes, and how dark they get together --
+ * is unchanged and is the half worth guarding.
+ */
+ok('the scrim is declared off a token',
+  /background: var\(--skin-collections-scrim\);/
+    .test(css.slice(css.indexOf('.collections-hero::before'), css.indexOf('.collections-hero > *'))))
+const scrim = css.match(/--skin-collections-scrim:([\s\S]*?);\n/)?.[1] ?? ''
 ok('there is a scrim to read', scrim.length > 200)
 const darkest = Math.max(...[...scrim.matchAll(/rgba\(5, 16, 25, ([\d.]+)\)/g)].map((m) => Number(m[1])))
 ok('the whole valley is in frame', /background-position: center;/.test(css))

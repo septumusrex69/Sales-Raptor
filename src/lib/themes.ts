@@ -6,7 +6,7 @@
  * in the stylesheet — no component changes, which is the whole point of the arrangement.
  */
 
-export type ThemeId = 'original' | 'raptor'
+export type ThemeId = 'original' | 'raptor' | 'desert'
 
 export interface ThemeDefinition {
   id: ThemeId
@@ -36,6 +36,24 @@ export const THEMES: ThemeDefinition[] = [
     productName: 'Raptor',
     lockupLight: '/brand/raptor-lockup-light.png',
     swatch: { ground: '#0b1f3b', surface: '#f4f6f9', accent: '#d4a853' },
+  },
+  {
+    id: 'desert',
+    name: 'Desert',
+    description: 'Warm sand, low sun and the dunes. The same Raptor, in another light.',
+    /*
+     * THE SAME PRODUCT NAME AS raptor, and that is not an oversight.
+     *
+     * A skin carries its own branding and this one is the same brand in another light -- the
+     * firm asked for "a new skin with the desert theme", not a second product. Giving it a name
+     * of its own would put a different word in the sidebar, in the page title and in the
+     * Appearance tab's own subtitle, which is a rename rather than a skin.
+     */
+    productName: 'Raptor',
+    lockupLight: '/brand/raptor-lockup-light.png',
+    /* Ground, surface, accent -- the three the preview tile stands on. Read off the skin's own
+       --color-navy-950, --color-surface and --c-gold, so the tile cannot drift from the skin. */
+    swatch: { ground: '#12100b', surface: '#f7f4ee', accent: '#d99f3f' },
   },
 ]
 
