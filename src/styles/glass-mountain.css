@@ -173,7 +173,6 @@ html[data-theme='glass-mountain'] .bg-gray-100 {
 html[data-theme='glass-mountain'] header {
   background: rgba(5, 16, 24, 0.55) !important;
   backdrop-filter: blur(16px) saturate(120%);
-  -webkit-backdrop-filter: blur(16px) saturate(120%);
   border-bottom: 1px solid rgba(255,255,255,0.10) !important;
   color: #f4f6f7;
 }
@@ -189,7 +188,6 @@ html[data-theme='glass-mountain'] header [class*='bg-slate'] {
   border: 1px solid rgba(255,255,255,0.18) !important;
   color: #f4f6f7 !important;
   backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border-radius: 10px !important;
 }
 
@@ -214,7 +212,6 @@ html[data-theme='glass-mountain'] header button:hover {
 html[data-theme='glass-mountain'] .app-sidebar {
   background: rgba(4, 14, 22, 0.08) !important;
   backdrop-filter: blur(14px) saturate(110%);
-  -webkit-backdrop-filter: blur(14px) saturate(110%);
   border-right: 1px solid rgba(255,255,255,0.09) !important;
   position: relative;
   isolation: isolate;
@@ -288,7 +285,6 @@ html[data-theme='glass-mountain'] .collections-hero {
 html[data-theme='glass-mountain'] .card {
   background: rgba(8, 20, 30, 0.64) !important;
   backdrop-filter: blur(18px) saturate(125%);
-  -webkit-backdrop-filter: blur(18px) saturate(125%);
   border: 1px solid rgba(255,255,255,0.13) !important;
   border-top-color: rgba(255,255,255,0.22) !important;
   box-shadow:
@@ -443,7 +439,6 @@ html[data-theme='glass-mountain'] [role='dialog'],
 html[data-theme='glass-mountain'] [class*='modal'] {
   background: rgba(6, 18, 28, 0.90) !important;
   backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
   border: 1px solid rgba(255,255,255,0.14) !important;
   border-top: 1px solid rgba(255,255,255,0.24) !important;
   box-shadow:
@@ -458,7 +453,6 @@ html[data-theme='glass-mountain'] [class*='popover'],
 html[data-theme='glass-mountain'] [class*='menu'] > div {
   background: rgba(6, 18, 28, 0.88) !important;
   backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255,255,255,0.12) !important;
 }
 
@@ -523,7 +517,6 @@ html[data-theme='glass-mountain'] [class*='rounded-2xl'][class*='bg-white'],
 html[data-theme='glass-mountain'] [class*='rounded-2xl'][class*='border-slate-200'] {
   background: rgba(8, 20, 30, 0.68) !important;
   backdrop-filter: blur(20px) saturate(125%);
-  -webkit-backdrop-filter: blur(20px) saturate(125%);
   border: 1px solid rgba(255,255,255,0.16) !important;
   border-top-color: rgba(255,255,255,0.26) !important;
   box-shadow:
@@ -550,7 +543,6 @@ html[data-theme='glass-mountain'] [class*='rounded-lg'][class*='border-slate-200
 html[data-theme='glass-mountain'] .border-b.border-slate-200:has(> div > button[class*='border-b-2']) {
   background: rgba(6, 18, 28, 0.60);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border-bottom-color: rgba(255, 255, 255, 0.10) !important;
   border-radius: 12px 12px 0 0;
   padding: 0 6px;
@@ -579,7 +571,6 @@ html[data-theme='glass-mountain'] button[class*='border-b-2'][class*='border-tra
 html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl {
   background: rgba(6, 18, 28, 0.58) !important;
   backdrop-filter: blur(16px) saturate(120%);
-  -webkit-backdrop-filter: blur(16px) saturate(120%);
   border: 1px solid rgba(255, 255, 255, 0.10) !important;
 }
 
@@ -601,7 +592,6 @@ html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl .bg-white {
   background: rgba(10, 24, 34, 0.68) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 html[data-theme='glass-mountain'] .bg-slate-50.rounded-xl .bg-white:hover {
