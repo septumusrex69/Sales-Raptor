@@ -112,11 +112,32 @@ ok('...and the box says so', /the account stays with/.test(modal))
    on its own. */
 ok('an empty ask is refused', /A referral with no ask is a date/.test(modal))
 
-/* REFER IS A TEAM LEADER'S, TRANSFER IS EVERYBODY'S. The person who answered the switchboard is
-   whoever picked it up; there is no reception role. */
-ok('referring is offered to whoever leads the floor',
-  /onRefer=\{canLeadCollections\(currentUser\) \? \(\) => setReferring\('refer'\) : null\}/.test(code(account)))
-ok('...and transferring to everybody', /onTransfer=\{\(\) => setReferring\('transfer'\)\}/.test(code(account)))
+/*
+ * THE REFER BUTTON IS GONE FROM THE ACCOUNT, AND THAT IS THE ASSERTION.
+ *
+ * THE FIRM: "you can remove that Refer button on the debtor's pane, because I forgot that if you
+ * tick on the agent's name, as a team leader or anybody -- well, except being another agent --
+ * then you can refer it."
+ *
+ * IT WAS THE SAME ACT TWICE. The agent's name in the hero opens the hand-out box, whose "Refer
+ * only" books somebody to work the account and does not change whose it is -- which is exactly
+ * what the button did. Two doors onto one act is two places to keep in step, and the hero's is
+ * the one that can also ALLOCATE.
+ *
+ * SO THE DOOR THAT SURVIVED IS ASSERTED TOO, not just the one that went: a check that only said
+ * the button was absent would pass on an account page with no way to refer at all.
+ */
+check('the account page no longer carries a Refer button',
+  /label="Refer"/.test(code(account)), false)
+ok('...and the agent\u2019s name is still what opens the hand-out box',
+  /onClick=\{\(\) => setHandOut\(true\)\}/.test(code(account)))
+ok('...which can refer without allocating',
+  /Refer only/.test(read('src/pages/accounts/HandOutModal.tsx')))
+/* TRANSFER IS EVERYBODY'S AND STAYS. Somebody is on the telephone: it is dated by that fact and
+   carries the number in case the line drops, neither of which a hand-out knows about. */
+ok('transferring a caller is still offered, to everybody',
+  /onTransfer=\{\(\) => setReferring\('transfer'\)\}/.test(code(account)))
+ok('...and its button is on the bar', /label="Transfer"/.test(code(account)))
 /* AND THE CALLER'S NUMBER IS THE ONE THE ACCOUNT WOULD HAVE ANSWERED ON. */
 ok('the transfer carries the number', /callerNumber=\{callContact\?\.value \?\? null\}/.test(code(account)))
 

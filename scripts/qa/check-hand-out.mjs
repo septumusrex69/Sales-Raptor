@@ -1217,6 +1217,72 @@ ok('...over the same filters the selection means',
 ok('...and chunked when it is a list of ids',
   /export async function unallocatedCount[\s\S]{0,400}?idChunks\(selection\.ids\)/.test(alloc))
 
+/* ---------------------------------------------------------------------------------------------
+ * ONE ACCOUNT IS A REFERRAL, AND THE BOX BECOMES ONE
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM, after the Refer button came off the account page: "it should by default, if you click
+ * on that person, because now it's one account that needs to be referred, be on default on
+ * individual. And it will ask you for who do you want to give it. There's not going to be any
+ * spread because it's one account. It's just when do you want it to be done, should it be
+ * allocated or should it be referred only."
+ *
+ * AND THEN THE HALF THAT MATTERS MOST: "if you choose the one person, you should be able to see
+ * their diary, like what it looks like, you know, that little space in the diary... as if they're
+ * booking it for themselves, as if they're diarising it for themselves."
+ *
+ * WHAT THIS GUARDS IS THE CONTROLS THAT CANNOT DO ANYTHING. A window to spread one account over,
+ * an even split between the people it is not going to, a stepper that can only read +1 -- each
+ * one is a control somebody tries, and the one that reads "Spread over 10 working days" on a
+ * single referral is a promise the planner cannot keep.
+ */
+ok('one account starts on Individual rather than Everyone',
+  /selectedCount === 1 \? 'individual' : 'everyone'/.test(handOutModal))
+/* DERIVED FROM WHAT LOADED, falling back to what the caller said -- the count arrives a moment
+   after the box opens, and the box must not change shape under somebody's hand. */
+ok('...and knows it is one account',
+  /const single = \(context\?\.accounts\.length \?\? selectedCount\) === 1/.test(handOutModal))
+/* ONE ACCOUNT GOES TO ONE PERSON. Ticking three for one account is a question the planner answers
+   by picking one of them, which is not a decision anybody made. */
+ok('...and choosing somebody replaces the choice rather than adding to it',
+  /if \(single\) return prev\.has\(id\) \? new Set<string>\(\) : new Set\(\[id\]\)/.test(handOutModal))
+
+/*
+ * THE DIARY ITSELF, which is the firm's own ask and is the same component a collector uses on
+ * their own day -- not a second calendar written for this box. Two calendars drift apart inside a
+ * month, and a leader booking somebody else's day off a grid with no counts on it is how 44
+ * accounts once landed on one agent's single date.
+ */
+ok('choosing one person shows their diary',
+  /<DiaryDatePicker\s+ownerId=\{chosenOne\.userId\}/.test(handOutModal))
+ok('...with their own capacity, not the firm default',
+  /capacity=\{chosenOne\.capacity\}/.test(handOutModal))
+ok('...writing to the same day the hand-out starts on',
+  /value=\{startOn\}\s*\n\s*onChange=\{setStartOn\}/.test(handOutModal))
+/* AND THE SAME PICKER, IMPORTED RATHER THAN REBUILT. */
+ok('...and it is the diary\u2019s own picker',
+  /import \{ DiaryDatePicker \} from '\.\.\/\.\.\/components\/diary\/DiaryDatePicker'/.test(handOutModal))
+
+/*
+ * AND EVERYTHING THAT IS ABOUT A STACK IS GONE. Asserted as the guard rather than as the absence
+ * of the words: the controls still exist for a real hand-out, so what is being checked is that
+ * each one is behind `single`.
+ */
+const spread = handOutModal.slice(handOutModal.indexOf('{single ? ('))
+ok('the spread window is not offered on one account',
+  spread.indexOf('Spread over') > spread.indexOf(') : ('))
+ok('...nor the even split',
+  spread.indexOf('Distribute the accounts equally') > spread.indexOf(') : ('))
+ok('...nor a share-out column to argue with',
+  /\{!single && <span className="shrink-0 w-\[4\.75rem\] text-right pr-4">Taking<\/span>\}/
+    .test(handOutModal))
+/* WHAT STAYS IS THE TWO THINGS THE FIRM NAMED: when it should be done, and which of the two acts
+   this is. Both are outside the branch, so neither can be lost with the rest. */
+ok('the day it is wanted is still asked', /When it should be done/.test(handOutModal))
+ok('...and so is allocate-or-refer', /Refer only/.test(handOutModal)
+  && /Allocate and refer/.test(handOutModal))
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')

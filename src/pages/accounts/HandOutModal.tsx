@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../store/AuthContext'
 import { AlertTriangle, CalendarClock, Loader2, UserCheck } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+/* The picker a collector uses on their own diary. On one account a leader books somebody else's
+   day with the same grid -- see the note where it is drawn. */
+import { DiaryDatePicker } from '../../components/diary/DiaryDatePicker'
 import { DictateButton } from '../../components/ui/Dictate'
 import {
   planHandOut, planSummary, type HandOutPlan, type PlannableCollector,
@@ -100,7 +103,14 @@ export function HandOutModal({
    * time was possible but had no mode of its own, so the only way in was to choose Everyone and
    * untick thirty-nine names.
    */
-  const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team' | 'individual'>('everyone')
+  /*
+   * AND ONE ACCOUNT STARTS ON INDIVIDUAL. The firm, having opened this from an account's own hero:
+   * "it should by default, if you click on that person, because now it's one account that needs to
+   * be referred... it will be on default on individual. And it will ask you for who do you want to
+   * give it." Everyone, on one account, is thirty-nine ticks and a planner picking one of them.
+   */
+  const [pickBy, setPickBy] = useState<'everyone' | 'rank' | 'team' | 'individual'>(
+    selectedCount === 1 ? 'individual' : 'everyone')
   /* Named so the Individual chip can put the cursor where the next thing happens. */
   const searchBox = useRef<HTMLInputElement>(null)
   const [onlyChosen, setOnlyChosen] = useState(false)
@@ -133,8 +143,16 @@ export function HandOutModal({
       .then((c) => {
         if (cancelled) return
         setContext(c)
-        // Everybody graded, to begin with: the commonest hand-out is "share this out", and a
-        // preselected list means the plan appears immediately instead of after six clicks.
+        /*
+         * Everybody graded, to begin with: the commonest hand-out is "share this out", and a
+         * preselected list means the plan appears immediately instead of after six clicks.
+         *
+         * EXCEPT ON ONE ACCOUNT, where nobody is. The firm: "it will be on default on individual,
+         * and it will ask you for who do you want to give it" -- which is a question, and a
+         * question with every answer already ticked is not one. Preselected, the box also opened
+         * with the planner having silently picked one of four people to refer the file to.
+         */
+        if (c.accounts.length === 1) return
         setChosen((prev) => (prev.size > 0 ? prev : new Set(c.collectors.map((x) => x.userId))))
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
@@ -285,11 +303,37 @@ export function HandOutModal({
     return next
   }), [])
 
+  /*
+   * ONE ACCOUNT IS A DIFFERENT ACT, AND THE BOX BECOMES THE REFERRAL.
+   *
+   * THE FIRM, pointing at the Refer button on an account and then at this screen: "I forgot that
+   * if you tick on the agent's name, as a team leader or anybody, then you can refer it... there's
+   * not going to be any spread because it's one account. It's just when do you want it to be done,
+   * should it be allocated or should it be referred only."
+   *
+   * SO WHAT GOES IS EVERYTHING THAT IS ABOUT A STACK: the window to spread over, the even split,
+   * and the per-person share. One account cannot be spread across four days or split between three
+   * people, and a control that cannot do anything is a control somebody tries.
+   *
+   * DERIVED FROM WHAT WAS LOADED, falling back to what the caller said, because the count arrives
+   * a moment after the box opens and the box must not change shape under somebody's hand.
+   */
+  const single = (context?.accounts.length ?? selectedCount) === 1
+  /* WHO IT IS GOING TO, on a one-account referral. Null until somebody is ticked, and never more
+     than one because `toggle` replaces rather than adds when `single`. */
+  const chosenOne = single && chosen.size === 1
+    ? (context?.collectors ?? []).find((c) => chosen.has(c.userId)) ?? null
+    : null
+
   const toggle = useCallback((id: string) => setChosen((prev) => {
+    /* ONE ACCOUNT GOES TO ONE PERSON, so choosing somebody REPLACES the choice rather than adding
+       to it. Ticking three people for one account is a question the planner answers by picking one
+       of them, which is not a decision anybody made. */
+    if (single) return prev.has(id) ? new Set<string>() : new Set([id])
     const next = new Set(prev)
     if (next.has(id)) next.delete(id); else next.add(id)
     return next
-  }), [])
+  }), [single])
 
   const tooMany = (context?.accounts.length ?? 0) > BULK_CEILING
   /* How many the "keep what it is" box would actually apply to — the rest have nothing to keep. */
@@ -478,10 +522,12 @@ export function HandOutModal({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1 text-[11px]">
                     <span className={chosen.size === 0 ? 'text-amber-700' : 'text-slate-500'}>
                       {chosen.size === 0
-                        ? 'Nobody chosen'
-                        : `${chosen.size} of ${context.collectors.length} chosen`}
+                        ? single ? 'Choose who it goes to' : 'Nobody chosen'
+                        : single
+                          ? 'Going to one person'
+                          : `${chosen.size} of ${context.collectors.length} chosen`}
                     </span>
-                    {plan && plan.placements.length > 0 && (
+                    {!single && plan && plan.placements.length > 0 && (
                       <span className="text-slate-400 tabular-nums">
                         taking {plan.placements.length.toLocaleString('en-ZA')} between them
                       </span>
@@ -539,7 +585,10 @@ export function HandOutModal({
                       it is not why he takes fewer accounts. The book is.
                     */}
                     <span className="shrink-0 w-12 text-right">A day</span>
-                    <span className="shrink-0 w-[4.75rem] text-right pr-4">Taking</span>
+                    {/* THERE IS NOTHING TO SHARE OUT ON ONE ACCOUNT, so the column and the nudges
+                        that live in it go. A stepper that can only read +1 or · is a control that
+                        invites a decision nobody has to make. */}
+                    {!single && <span className="shrink-0 w-[4.75rem] text-right pr-4">Taking</span>}
                   </div>
 
                   <div data-qa="collector-list"
@@ -587,6 +636,7 @@ export function HandOutModal({
                             onClick with stopPropagation because the whole row is a <label> for
                             the checkbox — without it, nudging somebody would untick them.
                           */}
+                          {!single && (
                           <span className="shrink-0 flex items-center justify-end gap-0.5 w-[4.75rem]">
                             <Step label={`Give ${c.name} one fewer`}
                               disabled={(taking?.taking ?? 0) <= 0}
@@ -607,6 +657,7 @@ export function HandOutModal({
                             <Step label={`Give ${c.name} one more`}
                               onClick={() => nudge(c.userId, 1)}>+</Step>
                           </span>
+                          )}
                         </label>
                       )
                     })}
@@ -636,6 +687,51 @@ export function HandOutModal({
                   sitting on top of each other is enough to stop relying on one mechanism.
                 */}
                 <div className="rounded-lg border border-slate-200 p-3 space-y-2.5">
+                  {single ? (
+                    /*
+                      ONE ACCOUNT: THEIR DIARY, NOT A DATE BOX.
+                      
+                      THE FIRM: "if you choose the one person, you should be able to see their
+                      diary, like what it looks like, you know, that little space in the diary,
+                      because this is one account that you're referring to a person as a team
+                      leader. So as if they're booking it for themselves, as if they're diarising
+                      it for themselves."
+                      
+                      SO IT IS THE SAME PICKER THEY USE ON THEMSELVES. DiaryDatePicker is what a
+                      collector sees in the Diarise box -- the counts on every day, their own
+                      capacity, weekends and public holidays unpickable. A leader booking somebody
+                      else's day should be looking at the same grid, or they are choosing a date
+                      from a calendar with nothing on it. The alternative is what was here: a bare
+                      date box, which is how 44 accounts once landed on one agent's single day.
+                      
+                      UNTIL SOMEBODY IS CHOSEN THERE IS NO DIARY TO SHOW, so the date box stands
+                      in. It is the same `startOn`, so nothing is lost by choosing the day first.
+                    */
+                    <div className="min-w-0">
+                      <span className="block text-xs font-medium text-slate-500 mb-1.5">
+                        {chosenOne ? `When ${chosenOne.name} should work it` : 'When it should be done'}
+                      </span>
+                      {chosenOne ? (
+                        <DiaryDatePicker
+                          ownerId={chosenOne.userId}
+                          capacity={chosenOne.capacity}
+                          value={startOn}
+                          onChange={setStartOn}
+                          today={new Date().toISOString().slice(0, 10)}
+                          weeks={2}
+                        />
+                      ) : (
+                        <>
+                          <input type="date" className={inputClass} value={startOn}
+                            onChange={(e) => setStartOn(e.target.value)} />
+                          <p className="mt-1.5 text-[11px] text-slate-400">
+                            Choose who it is going to and their diary appears here.
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                  <>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="min-w-0 overflow-hidden">
                       <span className="block text-xs font-medium text-slate-500 mb-1.5">Starting</span>
@@ -691,6 +787,9 @@ export function HandOutModal({
                     the firm does most. Sharing out a shuffle, they want the split flat: "a hundred
                     accounts over ten users means each one should get ten. Exactly." So it is a
                     choice on the screen rather than an argument in the planner.
+
+                    AND IT IS NOT OFFERED ON ONE ACCOUNT, with the window it belongs beside: there
+                    is nothing to distribute equally between anybody.
                   */}
                   <label className="flex items-start gap-2 cursor-pointer pt-0.5">
                     <input type="checkbox" className="mt-0.5 shrink-0 accent-brand-600"
@@ -703,6 +802,8 @@ export function HandOutModal({
                       </span>
                     </span>
                   </label>
+                  </>
+                  )}
 
                   {/*
                     WHAT THE WORK IS, as against whose it is. Off by default: the usual reason to

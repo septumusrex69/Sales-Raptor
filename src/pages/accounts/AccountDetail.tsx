@@ -1,7 +1,7 @@
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, Send, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { PhoneLink } from '../../components/PhoneLink'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
@@ -25,7 +25,7 @@ import {
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
 import {
-  canFreezeAccounts, canHandOutAccounts, canLeadCollections, canViewClients, isAssignableOwner,
+  canFreezeAccounts, canHandOutAccounts, canViewClients, isAssignableOwner,
 } from '../../lib/permissions'
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
@@ -1735,7 +1735,6 @@ export function AccountDetail() {
          * pre-legal team leader leads a team and cannot reassign, and they are exactly the person
          * who reads a file and wants somebody to ring the employer.
          */
-        onRefer={canLeadCollections(currentUser) ? () => setReferring('refer') : null}
         onTransfer={() => setReferring('transfer')}
         startable={startable}
         onStartWorkflow={(versionId) => {
@@ -2432,7 +2431,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow, onRefer, onTransfer }: {
+function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow, onTransfer }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -2465,14 +2464,6 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   /** The cell number a bureau can be searched on where there is no ID. See TraceButton.mobile. */
   traceMobile: string | null
   onTraced: () => Promise<void>
-  /**
-   * REFER IT, which only somebody who runs the floor is offered.
-   *
-   * THE FIRM: a team leader refers an account, and the referral IS the diary entry. Null for
-   * everybody else -- a collector referring their own account to a colleague is reallocating
-   * work, which is a team leader's decision.
-   */
-  onRefer: (() => void) | null
   /** Transfer a caller who is on the line now. Offered to everybody: reception has no role of
       its own, and the person who answers the switchboard is whoever picked up. */
   onTransfer: () => void
@@ -2577,17 +2568,23 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
           title={`${startable.length} sequences can be started on this account`} />
       )}
       {/*
-        REFERRING IT, AND TRANSFERRING A CALLER -- two presses that put this account on somebody
-        else's day. See accountReferral.ts: the diary entry is the referral, and nothing else is
-        written.
+        TRANSFERRING A CALLER, AND NOT REFERRING -- which lost a button.
 
-        REFER IS A TEAM LEADER'S and the button is absent for everybody else; TRANSFER is
-        everybody's, because the person who answered the telephone is whoever picked it up.
+        THE FIRM: "you can remove that Refer button on the debtor's pane, because I forgot that if
+        you tick on the agent's name, as a team leader or anybody -- well, except being another
+        agent -- then you can refer it."
+
+        THEY ARE RIGHT, AND IT WAS THE SAME ACT TWICE. The agent's name in the hero opens the
+        hand-out box, whose "Refer only" is exactly what this button did: it books somebody to work
+        the account and does not change whose it is. Two doors onto one act is two places to keep
+        in step, and the hero's is the one that also knows how to ALLOCATE -- which is the other
+        half of the decision a team leader is making when they look at who holds a file.
+
+        TRANSFER STAYS, and it is not the same thing. Somebody is on the telephone now; it is
+        dated today by that fact, it carries the caller's number in case the line drops, and it is
+        everybody's to press because the person who answered the switchboard is whoever picked up.
+        See accountReferral.ts, which still writes both sentences.
       */}
-      {onRefer && (
-        <Action icon={Send} label="Refer" onClick={onRefer}
-          title="Put this account on somebody's diary with what you want done. It does not hand the account over." />
-      )}
       <Action icon={PhoneForwarded} label="Transfer" onClick={onTransfer}
         title="The caller is on the line: hand the account to whoever you are putting them through to." />
       <TraceButton accountId={accountId} actor={actor} debtorKind={debtorKind} idNumber={idNumber}
