@@ -111,10 +111,16 @@ for (const p of paths) {
     existsSync(path.join('api', group, '[action].ts')) && Boolean(action))
 }
 /*
- * ONCE A DAY, AND AFTER THE MAIL SYNC. Every step is dated to a DAY, so nothing in the firm's
- * sequence is finer than daily. Running before the sync would decide the morning's sends against
- * yesterday's inbox -- and a debtor's reply is one of the things that takes an account out of a
- * workflow.
+ * ONCE A DAY, AND AFTER THE MAIL HAS COME IN. Every step is dated to a DAY, so nothing in the
+ * firm's sequence is finer than daily. Running before the mail would decide the morning's sends
+ * against yesterday's inbox -- and a debtor's reply is one of the things that takes an account out
+ * of a workflow.
+ *
+ * THE MAIL SWEEP IS NO LONGER A TIME OF DAY TO BE AFTER. It ran at 05:00 and the workflow at
+ * 06:00, which is where the hour comparison below came from; it now runs every few minutes, so
+ * "after the mail" is satisfied at every hour there is -- the mail from the last five minutes is
+ * already in. What still has to hold is that the RUNNER is daily and that the sweep is not a
+ * once-a-day job the runner could overtake.
  */
 const runCron = (vercel.crons ?? []).find((c) => c.path === '/api/workflow/run')
 const syncCron = (vercel.crons ?? []).find((c) => c.path === '/api/email/sync-all')
@@ -129,8 +135,11 @@ const hourOf = (cron) => {
   const field = cron?.schedule?.split(' ')[1]
   return field === undefined ? null : Number(field)
 }
+/* THE SWEEP IS ON A TIGHTER LOOP THAN THE RUNNER, which is what makes "after the mail" true
+   whenever the runner fires. Asserted on the shape of the two schedules rather than on an hour:
+   a daily runner and a minutes-apart sweep cannot be the wrong way round. */
 ok('...and after the mail has come in',
-  hourOf(runCron) !== null && hourOf(syncCron) !== null && hourOf(runCron) > hourOf(syncCron))
+  hourOf(runCron) !== null && /^\*\/\d+ \* \* \* \*$/.test(syncCron?.schedule ?? ''))
 
 /* ------------------------------------------------ one sender, not two */
 

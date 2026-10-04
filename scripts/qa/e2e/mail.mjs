@@ -347,6 +347,36 @@ try {
    * the cached read exists and returns the right string; only a browser can say that opening the
    * message asked nobody for anything.
    */
+  /*
+   * AND THE PAGE READS AHEAD, which is what makes the BACKLOG fast as well as the new mail.
+   *
+   * THE FIRM, asked where the worst wait still is: "clicking on a mail to read it." Keeping the
+   * body at sync time fixes everything that arrives from now on; the mail already in the mailbox
+   * is still a trip to the mail server the first time it is clicked, and that is most of what
+   * anybody is reading this week. So the top of the list is fetched BEFORE the click, one message
+   * at a time, and written back.
+   */
+  const warmedUp = [...bodyCalls]
+  t.ok(`the page read ahead for the top of the list (${warmedUp.length})`, warmedUp.length > 0)
+  /*
+   * AND NEVER THE SAME MESSAGE TWICE, which is the assertion that matters.
+   *
+   * The list is rebuilt whenever a flag on one row changes -- marking a message read maps the
+   * whole list -- so an effect keyed on the array read ahead for six more messages on EVERY
+   * CLICK. A mail server being asked again and again for mail nobody is reading is what makes the
+   * mailbox slow for the person who IS reading, which is the opposite of the point.
+   */
+  t.check(`...each message once (${warmedUp.length} fetched)`,
+    warmedUp.length, new Set(warmedUp).size)
+  /* A SCREEN AT A TIME. Mail servers cap connections per account, so a new list warms a handful
+     and a sitting is capped outright -- warming a thousand-message mailbox on open would take
+     the mailbox down for the person reading it. */
+  t.ok(`...a screen at a time rather than the whole mailbox (${warmedUp.length})`,
+    warmedUp.length > 0 && warmedUp.length <= 40)
+  /* AND NEVER THE ONE IT ALREADY HOLDS, which is the row's own `cached` doing its job. */
+  t.ok('...and never a message Raptor already holds',
+    !warmedUp.includes('aaaaaaa1-0000-4000-8000-000000000002'))
+
   bodyCalls.length = 0
   await page.getByText('Agreement and next steps').first().click()
   await page.waitForTimeout(900)
@@ -360,14 +390,21 @@ try {
    * app that simply stopped fetching bodies: everything that arrived before the sync started
    * keeping them, and anything too big to keep, is read out of the mailbox exactly as before.
    */
-  /* A MESSAGE NOT YET OPENED IN THIS RUN. One already read is held in the page and fetched
-     again by neither path, so it would count zero for the wrong reason. */
+  /*
+   * AND A MESSAGE THE PAGE READ AHEAD FOR COSTS NOTHING EITHER. It is not in Raptor's copy as far
+   * as this list knows -- the write-back landed in the database, not in the rows already drawn --
+   * but it is in the page, which is the whole point of reading ahead.
+   */
   bodyCalls.length = 0
   await page.getByText('Follow up on outstanding account').first().click()
   await page.waitForTimeout(900)
-  t.check(`a message nobody kept is still fetched (${bodyCalls.length})`, bodyCalls.length, 1)
+  t.check(`a message read ahead for costs nothing to open (${bodyCalls.length})`, bodyCalls.length, 0)
   const fetched = await page.locator('body').innerText()
-  t.ok('...and it is on screen too', fetched.includes('any updates regarding the account'))
+  t.ok('...and it is on screen', fetched.includes('any updates regarding the account'))
+  /* IT WAS FETCHED, THOUGH -- by the warmer, before the click. Asserted so that "costs nothing"
+     cannot quietly become "the body never loads at all". */
+  t.ok('...because the page had already fetched it',
+    warmedUp.includes('aaaaaaa1-0000-4000-8000-000000000003'))
 
   /* AND THE LONG MESSAGE IS LEFT OPEN, because the pane further down scrolls through it. Already
      fetched, so re-opening it costs nothing and asks nobody. */

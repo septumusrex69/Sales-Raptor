@@ -88,10 +88,23 @@ ok('...applied to the loop', /Date\.now\(\) - started > PRESS_BUDGET_MS/.test(al
  */
 ok('...with what it did not reach counted', /remaining \+= 1/.test(all))
 ok('...and handed back', /\bremaining,/.test(all))
-/* THE CRON IS NEVER BUDGETED. It has all night, and stopping it at fifty seconds would leave
-   mailboxes unread every night with nothing asking for them again until the next one. */
+/*
+ * THE CRON IS NEVER BUDGETED. It is not a person waiting on a spinner, and stopping it at fifty
+ * seconds would leave mailboxes unread with nothing asking for them again until the next run.
+ */
 ok('the budget applies to a press only', /if \(pressed && Date\.now\(\) - started/.test(all))
-ok('...as does the recency skip', /if \(pressed && conn\.last_synced_at/.test(all))
+/*
+ * THE RECENCY SKIP IS NOT PRESS-ONLY ANY MORE, AND THAT IS THE POINT.
+ *
+ * It was, while the sweep ran once a night -- a nightly run wants every mailbox whatever happened
+ * during the day. The sweep now runs every few minutes (see check-sync-starvation for why), and
+ * at that cadence re-walking eighteen folders of a mailbox the person is sitting in front of is
+ * fourteen thousand mailbox opens a day against a server that counts them. Both callers skip a
+ * mailbox read a moment ago; they differ only in how long "a moment" is.
+ */
+ok('both the press and the sweep skip a mailbox just read',
+  /const freshFor = pressed \? RECENT_MS : SWEEP_RECENT_MS/.test(all))
+ok('...and neither is gated on who asked', !/if \(pressed && conn\.last_synced_at/.test(all))
 
 /* ---------------- and the column the skip reads actually arrives ---------------- */
 

@@ -134,7 +134,13 @@ ok('...and reported', /remaining: left/.test(run))
  * ends in a 504: the budget would be a promise about a clock that had already stopped.
  */
 const maxDuration = vercel.functions?.['api/**/*.ts']?.maxDuration
-check('vercel.json gives the function room to send', maxDuration, 60)
+/*
+ * READ, NOT PINNED. This used to assert the number was exactly 60, which was the Hobby ceiling --
+ * and when the firm moved to Pro and the mail sweep was given five minutes to get round fifty
+ * mailboxes, the assertion failed on a change that made every number here safer. What matters is
+ * the relationship below: the budget stops the pass well inside whatever the function is allowed.
+ */
+ok('vercel.json gives the function room to send', Number.isFinite(maxDuration) && maxDuration >= 60)
 const budgetMs = Number((read('api/_lib/workflow/run.ts').match(/const BUDGET_MS = ([\d_]+)/) ?? [])[1]?.replace(/_/g, ''))
 ok('the budget was actually found', Number.isFinite(budgetMs) && budgetMs > 0)
 ok('...and stops well inside the function s limit', budgetMs < maxDuration * 1000)

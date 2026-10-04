@@ -36,8 +36,7 @@ import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from 
 const PRESS_BUDGET_MS = 50_000
 
 /**
- * DON'T RE-OPEN A MAILBOX SOMEBODY JUST DID. Only for a press: the nightly run wants every
- * mailbox whatever happened during the day.
+ * DON'T RE-OPEN A MAILBOX SOMEBODY JUST DID.
  *
  * Two minutes is long enough that a second press seconds later costs nothing and short enough
  * that a person waiting on a reply is never told to come back later. `claimSync` already refuses
@@ -45,6 +44,24 @@ const PRESS_BUDGET_MS = 50_000
  * mailbox that was read a moment ago.
  */
 const RECENT_MS = 2 * 60_000
+
+/**
+ * AND THE SWEEP SKIPS ONE TOO, WHICH IT DID NOT USED TO.
+ *
+ * It ran ONCE A NIGHT, and a nightly run wants every mailbox whatever happened during the day --
+ * that reasoning was right for a nightly run and inverts completely now that the sweep runs every
+ * few minutes. The firm: "there's still possibilities that the company's got 50 people, so in 60
+ * seconds it doesn't sync anything... you still have a loophole in your method." The answer to
+ * that was minutes rather than days, and the cost of minutes is arithmetic: fifty mailboxes,
+ * eighteen folders each, every five minutes is fourteen thousand mailbox opens a day against a
+ * mail server that counts them.
+ *
+ * SO A MAILBOX IS OPENED ABOUT ONCE A CYCLE AND NOT MORE. Four minutes against a five-minute
+ * schedule: a mailbox read by the person sitting in front of it, or by the previous sweep, is
+ * passed over by the next one and picked up by the one after. Shorter than the cycle on purpose,
+ * because a run that starts a little late must not skip the whole round.
+ */
+const SWEEP_RECENT_MS = 4 * 60_000
 
 /**
  * EVERY MAILBOX IN THE FIRM, AND NOW TWO THINGS CAN ASK FOR IT.
@@ -147,9 +164,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (conn.email) notReached.push(conn.email)
       continue
     }
-    /* Read a moment ago by somebody else's press. Nothing to gain and a connection to spend. */
-    if (pressed && conn.last_synced_at
-        && Date.now() - new Date(conn.last_synced_at).getTime() < RECENT_MS) {
+    /* Read a moment ago -- by somebody else's press, by the person whose mailbox it is, or by the
+       sweep before this one. Nothing to gain and a connection to spend. */
+    const freshFor = pressed ? RECENT_MS : SWEEP_RECENT_MS
+    if (conn.last_synced_at
+        && Date.now() - new Date(conn.last_synced_at).getTime() < freshFor) {
       results.push({ userId: conn.user_id, email: conn.email, skipped: true })
       continue
     }

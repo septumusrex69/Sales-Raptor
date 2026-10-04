@@ -66,6 +66,61 @@ ok('the order is on the connections query itself',
 ok('a press still stops itself before the platform does', /PRESS_BUDGET_MS/.test(syncAll))
 ok('...and the cron still runs unbudgeted', /if \(pressed && Date\.now\(\) - started > PRESS_BUDGET_MS\)/.test(syncAll))
 
+/*
+ * AND A MAILBOX IS OPENED ABOUT ONCE A CYCLE, which is the cost of running every few minutes.
+ * Fifty mailboxes, eighteen folders each, every five minutes is fourteen thousand mailbox opens a
+ * day against a mail server that counts them -- so one read by the person sitting in front of it,
+ * or by the previous sweep, is passed over by the next. The skip used to be press-only, which was
+ * right while the sweep ran once a night and is the opposite of right now.
+ */
+ok('the sweep skips a mailbox somebody just read', /const SWEEP_RECENT_MS = /.test(syncAll))
+ok('...whoever read it', /const freshFor = pressed \? RECENT_MS : SWEEP_RECENT_MS/.test(syncAll))
+/* SHORTER THAN THE CYCLE, or a run that starts a little late skips the whole round. */
+const sweepRecent = Number((syncAll.match(/const SWEEP_RECENT_MS = (\d+) \* 60_000/) ?? [])[1])
+ok('the sweep freshness window was found', Number.isFinite(sweepRecent) && sweepRecent > 0)
+
+/* ---------------------------------------------------------------------------------------------
+ * AND HOW OFTEN THE SWEEP ACTUALLY RUNS, WHICH IS THE OTHER HALF OF THE SAME COMPLAINT
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM, ON THE ORDERING FIX ABOVE: "there's still possibilities that the company's got 50
+ * people, so in 60 seconds it doesn't sync anything -- or it syncs two people and the third person
+ * is not synced. So you still have a loophole in your method."
+ *
+ * THEY WERE RIGHT AND IT WAS WORSE THAN THEY THOUGHT. Ordering makes the sweep fair; it says
+ * nothing about how long a full circuit takes, and the circuit was a DAY: the cron was
+ * `0 5 * * *`, once a night, with the function capped at sixty seconds. Fifty mailboxes at a few
+ * seconds each is several runs' worth of work, so a mailbox at the back was read every few DAYS.
+ * That is how long a debtor's reply could sit in the inbox of somebody who was not signed in.
+ *
+ * SO THE CADENCE IS PART OF THE RULE, and it is held here rather than left as a line in a config
+ * file nobody reads. Minutes, not days -- the firm chose Vercel Pro for exactly this, which is
+ * what lifts both the cron limit and the sixty-second cap.
+ */
+const vercel = JSON.parse(read('vercel.json'))
+const sweep = (vercel.crons ?? []).find((c) => c.path === '/api/email/sync-all')
+ok('the whole-company sweep is scheduled at all', !!sweep)
+/* NOT ONCE A DAY. `0 5 * * *` ran at five in the morning and not again until the next, which is
+   the loophole in as many characters. */
+ok('...and not once a day', !/^\d+ \d+ \* \* \*$/.test(sweep?.schedule ?? ''))
+/* EVERY FEW MINUTES, read off the step in the minute field so the assertion says what it means
+   rather than matching one exact string. */
+const everyMinutes = /^\*\/(\d+) \* \* \* \*$/.exec(sweep?.schedule ?? '')?.[1]
+ok(`...but every few minutes (${sweep?.schedule})`,
+  !!everyMinutes && Number(everyMinutes) <= 15)
+/*
+ * AND THE FUNCTION HAS ROOM TO GET ROUND EVERYBODY. Fifty mailboxes do not fit in sixty seconds,
+ * and a sweep killed partway is the thing the budget above exists to avoid -- more time is what
+ * turns "press again" into a job that finishes.
+ */
+const cap = vercel.functions?.['api/**/*.ts']?.maxDuration
+ok(`...with room for fifty mailboxes in one run (${cap}s)`, Number(cap) >= 300)
+/* AND THE SKIP WINDOW IS SHORTER THAN THE CYCLE, read off both rather than written down twice:
+   equal or longer and a sweep that starts a few seconds late passes over every mailbox. */
+ok(`...and the freshness window sits inside the cycle (${sweepRecent}m < ${everyMinutes}m?)`,
+  Number.isFinite(sweepRecent) && sweepRecent < Number(everyMinutes))
+
 /* ---------------------------------------------------------------------------------------------
  * AND IT SAYS WHICH ONES IT DID NOT REACH
  * ------------------------------------------------------------------------------------------- */

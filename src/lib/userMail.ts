@@ -62,6 +62,8 @@ export interface MailItem {
   fromName: string | null
   subject: string | null
   snippet: string | null
+  /** Raptor holds this one: opening it asks nobody for anything. See fetchCachedBody. */
+  cached: boolean
   attachmentNames: string[]
   isJunk: boolean
   occurredAt: string
@@ -120,6 +122,8 @@ interface MailRow {
   from_name: string | null
   subject: string | null
   snippet: string | null
+  /** The stamp only. The body itself is read one row at a time -- see fetchCachedBody. */
+  body_cached_at: string | null
   attachment_names: string[] | null
   is_junk: boolean
   occurred_at: string
@@ -164,6 +168,13 @@ const COLUMNS = `
   uid, message_id, from_address, from_name, subject, snippet,
   attachment_names, is_junk, occurred_at, read_at, is_filed, is_settled, no_record_at,
   invite_response,
+  /*
+   * WHETHER RAPTOR ALREADY HOLDS THE MESSAGE. The stamp only -- never the body, which is the
+   * whole reason this list is fast: fifty bodies is megabytes and the list shows a snippet.
+   * Carried so the page knows which rows are already instant and which are still a trip to the
+   * mail server, which is what lets it warm the rest in the background. See warmBodies.
+   */
+  body_cached_at,
   linked_account_id, linked_lead_id, linked_deal_id, linked_company_id, linked_contact_id,
   debtor_accounts!user_emails_linked_account_id_fkey ( account_number, debtor_first_name, debtor_surname ),
   leads ( first_name, last_name, company_name ),
@@ -242,6 +253,10 @@ function toItem(r: MailRow): MailItem {
     fromName: senderName(r.from_name, r.from_address),
     subject: r.subject,
     snippet: r.snippet,
+    /* NAMED HERE BY HAND like every other column -- one missing from this mapper reads as
+       undefined for ever and nothing fails, which here would quietly stop the page warming
+       anything and leave the backlog as slow as it was. */
+    cached: !!r.body_cached_at,
     attachmentNames: r.attachment_names ?? [],
     isJunk: r.is_junk,
     occurredAt: r.occurred_at,

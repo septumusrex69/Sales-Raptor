@@ -184,6 +184,44 @@ ok('...without a spinner on the fast path', /setReading\(cached \? null : mail\.
 ok('...and a failed picture fetch does not report a message nobody can read',
   /if \(!cached\) \{\s*\n\s*setReadError/.test(page))
 
+/* ---------------------------------------------------------------------------------------------
+ * AND THE PAGE READS AHEAD, SO THE BACKLOG IS FAST TOO
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM, asked where the worst wait still is: "clicking on a mail to read it."
+ *
+ * The sync fixes every message that arrives from now on and the write-back fixes a message the
+ * SECOND time it is opened. The mail already sitting in the mailbox -- which is most of what
+ * anybody is reading this week -- is still a trip to the mail server the first time it is
+ * clicked. So the top of the list is fetched BEFORE the click.
+ *
+ * The behaviour is checked in a browser, in e2e/mail, by counting the requests; what is held here
+ * is that the rules it depends on are still written down.
+ */
+/* THE LIST KNOWS WHICH ROWS ARE ALREADY HELD, which is what stops it warming them again. */
+ok('the list carries the stamp', /body_cached_at,/.test(lib))
+ok('...and never the body itself, which is why the list is fast',
+  !/\bbody_html\b[\s\S]{0,40}\bbody_text\b/.test(lib.slice(lib.indexOf('const COLUMNS'), lib.indexOf('const COLUMNS') + 900)))
+ok('...read onto the row by hand', /cached: !!r\.body_cached_at/.test(lib))
+
+/* A HANDFUL AT A TIME AND A CAP ON THE SITTING. Mail servers cap connections per account; warming
+   a thousand-message mailbox on open takes it down for the person actually reading. */
+ok('the page reads a screen ahead', /const WARM_AHEAD = \d+/.test(page))
+ok('...and stops after a sitting’s worth', /const WARM_SITTING_MAX = \d+/.test(page))
+ok('...one at a time rather than all at once', /for \(const mail of queue\) \{/.test(page))
+/*
+ * AND KEYED ON WHICH MESSAGES ARE ON SCREEN RATHER THAN ON THE ARRAY. `items` is rebuilt whenever
+ * a flag on one row changes -- marking a message read maps the whole list -- so an effect keyed on
+ * the array read ahead for six more messages on every click.
+ */
+ok('...on a new list rather than on every re-render',
+  /\}, \[items\.map\(\(m\) => m\.id\)\.join\(','\), session\?\.access_token\]\)/.test(page))
+ok('...and never the same message twice in one sitting', /!warmed\.current\.has\(m\.id\)/.test(page))
+/* SILENT WHEN IT FAILS: nobody asked for these. An error about a message somebody has not clicked
+   is a warning that fires when nothing has gone wrong. */
+ok('...and says nothing when it cannot', /SILENT, AND DELIBERATELY SO/.test(page))
+
 /* THE COLUMNS EXIST. A select naming a column that is not there empties the whole request, which
    is what check-select-columns exists for -- this is the schema half of the same guard. */
 const schema = read('supabase/schema.sql')

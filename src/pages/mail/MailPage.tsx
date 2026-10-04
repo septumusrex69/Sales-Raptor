@@ -57,6 +57,26 @@ import {
 import { canRefileMail } from '../../lib/permissions'
 
 /**
+ * HOW FAR AHEAD THE PAGE READS.
+ *
+ * SIX, which is roughly a screen of mail. Enough that the messages somebody is about to click are
+ * already held, few enough that opening the mailbox is not a dozen connections to a mail server
+ * that caps them -- and it only ever runs on rows Raptor does not already hold, so a mailbox that
+ * has been looked at once costs nothing.
+ */
+const WARM_AHEAD = 6
+
+/**
+ * AND HOW MANY IN ONE SITTING, WHATEVER HAPPENS.
+ *
+ * Every new list is another six -- a different tab, a search, the next page -- which is right, and
+ * unbounded it is a person leaving the mailbox open while something re-renders and a mail server
+ * being asked for a thousand messages nobody is reading. Forty is a morning's mail; past it the
+ * page stops reading ahead and everything still works the ordinary way.
+ */
+const WARM_SITTING_MAX = 40
+
+/**
  * One agent's mailbox.
  *
  * It exists because of a hole the firm asked about: an email from a debtor that matches no
@@ -426,6 +446,15 @@ export function MailPage() {
   const [reading, setReading] = useState<string | null>(null)
   /** Messages whose body is being fetched right now — see the guard in `toggleTo`. */
   const fetchingBody = useRef<Set<string>>(new Set())
+  /**
+   * Messages the page has already read ahead for in this sitting.
+   *
+   * A REF, BECAUSE THE LIST IS NOT THE RECORD OF IT. The write-back lands in the database and the
+   * `items` already in hand still say "not held", so the row cannot answer "have we done this
+   * one" -- and a re-render on every search keystroke would otherwise fetch the same six messages
+   * again and again.
+   */
+  const warmed = useRef<Set<string>>(new Set())
   const [readError, setReadError] = useState<Record<string, string>>({})
   const [view, setView] = useEmailView()
 
@@ -473,6 +502,93 @@ export function MailPage() {
   }, [currentUser, filter, asked, unreadOnly, pageSize, searchEverywhere])
 
   useEffect(() => { void load(0) }, [load])
+
+  /*
+   * WARMING THE TOP OF THE LIST, WHICH IS WHAT MAKES THE BACKLOG FAST TOO.
+   *
+   * THE FIRM, asked where the worst wait still is: "clicking on a mail to read it." Keeping the
+   * body at sync time fixes every message that arrives from now on, and the write-back fixes a
+   * message the SECOND time it is opened -- but the mail already sitting in the mailbox is still
+   * a trip to the mail server the first time somebody clicks it, which is most of what anybody is
+   * reading this week.
+   *
+   * SO THE PAGE READS AHEAD. Each one is the same fetch that clicking would have made, made
+   * before the click instead of during it, and it is written back -- so a mailbox gets faster
+   * every time somebody looks at it and never gets slower.
+   *
+   * ONE AT A TIME, AND A HANDFUL. Mail servers cap concurrent connections per account, which is
+   * the thing that made three simultaneous syncs queue behind each other and took the mailbox
+   * down with them. Serialised, this is no heavier than a person reading six messages, and the
+   * cost decays to nothing as the rows fill in.
+   *
+   * NEWEST FIRST, because that is the order the list is in and the order people read. The row
+   * already says which are held -- `cached`, off body_cached_at -- so nothing is fetched twice and
+   * a warmed mailbox warms nothing.
+   */
+  useEffect(() => {
+    const token = session?.access_token
+    if (!token || items.length === 0) return
+    let stopped = false
+    /*
+     * AND NEVER THE SAME MESSAGE TWICE IN ONE SITTING.
+     *
+     * `items` changes on every filter, every search keystroke that lands and every page -- and the
+     * ROW still says "not held", because the write-back lands in the database rather than in the
+     * list already in hand. Without this the warmer would re-fetch the same six messages every
+     * time somebody typed in the search box, which is the opposite of the point: a mail server
+     * opening connections for mail nobody is reading is what makes a mailbox slow for the person
+     * who IS reading.
+     */
+    if (warmed.current.size >= WARM_SITTING_MAX) return
+    const queue = items
+      .filter((m) => !m.cached && !warmed.current.has(m.id))
+      .slice(0, WARM_AHEAD)
+    if (queue.length === 0) return
+
+    const run = async () => {
+      for (const mail of queue) {
+        if (stopped) return
+        /* A MESSAGE SOMEBODY IS OPENING RIGHT NOW TAKES PRIORITY, and the same ref that stops a
+           double-click stops the warmer racing it for the same connection. */
+        if (fetchingBody.current.has(mail.id)) continue
+        warmed.current.add(mail.id)
+        fetchingBody.current.add(mail.id)
+        try {
+          const got = await fetchMailBody(mail.id, token)
+          if (stopped) return
+          /*
+           * HELD IN THE PAGE AS WELL AS WRITTEN BACK. The write-back makes the NEXT visit fast;
+           * this makes the next click fast, which is the one the person is about to make.
+           */
+          setBodies((b) => (b[mail.id] === undefined ? { ...b, [mail.id]: got.text } : b))
+          setHtmlBodies((h) => (h[mail.id] === undefined ? { ...h, [mail.id]: got.html } : h))
+          setCalendars((c) => (c[mail.id] === undefined ? { ...c, [mail.id]: got.calendar } : c))
+          setLinkedDetails((d) => (d[mail.id] === undefined ? { ...d, [mail.id]: got.details } : d))
+          setBodyImages((i) => (i[mail.id] === undefined ? { ...i, [mail.id]: got.images } : i))
+          setImagesSkipped((n) => (n[mail.id] === undefined ? { ...n, [mail.id]: got.imagesSkipped } : n))
+        } catch {
+          /*
+           * SILENT, AND DELIBERATELY SO. Nobody asked for this message -- they have not clicked
+           * it. An error here would be a warning about a thing that has not gone wrong yet, and
+           * if they do click it the ordinary path runs and says so properly.
+           */
+        } finally {
+          fetchingBody.current.delete(mail.id)
+        }
+      }
+    }
+    void run()
+    return () => { stopped = true }
+    /*
+     * KEYED ON WHICH MESSAGES ARE ON SCREEN, NOT ON THE ARRAY.
+     *
+     * `items` is rebuilt whenever a flag on one row changes -- marking a message read maps the
+     * whole list -- so depending on it meant every CLICK read ahead for six more messages. The ids
+     * are what this effect is actually about: a different tab, a search or the next page is a new
+     * list and deserves warming; the same list with one row now read is not.
+     */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.map((m) => m.id).join(','), session?.access_token])
 
   /*
    * The blocklist, loaded on every tab rather than only on the Blocked one.
