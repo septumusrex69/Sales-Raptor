@@ -361,6 +361,29 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     /* Optional, both of them: they are the same column, and it is empty on 97% of the book. */
     { key: 'debtor_id_masked', label: 'Identity number, masked (a person)', sample: '850312XXXX08X', optional: true },
     { key: 'debtor_reg_no', label: 'Registration number (a company)', sample: '2019/940923/07', optional: true },
+    /*
+     * HOW TO REACH THE DEBTOR, CONFIRMED BY THE DEBTOR. Five fields, and all five optional.
+     *
+     * THE FIRM, of the acknowledgement of debt: "when you fill it in, like address, maybe there
+     * should be like information like your work number, home, your cell phone number, work
+     * number, and email address, just kind of to confirm that stuff. Your employer... put it
+     * there as optional, that's fine."
+     *
+     * OPTIONAL IS NOT A CONVENIENCE HERE, IT IS THE WHOLE POINT. Nobody has all five. A person
+     * with no landline, no job, or no email is the ordinary case on this book -- so a line asking
+     * for one has to be able to LEAVE, or the firm's own agreement goes out reading "Work number:
+     * {{debtor_work_phone}}" on a document somebody is about to sign. That is the fault
+     * MergeField.optional exists for, met again on a new set of fields.
+     *
+     * AND THEY ARE ANSWERED BY THE SIGNER, not by the book. Raptor's copy of a debtor's cellphone
+     * is whatever a client's handover sheet said; these are what the person confirms with their
+     * signature on it. See signingBlanks.ts, which is what puts them on their screen.
+     */
+    { key: 'debtor_mobile', label: 'Cellphone number, as the debtor confirms it', sample: '082 123 4567', optional: true },
+    { key: 'debtor_work_phone', label: 'Work number, as the debtor confirms it', sample: '012 348 2248', optional: true },
+    { key: 'debtor_home_phone', label: 'Home number, as the debtor confirms it', sample: '011 333 4444', optional: true },
+    { key: 'debtor_email', label: 'Email address, as the debtor confirms it', sample: 'j.vdwest@gmail.com', optional: true },
+    { key: 'debtor_employer', label: 'Employer, where the debtor gives one', sample: 'Transnet SOC Ltd', optional: true },
     { key: 'account_number', label: "The creditor's own account number", sample: '92322880' },
     { key: 'respond_by', label: 'The date the debtor must answer by, written out', sample: '5 October 2026' },
     { key: 'position_as_at', label: 'The date the balance was struck', sample: '18 September 2026' },
@@ -618,6 +641,7 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
  */
 export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
   { title: 'The debtor', keys: ['debtor_name', 'debtor_first_name', 'debtor_address', 'debtor_id_masked',
+    'debtor_mobile', 'debtor_work_phone', 'debtor_home_phone', 'debtor_email', 'debtor_employer',
     'debtor_reg_no'] },
   { title: 'The person', keys: ['contact_name', 'contact_first_name'] },
   { title: 'The account', keys: ['case_number', 'reference', 'account_number', 'handover_date',
@@ -1171,6 +1195,13 @@ export function mergeValuesFor(input: {
    * posted.
    */
   debtorAddress?: string | null
+  /* How to reach the debtor, as the book holds it and the signer confirms it. All five may be
+     absent, and a line whose field is absent leaves the document -- see MergeField.optional. */
+  debtorMobile?: string | null
+  debtorWorkPhone?: string | null
+  debtorHomePhone?: string | null
+  debtorEmail?: string | null
+  debtorEmployer?: string | null
   debtorIdMasked?: string | null
   respondBy?: string | null
   positionAsAt?: string | null
@@ -1378,6 +1409,11 @@ export function mergeValuesFor(input: {
        appears on the debtor's paperwork, and a section 129 has to identify the agreement. */
     account_number: some(a.accountNumber),
     debtor_address: some(input.debtorAddress),
+    debtor_mobile: some(input.debtorMobile),
+    debtor_work_phone: some(input.debtorWorkPhone),
+    debtor_home_phone: some(input.debtorHomePhone),
+    debtor_email: some(input.debtorEmail),
+    debtor_employer: some(input.debtorEmployer),
     /*
      * MASKED HERE, not at the call site, and it was not masked at all before: the field has
      * always been called debtor_id_masked and AccountDetail passed the whole number straight

@@ -242,12 +242,15 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
    * of an agreement that has already been signed.
    */
   const images = new Map<string, Awaited<ReturnType<typeof pdf.embedPng>>>()
-  for (const planned of plan.pages) {
-    for (const op of planned.ops) {
-      if (op.op !== 'image' || images.has(op.src)) continue
-      try { images.set(op.src, await pdf.embedPng(op.src)) } catch { /* see above */ }
-    }
+  const embed = async (src: string) => {
+    if (images.has(src)) return
+    try { images.set(src, await pdf.embedPng(src)) } catch { /* see above */ }
   }
+  for (const planned of plan.pages) {
+    for (const op of planned.ops) if (op.op === 'image') await embed(op.src)
+  }
+  /* The initials are not in any page's ops -- they belong to every page, like the running line. */
+  if (plan.signedInitials) await embed(plan.signedInitials.src)
 
   const wPt = mmToPt(input.page.widthMm)
   const hPt = mmToPt(input.page.heightMm)
@@ -272,6 +275,23 @@ export async function letterToPdf(input: LetterPdfInput): Promise<Uint8Array> {
         font: faces.regular,
         color: rgb(c.r, c.g, c.b),
       })
+    }
+
+    /*
+     * THE INITIALS ON EVERY PAGE, which is what a page initial IS: the signer saying they read
+     * THAT page. Drawn before the body so a line that reaches the margin sits over them rather
+     * than being hidden by them -- the two should never meet, and if they ever do, the words win.
+     */
+    if (plan.signedInitials) {
+      const ini = images.get(plan.signedInitials.src)
+      if (ini) {
+        sheet.drawImage(ini, {
+          x: mmToPt(plan.signedInitials.xMm),
+          y: yPt(plan.signedInitials.yMm + plan.signedInitials.hMm),
+          width: mmToPt(plan.signedInitials.wMm),
+          height: mmToPt(plan.signedInitials.hMm),
+        })
+      }
     }
 
     for (const op of planned.ops) draw(sheet, op, { faceFor, rgb, yPt, gaps, images })

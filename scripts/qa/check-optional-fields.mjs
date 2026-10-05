@@ -75,6 +75,29 @@ for (const key of ['collector_whatsapp', 'agent_whatsapp', 'liaison_whatsapp']) 
 }
 
 /*
+ * AND HOW TO REACH THE DEBTOR, EVERY ONE OF WHICH MAY BE ABSENT.
+ *
+ * THE FIRM asked the acknowledgement of debt to confirm them: "like your work number, home, your
+ * cell phone number, work number, and email address, just kind of to confirm that stuff. Your
+ * employer... put it there as optional, that's fine."
+ *
+ * NOBODY HAS ALL FIVE. No landline, no job, no email address is the ordinary case on this book --
+ * so the line asking for one has to LEAVE, or the firm's own agreement goes out reading "Work
+ * number: {{debtor_work_phone}}" on a document somebody is about to sign. That is the same fault
+ * the identity number produced, met on a new set of fields.
+ *
+ * AND NONE OF THEM IS LOAD-BEARING ON A NOTICE. A section 129 is served on an ADDRESS -- item 2's
+ * domicilium -- and {{debtor_address}} is not optional and must never become so. These five say
+ * how else the firm may ring or write, which is a convenience and not the service.
+ */
+for (const key of ['debtor_mobile', 'debtor_work_phone', 'debtor_home_phone', 'debtor_email',
+  'debtor_employer']) {
+  ok(`${key} may drop out`, isOptionalField(key))
+}
+/* THE ONE THAT MUST NOT, asserted beside them because it is the one in the same family. */
+check('the posting address still holds the notice', isOptionalField('debtor_address'), false)
+
+/*
  * AND ALMOST NOTHING ELSE IS, which is the half that keeps this honest. Optional is not "nice to
  * have" — it is "this may be printed without, and the notice is still the notice". A balance, a
  * case number or a respond-by date quietly dropping out of a section 129 is a defective demand,
@@ -84,7 +107,9 @@ const optional = Object.values(MERGE_FIELDS)
   .flatMap((list) => list.filter((f) => f.optional).map((f) => f.key))
 check('nothing else has been quietly marked optional',
   [...new Set(optional)].sort().join(', '),
-  'agent_whatsapp, collector_phone, collector_whatsapp, debtor_id_masked, debtor_reg_no, liaison_whatsapp')
+  'agent_whatsapp, collector_phone, collector_whatsapp, debtor_email, debtor_employer, '
+  + 'debtor_home_phone, debtor_id_masked, debtor_mobile, debtor_reg_no, debtor_work_phone, '
+  + 'liaison_whatsapp')
 for (const key of ['balance', 'case_number', 'respond_by', 'debtor_name', 'firm_name']) {
   check(`${key} still holds the notice`, isOptionalField(key), false)
 }

@@ -22,6 +22,19 @@ export interface SignedMark {
   name: string
   /** ISO timestamp, as the database recorded it. */
   signedAt: string
+  /**
+   * THE INITIALS, WHICH ARE A SEPARATE MARK AND GO IN A SEPARATE PLACE.
+   *
+   * THE FIRM ASKED FOR THEM FROM THE START -- "make space for where there can be signatures like
+   * at the bottom of the pages for initials and stuff" -- and then, reading a signed copy: "the
+   * initials also don't appear on the page." They were captured and drawn nowhere.
+   *
+   * A PAGE INITIAL IS NOT A SMALL SIGNATURE. It is what somebody puts on every page to say they
+   * read that page, so it is captured separately on the signing form and drawn once per page
+   * rather than scaled down and reused on the rules. Null where the signer did not give one: it
+   * is not required, and a nine-page agreement signed at the end is still signed.
+   */
+  initialsPng?: string | null
 }
 
 /**
@@ -119,5 +132,28 @@ export function markBox(signed: SignedMark, ruleWidthMm: number): { wMm: number;
   const size = pngSize(signed.signaturePng)
   if (!size) return null
   const scale = Math.min(MARK_MAX_MM / size.height, ruleWidthMm / size.width)
+  return { wMm: size.width * scale, hMm: size.height * scale }
+}
+
+/**
+ * THE INITIALS' BOX, AND IT IS SMALL BECAUSE OF WHERE IT HAS TO FIT.
+ *
+ * They are drawn in the BOTTOM MARGIN, beside the running line, and that band is narrow: on the
+ * firm's A4 letterhead the text frame ends at 273mm and the printed footer -- the phone number,
+ * the company and VAT numbers -- starts at 279.8mm. Five millimetres is what sits between them
+ * with clearance at both ends.
+ *
+ * AND THAT IS WHY THEY COST NO PAGINATION. Given their own strip inside the text frame, a signed
+ * copy would break a nine-page agreement in different places from the one the debtor read; drawn
+ * in the margin, every page is exactly where it was. The width cap is the text frame, which only
+ * bites on initials somebody scrawled across the whole pad.
+ */
+export const INITIALS_MAX_MM = 5
+
+export function initialsBox(signed: SignedMark, maxWidthMm: number): { wMm: number; hMm: number } | null {
+  if (!signed.initialsPng) return null
+  const size = pngSize(signed.initialsPng)
+  if (!size) return null
+  const scale = Math.min(INITIALS_MAX_MM / size.height, maxWidthMm / size.width)
   return { wMm: size.width * scale, hMm: size.height * scale }
 }

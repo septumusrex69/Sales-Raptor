@@ -24,7 +24,9 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-signing-email.mjs
  */
 import { readFileSync } from 'node:fs'
-import { isSignable, signingButtonHtml, signingEmailBody } from '../../src/lib/signingRules.ts'
+import {
+  isSignable, signingButtonHtml, signingEmailBody, signingLinkLine,
+} from '../../src/lib/signingRules.ts'
 import {
   acknowledgementOfDebtFee, bandAmount, itemAmountFor, scheduleFor, unitAmountFor,
 } from '../../src/lib/annexureB.ts'
@@ -93,12 +95,25 @@ ok('...and the anchor filling it', /<a href="https:\/\/raptor\.example\/sign\/ab
 ok('...saying what it does', /Sign the acknowledgement of debt/.test(html))
 ok('...and never underlined blue', /text-decoration:none/.test(html) && /color:#ffffff/.test(html))
 /*
- * AND THE ADDRESS IN PLAIN TEXT UNDERNEATH. A button is an image-shaped thing to a client that
- * blocks images and to a debtor on a feature phone; the spelled-out link is what makes it work
- * anyway, and it is what somebody telephoning the firm can read out.
+ * AND THE ADDRESS IN PLAIN TEXT, WHICH MOVED OUT OF THE BUTTON AND INTO THE WORDS.
+ *
+ * It was a small grey line under the button, for a reader whose client blocks images. That reader
+ * is still served -- the body is rendered into the same HTML -- and three more are now: the firm,
+ * whose Emails tab files the TEXT of a message and so showed no link at all ("the email doesn't
+ * send the link to the thing"); anybody forwarding it; and anybody reading the address out over
+ * the telephone.
+ *
+ * SO THE BUTTON IS JUST THE BUTTON, and carries the address once rather than twice.
  */
-ok('the address is spelled out as well',
-  /Or copy this address/.test(html) && html.split('https://raptor.example/sign/abc').length === 3)
+check('the button carries the address once', html.split('https://raptor.example/sign/abc').length, 2)
+ok('...and no longer spells it out itself', !/Or copy this address/.test(html))
+ok('the words carry it instead', signingLinkLine('https://raptor.example/sign/abc')
+  .includes('https://raptor.example/sign/abc'))
+ok('...labelled, so it does not read as a stray string',
+  /^Open the document here:/.test(signingLinkLine('https://x')))
+/* AND THE PANEL PUTS IT ON THE MESSAGE, which is the half that reaches the firm's own record. */
+ok('the panel appends it to the body it hands the composer',
+  /signingLinkLine\(url\)/.test(panel))
 /* A QUOTE IN A URL CANNOT BREAK OUT OF THE ATTRIBUTE. Tokens are base64url and carry none, which
    is a reason to be careful rather than a reason not to be: this is markup in a legal notice. */
 const quoted = signingButtonHtml('https://x/sign/a"b')

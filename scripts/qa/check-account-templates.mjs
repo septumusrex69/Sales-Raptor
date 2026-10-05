@@ -301,9 +301,20 @@ check('a non-breaking space is what makes the difference',
 ok('the account hands its own contacts to the merge',
   /contacts: workspace\?\.contacts/.test(account))
 ok('...and the assembly picks the address off them', /debtorAddress: addressOf\(input\.contacts\)/.test(merge))
-/* A retired address is one somebody established the debtor has left. Posting a statutory demand
-   to it is worse than posting none, because it looks served. */
-ok('...never a retired one', /kind === 'address' && !c\.retiredAt/.test(merge))
+/*
+ * A retired address is one somebody established the debtor has left. Posting a statutory demand
+ * to it is worse than posting none, because it looks served.
+ *
+ * READ OFF contactOf RATHER THAN addressOf, because the rule moved there and widened: the
+ * acknowledgement of debt now asks the debtor to confirm a cellphone, a work number, a home number
+ * and an email address as well, and every one of them wants the primary and never a retired one
+ * for the same reason an address does. addressOf is one call into it.
+ */
+ok('...never a retired one', /c\.kind === kind && !c\.retiredAt/.test(merge))
+ok('...and the address goes through the same rule', /return contactOf\(contacts, 'address'\)/.test(merge))
+ok('...as does every way of reaching them',
+  /debtorMobile: contactOf\(input\.contacts, 'mobile'\)/.test(merge)
+  && /debtorEmail: contactOf\(input\.contacts, 'email'\)/.test(merge))
 ok('...preferring the one marked primary', /live\.find\(\(c\) => c\.isPrimary\)/.test(merge))
 
 /*

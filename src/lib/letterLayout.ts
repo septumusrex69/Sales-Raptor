@@ -22,7 +22,7 @@
 import { documentWithoutOptional } from './letterDocument.js'
 import type { Block, LetterDocument, PageSetup, Span } from './letterDocument.ts'
 import { autoColumnWidths } from './tableWidths.js'
-import { markBox, marked, stampLine, type SignedMark } from './signedMark.js'
+import { initialsBox, markBox, marked, stampLine, type SignedMark } from './signedMark.js'
 import { renderTemplate } from './messageTemplates.js'
 
 /** A run of text on a line, already positioned. */
@@ -245,6 +245,17 @@ export interface LetterPlan {
   pages: PlannedPage[]
   /** Where the running line goes at the FOOT of every page, if there is one. */
   runningFoot: { text: string; xMm: number; yMm: number; sizePt: number; colour: string } | null
+  /**
+   * THE SIGNER'S INITIALS, AT THE FOOT OF EVERY PAGE.
+   *
+   * ON THE PLAN AND NOT IN THE PAGE OPS, which is the same place the running line lives and for
+   * the same reason: it is drawn once per PAGE, and the page count is not known until the layout
+   * has finished. The drawer repeats it.
+   *
+   * IN THE BOTTOM MARGIN, beside the running line rather than inside the text frame -- so a signed
+   * copy breaks exactly where the unsigned one did. See initialsBox.
+   */
+  signedInitials: { src: string; xMm: number; yMm: number; wMm: number; hMm: number } | null
 }
 
 /**
@@ -679,10 +690,31 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
     }
   }
 
+  /*
+   * THE INITIALS SIT IN THE MARGIN BAND, RIGHT-ALIGNED.
+   *
+   * THE RUNNING LINE IS LEFT-ALIGNED at the same height, so the two share the strip without
+   * meeting: the foot of a four-page agreement reads "Page 2 of 4" on the left and the signer's
+   * initials on the right.
+   *
+   * BOTTOM EDGE AT footY, which is 6mm under the text frame -- clear of the last line of body text
+   * above and, on the firm's own letterhead, clear of the printed footer block at 279.8mm below.
+   * Both clearances are why initialsBox caps the height at five millimetres.
+   */
+  const initials = signed ? initialsBox(signed, textWidth) : null
   return {
     pages,
     runningFoot: doc.runningFoot
       ? { text: doc.runningFoot, xMm: left, yMm: footY, sizePt: footSize, colour: '#6b7280' }
+      : null,
+    signedInitials: initials && signed?.initialsPng
+      ? {
+        src: signed.initialsPng,
+        xMm: right - initials.wMm,
+        yMm: footY - initials.hMm,
+        wMm: initials.wMm,
+        hMm: initials.hMm,
+      }
       : null,
   }
 }

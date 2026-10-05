@@ -45,7 +45,7 @@ Kind regards
 
 ## 2. The acknowledgement of debt
 
-Nine pages. The debtor reads this one on the signing page and signs at the two signature rules.
+The debtor reads this one on the signing page and signs at the two signature rules.
 
 | DATE | {{today}} |
 | --- | --- |
@@ -92,6 +92,20 @@ This agreement records what is owed and how it will be paid, and it holds legal 
 | 9 | Interest | {{interest_rate}} on the outstanding balance from {{interest_from}}, calculated daily and compounded monthly, subject to the in duplum rule. |
 | 10 | Default period | 7 (seven) days from the due date of any instalment. |
 | 11 | Payment | Into the trust account of {{firm_name}}: {{firm_bank}}. Account name: {{firm_bank_holder}}. Account number: {{firm_bank_account}}. Reference: {{case_number}} |
+
+#### HOW WE WILL REACH YOU
+
+These are the details we will use. Correct any that are wrong before you sign, and leave blank anything you do not have.
+
+Cellphone number: {{debtor_mobile}}
+
+Work number: {{debtor_work_phone}}
+
+Home number: {{debtor_home_phone}}
+
+Email address: {{debtor_email}}
+
+Employer: {{debtor_employer}}
 
 ---
 
@@ -153,13 +167,8 @@ The Debtor is liable for the fees and expenses prescribed in Annexure B to the D
 
 This agreement is the whole agreement between the parties on what it deals with. No variation, cancellation or waiver has any effect unless it is in writing and signed by both parties. No representation not recorded here has been relied on.
 
-Signed at ____________________ on ____________________
-
 ____________________________
 The Debtor — {{debtor_name}}
-
-____________________________
-for the Creditor — {{firm_name}}, duly authorised agent
 
 ---
 
@@ -181,11 +190,8 @@ The Defendant, having acknowledged the debt described in Part A of the agreement
 
 The Defendant confirms that this consent is given freely, that the Defendant has read and understood it, and that the Defendant has been advised of the right to obtain independent legal advice before signing.
 
-Signed at ____________________ on ____________________
-
 ____________________________
 The Defendant — {{debtor_name}}
-
 ---
 
 ## Where the company version differs
@@ -204,32 +210,17 @@ authorised representative of {{debtor_name}}"*.
 
 ---
 
-## Two things already changed, so you are not rewriting them
+## What changed since you last read this
 
-- **"Return the signed document to {{agent_email}}"** is gone from the covering email. It was
-  telling the debtor to print, sign and email it back on a document that is signed online by
-  pressing a button in the same message.
-- **The email now always carries the link.** The covering email cannot be sent on its own any
-  more; it goes out from the Signing panel, which puts the button under it.
-
----
-
-## One line I have left alone, which is yours to decide
-
-Both signature blocks are preceded by:
-
-> Signed at \_\_\_\_\_\_\_\_\_\_ on \_\_\_\_\_\_\_\_\_\_
-
-On a wet signature those two blanks are filled in by hand. On one signed online they stay empty,
-because nobody is asked where they were sitting — so the signed PDF now carries a blank "Signed at
-___ on ___" directly above a signature and the line *Signed electronically by <name> on <date>*
-directly below it. The date is said twice, once blank and once filled.
-
-Three ways out, and it is your call which:
-
-1. **Drop the line from the agreement.** The stamp under the mark already says who signed and
-   when, which is what the blanks were for.
-2. **Keep it and fill the date.** "Signed at ______ on 4 October 2026" — the place still blank,
-   because an online signer has no place.
-3. **Ask the signer where they are.** One more box on the signing page, and both blanks fill.
-
+- **"Signed at \_\_\_\_ on \_\_\_\_" is gone**, on your instruction. It was a wet-signature line
+  with two blanks a pen fills in; nobody asks an online signer what town they are in, so it printed
+  empty above a signature with the date already written under it by the system's own stamp.
+- **The creditor's signature rule is gone** too: "I don't think we have to sign that." The
+  agreement is the debtor's admission, and an unsigned rule on every copy read as half-finished.
+- **"How we will reach you" is new** — cellphone, work, home, email and employer, prefilled with
+  whatever the book holds so the debtor is *confirming* rather than remembering. Every one of those
+  lines leaves the page entirely when there is nothing to put on it.
+- **"Return the signed document to {{agent_email}}" is gone** from the covering email. It told the
+  debtor to print, sign and post something they sign by pressing a button in the same message.
+- **The email carries the address in its words**, not only as a button, so the copy filed against
+  the account shows the link and a forward keeps it.

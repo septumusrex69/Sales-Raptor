@@ -114,6 +114,24 @@ export const FILLABLE: Blank[] = [
     required: false,
     forKind: 'company',
   },
+  /*
+   * HOW TO REACH THEM, CONFIRMED BY THEM. The firm: "maybe there should be like information like
+   * your work number, home, your cell phone number, work number, and email address, just kind of
+   * to confirm that stuff."
+   *
+   * NONE OF THEM REQUIRED, and that follows the rule already written above: a debtor who will not
+   * give a work number should still be able to sign. Refusing the instrument over a field the firm
+   * was never going to sue on costs the firm the agreement -- and every one of these is a line that
+   * simply LEAVES the document when it is not answered, which is what optional means here.
+   *
+   * THE EMAIL IS ASKED FOR EVEN THOUGH THEY ARRIVED BY EMAIL. The address the link was sent to is
+   * whatever a client's sheet carried in 2019; this is the one they are telling the firm to use,
+   * and the two are different facts often enough to be worth the box.
+   */
+  { key: 'debtor_mobile', label: 'Your cellphone number', kind: 'text', required: false },
+  { key: 'debtor_work_phone', label: 'Your work number', kind: 'text', required: false },
+  { key: 'debtor_home_phone', label: 'Your home number', kind: 'text', required: false },
+  { key: 'debtor_email', label: 'Your email address', kind: 'text', required: false },
   { key: 'debtor_employer', label: 'Your employer', kind: 'text', required: false, forKind: 'individual' },
   /*
    * THE ARRANGEMENT, WHICH IS THE WHOLE POINT. Required together: an instalment with no date and a

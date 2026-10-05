@@ -112,6 +112,9 @@ export default function SignPage() {
       signaturePng: request.signaturePng,
       name: request.signedName,
       signedAt: request.signedAt,
+      /* Drawn on the PDF's every page, not here: this sheet is one continuous document with no
+         page boundaries to put them at. See LetterPlan.signedInitials. */
+      initialsPng: request.initialsPng,
     }
     : null
 

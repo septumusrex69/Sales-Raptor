@@ -91,6 +91,31 @@ export function aod(kind) {
       item(11, 'Payment', 'Into the trust account of {{firm_name}}: {{firm_bank}}. Account name: {{firm_bank_holder}}. Account number: {{firm_bank_account}}. Reference: {{case_number}}'),
     ] },
 
+    /*
+     * HOW TO REACH YOU, CONFIRMED BY THE PERSON SIGNING.
+     *
+     * THE FIRM: "when you fill it in, like address, maybe there should be like information like
+     * your work number, home, your cell phone number, work number, and email address, just kind of
+     * to confirm that stuff. Your employer... put it there as optional, that's fine."
+     *
+     * ONE PARAGRAPH PER LINE AND NOT A TABLE, which is the only shape that can lose a line
+     * cleanly. Nobody has all five -- no landline, no job, no email address is the ordinary case
+     * on this book -- and a table row with an empty cell stays on the page as an empty row with a
+     * label beside it. A label paragraph whose field cannot be answered leaves whole; see
+     * MergeField.optional and documentWithoutOptional.
+     *
+     * AND IT IS PART OF WHAT THEY SIGN, rather than a form beside it. These are the addresses the
+     * firm will use -- item 3's domicilium is the one that carries legal process -- so they belong
+     * inside the agreement where the signature covers them.
+     */
+    H(2, 'HOW WE WILL REACH YOU'),
+    P('These are the details we will use. Correct any that are wrong before you sign, and leave blank anything you do not have.'),
+    P('Cellphone number: {{debtor_mobile}}'),
+    P('Work number: {{debtor_work_phone}}'),
+    P('Home number: {{debtor_home_phone}}'),
+    P('Email address: {{debtor_email}}'),
+    ...(isCo ? [] : [P('Employer: {{debtor_employer}}')]),
+
     { kind: 'pagebreak' },
     H(2, 'PART B — TERMS AND CONDITIONS'),
     P('Background. The Creditor supplied the goods, services or credit described in item 5 of Part A to the Debtor, and the Debtor has not paid for all of it. The account has been handed to the Creditor’s agent for collection. The Debtor has asked for time to pay, and the Creditor is prepared to accept payment in instalments on these terms and against the security recorded here.'),
@@ -131,20 +156,28 @@ export function aod(kind) {
     P('This agreement is the whole agreement between the parties on what it deals with. No variation, cancellation or waiver has any effect unless it is in writing and signed by both parties. No representation not recorded here has been relied on.'),
 
     { kind: 'spacer', mm: 6 },
-    P('Signed at ____________________ on ____________________', { keepWithNext: true }),
     /*
-     * WHOSE RULE IS WHOSE, said on the block rather than worked out from the words.
+     * ONE RULE, AND NO "SIGNED AT ____ ON ____" ABOVE IT.
      *
-     * The debtor signs TWO of the three rules in this agreement -- their own here and the
-     * Defendant's on the consent to judgment -- and the firm signs the third as the creditor's
-     * agent. A mark made online is stamped on the rules marked 'debtor' and on nothing else:
-     * one person's drawing on all three would show a court an agreement signed for both sides by
-     * the same hand. See signedMark.ts.
+     * BOTH WENT AT THE FIRM'S INSTRUCTION, having read a signed copy. Of the line: "it still says
+     * signed at, which is not fine." It is a wet-signature line -- two blanks somebody fills in
+     * with a pen -- and nobody asks an online signer what town they are sitting in, so it printed
+     * empty directly above a signature, with the date it was asking for already written underneath
+     * by the stamp. One date said twice, once blank.
+     *
+     * And of the creditor's rule: "for the creditor, I don't think we have to sign that. I think
+     * that's not really necessary." They are right about what the document is. An acknowledgement
+     * of debt is the DEBTOR's admission; the firm's counter-signature adds nothing to it, and an
+     * unsigned rule on every copy that comes back reads as a document only half completed.
+     *
+     * SO ONE RULE IS LEFT AND IT IS THE DEBTOR'S. `signer` still says so rather than leaving it to
+     * be read off the words -- the role is what decides where a mark lands, and the day somebody
+     * adds a witness line is the day a document with no roles on it stamps the wrong one. See
+     * signedMark.ts.
      */
     { kind: 'signature', widthMm: 70, signer: 'debtor', spans: [T(isCo
       ? 'for the Debtor — {{debtor_name}} ({{debtor_reg_no}}), duly authorised'
       : 'The Debtor — {{debtor_name}}')] },
-    { kind: 'signature', widthMm: 70, signer: 'creditor', spans: [T('for the Creditor — {{firm_name}}, duly authorised agent')] },
 
     { kind: 'pagebreak' },
     H(2, 'ANNEXURE A — CONSENT TO JUDGMENT'),
@@ -163,7 +196,7 @@ export function aod(kind) {
     ] },
     P('The Defendant confirms that this consent is given freely, that the Defendant has read and understood it, and that the Defendant has been advised of the right to obtain independent legal advice before signing.'),
     { kind: 'spacer', mm: 6 },
-    P('Signed at ____________________ on ____________________', { keepWithNext: true }),
+    /* The consent to judgment loses its "Signed at ____ on ____" for the same reason as Part B. */
     { kind: 'signature', widthMm: 70, signer: 'debtor', spans: [T(isCo
       ? 'for the Defendant — {{debtor_name}}, duly authorised'
       : 'The Defendant — {{debtor_name}}')] },

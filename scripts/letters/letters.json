@@ -5319,6 +5319,63 @@
     ]
    },
    {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "HOW WE WILL REACH YOU"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "These are the details we will use. Correct any that are wrong before you sign, and leave blank anything you do not have."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Cellphone number: {{debtor_mobile}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Work number: {{debtor_work_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Home number: {{debtor_home_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Email address: {{debtor_email}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Employer: {{debtor_employer}}"
+     }
+    ]
+   },
+   {
     "kind": "pagebreak"
    },
    {
@@ -5575,31 +5632,12 @@
     "mm": 6
    },
    {
-    "kind": "paragraph",
-    "spans": [
-     {
-      "text": "Signed at ____________________ on ____________________"
-     }
-    ],
-    "keepWithNext": true
-   },
-   {
     "kind": "signature",
     "widthMm": 70,
     "signer": "debtor",
     "spans": [
      {
       "text": "The Debtor — {{debtor_name}}"
-     }
-    ]
-   },
-   {
-    "kind": "signature",
-    "widthMm": 70,
-    "signer": "creditor",
-    "spans": [
-     {
-      "text": "for the Creditor — {{firm_name}}, duly authorised agent"
      }
     ]
    },
@@ -5729,15 +5767,6 @@
    {
     "kind": "spacer",
     "mm": 6
-   },
-   {
-    "kind": "paragraph",
-    "spans": [
-     {
-      "text": "Signed at ____________________ on ____________________"
-     }
-    ],
-    "keepWithNext": true
    },
    {
     "kind": "signature",
@@ -6348,6 +6377,55 @@
     ]
    },
    {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "HOW WE WILL REACH YOU"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "These are the details we will use. Correct any that are wrong before you sign, and leave blank anything you do not have."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Cellphone number: {{debtor_mobile}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Work number: {{debtor_work_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Home number: {{debtor_home_phone}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Email address: {{debtor_email}}"
+     }
+    ]
+   },
+   {
     "kind": "pagebreak"
    },
    {
@@ -6604,31 +6682,12 @@
     "mm": 6
    },
    {
-    "kind": "paragraph",
-    "spans": [
-     {
-      "text": "Signed at ____________________ on ____________________"
-     }
-    ],
-    "keepWithNext": true
-   },
-   {
     "kind": "signature",
     "widthMm": 70,
     "signer": "debtor",
     "spans": [
      {
       "text": "for the Debtor — {{debtor_name}} ({{debtor_reg_no}}), duly authorised"
-     }
-    ]
-   },
-   {
-    "kind": "signature",
-    "widthMm": 70,
-    "signer": "creditor",
-    "spans": [
-     {
-      "text": "for the Creditor — {{firm_name}}, duly authorised agent"
      }
     ]
    },
@@ -6758,15 +6817,6 @@
    {
     "kind": "spacer",
     "mm": 6
-   },
-   {
-    "kind": "paragraph",
-    "spans": [
-     {
-      "text": "Signed at ____________________ on ____________________"
-     }
-    ],
-    "keepWithNext": true
    },
    {
     "kind": "signature",

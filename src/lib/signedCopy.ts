@@ -98,6 +98,8 @@ export async function drawSignedCopy(token: string): Promise<{
       signaturePng: request.signaturePng,
       name: request.signedName,
       signedAt: request.signedAt,
+      /* The page initials, which only the PDF can draw -- it is the only view with pages. */
+      initialsPng: request.initialsPng,
     }
     : null
 

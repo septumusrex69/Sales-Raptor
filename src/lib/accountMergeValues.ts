@@ -43,7 +43,23 @@ export interface ContactLike {
  * an address is written on a page.
  */
 export function addressOf(contacts: ContactLike[]): string | null {
-  const live = contacts.filter((c) => c.kind === 'address' && !c.retiredAt)
+  return contactOf(contacts, 'address')
+}
+
+/**
+ * ANY ONE KIND OF CONTACT, on the same rule the address is chosen by.
+ *
+ * WRITTEN OUT ONCE RATHER THAN FIVE TIMES. The acknowledgement of debt now asks the debtor to
+ * confirm a cellphone, a work number, a home number and an email address -- the firm: "just kind
+ * of to confirm that stuff" -- and every one of them wants the primary, never a retired one, for
+ * exactly the reason an address does: a number somebody established is wrong is worse than no
+ * number, because the file then reads as contactable.
+ *
+ * NULL RATHER THAN AN EMPTY STRING, so an unanswerable line LEAVES the document instead of
+ * printing its label with nothing after it. See MergeField.optional.
+ */
+export function contactOf(contacts: ContactLike[], kind: string): string | null {
+  const live = contacts.filter((c) => c.kind === kind && !c.retiredAt)
   const pick = live.find((c) => c.isPrimary) ?? live[0]
   return (pick?.value ?? '').trim() || null
 }
@@ -170,6 +186,21 @@ export function accountMergeValues(input: {
       debtorIdMasked: input.debtorIdNumber,
       positionAsAt: input.today,
       debtorAddress: addressOf(input.contacts),
+      /*
+       * WHAT THE FIRM HOLDS, so the signer is CONFIRMING rather than filling in from nothing.
+       * The firm's word for this was "confirm", and a form that shows a blank box has not asked
+       * anybody to confirm anything -- it has asked them to remember. Anything the book cannot
+       * answer stays null and the whole line leaves the document until the signer supplies it.
+       *
+       * 'phone' IS THE HOME LINE. The contact kinds are mobile / phone / work / email, and the
+       * firm's own words for them are cellphone, home and work -- see DebtorDetails, where the
+       * same mapping is drawn.
+       */
+      debtorMobile: contactOf(input.contacts, 'mobile'),
+      debtorWorkPhone: contactOf(input.contacts, 'work'),
+      debtorHomePhone: contactOf(input.contacts, 'phone'),
+      debtorEmail: contactOf(input.contacts, 'email'),
+      debtorEmployer: contactOf(input.contacts, 'employer'),
       respondBy: input.respondByOverride ?? respondBy(input.today),
       nextInstalment: input.nextInstalment ?? null,
       arrangement: input.arrangement ?? null,

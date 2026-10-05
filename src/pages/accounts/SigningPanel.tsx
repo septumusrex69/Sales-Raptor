@@ -9,7 +9,9 @@ import { blanksFor, FILLABLE } from '../../lib/signingBlanks.ts'
 import {
   createSigningRequest, listSigningRequests, signingLink, type SigningState,
 } from '../../lib/signing.ts'
-import { isSignable, signingButtonHtml, signingEmailBody } from '../../lib/signingRules.ts'
+import {
+  isSignable, signingButtonHtml, signingEmailBody, signingLinkLine,
+} from '../../lib/signingRules.ts'
 import { chargeAcknowledgementOfDebt } from '../../lib/accountCharges.ts'
 import { renderTemplate } from '../../lib/messageTemplates'
 import { drawSignedCopy } from '../../lib/signedCopy.ts'
@@ -254,7 +256,10 @@ export function SigningPanel({
         : `Acknowledgement of debt${caseNumber ? ` - ${caseNumber}` : ''}`
       onEmail({
         subject,
-        body: words,
+        /* THE ADDRESS IN THE WORDS, not only in the button. See signingLinkLine: the button is
+           markup, so the message filed against the account carried no link at all and the firm
+           read their own sent copy as proof that none had gone. */
+        body: `${words.replace(/\s+$/, '')}\n\n${signingLinkLine(url)}`,
         appendHtml: signingButtonHtml(url),
         note: 'The button in this message opens the acknowledgement of debt for signature.',
       })
@@ -347,10 +352,27 @@ export function SigningPanel({
                 : 'Nothing was charged under item 4(a): the balance had not loaded, so the band '
                   + 'could not be decided. Raise it by hand.'}
           </p>
+          {/*
+            THE EMAIL IS THE ACT, AND THE BOX SAYS SO FIRST.
+            
+            THE FIRM, having pressed this: "if I say send it, it kind of asked me to copy it... but
+            I mean, there needs to be an email." The composer DOES open on the press -- it has since
+            the panel was built -- but what this box led with was an address and a Copy button, so
+            the press read as "here is a link, now go and send it yourself". The sentence is the
+            fix: what happened is named before anything is offered.
+            
+            THE LINK STAYS, DEMOTED. A debtor who answers on WhatsApp, a colleague being read the
+            address over the telephone, a second copy to an attorney -- all of that is a copy of the
+            same address, and taking it away would mean the only way to send one twice is to issue
+            a second document.
+          */}
+          <p className="mt-1.5 text-[11px] font-medium text-slate-700">
+            The email is open with the link in it. Send it to put the document in front of them.
+          </p>
           <p className="mt-1 text-[11px] text-slate-500 break-all select-all">{made.url}</p>
           <button type="button" onClick={() => void copy(made.url)}
             className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
-            {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy the link</>}
+            {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy the link as well</>}
           </button>
           {/* SAID PLAINLY, because it is the firm's own decision and somebody should be able to
               read it off the screen rather than remember it: there is no one-time pin yet. */}

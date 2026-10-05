@@ -146,16 +146,33 @@ ok('...and an unsigned document marks nothing', !marked(sig([], { signer: 'debto
  * AND THE AGREEMENT ITSELF IS TAGGED
  * ------------------------------------------------------------------------------------------- */
 
+/*
+ * TWO RULES, BOTH THE DEBTOR'S, AND THE CREDITOR'S IS GONE.
+ *
+ * THE FIRM, reading a signed copy: "for the creditor, I don't think we have to sign that. I think
+ * that's not really necessary." They are right about what the document is. An acknowledgement of
+ * debt is the DEBTOR's admission; a counter-signature adds nothing to it, and an unsigned rule on
+ * every copy that comes back reads as a document only half completed.
+ *
+ * SO THE COUNT IS THE ASSERTION: the debtor signs in Part B and again on the consent to judgment
+ * in Annexure A, and nobody else signs at all.
+ */
 for (const kind of ['individual', 'company']) {
   const rules = aod(kind).blocks.filter((b) => b.kind === 'signature')
-  check(`the ${kind} agreement has three signature rules`, rules.length, 3)
-  /* TWO AND ONE, and the count is the assertion: the debtor signs in Part B and again on the
-     consent to judgment in Annexure A, and the firm signs as the creditor's agent. */
-  check(`...two of them the debtor’s`, rules.filter((b) => signerOf(b) === 'debtor').length, 2)
-  check(`...and one the creditor’s`, rules.filter((b) => signerOf(b) === 'creditor').length, 1)
+  check(`the ${kind} agreement has two signature rules`, rules.length, 2)
+  check(`...both of them the debtor’s`, rules.filter((b) => signerOf(b) === 'debtor').length, 2)
+  check(`...and none the creditor’s`, rules.filter((b) => signerOf(b) === 'creditor').length, 0)
   /* MARKED EXPLICITLY RATHER THAN LEFT TO THE TEXT. The fallback exists for frozen documents; a
-     template that relied on it would break the day somebody reworded "for the Creditor". */
-  ok(`...all three saying so on the block`, rules.every((b) => b.signer))
+     template that relied on it would break the day somebody added a witness line. */
+  ok(`...both saying so on the block`, rules.every((b) => b.signer))
+  /*
+   * AND NO "SIGNED AT ____ ON ____" ABOVE EITHER. The firm: "it still says signed at, which is not
+   * fine." It is a wet-signature line -- two blanks filled in with a pen -- and nobody asks an
+   * online signer what town they are sitting in, so it printed empty directly above a signature
+   * with the date it was asking for already written underneath by the stamp.
+   */
+  ok(`...and the ${kind} agreement asks nobody where they signed`,
+    !/Signed at/.test(JSON.stringify(aod(kind).blocks)))
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -184,10 +201,14 @@ ok('...inside the rule rather than under it',
  * block before this one is the DEBTOR's and does carry a mark, so a slice that overruns reads as a
  * failure on correct code. Take the last `.ltr-sig` opening before the creditor's words.
  */
-const atCreditor = html.indexOf('for the Creditor')
-const creditorBlock = html.slice(html.lastIndexOf('<div class="ltr-sig"', atCreditor), atCreditor)
-ok('...and never on the creditor’s rule', !/ltr-mark/.test(creditorBlock))
-ok('...which is the block it says it is', /data-signer="creditor"/.test(creditorBlock))
+/*
+ * AND THE CREDITOR'S RULE IS NOT THERE TO BE MARKED. It was, and the check sliced its block to
+ * prove the mark stayed off it; the firm has since removed the rule itself, so what is asserted
+ * now is its absence -- and `marked` is still held to the role above, which is what would stop a
+ * mark landing on a creditor's rule if one ever came back.
+ */
+ok('...and there is no creditor’s rule to mark', !/for the Creditor/.test(html))
+ok('...nor one declared on any block', !/data-signer="creditor"/.test(html))
 ok('the stamp goes under the name', /<div class="ltr-stamp">Signed electronically by/.test(html))
 
 /* ---------------------------------------------------------------------------------------------
@@ -203,9 +224,9 @@ ok('the stamp goes under the name', /<div class="ltr-stamp">Signed electronicall
  */
 const back = documentHtmlToBlocks(unsignedHtml)
 const backRules = back.filter((b) => b.kind === 'signature')
-check('the editor gives back three rules', backRules.length, 3)
+check('the editor gives back two rules', backRules.length, 2)
 check('...with the roles they went in with',
-  backRules.map((b) => b.signer), ['debtor', 'creditor', 'debtor'])
+  backRules.map((b) => b.signer), ['debtor', 'debtor'])
 /* AND A ROLE NOBODY RECOGNISES IS NOT CARRIED. A hand-edited attribute would otherwise produce a
    signature rule whose owner is a typo, which nothing will ever stamp. */
 const odd = documentHtmlToBlocks(
@@ -314,11 +335,67 @@ const pdf = read('src/lib/letterPdf.ts')
    it twice would put two copies of it in the file. */
 ok('pictures are embedded before any page is drawn',
   /const images = new Map[\s\S]{0,400}?plan\.pages/.test(pdf))
-ok('...once per distinct picture', /images\.has\(op\.src\)/.test(pdf))
+ok('...once per distinct picture', /if \(images\.has\(src\)\) return/.test(pdf))
 /* AND A MARK THAT WILL NOT EMBED DRAWS NOTHING rather than refusing the document. The agreement
    has already been signed; producing no copy of it at all is the worse failure. */
 ok('...and one that will not embed does not stop the copy',
-  /try \{ images\.set\(op\.src, await pdf\.embedPng\(op\.src\)\) \} catch/.test(pdf))
+  /try \{ images\.set\(src, await pdf\.embedPng\(src\)\) \} catch/.test(pdf))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE INITIALS, AT THE FOOT OF EVERY PAGE
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM ASKED FOR THEM AT THE START -- "make space for where there can be signatures like at
+ * the bottom of the pages for initials and stuff" -- and then, reading a signed copy: "the
+ * initials also don't appear on the page." They were captured on the signing form and drawn
+ * nowhere at all.
+ *
+ * A PAGE INITIAL IS NOT A SMALL SIGNATURE. It is what somebody puts on EVERY page to say they
+ * read that page, so it is repeated per page rather than placed once -- which is why it lives on
+ * the plan beside the running line and not in any one page's ops.
+ */
+const INITIALS = fakePng(300, 120)
+const withInitials = { ...signed, initialsPng: INITIALS }
+const planI = planLetter(doc, A4_LETTERHEAD, { measure, filled: false, values: {}, signed: withInitials })
+
+ok('the plan carries the initials', Boolean(planI.signedInitials))
+check('...as the picture the signer drew', planI.signedInitials?.src, INITIALS)
+ok('...and not as a page op, so every page gets them',
+  planI.pages.flatMap((p) => p.ops).filter((o) => o.op === 'image').length === 2)
+check('a signer who gave none leaves them off', plan.signedInitials, null)
+
+/*
+ * IN THE BOTTOM MARGIN, which is what makes them free. Inside the text frame they would need a
+ * strip of their own, and a signed copy would then break a nine-page agreement in different places
+ * from the one the debtor read.
+ */
+const frameBottom = A4_LETTERHEAD.heightMm - A4_LETTERHEAD.marginBottomMm
+ok(`...below the last line of text (${planI.signedInitials?.yMm.toFixed(1)}mm)`,
+  (planI.signedInitials?.yMm ?? 0) >= frameBottom)
+/* AND ABOVE THE LETTERHEAD'S OWN PRINTED FOOTER, which starts at 279.8mm on the firm's paper. */
+ok('...and clear of the letterhead’s printed footer',
+  (planI.signedInitials?.yMm ?? 0) + (planI.signedInitials?.hMm ?? 0) < 279.8)
+ok('...capped at five millimetres', (planI.signedInitials?.hMm ?? 99) <= MARK_MAX_MM / 2)
+/* RIGHT-ALIGNED, because the running line is left-aligned at the same height: "Page 2 of 4" on the
+   left and the initials on the right, sharing the strip without meeting. */
+check('...right-aligned to the text frame',
+  Math.round((planI.signedInitials?.xMm ?? 0) + (planI.signedInitials?.wMm ?? 0)),
+  A4_LETTERHEAD.widthMm - A4_LETTERHEAD.marginRightMm)
+/* AND THEY COST NOTHING. The pages break exactly where they did without them. */
+check('the pages break where they did unsigned', planI.pages.length, plain.pages.length)
+
+/* THE DRAWER REPEATS THEM. Asserted on the source, because a plan cannot show what a page loop
+   does with it -- and the failure this guards is initials on page one only. */
+ok('the drawer puts them on every page',
+  /plan\.signedInitials\)[\s\S]{0,80}?images\.get\(plan\.signedInitials\.src\)/.test(pdf))
+ok('...inside the loop that adds the pages',
+  pdf.indexOf('if (plan.signedInitials) {') > pdf.indexOf('plan.pages.forEach('))
+/* AND BOTH RENDERERS HAND THEM OVER, which is where they went missing in the first place: the
+   signing page captured them, the database stored them, and nothing ever passed them on. */
+for (const file of ['src/lib/signedCopy.ts', 'src/pages/sign/SignPage.tsx']) {
+  ok(`${file} passes the initials on`, /initialsPng: request\.initialsPng/.test(read(file)))
+}
 ok('the signed input reaches the plan',
   /signed: input\.signed \?\? null/.test(pdf))
 

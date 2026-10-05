@@ -51,14 +51,22 @@ for (const key of ['balance', 'capital', 'fees', 'interest', 'settlement', 'to_s
   'case_number', 'reference', 'firm_bank', 'commission']) {
   ok(`the debtor may not fill in {{${key}}}`, !isFillable(key))
 }
-/* AND THE LIST IS SHORT ENOUGH TO READ. A closed list that grows past a dozen is a list nobody
-   checks, which is how a balance ends up on it. */
-ok('the fillable list is a closed handful', FILLABLE.length > 0 && FILLABLE.length <= 10)
+/*
+ * AND THE LIST IS SHORT ENOUGH TO READ. A closed list that grows past a dozen is a list nobody
+ * checks, which is how a balance ends up on it.
+ *
+ * TWELVE RATHER THAN TEN, because the firm added four ways of reaching the debtor -- "like your
+ * work number, home, your cell phone number, work number, and email address, just kind of to
+ * confirm that stuff". The ceiling is a reading limit and not a principle; the principle is the
+ * assertion under it, which is that nothing on this list is a figure.
+ */
+ok('the fillable list is a closed handful', FILLABLE.length > 0 && FILLABLE.length <= 12)
 ok('...and nothing on it is a money field',
   !FILLABLE.some((b) => /balance|capital|interest|fee|settle|commission/i.test(b.key)))
 
 /* WHAT IS ON IT: their own particulars, and the terms they are offering. */
 for (const key of ['debtor_address', 'debtor_id_masked', 'debtor_reg_no', 'debtor_employer',
+  'debtor_mobile', 'debtor_work_phone', 'debtor_home_phone', 'debtor_email',
   'ptp_amount', 'ptp_frequency', 'ptp_date']) {
   ok(`the debtor may fill in {{${key}}}`, isFillable(key))
 }

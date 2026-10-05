@@ -148,8 +148,27 @@ export function signingButtonHtml(url: string, label = 'Sign the acknowledgement
     + `style="display:inline-block;padding:14px 28px;font-family:Georgia,serif;font-size:16px;`
     + `font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px">${label}</a>`
     + `</td></tr></table>`
-    + `<p style="margin:0 0 16px;font-size:12px;color:#667085">`
-    + `Or copy this address into your browser:<br>${safe}</p>`
+}
+
+/**
+ * THE ADDRESS IN WORDS, WHICH GOES IN THE BODY RATHER THAN IN THE BUTTON.
+ *
+ * THE BUTTON IS MARKUP, AND THE FIRM COULD NOT SEE IT. What Raptor files against the account is
+ * the message's TEXT -- that is what the Emails tab shows and what somebody forwarding it carries
+ * -- so a link that existed only as an appended table left the firm reading their own sent message
+ * and concluding nothing had gone: "the email doesn't send the link to the thing."
+ *
+ * IT WAS IN THE BUTTON'S OWN MARKUP BEFORE, as a small grey line under it, for a reader whose
+ * client blocks images. That reader is still served -- the body is rendered into the same HTML --
+ * and now so is the record, the forward, and the person who wants to read the address out over the
+ * telephone. One address, in the one place every copy of the message keeps.
+ *
+ * AT THE FOOT, AFTER THE SIGN-OFF, because that is where a postscript goes and because the firm's
+ * covering wording is theirs to edit in the Library: nothing here may assume where in their words
+ * a link belongs.
+ */
+export function signingLinkLine(url: string): string {
+  return `Open the document here:\n${url}`
 }
 
 /**
