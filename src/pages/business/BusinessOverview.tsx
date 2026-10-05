@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { Link } from 'react-router-dom'
@@ -153,8 +154,18 @@ export function BusinessOverview() {
             <Row label="Invoiced to clients" value={rand(month?.invoiced ?? 0)} />
             <Row label="Spent" value={`(${rand(month?.expenses ?? 0)})`} />
             <div className="flex justify-between pt-2 border-t border-slate-100">
-              <span className="text-[13px] font-semibold text-slate-700">Made</span>
-              <span className="text-base font-semibold tabular-nums">{rand(month?.made ?? 0)}</span>
+              <span className="text-[13px] font-semibold text-slate-700">
+                {(month?.made ?? 0) < 0 ? 'Lost' : 'Made'}
+              </span>
+              {/*
+                A LOSS IS NOT DRAWN LIKE A PROFIT. Same weight and same colour for both is how a
+                month in the red gets skimmed past -- the minus sign is one character and the word
+                above it is doing the work.
+              */}
+              <span className={clsx('text-base font-semibold tabular-nums',
+                (month?.made ?? 0) < 0 ? 'text-negative-700' : 'text-positive-700')}>
+                {rand(Math.abs(month?.made ?? 0))}
+              </span>
             </div>
             {/*
               EARNED LESS SPENT, NOT DRAWN LESS SPENT. Money earned and still in trust has been

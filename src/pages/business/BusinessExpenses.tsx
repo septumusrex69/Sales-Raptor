@@ -107,8 +107,8 @@ export function BusinessExpenses() {
                     <thead>
                       <tr className="bg-slate-50 text-[10.5px] uppercase tracking-wide text-slate-400">
                         <th className="text-left font-medium px-4 py-2.5">Date</th>
-                        <th className="text-left font-medium px-4 py-2.5">What</th>
-                        <th className="text-left font-medium px-4 py-2.5">Category</th>
+                        <th className="text-left font-medium px-4 py-2.5 w-full">What</th>
+                        <th className="text-left font-medium px-4 py-2.5 whitespace-nowrap">Category</th>
                         <th className="text-right font-medium px-4 py-2.5">Amount</th>
                         <th className="text-right font-medium px-4 py-2.5">VAT</th>
                         <th className="px-4 py-2.5"></th>
@@ -129,9 +129,9 @@ export function BusinessExpenses() {
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-slate-500">{r.category}</td>
-                          <td className="px-4 py-3 text-right tabular-nums">{rand(r.amount)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums text-slate-400">{rand(r.vat)}</td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.category}</td>
+                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.amount)}</td>
+                          <td className="px-4 py-3 text-right tabular-nums text-slate-400 whitespace-nowrap">{rand(r.vat)}</td>
                           <td className="px-4 py-3 text-right">
                             {!r.cancelledAt && (
                               <button type="button"
