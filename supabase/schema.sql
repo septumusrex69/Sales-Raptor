@@ -23116,6 +23116,9 @@ begin
     update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
     update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
     update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    /* AND THE CLIENT CHARGES IT WAS CARRYING, or a rebuild leaves them pointing at a run whose
+       lines have gone and they are never set off against anything. */
+    update public.client_charges set payover_run_id = null where payover_run_id = v_run;
     delete from public.payover_run_lines where run_id = v_run;
   end if;
 
@@ -23186,6 +23189,27 @@ begin
     values (v_run, 'carried', v_prev.net_payover);
     update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
   end if;
+
+  /* 4. WHAT THE CLIENT OWES THE FIRM, taken off this payover. The firm, on withdrawing an
+        account: "withdrawal fee subtracted from payover". A charge is claimed by the first run
+        built after it was raised -- not by the cycle it falls in -- because it is not a receipt
+        and has no cycle of its own; what matters is that it comes off the next money that goes
+        out. `settlement = 'invoice'` is the other half of the firm's example and is deliberately
+        NOT claimed: that one the client pays directly. */
+  with taken as (
+    update public.client_charges c
+       set payover_run_id = v_run
+     where c.company_id = p_company
+       and c.settlement = 'set_off'
+       and c.payover_run_id is null
+       and c.cancelled_at is null
+       and c.paid_at is null
+       and c.raised_on <= v_end
+    returning c.*
+  )
+  insert into public.payover_run_lines (
+    run_id, account_id, line_kind, client_charge_id, charge_amount)
+  select v_run, t.account_id, 'charge', t.id, t.amount + t.vat from taken t;
 
   perform public.recompute_payover_run(v_run);
   return v_run;
@@ -23577,3 +23601,442 @@ as $$
 $$;
 
 revoke execute on function public.is_staging_database() from public, anon;
+
+-- ============================================================================
+-- THE CLIENT ACCOUNT: WHAT PASSES BETWEEN THE FIRM AND A CLIENT
+--
+-- Raptor could only ever see money owed TO a client. A payover run says what the firm collected
+-- and what it owes; nothing anywhere recorded what a CLIENT owes the FIRM, so there was no way to
+-- bill a withdrawal, a listing or anything else, and no statement a client could be shown.
+--
+-- THE FIRM'S OWN EXAMPLE, which is the specification for all of this:
+--   Payover due to client / Payover paid to client / Withdrawal invoice for client /
+--   Payover due to client / Withdrawal fee subtracted from payover / Client paid payover /
+--   Invoice for executive listing / Invoice paid by client.
+--
+-- TWO WAYS A CHARGE IS COLLECTED, because that example shows both. `set_off` comes off the next
+-- payover -- "withdrawal fee subtracted from payover" -- and rides the rail `due_to_bf` already
+-- uses for a debtor who paid the client directly. `invoice` the client pays separately, in money.
+--
+-- AND IT IS NOT AN ANNEXURE B FEE. The tariff is charged to a DEBTOR against an account and is
+-- bound by in duplum; this is the firm invoicing its own client. It never touches the account's
+-- fee ledger, never reaches a debtor's balance, and nothing here is capped by the ceiling --
+-- which is also why it lives in its own table rather than as another fee kind.
+-- ============================================================================
+create table if not exists public.client_charges (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id),
+  /* Where it came from, where that is an account -- a withdrawal is about one file. Null for a
+     charge about the relationship rather than a debtor, like a listing. */
+  account_id uuid references public.debtor_accounts(id) on delete set null,
+  kind text not null check (kind in ('withdrawal', 'listing', 'other')),
+  description text not null,
+  amount numeric(12,2) not null check (amount > 0),
+  vat numeric(12,2) not null default 0 check (vat >= 0),
+  raised_on date not null default ((now() at time zone 'Africa/Johannesburg')::date),
+  raised_by uuid references public.profiles(id),
+  settlement text not null default 'set_off' check (settlement in ('set_off', 'invoice')),
+  /* Set when a payover claimed it. Null again if that run is rebuilt or reset. */
+  payover_run_id uuid references public.payover_runs(id) on delete set null,
+  invoice_number text,
+  paid_at timestamptz,
+  paid_reference text,
+  cancelled_at timestamptz,
+  cancelled_reason text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists client_charges_company_idx
+  on public.client_charges (company_id, raised_on desc);
+create index if not exists client_charges_open_idx
+  on public.client_charges (company_id)
+  where payover_run_id is null and paid_at is null and cancelled_at is null;
+
+alter table public.client_charges enable row level security;
+
+create policy client_charges_select on public.client_charges
+  for select using (public.current_user_role() = 'Administrator');
+
+-- NO WRITE POLICY, like the ledgers: every change goes through a guarded function, so a charge
+-- cannot be edited into a different amount after it has been billed.
+revoke insert, update, delete on public.client_charges from authenticated, anon;
+
+-- THE CHARGE AS A LINE ON THE RUN, so a payover shows what was taken off it rather than quietly
+-- arriving short. `on delete cascade` from the charge: cancelling one takes its line with it.
+alter table public.payover_run_lines
+  add column if not exists client_charge_id uuid references public.client_charges(id) on delete cascade,
+  add column if not exists charge_amount numeric(12,2) not null default 0;
+
+alter table public.payover_run_lines drop constraint if exists payover_run_lines_kind_check;
+alter table public.payover_run_lines add constraint payover_run_lines_kind_check
+  check (line_kind in ('trust', 'ptc', 'reversal', 'carried', 'charge'));
+
+alter table public.payover_runs
+  add column if not exists charges_set_off numeric(12,2) not null default 0;
+
+-- AND THE RUN'S ARITHMETIC NETS IT. net_payover was
+--   due_to_client - due_to_bf - commission_vat + carried_in
+-- and a charge is one more thing the client owes, so it comes off the same way. The charge lines
+-- are excluded from every other sum BY NAME rather than left in `line_kind <> 'carried'`: a charge
+-- carries nothing in the payment columns, and counting its zero rows into filters that are about
+-- payments is the kind of thing that reads right and quietly shifts an average.
+create or replace function public.recompute_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare t record;
+begin
+  select
+    coalesce(sum(l.to_capital)              filter (where l.line_kind not in ('carried','charge') and not l.paid_to_client), 0) as trust_capital,
+    coalesce(sum(l.commission)              filter (where l.line_kind not in ('carried','charge') and not l.paid_to_client), 0) as trust_commission,
+    coalesce(sum(l.payment_amount)          filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)     as ptc_received,
+    coalesce(sum(l.to_interest + l.to_costs) filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)    as ptc_fees,
+    coalesce(sum(l.to_capital)              filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)     as ptc_capital,
+    coalesce(sum(l.commission)              filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)     as ptc_commission,
+    /* PER LINE, AND ALREADY ROUNDED ON THE ALLOCATION -- the firm's decision 5, so the lines add
+       up to the invoice total. VAT on the SUM differs from the sum of the VATs by cents, and the
+       firm's own Dr Roux figures are the sum of the VATs: 3 013.30 against 3 013.18. */
+    coalesce(sum(l.commission_vat)          filter (where l.line_kind not in ('carried','charge')), 0) as commission_vat,
+    coalesce(sum(l.carried_amount)          filter (where l.line_kind = 'carried'), 0)  as carried_in,
+    /* WHAT THE CLIENT OWES THE FIRM THIS CYCLE, taken off the payover the same way due_to_bf is.
+       The firm: "withdrawal fee subtracted from payover". VAT rides on the line's own amount. */
+    coalesce(sum(l.charge_amount)           filter (where l.line_kind = 'charge'), 0)   as charges
+  into t
+  from public.payover_run_lines l where l.run_id = p_run;
+
+  update public.payover_runs r
+     set trust_capital = t.trust_capital,
+         trust_commission = t.trust_commission,
+         due_to_client = t.trust_capital - t.trust_commission,
+         ptc_received = t.ptc_received,
+         ptc_fees_taken = t.ptc_fees,
+         ptc_capital = t.ptc_capital,
+         ptc_commission = t.ptc_commission,
+         due_to_bf = t.ptc_fees + t.ptc_commission,
+         commission_vat = t.commission_vat,
+         carried_in = t.carried_in,
+         charges_set_off = t.charges,
+         net_payover = (t.trust_capital - t.trust_commission)
+                     - (t.ptc_fees + t.ptc_commission)
+                     - t.commission_vat
+                     + t.carried_in
+                     - t.charges,
+         /* AND THE LADDER'S FIRST TWO RUNGS, from the blockers as they stand right now. The firm:
+            a run "becomes ready automatically when the last one is resolved" -- so nobody presses
+            anything to make it ready, and nothing has to remember to. */
+         status = case when exists (select 1 from public.payover_run_blockers(p_run))
+                       then 'needs_review' else 'ready' end
+   where r.id = p_run and public.payover_run_is_open(r.status);
+end $$;
+
+-- AND charges_set_off JOINS THE FROZEN TUPLE. It is one of the invoice's own figures now, so a
+-- charge attached to a run that has gone out would change what the client was told they were being
+-- paid -- silently, which is the whole thing this tuple exists to stop.
+create or replace function public.protect_payover_run()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.status = 'void' then return old; end if;
+    if public.is_staging_database()
+       and coalesce(current_setting('raptor.reset_run', true), '') = old.id::text then
+      return old;
+    end if;
+    if not public.payover_run_is_open(old.status) then
+      raise exception 'Payover run % is %; an invoice is not deleted.', old.invoice_number, old.status;
+    end if;
+    return old;
+  end if;
+
+  if public.payover_run_is_open(old.status) then return new; end if;
+
+  if public.payover_run_is_open(new.status) then
+    raise exception 'Payover run % has been %; it cannot go back to being a working document.',
+      old.invoice_number, old.status;
+  end if;
+
+  if (new.company_id, new.period_start, new.period_end, new.invoice_number,
+      new.trust_capital, new.trust_commission, new.due_to_client,
+      new.ptc_received, new.ptc_fees_taken, new.ptc_capital, new.ptc_commission, new.due_to_bf,
+      new.commission_vat, new.carried_in, new.charges_set_off, new.net_payover)
+     is distinct from
+     (old.company_id, old.period_start, old.period_end, old.invoice_number,
+      old.trust_capital, old.trust_commission, old.due_to_client,
+      old.ptc_received, old.ptc_fees_taken, old.ptc_capital, old.ptc_commission, old.due_to_bf,
+      old.commission_vat, old.carried_in, old.charges_set_off, old.net_payover) then
+    raise exception 'Payover run % is %; its figures are an issued invoice. A correction is a negative line in the next run.',
+      old.invoice_number, old.status;
+  end if;
+  return new;
+end $$;
+
+-- RAISING ONE. Administrator only, like everything else in Finance, and it refuses a charge with
+-- no words and a charge of nothing -- both of which read on a client's statement as the firm not
+-- knowing what it billed for.
+create or replace function public.raise_client_charge(
+  p_company uuid, p_kind text, p_description text, p_amount numeric,
+  p_vat numeric default 0, p_settlement text default 'set_off',
+  p_account uuid default null, p_raised_on date default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_what text := nullif(btrim(coalesce(p_description, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if v_what is null then
+    raise exception 'Say what the client is being charged for.' using errcode = '22023';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A charge is an amount the client owes, so it has to be more than nothing.'
+      using errcode = '22023';
+  end if;
+
+  insert into public.client_charges (
+    company_id, account_id, kind, description, amount, vat, settlement, raised_by, raised_on)
+  values (
+    p_company, p_account, p_kind, v_what, round(p_amount, 2), round(coalesce(p_vat, 0), 2),
+    p_settlement, auth.uid(),
+    coalesce(p_raised_on, (now() at time zone 'Africa/Johannesburg')::date))
+  returning id into v_id;
+  return v_id;
+end $$;
+
+-- CANCELLING ONE, while it is still the firm's own business. Once it has ridden a payover that
+-- went out it is on an invoice the client holds, and the payover's own rule applies: a correction
+-- is a line in the NEXT run, never a change to one already issued.
+create or replace function public.cancel_client_charge(p_charge uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_c public.client_charges%rowtype;
+  v_status text;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why it is being cancelled.' using errcode = '22023';
+  end if;
+  select * into v_c from public.client_charges where id = p_charge;
+  if not found then raise exception 'That charge no longer exists.' using errcode = 'P0002'; end if;
+  if v_c.cancelled_at is not null then return; end if;
+  if v_c.paid_at is not null then
+    raise exception 'That charge has been paid. A refund is a credit, not a cancellation.'
+      using errcode = '22023';
+  end if;
+  if v_c.payover_run_id is not null then
+    select status into v_status from public.payover_runs where id = v_c.payover_run_id;
+    if not public.payover_run_is_open(coalesce(v_status, 'paid')) then
+      raise exception 'That charge is on a payover that has already gone out. Credit it in the next run instead.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  update public.client_charges
+     set cancelled_at = now(), cancelled_reason = v_reason, payover_run_id = null
+   where id = p_charge;
+end $$;
+
+-- THE CLIENT PAYING AN INVOICE. Refused for a charge that comes off a payover, because that one is
+-- already settled -- recording a payment as well would have the client pay twice, once in money
+-- and once in a payover they never received.
+create or replace function public.mark_client_charge_paid(
+  p_charge uuid, p_reference text default null, p_paid_at timestamptz default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_c public.client_charges%rowtype;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select * into v_c from public.client_charges where id = p_charge;
+  if not found then raise exception 'That charge no longer exists.' using errcode = 'P0002'; end if;
+  if v_c.cancelled_at is not null then
+    raise exception 'That charge was cancelled.' using errcode = '22023';
+  end if;
+  if v_c.payover_run_id is not null then
+    raise exception 'That charge comes off a payover, so the client does not pay it separately.'
+      using errcode = '22023';
+  end if;
+  if v_c.paid_at is not null then return; end if;
+
+  update public.client_charges
+     set paid_at = coalesce(p_paid_at, now()),
+         paid_reference = nullif(btrim(coalesce(p_reference, '')), '')
+   where id = p_charge;
+end $$;
+
+-- ============================================================================
+-- THE STATEMENT, WHICH IS THE WHOLE POINT: one running balance per client.
+--
+-- POSITIVE MEANS THE FIRM OWES THE CLIENT. A payover due puts the balance up, paying it brings it
+-- back to nothing; a charge puts it down, the client settling it brings it back.
+--
+-- THE PAYOVER IS SHOWN GROSS AND THE CHARGE AS ITS OWN LINE, which is the firm's own sequence:
+-- "payover due to client" and then "withdrawal fee subtracted from payover" are two entries, not
+-- one net figure. net_payover already has the charge taken off, so it is added back on the due
+-- line and deducted again on the charge line -- the pair nets to what actually left the bank, and
+-- somebody reading the statement can see why the payment was short.
+--
+-- AN APPROVED RUN IS WHERE IT STARTS, not a built one: until it is approved the figures can still
+-- move, and a statement that showed a working document would change under the client.
+-- ============================================================================
+create or replace function public.client_account(p_company uuid)
+returns table(
+  entry_on date, sort_at timestamptz, kind text, description text,
+  reference text, amount numeric, balance numeric,
+  run_id uuid, charge_id uuid)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with entries as (
+    select (r.approved_at at time zone 'Africa/Johannesburg')::date as entry_on,
+           r.approved_at as sort_at, 'payover_due' as kind,
+           'Payover due to client' as description, r.invoice_number as reference,
+           r.net_payover + r.charges_set_off as amount, r.id as run_id, null::uuid as charge_id
+      from public.payover_runs r
+     where r.company_id = p_company and r.status in ('approved','sent','paid')
+
+    union all
+    /* A SECOND BEHIND THE PAYOVER IT CAME OFF, so the two always read in that order however the
+       clock fell -- the firm's sequence names the payover first and the deduction under it. */
+    select (r.approved_at at time zone 'Africa/Johannesburg')::date, r.approved_at + interval '1 second',
+           'charge_set_off', c.description, r.invoice_number,
+           -(c.amount + c.vat), r.id, c.id
+      from public.client_charges c
+      join public.payover_runs r on r.id = c.payover_run_id
+     where c.company_id = p_company and c.cancelled_at is null
+       and r.status in ('approved','sent','paid')
+
+    union all
+    select (r.paid_at at time zone 'Africa/Johannesburg')::date, r.paid_at,
+           'payover_paid', 'Payover paid to client',
+           coalesce(r.eft_reference, r.invoice_number), -r.net_payover, r.id, null::uuid
+      from public.payover_runs r
+     where r.company_id = p_company and r.paid_at is not null
+
+    union all
+    select c.raised_on, c.raised_on::timestamptz, 'invoice_raised', c.description,
+           c.invoice_number, -(c.amount + c.vat), null::uuid, c.id
+      from public.client_charges c
+     where c.company_id = p_company and c.settlement = 'invoice'
+       and c.cancelled_at is null
+
+    union all
+    select (c.paid_at at time zone 'Africa/Johannesburg')::date, c.paid_at,
+           'invoice_paid', 'Invoice paid by client', c.paid_reference,
+           c.amount + c.vat, null::uuid, c.id
+      from public.client_charges c
+     where c.company_id = p_company and c.paid_at is not null and c.cancelled_at is null
+  )
+  select e.entry_on, e.sort_at, e.kind, e.description, e.reference, e.amount,
+         sum(e.amount) over (order by e.sort_at, e.kind
+                             rows between unbounded preceding and current row) as balance,
+         e.run_id, e.charge_id
+    from entries e
+   where public.current_user_role() = 'Administrator'
+   order by e.sort_at, e.kind
+$$;
+
+-- ============================================================================
+-- AND THE FIVE NEW ONES ARE IN THE REVOKE LIST, for the reason stated above every other block
+-- like it: Supabase grants EXECUTE to anon on a new public-schema function, so a create is a
+-- grant. A new block at the end rather than names added above, because the earlier loops run
+-- before these functions exist on a fresh database and swallow undefined_function with a notice.
+-- ============================================================================
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;
+
+-- ============================================================================
+-- AND FOUR FUNCTIONS WERE REACHABLE BY anon, ONE OF THEM DESTRUCTIVE.
+--
+-- Found by writing the revoke list above, which is the job that list does. Supabase grants EXECUTE
+-- on a new public-schema function to anon by default, and these four were never revoked:
+-- `payover_invoice_number` and `payover_run_blockers` leak a client's figures, and
+-- `recompute_payover_run` rewrites a run's totals -- but `void_payover_run` had NO ROLE GUARD OF
+-- ITS OWN EITHER, so anybody who could reach the API could throw away a client's working payover:
+-- every allocation released, every line dropped.
+--
+-- The revokes are in the block above. This is the guard that should have been there as well,
+-- because a grant is the first lock and the function's own test is the second.
+-- ============================================================================
+create or replace function public.void_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  update public.payment_allocations set payover_run_id = null where payover_run_id = p_run;
+  update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = p_run;
+  update public.payover_runs set carried_out_run_id = null where carried_out_run_id = p_run;
+  /* AND THE CLIENT CHARGES, or they stay pointing at a voided run and are never set off. */
+  update public.client_charges set payover_run_id = null where payover_run_id = p_run;
+  delete from public.payover_run_lines where run_id = p_run;
+  update public.payover_runs set status = 'void'
+   where id = p_run and public.payover_run_is_open(status);
+  if not found then raise exception 'Only a run that has not been approved can be voided.'; end if;
+end $$;
+
+revoke execute on function public.payover_run_blockers(uuid) from public, anon;
+revoke execute on function public.payover_invoice_number(uuid, date) from public, anon;
