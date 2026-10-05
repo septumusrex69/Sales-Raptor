@@ -155,6 +155,29 @@ export default function SignPage() {
        * that stops somebody telephoning the firm about it.
        */
       if (!done) setProblem('This link has already been used. Reloading what was signed…')
+      /*
+       * AND THE SIGNED COPY GOES BACK, to the debtor and to the collector.
+       *
+       * THE FIRM: "it should go out as an email after it's signed in a PDF format to the debtor and
+       * to the debt collector." This page cannot send it -- the signer is anonymous and has no
+       * mailbox -- so it asks the server, which draws the PDF from the frozen request and sends it
+       * from the collector's own box. The token is the only thing handed over; see signedCopy.ts.
+       *
+       * ONLY WHEN THE SIGNATURE TOOK. `done` false means the link was already used, and the copy
+       * went with the signature that used it.
+       *
+       * AND A FAILURE IS NOT SHOWN. The document IS signed -- that is already in the database, and
+       * it is what the debtor came here to do. An error about an email they were not told to
+       * expect would read as the signing having failed. The firm's own panel still carries "Email
+       * the signed copy", which is where an unsent one is noticed and sent.
+       */
+      if (done) {
+        void fetch('/api/email/signed-copy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        }).catch(() => { /* see above */ })
+      }
       await load()
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))

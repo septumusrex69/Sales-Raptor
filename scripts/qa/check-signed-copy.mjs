@@ -33,6 +33,7 @@ import { readFileSync } from 'node:fs'
 import {
   MARK_MAX_MM, markBox, marked, pngSize, signerOf, stampLine,
 } from '../../src/lib/signedMark.ts'
+import { signingSmsText } from '../../src/lib/signingRules.ts'
 import {
   blankLetter, documentHtmlToBlocks, letterToHtml, A4_LETTERHEAD,
 } from '../../src/lib/letterDocument.ts'
@@ -419,6 +420,119 @@ ok('...and a row that will not update leaves no orphan behind',
 /* NOTHING IS CHARGED HERE. Item 4(a) was raised when the agreement was ISSUED and item 6 is
    raised by openDocument for the reading; filing the bytes is neither. */
 ok('filing the bytes charges nothing', !/charge/i.test(copy.replace(/\/\*[\s\S]*?\*\//g, '')))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE SIGNED COPY GOES BACK BY ITSELF, AND ONLY ONCE
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM: "it should go out as an email after it's signed in a PDF format to the debtor and to
+ * the debt collector." Before this it sat on the account until somebody noticed it, which on their
+ * first run meant the debtor signed and heard nothing back.
+ *
+ * THE SIGNER CANNOT SEND IT. They are anonymous: no mailbox, and the anon role has no rights on
+ * anything this needs. So a server route does it, and the three things that must hold are that it
+ * cannot be made to send something else, cannot send twice, and does not take the signing page
+ * down with it when the mail fails.
+ */
+const route = read('api/_lib/email/signedCopy.ts')
+const page = read('src/pages/sign/SignPage.tsx')
+const panel = read('src/pages/accounts/SigningPanel.tsx')
+const sql = read('supabase/schema.sql')
+
+/* NOTHING THE CALLER SENDS IS TRUSTED EXCEPT THE TOKEN. Anybody holding a link could otherwise
+   email the firm's own collector a doctored agreement, on the firm's letterhead, from the firm's
+   mailbox. Asserted as the absence of every other input rather than the presence of the token. */
+ok('the route reads the token and nothing else off the request',
+  /\(req\.body as \{ token\?: unknown \}\)\?\.token/.test(route))
+for (const field of ['req.body.to', 'req.body.pdf', 'req.body.subject', 'req.body.body']) {
+  check(`...never ${field}`, route.includes(field), false)
+}
+/* AND THE DOCUMENT COMES OFF THE FROZEN REQUEST, which is the other half of the same rule. */
+ok('...and draws from the request it read', /letterToPdf\(\{\s*\n\s*doc,/.test(route))
+ok('...refusing anything not signed', /request\.state !== 'signed'/.test(route))
+
+/*
+ * ONCE. A reload, a second tab, a debtor who taps back -- each would be another copy and another
+ * item 1(a) charged to them. The claim is an UPDATE conditional on the column still being null, so
+ * the second caller matches no rows; a flag read and then written would let two callers through
+ * between the read and the write.
+ */
+ok('the route claims the send before it sends',
+  /\.update\(\{ copy_sent_at: new Date\(\)\.toISOString\(\) \}\)[\s\S]{0,120}?\.is\('copy_sent_at', null\)/
+    .test(route))
+ok('...and stops where the claim found nothing',
+  /if \(!claimed \|\| claimed\.length === 0\)/.test(route))
+const atClaim = route.indexOf("copy_sent_at: new Date()")
+ok('...before a word of it goes out', atClaim > 0 && atClaim < route.indexOf('sendAsUser('))
+/* AND THE COLUMN EXISTS TO BE CLAIMED. */
+ok('signing_requests carries the column',
+  /alter table public\.signing_requests\s*\n\s*add column if not exists copy_sent_at timestamptz;/
+    .test(sql))
+
+/* TO THE DEBTOR AND TO THE COLLECTOR, which is what the firm asked for -- and as one message with
+   a copy rather than two, so there is one charge and one thread a reply can land in. */
+ok('it goes to the debtor', /const to = \(live\.find/.test(route))
+ok('...copied to the collector', /cc: collector\?\.email/.test(route))
+ok('...from the collector’s own mailbox', /sendAsUser\(admin, account\.assigned_to,/.test(route))
+/* AND IS RECORDED, or the one message the firm did not send by hand is the one with no record. */
+ok('...and is filed against the account', /from\('account_emails'\)\s*\n?\s*\.insert\(\{/.test(route))
+
+/*
+ * AND THE SIGNING PAGE DOES NOT WAIT FOR IT OR SHOW ITS FAILURE. The document IS signed -- that is
+ * in the database already, and it is what the debtor came to do. An error about an email they were
+ * never told to expect reads as the signature having failed.
+ */
+ok('the signing page asks for the copy', /\/api\/email\/signed-copy/.test(page))
+ok('...only where the signature took', /if \(done\) \{[\s\S]{0,200}?signed-copy/.test(page))
+ok('...and swallows a failure rather than reporting one',
+  /signed-copy[\s\S]{0,300}?\}\)\.catch\(\(\) => \{/.test(page))
+
+/* ---------------------------------------------------------------------------------------------
+ * THE LINK BY SMS, WHERE EVERY CHARACTER IS MONEY
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM: "you should email the link or you should SMS the link or somehow... because now you
+ * copy the link. That's bullshit."
+ *
+ * ONE CHARACTER OUTSIDE THE GSM ALPHABET drops the whole message to UCS-2 and cuts every segment
+ * from 160 characters to 70 -- a curly apostrophe, or the non-breaking space en-ZA puts in its own
+ * thousands. It has cost the firm money before; see CLAUDE.md.
+ */
+const smsText = signingSmsText('https://raptor.example/sign/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG')
+ok('the SMS carries the address', smsText.includes('/sign/abcdefg'))
+// eslint-disable-next-line no-control-regex
+ok('...in plain GSM characters only', !/[^\x20-\x7e]/.test(smsText))
+ok('...and says who it is from, so it is not read as a scam', /Bredell Ferreira/.test(smsText))
+/*
+ * AND IT FITS IN ONE SEGMENT ON THE FIRM'S OWN DOMAIN, which is the assertion worth making rather
+ * than a character count on the words: 160 characters is a GSM segment, R3.50 under item 1(c),
+ * charged to the DEBTOR. The first draft said the same thing in eighty-seven characters of words
+ * and bought a second one.
+ */
+const real = signingSmsText(`https://raptor.bredellferreira.co.za/sign/${'a'.repeat(43)}`)
+ok(`...and fits one segment on the firm’s own domain (${real.length} of 160)`, real.length <= 160)
+/* AND THE BOX THAT SENDS IT IS THE ONE THAT KNOWS THE PRICE, not a second sender in the panel. */
+ok('the panel hands it to the SMS box', /onSms\(signingSmsText\(made\.url\)\)/.test(panel))
+ok('...which takes words it did not write', /initialText\?: string/.test(read('src/pages/accounts/SmsModal.tsx')))
+
+/* ---------------------------------------------------------------------------------------------
+ * AND THE FILED PDF CAN BE SAVED
+ * ------------------------------------------------------------------------------------------- */
+
+/*
+ * THE FIRM, of a signed copy: "it opens like as something, I don't know if it's a PDF or whatever,
+ * but I can't download it, I can't save it."
+ *
+ * THAT IS CONTENT-DISPOSITION. Served inline, Safari on an iPad renders a PDF in its own reader
+ * with no filename and no obvious way out -- on a document the firm needs to keep, post to an
+ * attorney or attach to a summons.
+ */
+const store = read('src/lib/accountWorkspace.ts')
+ok('a document arrives as a file rather than a view',
+  /createSignedUrl\(storagePath, 60, \{ download: filename \|\| true \}\)/.test(store))
+ok('...under the name the row carries', /documentUrl\(path, doc\.name\)/.test(store))
 
 if (failures.length > 0) {
   console.error(`\ncheck-signed-copy: ${pass} passed, ${failures.length} failed\n`)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Copy, FileSignature, Loader2, PenLine } from 'lucide-react'
+import { Check, Copy, FileSignature, Loader2, MessageSquare, PenLine } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary'
@@ -10,7 +10,7 @@ import {
   createSigningRequest, listSigningRequests, signingLink, type SigningState,
 } from '../../lib/signing.ts'
 import {
-  isSignable, signingButtonHtml, signingEmailBody, signingLinkLine,
+  isSignable, signingButtonHtml, signingEmailBody, signingLinkLine, signingSmsText,
 } from '../../lib/signingRules.ts'
 import { chargeAcknowledgementOfDebt } from '../../lib/accountCharges.ts'
 import { renderTemplate } from '../../lib/messageTemplates'
@@ -61,7 +61,7 @@ const COVERING_KEY = { individual: 'email-aod-individual', company: 'email-aod-c
  * the court a different balance from the one the debtor agreed to.
  */
 export function SigningPanel({
-  accountId, values, debtorName, debtorKind, claimAmount, caseNumber, onEmail,
+  accountId, values, debtorName, debtorKind, claimAmount, caseNumber, onEmail, onSms,
 }: {
   accountId: string
   /** The merge values for this account, resolved by the page. Same ones the composer uses. */
@@ -98,6 +98,15 @@ export function SigningPanel({
    * account -- a box of our own would be a second set of all of it, and the one that charged item
    * 1(a) would be whichever got remembered.
    */
+  /**
+   * SEND THE SAME LINK BY SMS, through the account's own SMS box.
+   *
+   * THE FIRM: "you should email the link or you should SMS the link or somehow... because now you
+   * copy the link. That's bullshit." Not a second sender in here, for the same reason the email is
+   * not: SmsModal knows the numbers, the segment count and what item 1(c) charges the debtor, and
+   * a copy of any of that would be the copy that drifts.
+   */
+  onSms: (text: string) => void
   onEmail: (message: {
     subject: string
     body: string
@@ -370,10 +379,20 @@ export function SigningPanel({
             The email is open with the link in it. Send it to put the document in front of them.
           </p>
           <p className="mt-1 text-[11px] text-slate-500 break-all select-all">{made.url}</p>
-          <button type="button" onClick={() => void copy(made.url)}
-            className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
-            {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy the link as well</>}
-          </button>
+          {/*
+            AND BY SMS, which is the other way a debtor on this book actually receives anything.
+            Beside the copy rather than instead of it: three ways out of one address.
+          */}
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => onSms(signingSmsText(made.url))}
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+              <MessageSquare size={11} /> Send the link by SMS
+            </button>
+            <button type="button" onClick={() => void copy(made.url)}
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--c-steel)] hover:underline">
+              {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy the link as well</>}
+            </button>
+          </div>
           {/* SAID PLAINLY, because it is the firm's own decision and somebody should be able to
               read it off the screen rather than remember it: there is no one-time pin yet. */}
           <p className="mt-2 text-[10px] text-slate-500">

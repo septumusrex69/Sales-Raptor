@@ -21182,3 +21182,25 @@ comment on policy "account_documents_file_signed" on public.account_documents is
   'could not upload a file; the firm''s side draws the PDF the first time somebody opens it and '
   'points the row at it. The USING clause is what keeps this narrow -- once storage_path is a real '
   'path the row is no longer updatable, so a filed signed agreement cannot be repointed.';
+
+-- ---------------------------------------------------------------------------
+-- THE SIGNED COPY GOES BACK BY EMAIL, AND ONLY ONCE.
+--
+-- THE FIRM: "it should go out as an email after it's signed in a PDF format to the debtor and to
+-- the debt collector."
+--
+-- WHICH THE SIGNER'S BROWSER CANNOT DO. It is anonymous: it has no mailbox, and the anon role has
+-- no rights on anything it would need. So the signing page asks a server route to do it, and the
+-- route is the thing that must not be able to run twice -- a reload, a second tab, a debtor who
+-- taps back and signs again, each would otherwise send another copy and charge item 1(a) again.
+--
+-- SO THE ROUTE CLAIMS THIS COLUMN BEFORE IT SENDS, and the claim is conditional on the column
+-- still being null. The second caller's update matches no rows and it stops.
+alter table public.signing_requests
+  add column if not exists copy_sent_at timestamptz;
+
+comment on column public.signing_requests.copy_sent_at is
+  'When the signed copy was emailed back to the debtor and the collector. Set by the server route '
+  'that sends it, and checked before sending so a reload of the signing page cannot send a second '
+  'copy. Null on a request that has not been signed, and on every request signed before the copy '
+  'went out automatically.';

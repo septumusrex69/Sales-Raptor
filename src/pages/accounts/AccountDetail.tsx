@@ -282,6 +282,8 @@ export function AccountDetail() {
   const noteRef = useRef<HTMLTextAreaElement>(null)
   const [promiseOpen, setPromiseOpen] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
+  /** Words the SMS box opens with, where something on the page wrote them. See SigningPanel. */
+  const [smsText, setSmsText] = useState<string | null>(null)
   const [disputing, setDisputing] = useState(false)
   /*
    * THE REQUEST THE TRACE BOX ASKED FOR, as a prefilled description.
@@ -1161,7 +1163,10 @@ export function AccountDetail() {
           startCompose()
           setSigningEmail(message)
           setComposeTo(emailContact?.value ?? '')
-        }} />
+        }}
+        /* The same address by SMS, into the box that knows the numbers and what a segment costs
+           the debtor. See SmsModal.initialText. */
+        onSms={(text) => { setSmsText(text); setSmsOpen(true) }} />
     </div>
   )
   const timelinePanel = (
@@ -2090,7 +2095,10 @@ export function AccountDetail() {
       {smsOpen && (
         <SmsModal accountId={account.id} debtorKind={account.debtorKind} numbers={smsNumbers}
           values={letterContext.values}
-          onClose={() => setSmsOpen(false)} onDone={reload} />
+          /* Empty for the ordinary SMS button, which opens on the template picker; written where
+             the signing panel opened this to send a link it has just made. */
+          initialText={smsText ?? undefined}
+          onClose={() => { setSmsOpen(false); setSmsText(null) }} onDone={reload} />
       )}
 
       {/*

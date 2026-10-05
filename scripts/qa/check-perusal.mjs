@@ -238,7 +238,8 @@ ok('...after the address is signed', atUrl >= 0 && atOpenCharge > atUrl)
 ok('...a signed copy that will not draw still opens, and is still perused',
   /url: signingPath\(token\),[\s\S]{0,400}?charge: await chargePerusal\(/.test(open))
 ok('...and the drawn one falls through to the file branch, which charges',
-  /path = filed/.test(open) && /const url = await documentUrl\(path\)[\s\S]{0,120}chargePerusal\(/.test(open))
+  /path = filed/.test(open)
+  && /const url = await documentUrl\(path, doc\.name\)[\s\S]{0,120}chargePerusal\(/.test(open))
 /* AND THE DRAWING HAPPENS BEFORE EITHER FEE. A PDF that failed to draw has not been perused --
    the same rule as the signed address above, applied to the thing that replaced it. */
 const atFile = open.indexOf('fileSignedCopy(')

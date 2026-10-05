@@ -4,6 +4,7 @@ import ticket from '../_lib/email/ticket.js'
 import connect from '../_lib/email/connect.js'
 import disconnect from '../_lib/email/disconnect.js'
 import send from '../_lib/email/send.js'
+import signedCopy from '../_lib/email/signedCopy.js'
 import status from '../_lib/email/status.js'
 import sync from '../_lib/email/sync.js'
 import syncAll from '../_lib/email/sync-all.js'
@@ -32,6 +33,9 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   status,
   sync,
   'sync-all': syncAll,
+  /* ANONYMOUS, and the token is the authority -- see signedCopy for why nothing else it is
+     sent is trusted. */
+  'signed-copy': signedCopy,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

@@ -110,11 +110,22 @@ export const CHARTER_GAPS: FaceGaps = {
  * every reader has; a notice that prints in the wrong face is a nuisance, and a notice that
  * refuses to attach because a font file 404ed is a demand that did not go out.
  */
-export async function fetchCharter(): Promise<CharterBytes | null> {
+/**
+ * `base` IS FOR THE SERVER, and the browser never passes it.
+ *
+ * These are root-relative paths, which a browser resolves against the page it is on and node
+ * cannot resolve at all -- so a serverless route drawing the same document would silently get
+ * null here and print the agreement in Times while the copy the firm files is in Charter. Two
+ * different-looking documents for one signed agreement is worse than either.
+ *
+ * So the server passes its own deployment's origin and gets the same four files the browser does.
+ */
+export async function fetchCharter(base = ''): Promise<CharterBytes | null> {
   try {
     const [regular, bold, italic, boldItalic] = await Promise.all(
       [CHARTER_TTF.regular, CHARTER_TTF.bold, CHARTER_TTF.italic, CHARTER_TTF.boldItalic]
-        .map(async (url) => {
+        .map(async (path) => {
+          const url = `${base}${path}`
           const res = await fetch(url)
           if (!res.ok) throw new Error(`${url}: ${res.status}`)
           return new Uint8Array(await res.arrayBuffer())

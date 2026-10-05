@@ -172,6 +172,32 @@ export function signingLinkLine(url: string): string {
 }
 
 /**
+ * THE SAME LINK, BY SMS, AND EVERY CHARACTER IS MONEY.
+ *
+ * THE FIRM: "you should email the link or you should SMS the link or somehow... because now you
+ * copy the link. That's bullshit." An email reaches the debtor who reads email; this reaches the
+ * one who does not, which on this book is most of them.
+ *
+ * AS SHORT AS IT CAN BE SAID. The address is a host plus a 43-character token -- about 85 on the
+ * firm's own domain -- and one GSM segment is 160 characters, so the words around it decide
+ * whether this is one segment or two. A segment is R3.50 under item 1(c), charged to the DEBTOR.
+ * Fifty-seven characters is what is left after saying who it is from, what it is, and that it has
+ * to be signed; the first draft said the same thing in eighty-seven and bought a second segment.
+ *
+ * NO BALANCE, NO NAME, NO REFERENCE. Each would be another line and another segment, and none of
+ * them is needed: the document behind the link says all three, and the debtor is about to read it.
+ * The case number is the one thing a reply could need and it is not here for the same reason --
+ * somebody answering an SMS answers the number it came from.
+ *
+ * ASCII ONLY, DELIBERATELY. One character outside the GSM alphabet -- a curly apostrophe, a
+ * non-breaking space out of en-ZA's own formatting -- drops the whole message to UCS-2 and cuts
+ * every segment from 160 characters to 70. See CLAUDE.md; it has cost the firm money before.
+ */
+export function signingSmsText(url: string): string {
+  return `Bredell Ferreira: sign your acknowledgement of debt here: ${url}`
+}
+
+/**
  * WHAT THE EMAIL SAYS, WHICH IS NEARLY NOTHING.
  *
  * THE FIRM: "maybe make the script or the writing for the acknowledgement of debt very short.

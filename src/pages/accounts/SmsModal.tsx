@@ -16,7 +16,7 @@ import { UseTemplate } from '../../components/library/UseTemplate'
  * Word costs more than that again. A collector who can see "2 messages, R6.90" before they press
  * send will shorten it; one who finds out on the statement will not.
  */
-export function SmsModal({ accountId, debtorKind, numbers, values, onClose, onDone }: {
+export function SmsModal({ accountId, debtorKind, numbers, values, initialText, onClose, onDone }: {
   accountId: string
   /** Which half of the library to offer: the firm's wording is written twice, person and company. */
   debtorKind: 'individual' | 'company'
@@ -31,12 +31,24 @@ export function SmsModal({ accountId, debtorKind, numbers, values, onClose, onDo
    * because somebody's retyping ran to 161 characters.
    */
   values: Record<string, string>
+  /**
+   * WORDS THE PAGE HAS ALREADY WRITTEN, where this box was opened to send something particular.
+   *
+   * THE SIGNING LINK IS THE ONE THAT USES IT. The firm: "you should email the link or you should
+   * SMS the link... because now you copy the link. That's bullshit." The address is made at the
+   * moment the document is issued, so it can never be a template -- the panel that issues it
+   * writes the message and hands it here, where the segment count and the charge already live.
+   *
+   * SEEDED, NOT LOCKED. It lands in the same box as a template's words and can be edited before it
+   * goes, which matters: a collector who has just spoken to this person knows how to say it.
+   */
+  initialText?: string
   onClose: () => void
   onDone: () => Promise<void>
 }) {
   const { session, currentUser } = useAuth()
   const [to, setTo] = useState(numbers[0]?.value ?? '')
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState<{ segments: number; charged: string } | null>(null)

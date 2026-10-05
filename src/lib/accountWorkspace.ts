@@ -730,7 +730,7 @@ export async function uploadDocument(input: {
  * THE URL FIRST. A document that cannot be opened has not been perused.
  */
 export async function openDocument(
-  doc: { id: string; accountId: string; storagePath: string },
+  doc: { id: string; accountId: string; storagePath: string; name?: string | null },
   by: string | null,
 ): Promise<{ url: string; charge: ChargeResult | null }> {
   /*
@@ -767,7 +767,7 @@ export async function openDocument(
     }
     path = filed
   }
-  const url = await documentUrl(path)
+  const url = await documentUrl(path, doc.name)
   return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
 }
 
@@ -781,9 +781,23 @@ export function signingPath(token: string): string {
  *
  * The bucket is private, so there is no permanent address to link to. Sixty seconds is enough to
  * open a PDF and not enough for the URL to be worth passing on.
+ *
+ * AND IT ARRIVES AS A FILE, NOT AS A VIEW. THE FIRM, of a signed acknowledgement of debt: "it
+ * opens like as something, I don't know if it's a PDF or whatever, but I can't download it, I
+ * can't save it."
+ *
+ * THAT IS CONTENT-DISPOSITION AND NOTHING ELSE. Without it the object is served inline, and Safari
+ * on an iPad renders a PDF in its own reader with no filename and no obvious way out -- which is
+ * exactly what the firm met, on a document they need to keep, post to an attorney or attach to a
+ * summons. `download` makes storage send `attachment` with the file's own name, which is what puts
+ * it into Files on an iPad and into Downloads everywhere else.
+ *
+ * THE NAME IS THE ROW'S, because that is the one somebody searches for later: a signed agreement
+ * saved as a UUID is a signed agreement nobody finds again.
  */
-export async function documentUrl(storagePath: string): Promise<string> {
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(storagePath, 60)
+export async function documentUrl(storagePath: string, filename?: string | null): Promise<string> {
+  const { data, error } = await supabase.storage.from(BUCKET)
+    .createSignedUrl(storagePath, 60, { download: filename || true })
   if (error || !data?.signedUrl) throw new Error(error?.message ?? 'Could not open that document.')
   return data.signedUrl
 }
