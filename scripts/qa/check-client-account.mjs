@@ -194,6 +194,62 @@ ok('payover_invoice_number as well',
 ok('and voiding a run now asks who is asking',
   /current_user_role\(\) is distinct from 'Administrator'/.test(voidRun ?? ''))
 
+/* ---------------- an overpayment is a credit to dispose of ---------------- */
+
+const dispose = liveBody('dispose_excess_credit')
+const blockers = liveBody('payover_run_blockers')
+ok('schema.sql defines dispose_excess_credit', typeof dispose === 'string' && dispose.length > 80)
+
+/*
+ * IT IS NOT SUSPENSE, AND THAT IS THE WHOLE DESIGN. Suspense means nobody knows whose the money
+ * is; an excess credit's owner is the debtor, on an account with a name on it. The firm asked
+ * whether it should go there and be refunded out of it -- asserted as an absence, because the
+ * failure would be a fully identified credit dropped into a list of unidentified receipts.
+ */
+no('an overpayment never reaches suspense', /suspend|suspense/i.test(dispose ?? ''))
+
+ok('there is a trust payment out that is not a payover',
+  /create table if not exists public\.trust_payments_out/.test(sql))
+/* RECONCILED AGAINST THE BANK like a payover run is, or it is a status change nobody can tie to
+   money actually leaving. */
+ok('...matched to a line off the statement',
+  /bank_line_id uuid references public\.bank_statement_lines\(id\)/.test(sql))
+ok('...and Administrator only', /create policy trust_payments_out_select/.test(sql))
+
+/* THREE DISPOSALS AND NO DEFAULT -- the firm chose "ask every time", because the three send the
+   same money to three different places. */
+for (const d of ['refund', 'moved', 'released']) {
+  ok(`an overpayment can be ${d}`, new RegExp(`'${d}'`).test(dispose ?? ''))
+}
+ok('...and nothing else', /refunded, moved to another account, or released to the client/.test(dispose ?? ''))
+ok('a refund has to say who it is payable to', /Say who the refund is payable to/.test(dispose ?? ''))
+ok('a move has to say which account', /Say which account it moves to/.test(dispose ?? ''))
+ok('...and not the one it is already on', /That is the account it is already on/.test(dispose ?? ''))
+ok('every disposal says why', /Say why it is going that way/.test(dispose ?? ''))
+ok('deciding twice is refused', /already been dealt with/.test(dispose ?? ''))
+/* DECIDED BEFORE THE PAYOVER GOES OUT. Once the run is issued its figures are an invoice the
+   client holds, and moving the money then changes what they were told. */
+ok('a decision is refused once the payover has gone out',
+  /The credit belongs in the next run/.test(dispose ?? ''))
+
+/*
+ * AND THE BLOCKER CLEARS. It read "held pending a refund decision" with no way to make one, so one
+ * overpayment held the rest of that client's money too -- which is what the firm hit.
+ */
+ok('only an undecided overpayment holds the run', /a\.excess_disposal is null/.test(blockers ?? ''))
+ok('...and it asks for the decision rather than naming a dead end',
+  /say what happens to the credit/.test(blockers ?? ''))
+no('...no longer calling it a refund decision nobody can make',
+  /held pending a refund decision/.test(blockers ?? ''))
+
+/* A RELEASED CREDIT REACHES THE CLIENT, and carries no commission: it is not recovered capital,
+   so there is no recovery to be paid on. */
+ok('a released credit is added to the payover', /\+ t\.released/.test(recompute ?? ''))
+ok('...only where it was actually decided',
+  /filter \(where a\.excess_disposal = 'released'\)/.test(recompute ?? ''))
+no('...and no commission is taken off it',
+  /released \* |commission.{0,20}released/.test(recompute ?? ''))
+
 console.log(`\ncheck-client-account: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

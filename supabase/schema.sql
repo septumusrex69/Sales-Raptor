@@ -24040,3 +24040,244 @@ end $$;
 
 revoke execute on function public.payover_run_blockers(uuid) from public, anon;
 revoke execute on function public.payover_invoice_number(uuid, date) from public, anon;
+
+-- ============================================================================
+-- AN OVERPAYMENT IS A CREDIT TO DISPOSE OF, AND IT IS NOT SUSPENSE
+--
+-- The excess blocker read "held pending a refund decision" and there was no way to make one, so a
+-- run with one overpayment on it stayed on needs_review for ever -- holding up the rest of that
+-- client's money as well.
+--
+-- THE FIRM ASKED WHETHER IT SHOULD GO TO SUSPENSE AND THEN BE REFUNDED. It should not. Suspense
+-- means "nobody knows whose this money is"; an excess credit's owner is known -- it is the
+-- debtor's, on an account with a name on it. Putting it there would drop a fully identified credit
+-- into a list of unidentified receipts, and whoever works that list would have to re-identify
+-- something nobody ever lost.
+--
+-- THREE DISPOSALS AND NO DEFAULT, which the firm chose: "ask every time". Refund the debtor, move
+-- it to another account of theirs, or release it to the client. Each has to be said out loud,
+-- because they send the same money three different places.
+--
+-- A REFUND IS A PAYMENT OUT OF TRUST THAT IS NOT A PAYOVER. Until now trust only paid out through
+-- a payover run, matched to a debit off the statement. A refund is the same shape -- an
+-- instruction, then a real bank movement reconciled against it -- so it is a row somebody can
+-- reconcile rather than a status change nobody can tie to the bank.
+--
+-- AND A RELEASED CREDIT CARRIES NO COMMISSION. It is not recovered capital: the debtor paid more
+-- than the account owed, so there is no recovery to be paid on. It is added to the payover whole.
+-- ============================================================================
+create table if not exists public.trust_payments_out (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts(id),
+  kind text not null check (kind in ('refund')),
+  amount numeric(12,2) not null check (amount > 0),
+  payable_to text not null,
+  reason text not null,
+  instructed_at timestamptz not null default now(),
+  instructed_by uuid references public.profiles(id),
+  /* Matched to the debit off the statement, the same way a payover run is. */
+  bank_line_id uuid references public.bank_statement_lines(id) on delete set null,
+  paid_at timestamptz,
+  paid_reference text,
+  cancelled_at timestamptz,
+  cancelled_reason text
+);
+
+create index if not exists trust_payments_out_open_idx
+  on public.trust_payments_out (instructed_at desc)
+  where paid_at is null and cancelled_at is null;
+
+alter table public.trust_payments_out enable row level security;
+create policy trust_payments_out_select on public.trust_payments_out
+  for select using (public.current_user_role() = 'Administrator');
+revoke insert, update, delete on public.trust_payments_out from authenticated, anon;
+
+-- THE DECISION LIVES ON THE ALLOCATION, beside the excess it is about, so "what happened to that
+-- overpayment" is answered by the same row that says there was one.
+alter table public.payment_allocations
+  add column if not exists excess_disposal text
+    check (excess_disposal in ('refund', 'moved', 'released')),
+  add column if not exists excess_decided_at timestamptz,
+  add column if not exists excess_decided_by uuid references public.profiles(id),
+  add column if not exists excess_moved_to uuid references public.debtor_accounts(id),
+  add column if not exists excess_payment_out_id uuid references public.trust_payments_out(id);
+
+alter table public.payover_runs
+  add column if not exists excess_released numeric(12,2) not null default 0;
+
+create or replace function public.dispose_excess_credit(
+  p_allocation uuid, p_disposal text, p_reason text,
+  p_payable_to text default null, p_move_to uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_status text;
+  v_out uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to decide what happens to an overpayment.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is going that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if coalesce(v_a.excess_credit, 0) <= 0 then
+    raise exception 'There is no overpayment on that receipt to decide about.' using errcode = '22023';
+  end if;
+  if v_a.excess_disposal is not null then
+    raise exception 'That overpayment has already been dealt with.' using errcode = '22023';
+  end if;
+
+  -- IT IS DECIDED BEFORE THE PAYOVER GOES OUT, NOT AFTER. The excess is what holds the run on
+  -- needs_review; once the run is issued its figures are an invoice the client has, and moving the
+  -- money then would be changing what they were told.
+  if v_a.payover_run_id is not null then
+    select status into v_status from public.payover_runs where id = v_a.payover_run_id;
+    if not public.payover_run_is_open(coalesce(v_status, 'paid')) then
+      raise exception 'That receipt is on a payover that has gone out. The credit belongs in the next run.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  if p_disposal = 'refund' then
+    if nullif(btrim(coalesce(p_payable_to, '')), '') is null then
+      raise exception 'Say who the refund is payable to.' using errcode = '22023';
+    end if;
+    insert into public.trust_payments_out (
+      account_id, kind, amount, payable_to, reason, instructed_by)
+    values (v_a.account_id, 'refund', v_a.excess_credit, btrim(p_payable_to), v_why, auth.uid())
+    returning id into v_out;
+
+  elsif p_disposal = 'moved' then
+    if p_move_to is null then
+      raise exception 'Say which account it moves to.' using errcode = '22023';
+    end if;
+    if p_move_to = v_a.account_id then
+      raise exception 'That is the account it is already on.' using errcode = '22023';
+    end if;
+    if not exists (select 1 from public.debtor_accounts where id = p_move_to) then
+      raise exception 'That account no longer exists.' using errcode = '22023';
+    end if;
+
+  elsif p_disposal <> 'released' then
+    raise exception 'An overpayment is refunded, moved to another account, or released to the client.'
+      using errcode = '22023';
+  end if;
+
+  update public.payment_allocations
+     set excess_disposal = p_disposal,
+         excess_decided_at = now(),
+         excess_decided_by = auth.uid(),
+         excess_moved_to = case when p_disposal = 'moved' then p_move_to end,
+         excess_payment_out_id = v_out
+   where id = p_allocation;
+
+  if v_a.payover_run_id is not null then
+    perform public.recompute_payover_run(v_a.payover_run_id);
+  end if;
+  return v_out;
+end $$;
+
+revoke execute on function public.dispose_excess_credit(uuid, text, text, text, uuid) from public, anon;
+
+-- ONLY AN UNDECIDED OVERPAYMENT HOLDS THE RUN. It used to be every one of them, with no way to
+-- decide -- so one overpayment kept the rest of that client's money waiting too.
+create or replace function public.payover_run_blockers(p_run uuid)
+returns table(kind text, detail text, amount numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'needs_rate',
+         'No commission rate on ' || count(*) || ' account(s); the client would be paid all of it',
+         sum(l.to_capital)
+    from public.payover_run_lines l
+   where l.run_id = p_run and l.needs_rate
+  having count(*) > 0
+  union all
+  select 'excess_credit',
+         count(*) || ' payment(s) came to more than the account owed; say what happens to the credit',
+         sum(l.excess_credit)
+    from public.payover_run_lines l
+    join public.payment_allocations a on a.id = l.allocation_id
+   where l.run_id = p_run and l.excess_credit > 0 and a.excess_disposal is null
+  having count(*) > 0
+  union all
+  select 'no_client_code',
+         'This client has no code, so the invoice number is provisional (' || r.invoice_number || ')',
+         null::numeric
+    from public.payover_runs r
+    join public.companies c on c.id = r.company_id
+   where r.id = p_run and nullif(btrim(coalesce(c.code, '')), '') is null
+$$;
+
+revoke execute on function public.payover_run_blockers(uuid) from public, anon;
+
+-- AND A RELEASED CREDIT REACHES THE CLIENT. Deciding "release it" did nothing until the run's
+-- arithmetic carried it: excess_credit was a blocker and nothing else, so the money would have sat
+-- in trust with a decision written beside it and no payment behind it.
+create or replace function public.recompute_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare t record;
+begin
+  select
+    coalesce(sum(l.to_capital)              filter (where l.line_kind not in ('carried','charge') and not l.paid_to_client), 0) as trust_capital,
+    coalesce(sum(l.commission)              filter (where l.line_kind not in ('carried','charge') and not l.paid_to_client), 0) as trust_commission,
+    coalesce(sum(l.payment_amount)          filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)     as ptc_received,
+    coalesce(sum(l.to_interest + l.to_costs) filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)    as ptc_fees,
+    coalesce(sum(l.to_capital)              filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)     as ptc_capital,
+    coalesce(sum(l.commission)              filter (where l.line_kind not in ('carried','charge') and l.paid_to_client), 0)     as ptc_commission,
+    /* PER LINE, AND ALREADY ROUNDED ON THE ALLOCATION -- the firm's decision 5, so the lines add
+       up to the invoice total. */
+    coalesce(sum(l.commission_vat)          filter (where l.line_kind not in ('carried','charge')), 0) as commission_vat,
+    coalesce(sum(l.carried_amount)          filter (where l.line_kind = 'carried'), 0)  as carried_in,
+    coalesce(sum(l.charge_amount)           filter (where l.line_kind = 'charge'), 0)   as charges,
+    /* AN OVERPAYMENT THE FIRM DECIDED TO RELEASE, and ONLY one that was decided. It is not
+       recovered capital -- the debtor paid more than the account owed -- so no commission is taken
+       on it and it is added whole. An undecided excess is still holding the run on needs_review
+       and reaches nobody. */
+    coalesce(sum(l.excess_credit) filter (where a.excess_disposal = 'released'), 0) as released
+  into t
+  from public.payover_run_lines l
+  left join public.payment_allocations a on a.id = l.allocation_id
+  where l.run_id = p_run;
+
+  update public.payover_runs r
+     set trust_capital = t.trust_capital,
+         trust_commission = t.trust_commission,
+         due_to_client = t.trust_capital - t.trust_commission,
+         ptc_received = t.ptc_received,
+         ptc_fees_taken = t.ptc_fees,
+         ptc_capital = t.ptc_capital,
+         ptc_commission = t.ptc_commission,
+         due_to_bf = t.ptc_fees + t.ptc_commission,
+         commission_vat = t.commission_vat,
+         carried_in = t.carried_in,
+         charges_set_off = t.charges,
+         excess_released = t.released,
+         net_payover = (t.trust_capital - t.trust_commission)
+                     - (t.ptc_fees + t.ptc_commission)
+                     - t.commission_vat
+                     + t.carried_in
+                     - t.charges
+                     + t.released,
+         /* AND THE LADDER'S FIRST TWO RUNGS, from the blockers as they stand right now. */
+         status = case when exists (select 1 from public.payover_run_blockers(p_run))
+                       then 'needs_review' else 'ready' end
+   where r.id = p_run and public.payover_run_is_open(r.status);
+end $$;
+
+revoke execute on function public.recompute_payover_run(uuid) from public, anon;
+revoke execute on function public.dispose_excess_credit(uuid, text, text, text, uuid) from public, anon;
