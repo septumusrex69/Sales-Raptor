@@ -250,6 +250,107 @@ ok('...only where it was actually decided',
 no('...and no commission is taken off it',
   /released \* |commission.{0,20}released/.test(recompute ?? ''))
 
+/* ---------------- the trust creditors, and cash reconciled to them ---------------- */
+
+/*
+ * THE FIRM: "does the overpayment then create a trust creditor?" It did not, and neither did
+ * anything else -- Raptor had no trust creditor concept at all, so "does your trust account
+ * balance to its creditors" could not be answered. Four parties hold money in that account and
+ * every cent belongs to one of them.
+ */
+const onAlloc = liveBody('trust_creditors_on_allocation')
+const onRun = liveBody('trust_creditors_on_run')
+const onOut = liveBody('trust_creditors_on_payment_out')
+const draw = liveBody('draw_from_trust')
+const position = liveBody('trust_position')
+
+ok('there is a trust creditors ledger', /create table if not exists public\.trust_creditor_entries/.test(sql))
+ok('...with the four parties who hold money there',
+  /party text not null check \(party in \('client', 'debtor', 'firm', 'unidentified'\)\)/.test(sql))
+/* A LEDGER, SO IT IS WRITTEN AND NEVER EDITED -- check-financial-immutability holds the rest. */
+ok('...which cannot be edited through the API',
+  /revoke insert, update, delete on public\.trust_creditor_entries from authenticated, anon/.test(sql))
+
+/*
+ * THE RECEIPT SPLITS THREE WAYS AND THE THREE ADD BACK TO IT. Checked across every allocation on
+ * the book before this was written -- eight of eight to the cent -- which is what makes the
+ * identity safe to build a reconciliation on.
+ */
+ok('the firm is owed its fees, interest and commission',
+  /to_interest, 0\) \+ coalesce\(new\.to_costs, 0\)\s*\n\s*\+ coalesce\(new\.commission, 0\) \+ coalesce\(new\.commission_vat, 0\)/.test(onAlloc ?? ''))
+ok('the client is owed capital less commission',
+  /to_capital, 0\) - coalesce\(new\.commission, 0\)\s*\n\s*- coalesce\(new\.commission_vat, 0\)/.test(onAlloc ?? ''))
+ok('the debtor is owed the overpayment', /new\.excess_credit,\s*\n?\s*'Paid more than the account owed/.test(onAlloc ?? ''))
+
+/*
+ * MONEY THAT NEVER ENTERED TRUST MAKES NO TRUST CREDITOR. A paid-to-client receipt went to the
+ * client's own bank; counting it here would inflate the creditors against cash that is not there,
+ * which reads as a surplus and hides a real difference.
+ */
+ok('a receipt paid straight to the client makes no trust creditor',
+  /if new\.paid_to_client then return new; end if;/.test(onAlloc ?? ''))
+ok('...and neither does a reversed one', /if new\.status = 'reversed' then return new; end if;/.test(onAlloc ?? ''))
+ok('...nor demo money', /if coalesce\(v_demo, false\) then return new; end if;/.test(onAlloc ?? ''))
+
+/* APPROVING RECLASSIFIES, PAYING MOVES CASH. The first two are the same money in the same account
+   changing whose it is, which is why they hang off the status rather than paid_at. */
+ok('a charge set off moves from the client to the firm',
+  /'Charges set off against payover '/.test(onRun ?? '') && /'Charges recovered from payover '/.test(onRun ?? ''))
+ok('a released overpayment moves from the debtor to the client',
+  /'Overpayment released to the client on '/.test(onRun ?? ''))
+ok('and paying the payover is what takes it out of trust',
+  /old\.paid_at is null and new\.paid_at is not null/.test(onRun ?? ''))
+ok('a refund takes the debtor\u2019s credit out',
+  /old\.paid_at is null and new\.paid_at is not null/.test(onOut ?? ''))
+
+/*
+ * THE FIRM CANNOT DRAW MORE THAN IT HAS EARNED. Drawing against another party's money is a trust
+ * shortfall -- the most serious thing that can happen in this account -- so it is refused at the
+ * moment of asking rather than found at a reconciliation weeks later, by which time it has gone.
+ */
+ok('drawing is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(draw ?? ''))
+/* THE COMPARISON, NOT THE MESSAGE. Asserted on the wording first, which passed happily with the
+   test replaced by `if false` -- the sentence sat there unreachable inside a dead branch. */
+ok('...and refuses to overdraw', /if p_amount > v_held then/.test(draw ?? ''))
+ok('...saying so in the firm\u2019s terms', /Drawing more than is earned is a trust shortfall/.test(draw ?? ''))
+ok('...measured against what the firm actually holds',
+  /select coalesce\(sum\(amount\), 0\) into v_held[\s\S]{0,160}where party = 'firm'/.test(draw ?? ''))
+ok('...and says which transfer it was', /Say which transfer this is/.test(draw ?? ''))
+
+/*
+ * AND THE RECONCILIATION TAKES CASH FROM THE BANK, not from Raptor. A balance computed on both
+ * sides by the same code reconciles to itself and proves nothing.
+ */
+/*
+ * READ OUT OF THE `cash` CTE ITSELF, not the function. Both assertions were written against the
+ * whole body and both passed with the cash side's filter replaced by `true` -- the `unplaced` CTE
+ * further down has the same two lines, so the patterns matched it instead and the reconciliation
+ * would have compared every bank account in the firm against the trust creditors.
+ */
+const cashCte = (() => {
+  const at = (position ?? '').indexOf('with cash as (')
+  if (at < 0) return ''
+  /* THE CTE'S OWN CLOSING BRACKET, which is at the start of a line. Looking for the first '),'
+     landed inside `coalesce(sum(l.amount), 0)` and returned a few characters -- so the assertions
+     below failed on correct code until this was read properly. */
+  const end = (position ?? '').indexOf('\n  ),', at)
+  return end < 0 ? '' : position.slice(at, end)
+})()
+ok('the cash side of the reconciliation really is its own block', cashCte.length > 60)
+ok('trust cash is read off the bank statement',
+  /from public\.bank_statement_lines l/.test(cashCte))
+ok('...on the trust account, not any account',
+  /l\.bank_account = f\.trust_account_number/.test(cashCte))
+ok('...and the difference is named rather than hidden',
+  /c\.bal - \(h\.total \+ u\.bal\)/.test(position ?? ''))
+/* AN UNPLACED RECEIPT IS A CREDITOR WITH NO NAME ON IT YET -- counted, because the bank has the
+   money whether or not anybody has said whose it is. */
+ok('receipts nobody has placed are still owed to somebody',
+  /l\.direction = 'credit' and l\.status = 'unallocated'/.test(position ?? ''))
+ok('...and every party is reported separately',
+  ['client', 'debtor', 'firm', 'unidentified'].every((p) =>
+    new RegExp(`filter \\(where party = '${p}'\\)`).test(position ?? '')))
+
 console.log(`\ncheck-client-account: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

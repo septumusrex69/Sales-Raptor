@@ -59,6 +59,15 @@ const LEDGERS = [
    */
   'payover_run_lines',
   /*
+   * AND THE SEVENTH: THE TRUST CREDITORS.
+   *
+   * Every cent in the trust account belongs to a client, a debtor, the firm or somebody not yet
+   * identified, and these entries are what says which. A balance that can be adjusted after the
+   * fact is not a balance anybody can take to the Council -- the same reason the other six are
+   * here, applied to the one ledger that answers "does trust balance to its creditors".
+   */
+  'trust_creditor_entries',
+  /*
    * AND THE SIXTH, WHICH IS NOT MONEY BUT DECIDES IT: who changed a commission rate, the VAT
    * rate, a tariff or the cut-over, from what to what, and why. An audit trail somebody can edit
    * is not an audit trail -- and this one is the only record of a change that silently alters
@@ -87,8 +96,28 @@ for (const table of LEDGERS) {
      the ledger either -- a different bug that this check would otherwise call a pass. */
   ok(`...while it can still be read`,
     new RegExp(`create policy\\s+"?[\\w]+"?\\s+on\\s+public\\.${table}\\s+for\\s+select\\b`, 'i').test(clean))
-  ok(`...and written to in the first place`,
-    new RegExp(`create policy\\s+"?[\\w]+"?\\s+on\\s+public\\.${table}\\s+for\\s+insert\\b`, 'i').test(clean))
+  /*
+   * WRITTEN TO IN THE FIRST PLACE, BY ONE OF TWO ROUTES, and the second is the stricter one.
+   *
+   * Five of these carry an insert policy because the app inserts them directly.
+   * `trust_creditor_entries` carries NONE: every entry is written by a security-definer trigger or
+   * function, which bypasses RLS, and the insert grant is revoked besides -- so there is no way to
+   * put a row in it through PostgREST at all. Requiring an insert policy here would have meant
+   * ADDING one, which is the opposite of what this file is for.
+   *
+   * The original worry still holds and is still checked: a table with no policy of any kind would
+   * satisfy "no update policy" while nobody could read the ledger either. The select policy above
+   * is what rules that out.
+   */
+  const insertPolicy = new RegExp(
+    `create policy\\s+"?[\\w]+"?\\s+on\\s+public\\.${table}\\s+for\\s+insert\\b`, 'i').test(clean)
+  const insertRevoked = new RegExp(
+    `revoke[^;]*insert[^;]*on\\s+public\\.${table}\\s+from`, 'i').test(clean)
+  ok(`...and written to in the first place, by a policy or by definer alone`,
+    insertPolicy || insertRevoked)
+  /* AND NEVER BOTH WAYS AT ONCE: a table that revokes the grant and then adds a policy is one
+     somebody half-changed, and which of the two is the real rule is then a coin toss. */
+  ok(`...one route or the other, not both`, !(insertPolicy && insertRevoked))
 }
 
 /*

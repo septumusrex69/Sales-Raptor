@@ -24281,3 +24281,274 @@ end $$;
 
 revoke execute on function public.recompute_payover_run(uuid) from public, anon;
 revoke execute on function public.dispose_excess_credit(uuid, text, text, text, uuid) from public, anon;
+
+-- ============================================================================
+-- THE TRUST CREDITORS LEDGER, AND TRUST CASH RECONCILED TO IT
+--
+-- THE FIRM, on the overpayment: "does the overpayment then create a trust creditor?" It did not,
+-- and neither did anything else. Raptor had no trust creditor concept at all -- the five money
+-- ledgers are account-side, nothing computed a trust balance, and nothing compared one to the
+-- bank. "Does your trust account balance to your trust creditors" could not be answered, which is
+-- the question an inspection asks first.
+--
+-- FOUR PARTIES HOLD MONEY IN THIS ACCOUNT, and every cent in it belongs to one of them:
+--   CLIENT        capital recovered less commission, until the payover is paid
+--   DEBTOR        an overpayment, until it is refunded or released
+--   FIRM          fees, interest and commission earned, until drawn to the business account
+--   UNIDENTIFIED  a receipt the bank has and nobody has placed yet
+--
+-- THE RECEIPT SPLITS THREE WAYS AND THE THREE ADD BACK TO IT EXACTLY. Checked across every
+-- allocation on the book before this was written: eight of eight, to the cent, no rounding gap.
+--   firm   = to_interest + to_costs + commission + commission_vat
+--   client = to_capital - commission - commission_vat
+--   debtor = excess_credit
+--
+-- A LEDGER, SO IT IS WRITTEN AND NEVER EDITED -- no update and no delete policy, exactly like the
+-- five money ledgers. A trust creditor balance that can be adjusted afterwards is not a balance
+-- anybody can take to the Council.
+--
+-- AND THE RECONCILIATION IS THE POINT. `trust_position` puts the BANK's own balance beside the sum
+-- of the creditors and names the difference. It is not meant always to be nil: on the firm's own
+-- staging data it reports -963.50, which is a R962.50 payment out to a client with no payover run
+-- behind it and a R1.00 bank charge, both excluded from reconciliation and so accounted for by
+-- nothing. That is the number this exists to surface.
+-- ============================================================================
+create table if not exists public.trust_creditor_entries (
+  id uuid primary key default gen_random_uuid(),
+  entry_at timestamptz not null default now(),
+  party text not null check (party in ('client', 'debtor', 'firm', 'unidentified')),
+  company_id uuid references public.companies(id),
+  account_id uuid references public.debtor_accounts(id),
+  /* Positive is money that came into trust and is now owed to that party; negative is money that
+     left trust to them, or was reclassified to somebody else. */
+  amount numeric(12,2) not null,
+  reason text not null,
+  payment_id uuid references public.account_payments(id),
+  allocation_id uuid references public.payment_allocations(id),
+  payover_run_id uuid references public.payover_runs(id),
+  payment_out_id uuid references public.trust_payments_out(id),
+  bank_line_id uuid references public.bank_statement_lines(id),
+  created_by uuid references public.profiles(id)
+);
+
+create index if not exists trust_creditor_entries_party_idx
+  on public.trust_creditor_entries (party, entry_at desc);
+create index if not exists trust_creditor_entries_company_idx
+  on public.trust_creditor_entries (company_id) where company_id is not null;
+create index if not exists trust_creditor_entries_account_idx
+  on public.trust_creditor_entries (account_id) where account_id is not null;
+
+alter table public.trust_creditor_entries enable row level security;
+create policy trust_creditor_entries_select on public.trust_creditor_entries
+  for select using (public.current_user_role() = 'Administrator');
+revoke insert, update, delete on public.trust_creditor_entries from authenticated, anon;
+
+-- EVERY ALLOCATION SPLITS INTO CREDITORS AS IT POSTS. A trigger rather than a change to
+-- allocate_payment, which is the engine and has enough to do: the split is a consequence of the
+-- allocation, not part of deciding it.
+create or replace function public.trust_creditors_on_allocation()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_company uuid;
+  v_demo boolean;
+  v_firm numeric;
+  v_client numeric;
+begin
+  -- MONEY THAT NEVER ENTERED TRUST MAKES NO TRUST CREDITOR. A paid-to-client receipt went to the
+  -- client's own bank; the firm is owed commission on it, which is a CLIENT debt settled through
+  -- the payover's due_to_bf, not money sitting in this account.
+  if new.paid_to_client then return new; end if;
+  if new.status = 'reversed' then return new; end if;
+
+  select p.is_demo, d.company_id into v_demo, v_company
+    from public.account_payments p
+    join public.debtor_accounts d on d.id = p.account_id
+   where p.id = new.payment_id;
+  if coalesce(v_demo, false) then return new; end if;
+
+  v_firm := coalesce(new.to_interest, 0) + coalesce(new.to_costs, 0)
+          + coalesce(new.commission, 0) + coalesce(new.commission_vat, 0);
+  v_client := coalesce(new.to_capital, 0) - coalesce(new.commission, 0)
+            - coalesce(new.commission_vat, 0);
+
+  if v_firm <> 0 then
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('firm', v_company, new.account_id, v_firm,
+      'Fees, interest and commission earned, held in trust until drawn', new.payment_id, new.id);
+  end if;
+  if v_client <> 0 then
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('client', v_company, new.account_id, v_client,
+      'Capital recovered, less commission, held for the client', new.payment_id, new.id);
+  end if;
+  if coalesce(new.excess_credit, 0) <> 0 then
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('debtor', v_company, new.account_id, new.excess_credit,
+      'Paid more than the account owed, held for the debtor', new.payment_id, new.id);
+  end if;
+  return new;
+end $$;
+
+create trigger trust_creditors_on_allocation
+  after insert on public.payment_allocations
+  for each row execute function public.trust_creditors_on_allocation();
+
+-- A RUN APPROVED RECLASSIFIES; A RUN PAID MOVES CASH. The first two are the same money in the same
+-- account changing whose it is, which is why they hang off the status and not off paid_at.
+create or replace function public.trust_creditors_on_run()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if public.payover_run_is_open(old.status) and not public.payover_run_is_open(new.status)
+     and new.status <> 'void' then
+    /* A charge set off is the firm keeping what the client owed it. */
+    if coalesce(new.charges_set_off, 0) <> 0 then
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('client', new.company_id, -new.charges_set_off,
+              'Charges set off against payover ' || new.invoice_number, new.id),
+             ('firm', new.company_id, new.charges_set_off,
+              'Charges recovered from payover ' || new.invoice_number, new.id);
+    end if;
+    /* A released overpayment stops being the debtor's and becomes the client's. */
+    if coalesce(new.excess_released, 0) <> 0 then
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('debtor', new.company_id, -new.excess_released,
+              'Overpayment released to the client on ' || new.invoice_number, new.id),
+             ('client', new.company_id, new.excess_released,
+              'Overpayment released by the debtor, on ' || new.invoice_number, new.id);
+    end if;
+  end if;
+
+  if old.paid_at is null and new.paid_at is not null and coalesce(new.net_payover, 0) <> 0 then
+    insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+    values ('client', new.company_id, -new.net_payover,
+            'Payover ' || new.invoice_number || ' paid to the client', new.id);
+  end if;
+  return new;
+end $$;
+
+create trigger trust_creditors_on_run
+  after update on public.payover_runs
+  for each row execute function public.trust_creditors_on_run();
+
+create or replace function public.trust_creditors_on_payment_out()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_company uuid;
+begin
+  if old.paid_at is null and new.paid_at is not null then
+    select company_id into v_company from public.debtor_accounts where id = new.account_id;
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_out_id)
+    values ('debtor', v_company, new.account_id, -new.amount,
+            'Refunded to ' || new.payable_to, new.id);
+  end if;
+  return new;
+end $$;
+
+create trigger trust_creditors_on_payment_out
+  after update on public.trust_payments_out
+  for each row execute function public.trust_creditors_on_payment_out();
+
+-- THE FIRM TAKING ITS OWN MONEY OUT, AND IT CANNOT TAKE MORE THAN IT HAS EARNED.
+-- Drawing against another party's money is a trust shortfall, which is the single most serious
+-- thing that can happen in this account -- so it is refused here rather than found at a
+-- reconciliation three weeks later, by which time the money has gone.
+create or replace function public.draw_from_trust(
+  p_amount numeric, p_reference text, p_company uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_held numeric;
+  v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A drawing is an amount, so it has to be more than nothing.' using errcode = '22023';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which transfer this is.' using errcode = '22023';
+  end if;
+
+  select coalesce(sum(amount), 0) into v_held
+    from public.trust_creditor_entries
+   where party = 'firm' and (p_company is null or company_id = p_company);
+  if p_amount > v_held then
+    raise exception 'The firm has % in trust and this would draw %. Drawing more than is earned is a trust shortfall.',
+      to_char(v_held, 'FM999999990.00'), to_char(p_amount, 'FM999999990.00')
+      using errcode = '22023';
+  end if;
+
+  insert into public.trust_creditor_entries (
+    party, company_id, amount, reason, created_by)
+  values ('firm', p_company, -round(p_amount, 2),
+          'Drawn to the business account - ' || v_ref, auth.uid())
+  returning id into v_id;
+  return v_id;
+end $$;
+
+revoke execute on function public.draw_from_trust(numeric, text, uuid) from public, anon;
+
+-- THE RECONCILIATION. The BANK's own balance beside the sum of what is owed out of it, and the
+-- difference named rather than hidden -- a figure Raptor computed on both sides would reconcile to
+-- itself and prove nothing.
+create or replace function public.trust_position()
+returns table(
+  trust_cash numeric, creditors numeric, difference numeric,
+  owed_to_clients numeric, owed_to_debtors numeric, owed_to_firm numeric, unidentified numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+  ),
+  held as (
+    select
+      coalesce(sum(amount) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(amount), 0) as total
+      from public.trust_creditor_entries
+  ),
+  unplaced as (
+    /* RECEIPTS THE BANK HAS AND NOBODY HAS PLACED. They are somebody's money and no allocation has
+       said whose, so they are a creditor with no name on it yet -- counted here rather than
+       written as entries, because placing one is what decides who it belongs to. */
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal, h.total + u.bal, c.bal - (h.total + u.bal),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown
+    from cash c, held h, unplaced u
+   where public.current_user_role() = 'Administrator'
+$$;
+
+revoke execute on function public.trust_position() from public, anon;
