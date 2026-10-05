@@ -283,12 +283,23 @@ ok('the client is owed capital less commission',
 ok('the debtor is owed the overpayment', /new\.excess_credit,\s*\n?\s*'Paid more than the account owed/.test(onAlloc ?? ''))
 
 /*
- * MONEY THAT NEVER ENTERED TRUST MAKES NO TRUST CREDITOR. A paid-to-client receipt went to the
- * client's own bank; counting it here would inflate the creditors against cash that is not there,
- * which reads as a surplus and hides a real difference.
+ * A PTC MAKES THE CLIENT A TRUST DEBTOR, NOT A CREDITOR -- the firm's own correction: "the trust
+ * can have creditors or debtors, because PTCs of debtors paid to clients owe the trust."
+ *
+ * No money entered trust, which is why this used to return early and skip the receipt entirely.
+ * But the fees, interest and commission were earned and the client owes them, so leaving it out
+ * meant the trust position and the payover disagreed about the same money: due_to_bf set it off
+ * every month while the trust ledger had never heard of it.
  */
-ok('a receipt paid straight to the client makes no trust creditor',
+ok('a receipt paid straight to the client is still recorded',
+  /if new\.paid_to_client then\s*\n\s*v_firm :=/.test(onAlloc ?? ''))
+no('...and no longer skipped altogether',
   /if new\.paid_to_client then return new; end if;/.test(onAlloc ?? ''))
+/* NEGATIVE, because the client OWES it. The sign is the whole difference between a receivable and
+   a payable, and getting it the wrong way round reads as money the firm is holding. */
+ok('...as something the client owes the trust',
+  /values \('client', v_company, new\.account_id, -v_firm,/.test(onAlloc ?? ''))
+ok('...and says so in the entry', /so they owe the trust the fees and commission/.test(onAlloc ?? ''))
 ok('...and neither does a reversed one', /if new\.status = 'reversed' then return new; end if;/.test(onAlloc ?? ''))
 ok('...nor demo money', /if coalesce\(v_demo, false\) then return new; end if;/.test(onAlloc ?? ''))
 
@@ -342,7 +353,23 @@ ok('trust cash is read off the bank statement',
 ok('...on the trust account, not any account',
   /l\.bank_account = f\.trust_account_number/.test(cashCte))
 ok('...and the difference is named rather than hidden',
-  /c\.bal - \(h\.total \+ u\.bal\)/.test(position ?? ''))
+  /c\.bal - \(\(h\.owed_out \+ u\.bal\) - h\.owed_in\)/.test(position ?? ''))
+
+/*
+ * AND THE TWO SIDES ARE REPORTED APART. Summing a receivable into a smaller payable hides it, and
+ * a reconciliation that reads better than the truth is the one kind worse than none.
+ */
+ok('what is owed OUT of trust is counted on its own',
+  /filter \(where bal > 0\), 0\) as owed_out/.test(position ?? ''))
+ok('...and what is owed TO it separately',
+  /filter \(where bal < 0\), 0\) as owed_in/.test(position ?? ''))
+/*
+ * A CLIENT NETS ACROSS THEIR BOOK, because that is how they are paid -- one payover run for the
+ * company. Netting per account showed a client owed R100 on one file and owing R50 on another as a
+ * R100 creditor AND a R50 debtor, when the firm will hand them R50: both sides overstated.
+ */
+ok('a client nets across their whole book, a debtor per account',
+  /case when party = 'client' then company_id::text else coalesce\(account_id::text, party\) end/.test(position ?? ''))
 /* AN UNPLACED RECEIPT IS A CREDITOR WITH NO NAME ON IT YET -- counted, because the bank has the
    money whether or not anybody has said whose it is. */
 ok('receipts nobody has placed are still owed to somebody',

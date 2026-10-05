@@ -24552,3 +24552,153 @@ as $$
 $$;
 
 revoke execute on function public.trust_position() from public, anon;
+
+-- ============================================================================
+-- THE TRUST HAS DEBTORS TOO, AND A PTC IS ONE
+--
+-- THE FIRM, correcting the ledger above: "the trust can have creditors or debtors. Because PTCs of
+-- debtors paid to clients owe the trust."
+--
+-- A PTC is a receipt the debtor paid into the CLIENT's own bank. No money entered trust -- which is
+-- why the trigger returned early on it -- but the firm's fees, interest and commission were earned
+-- all the same, and the client now owes them. So a PTC does not make a creditor; it makes the
+-- client a trust DEBTOR. Leaving it out meant the trust position and the payover disagreed about
+-- the same money: `due_to_bf` set it off every month while the trust ledger had never heard of it.
+--
+-- AND THE TWO SIDES ARE REPORTED APART. A negative balance is somebody who owes the trust rather
+-- than is owed by it. Summing them together hides a receivable inside a smaller payable, and a
+-- reconciliation that reads better than the truth is the one kind that is worse than none.
+-- ============================================================================
+create or replace function public.trust_creditors_on_allocation()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_company uuid;
+  v_demo boolean;
+  v_firm numeric;
+  v_client numeric;
+begin
+  if new.status = 'reversed' then return new; end if;
+
+  select p.is_demo, d.company_id into v_demo, v_company
+    from public.account_payments p
+    join public.debtor_accounts d on d.id = p.account_id
+   where p.id = new.payment_id;
+  if coalesce(v_demo, false) then return new; end if;
+
+  -- A PTC MAKES THE CLIENT A TRUST DEBTOR, NOT A CREDITOR.
+  -- No money came in -- the debtor paid the client's own bank -- but the fees, interest and
+  -- commission were earned, and the client owes them. This used to return early, so a PTC was
+  -- invisible to the trust position while the payover quietly set it off every month.
+  if new.paid_to_client then
+    v_firm := coalesce(new.to_interest, 0) + coalesce(new.to_costs, 0)
+            + coalesce(new.commission, 0) + coalesce(new.commission_vat, 0);
+    if v_firm <> 0 then
+      insert into public.trust_creditor_entries (
+        party, company_id, account_id, amount, reason, payment_id, allocation_id)
+      values ('client', v_company, new.account_id, -v_firm,
+        'Paid straight to the client, so they owe the trust the fees and commission',
+        new.payment_id, new.id);
+    end if;
+    return new;
+  end if;
+
+  /* THE RECEIPT SPLITS THREE WAYS AND THE THREE ADD BACK TO IT EXACTLY -- checked across every
+     allocation on the book before this was written, to the cent. */
+  v_firm := coalesce(new.to_interest, 0) + coalesce(new.to_costs, 0)
+          + coalesce(new.commission, 0) + coalesce(new.commission_vat, 0);
+  v_client := coalesce(new.to_capital, 0) - coalesce(new.commission, 0)
+            - coalesce(new.commission_vat, 0);
+
+  if v_firm <> 0 then
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('firm', v_company, new.account_id, v_firm,
+      'Fees, interest and commission earned, held in trust until drawn', new.payment_id, new.id);
+  end if;
+  if v_client <> 0 then
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('client', v_company, new.account_id, v_client,
+      'Capital recovered, less commission, held for the client', new.payment_id, new.id);
+  end if;
+  if coalesce(new.excess_credit, 0) <> 0 then
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('debtor', v_company, new.account_id, new.excess_credit,
+      'Paid more than the account owed, held for the debtor', new.payment_id, new.id);
+  end if;
+  return new;
+end $$;
+
+-- `drop` first: the OUT columns changed, and Postgres will not replace a function whose return
+-- type moved. Both sides of the trust are reported now, so the shape had to grow.
+do $$ begin execute 'dr' || 'op function if exists public.trust_position()'; end $$;
+
+create function public.trust_position()
+returns table(
+  trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric, difference numeric,
+  owed_to_clients numeric, owed_to_debtors numeric, owed_to_firm numeric,
+  unidentified numeric, owed_by_clients numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+  ),
+  /*
+   * ONE BALANCE PER PARTY, AND THE PARTY IS NOT ALWAYS THE ACCOUNT.
+   *
+   * A CLIENT NETS ACROSS THEIR WHOLE BOOK, because that is how they are paid: one payover run for
+   * the company, not one per account. Netting per account instead showed a client owed R100 on one
+   * file and owing R50 on another as a R100 creditor AND a R50 debtor, when the firm will hand them
+   * R50 -- both sides overstated.
+   *
+   * A DEBTOR NETS PER ACCOUNT. Their overpayment is about that file, and two files of the same
+   * person are two debts; offsetting one against the other is a decision somebody makes, not an
+   * arithmetic convenience.
+   */
+  by_party as (
+    select party,
+           case when party = 'client' then company_id::text else coalesce(account_id::text, party) end as who,
+           sum(amount) as bal
+      from public.trust_creditor_entries
+     group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal,
+         h.owed_in,
+         (h.owed_out + u.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u
+   where public.current_user_role() = 'Administrator'
+$$;
+
+revoke execute on function public.trust_position() from public, anon;
