@@ -33,7 +33,8 @@ export const COLUMNS = 'firm_name, registration_number, vat_number, council_numb
   + 'trust_account_type, payment_instruction, '
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
-  + 'email_font, email_size_pt, vat_rate, time_zone, finance_cutover_at, updated_at'
+  + 'email_font, email_size_pt, vat_rate, time_zone, finance_cutover_at, parked_credit_months, '
+  + 'updated_at'
 
 export interface Row {
   firm_name: string
@@ -64,6 +65,7 @@ export interface Row {
   /* numeric comes back as a string over the wire, like every other numeric here. */
   vat_rate: number | string
   time_zone: string
+  parked_credit_months: number | null
   finance_cutover_at: string | null
   updated_at: string
 }
@@ -130,6 +132,14 @@ export interface FirmSettings {
    * default, "unless you deliberately change it".
    */
   timeZone: string
+  /*
+   * HOW LONG A PARKED OVERPAYMENT WAITS BEFORE THE FIRM MAY TAKE IT.
+   *
+   * NOT YET THE FIRM'S DECISION. They said "taken to the firm after a period" and have not named
+   * the period; six months is a placeholder. It is a setting rather than a constant precisely so
+   * naming it costs nothing.
+   */
+  parkedCreditMonths: number
   /**
    * WHEN THE ALLOCATION ENGINE STARTS SPLITTING PAYMENTS, AND NULL UNTIL THE FIRM SAYS SO.
    *
@@ -183,6 +193,7 @@ export const FIRM_UNSET: FirmSettings = {
   vatRate: 0.15,
   /* The zone every date in this codebase already names literally, in one place for once. */
   timeZone: 'Africa/Johannesburg',
+  parkedCreditMonths: 6,
   /* Off. An engine that switched itself on across the whole book would not be undoable. */
   financeCutoverAt: null,
   updatedAt: '',
@@ -226,6 +237,7 @@ export function toSettings(r: Row): FirmSettings {
     /* A row written before the column existed reads null over the wire, and a null zone is a
        calendar that stops placing floating invitations -- the state this column exists to end. */
     timeZone: r.time_zone || 'Africa/Johannesburg',
+    parkedCreditMonths: r.parked_credit_months ?? 6,
     financeCutoverAt: r.finance_cutover_at ?? null,
     updatedAt: r.updated_at,
   }

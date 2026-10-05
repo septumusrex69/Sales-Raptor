@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
+import { DisposeExcessModal } from '../../components/finance/DisposeExcessModal'
+import { ParkedCredits } from '../../components/finance/ParkedCredits'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
@@ -41,6 +43,7 @@ export function FinanceExceptions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rateFor, setRateFor] = useState<ExceptionJob | null>(null)
+  const [disposing, setDisposing] = useState<ExceptionJob | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -98,6 +101,23 @@ export function FinanceExceptions() {
                     className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
                     {j.action}
                   </button>
+                ) : j.kind === 'excess_credit' && j.allocationId ? (
+                  /*
+                   * DECIDED HERE NOW, RATHER THAN ON THE ACCOUNT.
+                   *
+                   * It used to open the account, on the reasoning that an overpayment is a DECISION
+                   * and the person making it should see everything it depends on. That held while
+                   * the only answers were refund, move or release -- each of which is about the
+                   * debtor. The fourth, parking, is about the FIRM's time, and the thing it
+                   * depends on is the amount, which is already in this row. Opening a whole account
+                   * to decide that R4.12 is not worth a telephone call is the long way round.
+                   *
+                   * The account is still one click away, under the debtor's name.
+                   */
+                  <button type="button" onClick={() => setDisposing(j)}
+                    className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
+                    Decide it
+                  </button>
                 ) : (
                   <Link to={`/accounts/${j.accountId}`}
                     className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100">
@@ -114,6 +134,24 @@ export function FinanceExceptions() {
           </div>
         </Card>
       ))}
+
+      {/*
+        AND WHAT WAS PARKED EARLIER. Not an exception -- nothing is holding a payover up -- but this
+        is where somebody comes to deal with overpayments, and a credit parked six months ago has
+        nowhere else to surface. It draws nothing at all when nothing is parked.
+      */}
+      <ParkedCredits />
+
+      {disposing?.allocationId && (
+        <DisposeExcessModal
+          allocationId={disposing.allocationId}
+          debtor={disposing.debtor}
+          caseNumber={disposing.caseNumber}
+          amount={disposing.amount ?? 0}
+          onClose={() => setDisposing(null)}
+          onDone={async () => { setDisposing(null); await load() }}
+        />
+      )}
 
       {rateFor && (
         <SetRateModal

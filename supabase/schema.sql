@@ -25458,3 +25458,277 @@ revoke all on function public.settle_account(uuid, text, text, text) from anon;
 grant execute on function public.withdrawal_basis(uuid) to authenticated;
 grant execute on function public.withdraw_account(uuid, text, boolean, boolean, boolean, numeric, text) to authenticated;
 grant execute on function public.settle_account(uuid, text, text, text) to authenticated;
+
+-- ============================================================================================
+-- AN OVERPAYMENT NOBODY CLAIMS: PARKED, THEN TAKEN TO THE FIRM
+--
+-- THE FOURTH DISPOSAL. A debtor's overpayment could be refunded, moved to another of their
+-- accounts, or released to the client. None of those fits the commonest case, which the firm
+-- described exactly: "who are we going to pay five rand to? We're going to give the guy a call, and
+-- the costs are going to be already more than 20 rand. If there's any cost less left... that money
+-- stays in the trust or whatever. It can go to us or whatever."
+--
+-- PARKING DECIDES NOTHING ABOUT THE MONEY. It is still the DEBTOR'S -- nothing moves in the trust
+-- ledger -- it simply stops holding the payover run and gets a date to come back on. That date is
+-- `parked_credit_months` on firm_settings, DEFAULTED TO SIX AND NOT YET THE FIRM'S DECISION: the
+-- firm said "taken to the firm after a period" without naming the period, so six months is a
+-- placeholder they can change and the function reads the setting rather than a constant.
+--
+-- TAKING IT WAITS OUT THE PERIOD, and that is the whole defensibility of it. Taking a credit the
+-- day it is parked is keeping a debtor's money; waiting is giving up on returning it. The function
+-- refuses an early take outright.
+--
+-- AND IT REVERSES, because the case it has to survive is the debtor coming back. Both directions
+-- write TWO FRESH ENTRIES rather than editing anything: the ledger is append-only and has no update
+-- or delete policy at all -- check-financial-immutability exists to keep it that way -- so the
+-- debtor's balance falls by a new negative entry and the firm's rises by a matching positive one.
+-- Proved against staging: debtor R410.63 to nil and back, firm up R410.63 and back, the trust total
+-- unchanged throughout because the money only ever moves between parties inside it.
+-- ============================================================================================
+
+alter table public.payment_allocations
+  drop constraint if exists payment_allocations_excess_disposal_check;
+alter table public.payment_allocations
+  add constraint payment_allocations_excess_disposal_check
+  check (excess_disposal = any (array['refund','moved','released','parked']));
+
+alter table public.payment_allocations
+  add column if not exists excess_parked_until date,
+  add column if not exists excess_taken_at timestamptz,
+  add column if not exists excess_taken_by uuid references public.profiles(id),
+  add column if not exists excess_taken_reason text;
+
+-- NOT YET THE FIRM'S DECISION. Six months is a placeholder; the firm said "after a period" and has
+-- not named it. It is a setting rather than a constant precisely so naming it costs nothing.
+alter table public.firm_settings
+  add column if not exists parked_credit_months integer not null default 6;
+
+create or replace function public.dispose_excess_credit(
+  p_allocation uuid, p_disposal text, p_reason text,
+  p_payable_to text default null, p_move_to uuid default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_status text;
+  v_out uuid;
+  v_months integer;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_until date;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to decide what happens to an overpayment.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is going that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if coalesce(v_a.excess_credit, 0) <= 0 then
+    raise exception 'There is no overpayment on that receipt to decide about.' using errcode = '22023';
+  end if;
+  if v_a.excess_disposal is not null then
+    raise exception 'That overpayment has already been dealt with.' using errcode = '22023';
+  end if;
+
+  -- IT IS DECIDED BEFORE THE PAYOVER GOES OUT, NOT AFTER. The excess is what holds the run on
+  -- needs_review; once the run is issued its figures are an invoice the client has, and moving the
+  -- money then would be changing what they were told.
+  if v_a.payover_run_id is not null then
+    select status into v_status from public.payover_runs where id = v_a.payover_run_id;
+    if not public.payover_run_is_open(coalesce(v_status, 'paid')) then
+      raise exception 'That receipt is on a payover that has gone out. The credit belongs in the next run.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  if p_disposal = 'refund' then
+    if nullif(btrim(coalesce(p_payable_to, '')), '') is null then
+      raise exception 'Say who the refund is payable to.' using errcode = '22023';
+    end if;
+    insert into public.trust_payments_out (
+      account_id, kind, amount, payable_to, reason, instructed_by)
+    values (v_a.account_id, 'refund', v_a.excess_credit, btrim(p_payable_to), v_why, auth.uid())
+    returning id into v_out;
+
+  elsif p_disposal = 'moved' then
+    if p_move_to is null then
+      raise exception 'Say which account it moves to.' using errcode = '22023';
+    end if;
+    if p_move_to = v_a.account_id then
+      raise exception 'That is the account it is already on.' using errcode = '22023';
+    end if;
+    if not exists (select 1 from public.debtor_accounts where id = p_move_to) then
+      raise exception 'That account no longer exists.' using errcode = '22023';
+    end if;
+
+  elsif p_disposal = 'parked' then
+    /*
+     * PARKED IS A DECISION TO WAIT, NOT A DECISION ABOUT THE MONEY.
+     *
+     * The firm, on the small ones: "who are we going to pay five rand to? We're going to give the
+     * guy a call, and the costs are going to be already more than 20 rand." Refunding a sum smaller
+     * than the phone call costs more than it returns -- but the money is still the DEBTOR'S until
+     * somebody says otherwise, so nothing moves in the trust ledger here. It simply stops holding
+     * the payover run and gets a date to come back on.
+     */
+    select coalesce(parked_credit_months, 6) into v_months from public.firm_settings limit 1;
+    v_until := current_date + (coalesce(v_months, 6) || ' months')::interval;
+
+  elsif p_disposal <> 'released' then
+    raise exception 'An overpayment is refunded, moved to another account, released to the client, or parked.'
+      using errcode = '22023';
+  end if;
+
+  update public.payment_allocations
+     set excess_disposal = p_disposal,
+         excess_decided_at = now(),
+         excess_decided_by = auth.uid(),
+         excess_moved_to = case when p_disposal = 'moved' then p_move_to end,
+         excess_parked_until = v_until,
+         excess_payment_out_id = v_out
+   where id = p_allocation;
+
+  if v_a.payover_run_id is not null then
+    perform public.recompute_payover_run(v_a.payover_run_id);
+  end if;
+  return v_out;
+end $$;
+
+create or replace function public.parked_credits()
+returns table(allocation_id uuid, account_id uuid, case_number text, debtor text,
+              client text, amount numeric, parked_on date, ripe_on date, ripe boolean,
+              taken_at timestamptz, reason text)
+language sql stable security definer set search_path to 'public'
+as $$
+  select a.id, a.account_id, d.case_number,
+         coalesce(nullif(btrim(coalesce(d.debtor_first_name, d.debtor_initials, '')
+           || ' ' || coalesce(d.debtor_surname, '')), ''), 'Unknown debtor'),
+         c.name, a.excess_credit,
+         (a.excess_decided_at at time zone 'Africa/Johannesburg')::date,
+         a.excess_parked_until,
+         a.excess_parked_until <= current_date,
+         a.excess_taken_at,
+         a.excess_taken_reason
+    from public.payment_allocations a
+    join public.debtor_accounts d on d.id = a.account_id
+    left join public.companies c on c.id = d.company_id
+   where public.has_capability('finance.view')
+     and a.excess_disposal = 'parked'
+   order by a.excess_parked_until
+$$;
+
+create or replace function public.take_parked_credit(p_allocation uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_id uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Taking a parked credit is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is being taken.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.excess_disposal is distinct from 'parked' then
+    raise exception 'That overpayment is not parked.' using errcode = '22023';
+  end if;
+  if v_a.excess_taken_at is not null then
+    raise exception 'That credit has already been taken.' using errcode = '22023';
+  end if;
+  /*
+   * IT WAITS OUT ITS PERIOD. The firm's instruction was "taken to the firm after a period" -- the
+   * period is the point. Taking it the day it is parked is keeping a debtor's money, not giving up
+   * on returning it, and the difference is the only thing that makes this defensible.
+   */
+  if v_a.excess_parked_until > current_date then
+    raise exception 'That credit is parked until %. It cannot be taken before then.',
+      to_char(v_a.excess_parked_until, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  /*
+   * TWO ENTRIES, NOT AN EDIT. The ledger is append-only and has no update or delete policy at all
+   * -- check-financial-immutability exists to keep it that way. So the debtor's balance is reduced
+   * by a new negative entry and the firm's raised by a matching positive one, and the pair carries
+   * the allocation it came from. Nothing that was written is rewritten.
+   */
+  insert into public.trust_creditor_entries (party, account_id, allocation_id, amount, reason, created_by)
+  values ('debtor', v_a.account_id, p_allocation, -round(v_a.excess_credit, 2),
+          'Parked credit taken to the firm - ' || v_why, auth.uid());
+
+  insert into public.trust_creditor_entries (party, account_id, allocation_id, amount, reason, created_by)
+  values ('firm', v_a.account_id, p_allocation, round(v_a.excess_credit, 2),
+          'Parked credit taken to the firm - ' || v_why, auth.uid())
+  returning id into v_id;
+
+  update public.payment_allocations
+     set excess_taken_at = now(), excess_taken_by = auth.uid(), excess_taken_reason = v_why
+   where id = p_allocation;
+
+  return v_id;
+end $$;
+
+create or replace function public.return_parked_credit(p_allocation uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_id uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Returning a parked credit is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is being given back.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.excess_taken_at is null then
+    raise exception 'That credit was never taken, so there is nothing to give back.' using errcode = '22023';
+  end if;
+
+  /*
+   * THE DEBTOR CAME BACK. The firm takes a parked credit because nobody claimed it, and somebody
+   * claiming it afterwards is exactly the case this has to survive -- so it reverses, and reverses
+   * the same way it moved: two fresh entries, nothing rewritten.
+   */
+  insert into public.trust_creditor_entries (party, account_id, allocation_id, amount, reason, created_by)
+  values ('firm', v_a.account_id, p_allocation, -round(v_a.excess_credit, 2),
+          'Parked credit returned to the debtor - ' || v_why, auth.uid());
+
+  insert into public.trust_creditor_entries (party, account_id, allocation_id, amount, reason, created_by)
+  values ('debtor', v_a.account_id, p_allocation, round(v_a.excess_credit, 2),
+          'Parked credit returned to the debtor - ' || v_why, auth.uid())
+  returning id into v_id;
+
+  update public.payment_allocations
+     set excess_taken_at = null, excess_taken_by = null,
+         excess_taken_reason = 'Given back: ' || v_why
+   where id = p_allocation;
+
+  return v_id;
+end $$;
+
+revoke all on function public.dispose_excess_credit(uuid, text, text, text, uuid) from public;
+revoke all on function public.dispose_excess_credit(uuid, text, text, text, uuid) from anon;
+revoke all on function public.parked_credits() from public;
+revoke all on function public.parked_credits() from anon;
+revoke all on function public.take_parked_credit(uuid, text) from public;
+revoke all on function public.take_parked_credit(uuid, text) from anon;
+revoke all on function public.return_parked_credit(uuid, text) from public;
+revoke all on function public.return_parked_credit(uuid, text) from anon;
+grant execute on function public.dispose_excess_credit(uuid, text, text, text, uuid) to authenticated;
+grant execute on function public.parked_credits() to authenticated;
+grant execute on function public.take_parked_credit(uuid, text) to authenticated;
+grant execute on function public.return_parked_credit(uuid, text) to authenticated;

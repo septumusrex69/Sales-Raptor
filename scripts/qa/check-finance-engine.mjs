@@ -336,7 +336,10 @@ ok('...before the row is written', /before update on public\.firm_settings/.test
    the screen reads and silently fails to save -- the failure CLAUDE.md names on this exact row. */
 const settingsRow = readFileSync(new URL('../../src/lib/firmSettingsRow.ts', import.meta.url), 'utf8')
 const settingsLib = readFileSync(new URL('../../src/lib/firmSettings.ts', import.meta.url), 'utf8')
-ok('the app selects the cut-over', /finance_cutover_at, updated_at/.test(settingsRow))
+/* THE COLUMN, NOT ITS NEIGHBOURS. This read `finance_cutover_at, updated_at` and broke the day a
+   setting was added between them -- an assertion about where a column sits in a list, dressed up
+   as one about whether it is there at all. */
+ok('the app selects the cut-over', /\bfinance_cutover_at\b/.test(settingsRow))
 ok('...maps it', /financeCutoverAt: r\.finance_cutover_at/.test(settingsRow))
 ok('...and writes it back', /finance_cutover_at: next\.financeCutoverAt/.test(settingsLib))
 

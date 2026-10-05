@@ -216,12 +216,20 @@ ok('...matched to a line off the statement',
   /bank_line_id uuid references public\.bank_statement_lines\(id\)/.test(sql))
 ok('...and Administrator only', /create policy trust_payments_out_select/.test(sql))
 
-/* THREE DISPOSALS AND NO DEFAULT -- the firm chose "ask every time", because the three send the
-   same money to three different places. */
-for (const d of ['refund', 'moved', 'released']) {
+/*
+ * FOUR DISPOSALS AND NO DEFAULT -- the firm chose "ask every time", because they send the same
+ * money to four different places.
+ *
+ * PARKING WAS THE FOURTH AND ARRIVED LATER, when the firm put the commonest case plainly: "who are
+ * we going to pay five rand to? We're going to give the guy a call, and the costs are going to be
+ * already more than 20 rand." check-parked-credit holds what parking may and may not do; this only
+ * asserts that the closed list is closed.
+ */
+for (const d of ['refund', 'moved', 'released', 'parked']) {
   ok(`an overpayment can be ${d}`, new RegExp(`'${d}'`).test(dispose ?? ''))
 }
-ok('...and nothing else', /refunded, moved to another account, or released to the client/.test(dispose ?? ''))
+ok('...and nothing else',
+  /refunded, moved to another account, released to the client, or parked/.test(dispose ?? ''))
 ok('a refund has to say who it is payable to', /Say who the refund is payable to/.test(dispose ?? ''))
 ok('a move has to say which account', /Say which account it moves to/.test(dispose ?? ''))
 ok('...and not the one it is already on', /That is the account it is already on/.test(dispose ?? ''))
