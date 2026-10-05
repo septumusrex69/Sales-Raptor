@@ -18,6 +18,7 @@
  * browser is a courtesy, not a boundary.
  */
 import { supabase } from './supabase'
+import { allocationOf, type Allocation } from './allocationRules'
 
 export type RunStatus = 'needs_review' | 'ready' | 'approved' | 'sent' | 'paid' | 'void'
 
@@ -856,6 +857,77 @@ export interface AwaitingPayment {
   interestAfter: number
   interestOpen: number
   interestOpenFrom: string | null
+  /*
+   * THE FEES SIDE, BROKEN INTO THE THREE THINGS IT PAYS, EACH WITH THE FIRM'S FOUR FIGURES.
+   *
+   * THE FIRM: "the fees you need to split up into three sections. First is the interest... Then
+   * the receipt fee, which is the 10% excluding VAT. Then the fees, which is the Annexure B fees.
+   * Now for every single one... the total interest, the interest already retained, the interest
+   * that is available, the interest we are taking now, and the interest after."
+   *
+   * FOUR AND NOT FIVE, because `available` and `after` are SUBTRACTIONS and the screen does them
+   * through allocationRules.ts -- that is how a figure here can be found to be wrong. A function
+   * that handed over the answers as well as the inputs could only ever agree with itself.
+   */
+  interestTotal: number
+  interestCant: number
+  interestRetained: number
+  rfTotal: number
+  rfCant: number
+  rfRetained: number
+  toReceiptFees: number
+  feesTotal: number
+  feesCant: number
+  feesRetained: number
+  toFees: number
+  /* The pool the receipt fee and the Annexure B fees are a derived split of -- see Allocation. */
+  costsBefore: number
+  costsAfter: number
+  /** Null on a client with sliding bands: there is no one rate the commission can be checked on. */
+  commissionRate: number | null
+  vatRate: number
+}
+
+/**
+ * ONE ROW AS THE RULES WANT IT.
+ *
+ * The screen and check-allocation-rules both go through this, so a figure the rules pass and the
+ * screen draws cannot be two different figures. THE RECEIPT FEE IS JOINED HERE: `receiptFee` is
+ * the 10% EXCLUDING VAT and `receiptFeeVat` is the VAT on it, and what the split actually spends
+ * -- and what the firm asked to see -- is the two added together.
+ */
+export function awaitingAllocation(r: AwaitingPayment): Allocation {
+  return allocationOf({
+    payment: r.amount,
+    interestTotal: r.interestTotal,
+    interestCant: r.interestCant,
+    interestRetained: r.interestRetained,
+    interestBefore: r.interestToDate,
+    toInterest: r.toInterest,
+    interestAfter: r.interestAfter,
+    rfTotal: r.rfTotal,
+    rfCant: r.rfCant,
+    rfRetained: r.rfRetained,
+    toReceiptFees: r.toReceiptFees,
+    feesTotal: r.feesTotal,
+    feesCant: r.feesCant,
+    feesRetained: r.feesRetained,
+    toFees: r.toFees,
+    costsBefore: r.costsBefore,
+    costsAfter: r.costsAfter,
+    receiptFeeRaised: r.receiptFee + r.receiptFeeVat,
+    capitalBefore: r.capitalBefore,
+    toCapital: r.toCapital,
+    capitalAfter: r.capitalAfter,
+    commission: r.commission,
+    commissionVat: r.commissionVat,
+    toClient: r.toClient,
+    dueToBf: r.dueToBf,
+    excess: r.excess,
+    paidToClient: r.paidToClient,
+    commissionRate: r.commissionRate,
+    vatRate: r.vatRate,
+  })
 }
 
 export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
@@ -899,6 +971,22 @@ export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
     interestAfter: Number(r.interest_after ?? 0),
     interestOpen: Number(r.interest_open ?? 0),
     interestOpenFrom: s(r.interest_open_from),
+    interestTotal: Number(r.interest_total ?? 0),
+    interestCant: Number(r.interest_cant ?? 0),
+    interestRetained: Number(r.interest_retained ?? 0),
+    rfTotal: Number(r.rf_total ?? 0),
+    rfCant: Number(r.rf_cant ?? 0),
+    rfRetained: Number(r.rf_retained ?? 0),
+    toReceiptFees: Number(r.to_receipt_fees ?? 0),
+    feesTotal: Number(r.fees_total ?? 0),
+    feesCant: Number(r.fees_cant ?? 0),
+    feesRetained: Number(r.fees_retained ?? 0),
+    toFees: Number(r.to_fees ?? 0),
+    costsBefore: Number(r.costs_before ?? 0),
+    costsAfter: Number(r.costs_after ?? 0),
+    /* NULL AND NOT NOUGHT where the client has bands: nought is a rate somebody chose. */
+    commissionRate: r.commission_rate == null ? null : Number(r.commission_rate),
+    vatRate: Number(r.vat_rate ?? 0.15),
   }))
 }
 

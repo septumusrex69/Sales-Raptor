@@ -21204,3 +21204,383 @@ comment on column public.signing_requests.copy_sent_at is
   'that sends it, and checked before sending so a reload of the signing page cannot send a second '
   'copy. Null on a request that has not been signed, and on every request signed before the copy '
   'went out automatically.';
+
+-- ============================================================================
+-- THE FEES SIDE, BROKEN INTO THE THREE THINGS IT PAYS, EACH WITH ITS OWN FIVE FIGURES.
+--
+-- THE FIRM, having looked at the first imported payment run: "the fees you need to split up into
+-- three sections. First is the interest, which is the first thing that is taken. Then the receipt
+-- fee, which is the 10% excluding VAT. Then the fees, which is the Annexure B fees. Now for every
+-- single one... the total interest, the interest already retained, the interest that is available,
+-- the interest we are taking now, and the interest after."
+--
+-- So each of the three carries a / cannot take / b / taking, and the SCREEN does the subtractions:
+-- available = a - cannot - b, after = available - taking. That is deliberate -- src/lib/
+-- allocationRules.ts recomputes them from these four and reports a violation if they do not hold,
+-- which is the firm's own instruction ("if anything touches a formula, there is a problem"). A
+-- function that returned the answers as well as the inputs could only ever agree with itself.
+--
+-- ------------------------------------------------------------------------------------------------
+-- `to_costs` IS ONE POOL AND ALWAYS HAS BEEN
+-- ------------------------------------------------------------------------------------------------
+--
+-- finance_split pays interest, then costs, and costs are a single number -- which fee inside it a
+-- payment actually paid is recorded nowhere. Splitting it is a DERIVATION, and it uses the same
+-- ordering account_money_position uses or the approval screen and the money position would answer
+-- the same question differently: oldest fee first, by (incurred_at, id), against the running total
+-- of to_costs across every allocation.
+--
+-- THE RECEIPT FEE THIS PAYMENT RAISES IS THE NEWEST ROW, so it is paid LAST. That is not a detail:
+-- on a small payment the costs half goes to old Annexure B fees and this payment's own receipt fee
+-- is still outstanding afterwards. The firm should read that off the screen rather than discover it.
+--
+-- ------------------------------------------------------------------------------------------------
+-- IN DUPLUM IS SPENT OLDEST-FIRST TOO, AND THAT IS WHY IT CAN BE SPLIT AT ALL
+-- ------------------------------------------------------------------------------------------------
+--
+-- engine_balances clips the whole costs pool with `least(costs, in_duplum_cost_room(...))` -- one
+-- number against a total, with nothing saying WHICH fee the ceiling refuses. Attributing it
+-- oldest-first is the only attribution consistent with the way payments are attributed: a payment
+-- settles the oldest fee first, so the fee the ceiling puts out of reach is exactly the fee that
+-- would have been settled last. Any other attribution would show a fee as available that no
+-- payment will ever reach.
+--
+-- THE CONSEQUENCE THAT MATTERS: sum of the two buckets' `taking` is to_costs, exactly, on every
+-- account including one at its ceiling. Without the clip in here, an in duplum account would show
+-- more fees available than the engine will ever pay and the firm's own formula would fire on
+-- correct arithmetic.
+--
+-- AND THE RECEIPT FEE THIS PAYMENT RAISES IS NOT CLIPPED, because finance_split does not clip it:
+-- it adds fee_excl + fee_vat to the pool after engine_balances has done its clipping. Clipping it
+-- here and not there would make these columns disagree with the money that moves.
+--
+-- ------------------------------------------------------------------------------------------------
+-- WHAT COUNTS AS A RECEIPT FEE
+-- ------------------------------------------------------------------------------------------------
+--
+-- `not counts_toward_fee_cap`, which is how account_money_position already divides them -- not
+-- `annexure_item = '9'`. The two agree on today's book (every fee ever raised is an item 1-7 and
+-- counts, and item 9 is the only item that does not) and the column is the one the view reads, so
+-- reading the item instead would be a second rule that drifts.
+--
+-- DROPPED AND CREATED, not replaced: Postgres will not add columns to an existing function's
+-- return type. The revoke at the foot carries the signature, which has not changed.
+-- ============================================================================
+drop function if exists public.preview_allocation(uuid, numeric, boolean, date, uuid);
+
+create function public.preview_allocation(
+  p_account uuid, p_amount numeric, p_paid_to_client boolean default false,
+  p_as_at date default null, p_exclude_payment uuid default null)
+returns table (
+  receipt_fee_excl numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric,
+  commission numeric, commission_vat numeric,
+  to_client numeric, due_to_bf numeric, bf_takes numeric,
+  interest_before numeric, costs_before numeric, capital_before numeric,
+  interest_after numeric, costs_after numeric, capital_after numeric,
+  has_rate boolean, interest_open numeric, interest_open_from date,
+  -- a / cannot take / b / taking, for each of the three sections of the fees side.
+  interest_total numeric, interest_cant numeric, interest_retained numeric,
+  rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  b record; s record; o record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric := 0;
+  v_company uuid;
+  v_day date := coalesce(p_as_at, current_date);
+  v_interest numeric;
+  v_accrued numeric; v_recoverable numeric;
+  v_costs_taken numeric;
+  v_room numeric;
+  v_rf_incl numeric;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  -- THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's.
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and v_day >= effective_from
+     and (effective_to is null or v_day <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  select * into b from public.engine_balances(p_account, p_exclude_payment);
+
+  /*
+   * THE OPEN PERIOD, ASKED AND NOT WRITTEN. This is the same call allocate_payment makes before it
+   * posts, with the same day and the same exclusion, so the figure below is the figure that will
+   * be posted. `recoverable` rather than `accrued`, because engine_balances counts the recoverable
+   * half of every posted row and in duplum binds a split the same way it binds a ledger.
+   */
+  select * into o from public.open_interest(p_account, v_day, p_exclude_payment);
+  interest_open := coalesce(o.recoverable, 0);
+  interest_open_from := o.from_day;
+  v_interest := b.interest + interest_open;
+
+  select * into s from public.finance_split(
+    greatest(coalesce(p_amount, 0), 0), v_interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+  v_rf_incl := s.fee_excl + s.fee_vat;
+
+  /* ---------------------------------------------------------------- INTEREST: a, cannot take, b
+   * `a` is every cent of interest this account has ever RUN, the open period included -- what the
+   * firm called "the total interest run". `cannot take` is the part in duplum put out of reach,
+   * which is the whole reason a - b is not the available figure on an account at its ceiling.
+   * Read as two sums and subtracted once, the way account_money_position reads it: per row the
+   * difference can be negative on an imported accrual and a sum of greatests would overstate it.
+   */
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = p_account;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+  interest_total := v_accrued;
+  interest_cant := greatest(v_accrued - v_recoverable, 0);
+  select coalesce(sum(a.to_interest), 0) into interest_retained
+    from public.payment_allocations a
+   where a.account_id = p_account and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id is distinct from p_exclude_payment);
+
+  /* ---------------------------------------------------------------- THE COSTS POOL, SPLIT IN TWO */
+  select coalesce(sum(a.to_costs), 0) into v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = p_account and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id is distinct from p_exclude_payment);
+  v_room := public.in_duplum_cost_room(p_account);
+
+  with fee_rows as (
+    select 0 as sk, f.id, f.incurred_at,
+           (f.counts_toward_fee_cap is not true) as is_receipt,
+           f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+           /* RECOVERABLE BY THE ENGINE'S OWN RULE, not the money position view's: engine_balances
+              gathers the pool with fee_stands() and `billed is not false`, and it is that pool
+              to_costs was paid out of. */
+           (public.fee_stands(f.cancelled_at, f.legacy_name) and f.billed is not false) as stands
+      from public.account_fees f
+     where f.account_id = p_account
+       and (p_exclude_payment is null
+            or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid)
+               is distinct from p_exclude_payment)
+    union all
+    /* THE FEE THIS PAYMENT RAISES. Not a row yet, and the newest when it is -- so it sorts last
+       and is paid last, which is why a small payment leaves its own receipt fee outstanding. */
+    select 1, '00000000-0000-0000-0000-000000000000'::uuid, now(), true, v_rf_incl, true
+  ),
+  /* What the ceiling had already been spent on by the time this fee's turn came, oldest first. */
+  roomed as (
+    select r.*,
+           coalesce(sum(case when r.stands then r.incl else 0 end)
+             over (order by r.sk, r.incurred_at, r.id
+                   rows between unbounded preceding and 1 preceding), 0) as raised_before
+      from fee_rows r
+  ),
+  payable as (
+    select r.is_receipt, r.incl, r.sk,
+           case when not r.stands then 0
+                /* The new receipt fee is outside the clip -- see the header. */
+                when r.sk = 1 then r.incl
+                else least(greatest(v_room - r.raised_before, 0), r.incl) end as can,
+           r.incurred_at, r.id
+      from roomed r
+  ),
+  /* And what earlier payments had settled by the time this fee's turn came -- over `can`, not
+     `incl`, because a payment can only ever have settled what was within the ceiling. */
+  ordered as (
+    select p.*,
+           coalesce(sum(p.can) over (order by p.sk, p.incurred_at, p.id
+                                     rows between unbounded preceding and 1 preceding), 0)
+             as settled_before
+      from payable p
+  ),
+  split as (
+    select o2.is_receipt, o2.incl, o2.can,
+           least(greatest(v_costs_taken - o2.settled_before, 0), o2.can) as was,
+           least(greatest(v_costs_taken + s.to_costs - o2.settled_before, 0), o2.can) as now_
+      from ordered o2
+  )
+  select
+    coalesce(sum(incl) filter (where is_receipt), 0),
+    coalesce(sum(incl - can) filter (where is_receipt), 0),
+    coalesce(sum(was) filter (where is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where is_receipt), 0),
+    coalesce(sum(incl) filter (where not is_receipt), 0),
+    coalesce(sum(incl - can) filter (where not is_receipt), 0),
+    coalesce(sum(was) filter (where not is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where not is_receipt), 0)
+  into rf_total, rf_cant, rf_retained, to_receipt_fees,
+       fees_total, fees_cant, fees_retained, to_fees
+  from split;
+
+  select d.company_id, coalesce(d.commission_rate, c.commission_rate), c.commission_bands, c.mandate_signed_at
+    into v_company, v_rate, v_bands, v_mandate
+    from public.debtor_accounts d join public.companies c on c.id = d.company_id
+   where d.id = p_account;
+
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_company and a.status <> 'reversed'
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+  has_rate := commission is not null;
+  if commission is null then commission := 0; end if;
+  commission_vat := round(commission * v_vat, 2);
+
+  receipt_fee_excl := s.fee_excl;
+  receipt_fee_vat := s.fee_vat;
+  to_interest := s.to_interest;
+  to_costs := s.to_costs;
+  to_capital := s.to_capital;
+  excess_credit := s.excess;
+
+  if p_paid_to_client then
+    to_client := 0;
+    due_to_bf := s.to_interest + s.to_costs + commission;
+  else
+    to_client := s.to_capital - commission - commission_vat;
+    due_to_bf := 0;
+  end if;
+  /* WHAT BF ACTUALLY EARNS, which is not due_to_bf: interest and costs recovered plus commission,
+     however the money arrived. The VAT is SARS's and is deliberately not in this figure. */
+  bf_takes := s.to_interest + s.to_costs + commission;
+
+  /* INTEREST TO DATE INCLUDES THE OPEN PERIOD, because that is what the payment will be split
+     against once it is posted. Reporting only the posted half here would put a "before" figure on
+     the screen that the "retained" figure beside it exceeds. */
+  interest_before := v_interest; costs_before := b.costs; capital_before := b.capital;
+  /* The receipt fee this payment would raise joins costs before it is paid, so what is left after
+     is the old costs plus that fee less what the payment took. */
+  interest_after := v_interest - s.to_interest;
+  costs_after := b.costs + s.fee_excl + s.fee_vat - s.to_costs;
+  capital_after := b.capital - s.to_capital;
+  return next;
+end $$;
+
+comment on function public.preview_allocation(uuid, numeric, boolean, date, uuid) is
+  'What a payment WOULD do, without doing it, with the fees side broken into the three things it '
+  'pays: interest, the item 9 receipt fee, and the rest of the tariff. Each carries what has ever '
+  'been raised, what in duplum refuses, what earlier payments retained and what this one takes -- '
+  'so the screen shows "taking now" and expands to the arithmetic behind it. The split of '
+  'to_costs is derived oldest-fee-first, the ordering account_money_position uses, and the fee '
+  'this payment raises sorts last because it is the newest. Includes the open interest period '
+  'allocate_payment will post at approval, asked with the same day and the same exclusion, so the '
+  'approval queue and the engine cannot disagree.';
+
+-- AND FROM ANON BY NAME, not only from PUBLIC. Supabase's default privileges grant execute on a
+-- new function to anon, authenticated and service_role, so re-creating a function HANDS IT BACK to
+-- anon -- which is exactly what happened the first time this was applied. The guard loop further
+-- up revokes the whole payover list from `public, anon` for this reason; a create that only
+-- revokes from public undoes it silently and nothing fails.
+revoke execute on function public.preview_allocation(uuid, numeric, boolean, date, uuid) from public, anon;
+grant execute on function public.preview_allocation(uuid, numeric, boolean, date, uuid) to authenticated;
+
+-- ============================================================================
+-- THE QUEUE CARRIES THE THREE SECTIONS THROUGH, AND THE RATE EACH FIGURE WAS MADE WITH.
+--
+-- THE FIRM: "the column that you will be showing to us is the interest that we are taking now.
+-- But if you click on the interest taking, it expands all of the other columns just to double
+-- check." So every one of preview_allocation's new columns has to reach the browser -- a column
+-- the preview computes and this function drops is a column the screen cannot expand to.
+--
+-- AND `commission_rate` AND `vat_rate` COME WITH THEM, which is not padding: the firm asked for
+-- testing mechanisms, and allocationRules.ts cannot check "commission is the rate on capital
+-- recovered" or "VAT is the rate on the commission" without the two rates. A rule that has to
+-- assume the rate it is checking against is not a rule.
+--
+-- `costs_before` AND `costs_after` TOO, because the receipt fee and the Annexure B fees are a
+-- DERIVED split of one pool and those two are the pool. They are what lets a wrong split be
+-- caught rather than believed -- see the comment on Allocation.costsBefore.
+--
+-- DROPPED AND CREATED, not replaced: Postgres will not add columns to an existing function's
+-- return type.
+-- ============================================================================
+drop function if exists public.payments_awaiting_approval();
+
+create function public.payments_awaiting_approval()
+returns table (
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric,
+  paid_to_client boolean, method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date,
+  interest_to_date numeric, interest_after numeric,
+  interest_open numeric, interest_open_from date,
+  interest_total numeric, interest_cant numeric, interest_retained numeric,
+  rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric,
+  costs_before numeric, costs_after numeric,
+  commission_rate numeric, vat_rate numeric
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date,
+    pv.interest_before, pv.interest_after,
+    pv.interest_open, pv.interest_open_from,
+    pv.interest_total, pv.interest_cant, pv.interest_retained,
+    pv.rf_total, pv.rf_cant, pv.rf_retained, pv.to_receipt_fees,
+    pv.fees_total, pv.fees_cant, pv.fees_retained, pv.to_fees,
+    pv.costs_before, pv.costs_after,
+    /* THE RATE THE COMMISSION WAS MADE WITH, read the way preview_allocation reads it -- the
+       account's own rate where it has one, else the client's. A banded client has no single rate
+       and reads null, which is right: there is no one multiplication to check against. */
+    case when c.commission_bands is null
+         then coalesce(d.commission_rate, c.commission_rate) end,
+    fs.vat_rate
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  cross join lateral (select vat_rate from public.firm_settings limit 1) fs
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  left join lateral public.preview_allocation(
+    p.account_id, p.amount, p.paid_to_client,
+    (p.received_at at time zone 'Africa/Johannesburg')::date, p.id) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and p.suspended_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+comment on function public.payments_awaiting_approval() is
+  'The day''s unapproved receipts with what each WOULD do, previewed on the day the money arrived, '
+  'the fees side broken into interest, the item 9 receipt fee and the rest of the tariff, and the '
+  'commission and VAT rates each figure was made with so the formulas can be checked rather than '
+  'trusted. Nothing here has happened: no balance has moved, no fee has been raised, and a payover '
+  'run gathers allocations, so an unapproved payment is invisible to remittance by construction.';
+
+revoke execute on function public.payments_awaiting_approval() from public, anon;
+grant execute on function public.payments_awaiting_approval() to authenticated;

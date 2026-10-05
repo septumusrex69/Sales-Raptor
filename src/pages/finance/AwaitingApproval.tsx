@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, Loader2, RotateCcw, Search } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search,
+} from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
@@ -7,8 +9,9 @@ import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
   fetchAwaitingApproval, approvePayments, setPaymentAccount, suspendPayment,
-  type AwaitingPayment,
+  awaitingAllocation, type AwaitingPayment,
 } from '../../lib/payover'
+import { checkAllocation, type Allocation, type Component } from '../../lib/allocationRules'
 
 /**
  * THE DAY'S PAYMENTS, WAITING TO BE APPROVED.
@@ -26,6 +29,51 @@ import {
  * specific day, then it carries over and it stays there." This list is everything not yet
  * approved, whatever day it arrived -- no nightly job, and so no night it fails to run.
  */
+/**
+ * THE THREE THINGS THE FEES SIDE PAYS, IN THE ORDER IT PAYS THEM.
+ *
+ * THE FIRM: "the fees you need to split up into three sections. First is the interest, which is
+ * the first thing that is taken. Then the receipt fee, which is the 10% excluding VAT. Then the
+ * fees, which is the Annexure B fees."
+ *
+ * THE ORDER IS THE ENGINE'S ORDER AND NOT A PREFERENCE. finance_split pays interest out of half A
+ * first and the costs pool after it, and the costs pool is settled oldest fee first -- which is
+ * why on a small payment the receipt fee this very payment raises can take nothing at all. Drawn
+ * in any other order the screen would imply a sequence the money does not follow.
+ */
+const SECTIONS = [
+  { key: 'interest', label: 'Interest', of: (a: Allocation) => a.interest },
+  /* VAT-INCLUSIVE, which the firm asked for by name: "this receipt fee that's shown should be
+     inclusive of that". The rate is 10% EXCLUDING VAT and then VAT is added, so the inclusive
+     figure is both what the debtor is charged and what the split actually spends. It was drawn
+     exclusive beside inclusive costs, which is two units in one row. */
+  { key: 'receiptFee', label: 'Receipt fee', of: (a: Allocation) => a.receiptFee },
+  { key: 'fees', label: 'Fees', of: (a: Allocation) => a.fees },
+] as const
+
+type SectionKey = typeof SECTIONS[number]['key']
+
+/**
+ * THE FOUR FIGURES BEHIND A "TAKING NOW", AS THE FIRM WROTE THEM OUT BY HAND.
+ *
+ *   a        total run         everything of this kind ever raised
+ *   b        retained          what earlier payments took
+ *   a - b    available         what is there to take
+ *   c        taking now        what THIS payment takes -- the column that is always shown
+ *   a-b-c    after             what is left
+ *
+ * THE FIFTH IS MINE AND IT IS NOT PADDING. In duplum (NCA s103(5)) stops interest and fees
+ * together exceeding the capital outstanding, so on an account at its ceiling part of what RAN can
+ * never be RECOVERED -- RRC00005 carries R437,01 of fees against R380 of capital. Without it the
+ * expansion would not add up and the firm's own formula would look broken on correct arithmetic.
+ */
+const BEFORE: { label: string; of: (c: Component) => number }[] = [
+  { label: 'run', of: (c) => c.total },
+  { label: 'ceiling refuses', of: (c) => c.cannotTake },
+  { label: 'retained', of: (c) => c.retained },
+  { label: 'available', of: (c) => c.available },
+]
+
 export function AwaitingApproval({ refreshKey, onApproved }: {
   refreshKey: number
   onApproved: () => void
@@ -46,6 +94,17 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
    * alternative was leaving it on the queue where the next person approves it onto the wrong one.
    */
   const [parking, setParking] = useState<AwaitingPayment | null>(null)
+  /*
+   * WHICH OF THE THREE FEE SECTIONS IS OPENED OUT.
+   *
+   * THE FIRM: "the column that you will be showing to us is the interest that we are taking now.
+   * But if you click on the interest taking, it expands all of the other columns just to double
+   * check." So the default is one column a section -- what this payment takes -- and the
+   * arithmetic behind it is a click away rather than always on the screen. Per SECTION and not
+   * per row: the four figures are a column each, and a row that opened its own would put a
+   * different number of cells in one table.
+   */
+  const [opened, setOpened] = useState<Set<SectionKey>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -60,6 +119,28 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
     () => rows.filter((r) => picked.has(r.paymentId)).reduce((n, r) => n + r.amount, 0),
     [rows, picked],
   )
+
+  /*
+   * THE FIGURES AS THE RULES SEE THEM, AND WHAT THE RULES MAKE OF THEM.
+   *
+   * THE FIRM: "you can build in testing mechanisms... These formulas are the key and they are the
+   * rules about how which we will abide. IF ANYTHING TOUCHES A FORMULA, THERE IS A PROBLEM." So
+   * the screen does not merely draw what the engine said -- it checks it, on every row, every
+   * time the list loads, and says so where it does not hold.
+   *
+   * THE CHECK DOES NOT STOP THE APPROVAL, and that is deliberate. The money has arrived either
+   * way; a screen that refused to show a receipt it could not reconcile would leave the firm with
+   * nothing to act on. It is marked, named and approvable.
+   */
+  const checked = useMemo(() => rows.map((r) => {
+    const a = awaitingAllocation(r)
+    return { row: r, a, problems: checkAllocation(a) }
+  }), [rows])
+  const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
+
+  function toggleSection(k: SectionKey) {
+    setOpened((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n })
+  }
 
   async function approve(ids: string[]) {
     if (ids.length === 0 || busy) return
@@ -129,9 +210,64 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
         </div>
       )}
 
+      {/*
+        AND THE FORMULAS THEMSELVES, WHERE ONE OF THEM DID NOT HOLD.
+
+        THE FIRM ASKED FOR THIS DIRECTLY: "if anything touches a formula, there is a problem." The
+        band is absent when everything holds -- a warning that fires when nothing is wrong is worse
+        than no warning, because people stop reading it. Named rules, not "the figures do not
+        balance": one tells somebody where to look and the other tells them to call somebody.
+      */}
+      {broken.length > 0 && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] text-amber-900">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            {broken.length === 1 ? 'One payment does not' : `${broken.length} payments do not`} obey
+            the allocation formulas. Nothing is blocked — check these before approving.
+          </p>
+          <ul className="mt-1 ml-5 list-disc space-y-0.5">
+            {broken.slice(0, 4).map((c) => (
+              <li key={c.row.paymentId}>
+                <span className="font-medium">{c.row.caseNumber ?? c.row.accountNumber}</span>
+                {' · '}{c.problems[0].rule}: {c.problems[0].detail}
+                {c.problems.length > 1 && ` (and ${c.problems.length - 1} more)`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full text-[12.5px] whitespace-nowrap">
+          {/*
+            TWO HEADER ROWS, BECAUSE A PAYMENT HAS TWO SIDES AND THE FIRM DREW IT THAT WAY.
+
+            THE FIRM: "what I need you to do is to split the payments into two... you'll see the
+            payment. Then first we will handle the fees section and then we will handle the capital
+            section. It's 50-50 unless the fees are less than 50% of the payment, then the rest is
+            allocated to the capital."
+
+            THE SPANS ARE COMPUTED FROM WHAT IS OPEN, so an opened section widens its own group
+            rather than pushing the headings out of line -- a colspan written as a constant goes
+            wrong the first time somebody clicks.
+          */}
           <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
+            <tr className="border-b border-slate-100 text-slate-400">
+              <th colSpan={5} />
+              <th colSpan={SECTIONS.reduce((n, x) => n + (opened.has(x.key) ? 5 : 1), 0)}
+                className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
+                The fees side — half the payment
+              </th>
+              {/* SEVEN: capital outstanding, taking and after, then commission, its VAT, what the
+                  client is paid and what the client owes. `Due to BF` belongs on this side and not
+                  outside it -- it is the same money read from the other direction, owed BY the
+                  client where the debtor paid them rather than the firm. */}
+              <th colSpan={7}
+                className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
+                The capital side — the other half, and whatever the fees side could not spend
+              </th>
+              <th colSpan={2} />
+            </tr>
             <tr className="border-b border-slate-100">
               <th className="px-3 py-2">
                 <input type="checkbox"
@@ -142,49 +278,65 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
               <th className="px-2 py-2 text-left font-medium">Account</th>
               <th className="px-2 py-2 text-left font-medium">Debtor</th>
               <th className="px-2 py-2 text-right font-medium">Payment</th>
-              <th className="px-2 py-2 text-right font-medium">Receipt fee</th>
+              {SECTIONS.map((sec, i) => (
+                <Fragment key={sec.key}>
+                  {opened.has(sec.key) && BEFORE.map((f) => (
+                    <th key={f.label}
+                      className={`px-2 py-2 text-right font-normal text-slate-400 ${
+                        f.label === 'run' ? 'border-l border-slate-200' : ''}`}>
+                      {sec.label} {f.label}
+                    </th>
+                  ))}
+                  {/*
+                    THE COLUMN THAT IS ALWAYS THERE, and it is a button. "If you click on the
+                    interest taking, it expands all of the other columns just to double check."
+                  */}
+                  <th className={`px-2 py-2 text-right font-medium ${
+                    !opened.has(sec.key) && i === 0 ? 'border-l border-slate-200'
+                      : !opened.has(sec.key) ? 'border-l border-slate-100' : ''}`}>
+                    <button type="button" onClick={() => toggleSection(sec.key)}
+                      className="inline-flex items-center gap-1 uppercase tracking-wide
+                        hover:text-navy-950"
+                      title={opened.has(sec.key)
+                        ? `Hide the ${sec.label.toLowerCase()} arithmetic`
+                        : `Show what this ${sec.label.toLowerCase()} figure comes out of`}>
+                      {opened.has(sec.key) ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                      {sec.label} taking
+                    </button>
+                  </th>
+                  {opened.has(sec.key) && (
+                    <th className="px-2 py-2 text-right font-normal text-slate-400">
+                      {sec.label} after
+                    </th>
+                  )}
+                </Fragment>
+              ))}
               {/*
-                THE FIRM'S OWN WORDS, off their export: retained interest, retained legal fees,
-                retained collection commission.
-
-                AND THE THIRD ONE IS THE POINT. "Swordfish made that part of the retained legal
-                fees. Not anything else. So I think it's important for us to split this." It is
-                already split here and always has been -- to_interest, to_costs, commission and
-                commission_vat are four columns on payment_allocations, never one. What was
-                missing was the firm's names on them, so nobody could see that the thing they
-                asked for was already true.
-
-                INTEREST BEFORE FEES is the firm's order and the reverse of Swordfish's: VAT is on
-                fees and not on interest, so taking interest first carries less risk if the debtor
-                stops paying.
+                THE LINE ITEM THE FIRM FOUND MISSING: "one line item that is missing is the capital
+                outstanding. So the capital outstanding will be what is outstanding on the capital
+                of the payment." Drawn either side of what the payment takes, the same shape as an
+                opened fee section, so the two sides of the screen read the same way.
               */}
+              <th className="px-2 py-2 text-right font-normal text-slate-400 border-l border-slate-200">
+                Capital outstanding
+              </th>
+              <th className="px-2 py-2 text-right font-medium">Capital taking</th>
+              <th className="px-2 py-2 text-right font-normal text-slate-400">Capital after</th>
               {/*
-                AND WHAT IT COMES OUT OF, WHICH WAS THE HALF THAT WAS MISSING.
-
-                THE FIRM, OF SWORDFISH'S GRID: "all of these fields don't appear in your ready state
-                for the payments to be allocated... there was zero interest captured." Retained
-                interest has been on this screen since it was built and read R 0,00 on every row,
-                because the split had no interest to take. Now that it has, a real figure would have
-                appeared with nothing beside it to explain where it came from.
-
-                Three columns in a row are one sentence: what the account owes in interest on the
-                day the money arrived, what this payment takes of it, and what is left.
+                "COMMISSION", NOT "RETAINED COL. COMMISSION" -- the firm's own correction: "the
+                retained collection commission, just call that commission and then VAT is the VAT
+                on commission and then pay to the client, due to BF."
               */}
-              <th className="px-2 py-2 text-right font-medium">Interest on the account</th>
-              <th className="px-2 py-2 text-right font-medium">Retained interest</th>
-              <th className="px-2 py-2 text-right font-medium">Interest left</th>
-              <th className="px-2 py-2 text-right font-medium">Retained legal fees</th>
-              <th className="px-2 py-2 text-right font-medium">Capital</th>
-              <th className="px-2 py-2 text-right font-medium">Retained col. commission</th>
+              <th className="px-2 py-2 text-right font-medium">Commission</th>
               <th className="px-2 py-2 text-right font-medium">VAT</th>
               <th className="px-2 py-2 text-right font-medium">To client</th>
-              <th className="px-2 py-2 text-right font-medium">Due to BF</th>
+              <th className="px-2 py-2 text-right font-medium border-l border-slate-200">Due to BF</th>
               <th className="px-2 py-2 text-left font-medium">Type</th>
               <th className="px-2 py-2 text-left font-medium">Reference</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {checked.map(({ row: r, a, problems }) => (
               <tr key={r.paymentId}
                 /*
                   A RETURNED RECEIPT IS TINTED, and that is not decoration. The firm: a reversal
@@ -194,7 +346,8 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 */
                 className={`border-b border-slate-50 ${
                   picked.has(r.paymentId) ? 'bg-gold-50/40'
-                    : r.cameBackFrom ? 'bg-amber-50/50' : ''}`}>
+                    : problems.length > 0 ? 'bg-amber-50'
+                      : r.cameBackFrom ? 'bg-amber-50/50' : ''}`}>
                 <td className="px-3 py-1.5">
                   <input type="checkbox" checked={picked.has(r.paymentId)}
                     onChange={() => toggle(r.paymentId)} />
@@ -202,6 +355,15 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 <td className="px-2 py-1.5 text-slate-600">{formatDate(r.receivedOn)}</td>
                 <td className="px-2 py-1.5 text-slate-600">
                   {r.caseNumber ?? r.accountNumber}
+                  {/* THE RULES THAT DID NOT HOLD, ON THE ROW THEY DID NOT HOLD ON. The band at the
+                      top carries the first four; a morning with more than four needs the rest
+                      findable, and the row is where somebody is already looking. */}
+                  {problems.length > 0 && (
+                    <span className="ml-1 inline-flex align-middle text-amber-700"
+                      title={problems.map((v) => `${v.rule} — ${v.detail}`).join('\n')}>
+                      <AlertTriangle size={11} />
+                    </span>
+                  )}
                   {/*
                     THE ONE THING THIS SCREEN MAY CHANGE, and the firm chose it: which debtor the
                     money goes on. The amount and the date are what the bank said. Offered on every
@@ -227,26 +389,50 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 </td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.receiptFee)}</td>
-                {/*
-                  NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of this figure is the open
-                  period -- computed to the day the money arrived, written only when somebody
-                  approves. A collector reading it down the telephone is quoting a real amount; a
-                  collector looking for it in the ledger before approval will not find it, and the
-                  marker is what stops that being a surprise.
-                */}
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600"
-                  title={r.interestOpen > 0 && r.interestOpenFrom
-                    ? `${rand(r.interestOpen)} of this has accrued since ${
+                {SECTIONS.map((sec, i) => {
+                  const c = sec.of(a)
+                  /*
+                    NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of the interest here is the
+                    open period -- computed to the day the money arrived, written only when
+                    somebody approves. A collector reading it down the telephone is quoting a real
+                    amount; one looking for it in the ledger before approval will not find it, and
+                    the marker is what stops that being a surprise.
+                  */
+                  const note = sec.key === 'interest' && r.interestOpen > 0 && r.interestOpenFrom
+                    ? `${rand(r.interestOpen)} of the interest has accrued since ${
                         formatDate(r.interestOpenFrom)} and is posted when you approve`
-                    : 'All of this is already posted'}>
-                  {rand(r.interestToDate)}
-                  {r.interestOpen > 0 && <span className="ml-1 text-[10px] text-slate-400">·</span>}
+                    : undefined
+                  return (
+                    <Fragment key={sec.key}>
+                      {opened.has(sec.key) && BEFORE.map((f) => (
+                        <td key={f.label} title={f.label === 'available' ? note : undefined}
+                          className={`px-2 py-1.5 text-right tabular-nums text-slate-400 ${
+                            f.label === 'run' ? 'border-l border-slate-200' : ''}`}>
+                          {rand(f.of(c))}
+                          {f.label === 'available' && note && (
+                            <span className="ml-1 text-[10px] text-slate-400">·</span>
+                          )}
+                        </td>
+                      ))}
+                      <td title={note}
+                        className={`px-2 py-1.5 text-right tabular-nums text-slate-700 ${
+                          !opened.has(sec.key) && i === 0 ? 'border-l border-slate-200'
+                            : !opened.has(sec.key) ? 'border-l border-slate-100' : ''}`}>
+                        {rand(c.taking)}
+                      </td>
+                      {opened.has(sec.key) && (
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                          {rand(c.after)}
+                        </td>
+                      )}
+                    </Fragment>
+                  )
+                })}
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-400 border-l border-slate-200">
+                  {rand(r.capitalBefore)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.toInterest)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.interestAfter)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.toCosts)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.toCapital)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-700">{rand(r.toCapital)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{rand(r.capitalAfter)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">
                   {/* NO RATE IS NOT A ZERO. Approving still writes the allocation, marked
                       needs_rate, and the exceptions screen carries it -- but a confident 0.00
@@ -255,7 +441,9 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.commissionVat)}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-[var(--c-green)]">{rand(r.toClient)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{rand(r.dueToBf)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600 border-l border-slate-200">
+                  {rand(r.dueToBf)}
+                </td>
                 <td className="px-2 py-1.5">
                   {/* THE TWO DIRECTIONS OF MONEY, named the way the firm's own export names them. */}
                   <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${
@@ -274,6 +462,14 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                       title={`Reversed ${r.cameBackOn ? formatDate(r.cameBackOn) : ''} — ${
                         r.cameBackReason ?? 'no reason given'}`}>
                       <RotateCcw size={10} /> Came back
+                    </span>
+                  )}
+                  {/* AND THE MONEY THAT PAID NOTHING. An overpayment is held as a credit, never
+                      paid over -- the client is owed capital and this is not capital. */}
+                  {r.excess > 0 && (
+                    <span className="ml-1 text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"
+                      title="Everything on the account is settled, so this is held as a credit rather than paid over">
+                      {rand(r.excess)} credit
                     </span>
                   )}
                 </td>
