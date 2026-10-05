@@ -436,6 +436,108 @@ export async function rebuildRun(companyId: string, periodStart: string): Promis
   if (error) throw new Error(error.message)
 }
 
+/* ---------------- building a run, and the test controls around it ---------------- */
+
+/**
+ * A CLIENT WITH MONEY IN A CYCLE, AND THE RUN FOR IT IF THERE IS ONE.
+ *
+ * WHY THIS EXISTS AT ALL: `payover_work_queue` lists runs that have already been BUILT, so until
+ * one is, the Payover queue is empty and there is nothing to press. `build_payover_run` was
+ * reachable only from the Exceptions screen, as a REBUILD after fixing a commission rate -- so the
+ * first run for any client could never be created and the remittance advice was unreachable. The
+ * firm found it the obvious way: "where is the payover report?"
+ *
+ * It answers the question the Build box actually asks: which clients took money in this cycle, how
+ * much, and is there a run for it yet.
+ */
+export interface Buildable {
+  companyId: string
+  client: string
+  clientCode: string | null
+  payments: number
+  received: number
+  runId: string | null
+  runStatus: RunStatus | null
+  invoiceNumber: string | null
+}
+
+export async function fetchBuildable(periodStart: string): Promise<Buildable[]> {
+  const { data, error } = await supabase.rpc('payover_buildable', { p_period_start: periodStart })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    companyId: String(r.company_id),
+    client: String(r.client ?? ''),
+    clientCode: (r.client_code as string | null) ?? null,
+    payments: n(r.payments),
+    received: n(r.received),
+    runId: (r.run_id as string | null) ?? null,
+    runStatus: (r.run_status as RunStatus | null) ?? null,
+    invoiceNumber: (r.invoice_number as string | null) ?? null,
+  }))
+}
+
+/** Build (or rebuild) one client's run for one cycle. Returns the run's id. */
+export async function buildRun(companyId: string, periodStart: string): Promise<string> {
+  const { data, error } = await supabase.rpc('build_payover_run', {
+    p_company: companyId, p_period_start: periodStart,
+  })
+  if (error) throw new Error(error.message)
+  return String(data)
+}
+
+/**
+ * THROW A FINISHED RUN AWAY SO THE SAME CLIENT CAN BE TESTED AGAIN.
+ *
+ * THE FIRM: "now I'm in a testing mode and I need to test... I'm going to be testing different
+ * clients, creating different clients, different scenarios, everything." Approve, email, mark paid
+ * -- and the run is frozen for good, which is right for an invoice a client has received and makes
+ * the loop a once-per-client-per-cycle affair while they are still testing it.
+ *
+ * NOT AN EDIT. It removes the run entirely and frees the cycle, so the next build starts from
+ * nothing -- the payover's own rule is that a correction is a negative line in the NEXT run, never
+ * a change to one that went out.
+ *
+ * STAGING ONLY, AND THE DATABASE IS WHERE THAT IS DECIDED. `isStagingDeployment` below is for
+ * deciding whether to DRAW the button; `reset_payover_run` refuses on its own, reading a row the
+ * app cannot write.
+ */
+export async function resetRun(runId: string): Promise<void> {
+  const { error } = await supabase.rpc('reset_payover_run', { p_run: runId })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * MOVE A PAYMENT INTO ANOTHER CYCLE.
+ *
+ * A run claims on `account_payments.created_at`, not the received date somebody typed -- so every
+ * receipt captured today is in today's cycle whatever date is on it, and a carry-forward, a
+ * negative payover and a reversal landing in the next run are all unreachable without this. Worse,
+ * backdating the received date LOOKS like it worked, so the test silently proves nothing.
+ *
+ * Staging only, refused in the database, and refused outright for a payment already on an issued
+ * invoice.
+ */
+export async function movePaymentToCycle(paymentId: string, periodStart: string): Promise<void> {
+  const { error } = await supabase.rpc('move_payment_to_cycle', {
+    p_payment: paymentId, p_period_start: periodStart,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * IS THIS THE STAGING DATABASE?
+ *
+ * ONLY TO DECIDE WHETHER TO DRAW A BUTTON. Every test control asks the database again and refuses
+ * on its own, which is the lock that matters -- this one is so the browser never offers something
+ * the server would refuse, and so a refusal is a missing button rather than an error message.
+ * Defaults to NO on any failure, the direction an unknown has to fail in.
+ */
+export async function isStagingDeployment(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('is_staging_database')
+  if (error) return false
+  return data === true
+}
+
 /** Replay one account after a rate is set or a payment reversed, then rebuild its draft run. */
 export async function reallocateAccount(accountId: string): Promise<void> {
   const { error } = await supabase.rpc('reallocate_account', { p_account_id: accountId })

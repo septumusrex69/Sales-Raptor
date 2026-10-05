@@ -23043,3 +23043,537 @@ alter table public.firm_settings
 
 comment on column public.firm_settings.time_zone is
   'The zone the firm works in. It is what a FLOATING time in a calendar invitation means -- RFC 5545 says such a time is read on the observer''s own clock, and for this firm that clock is Johannesburg. A setting rather than a constant because the firm asked for it that way: South Africa unless somebody deliberately changes it.';
+
+-- ============================================================================
+-- TESTING THE PAYOVER WITHOUT WAITING FOR THE 11th
+--
+-- THE FIRM, mid-test: "now I'm in a testing mode and I need to test. So do I need to wait for the
+-- 11th or whatever? What can we do to speed up these tests? I'm going to be testing different
+-- clients, creating different clients, different scenarios, everything."
+--
+-- THE DATE WAS NEVER THE PROBLEM. `build_payover_run` takes any cycle start and builds it on the
+-- spot; nothing anywhere waits for a period to close. What actually stood in the way was three
+-- things, and the first two are production bugs that testing merely found first.
+-- ============================================================================
+
+-- ============================================================================
+-- 1. A VOIDED RUN NO LONGER HOLDS ITS CYCLE SHUT.
+--
+-- Voiding a run releases every allocation, drops every line and sends nothing to anybody -- and
+-- then `UNIQUE (company_id, period_start)` keeps the empty row in the slot, `build_payover_run`
+-- refused it alongside approved and sent, and `protect_payover_run` refused to remove it. So
+-- pressing Void was the one irreversible action in the Finance section: that client could never
+-- be paid over for that cycle again, and nothing said so.
+--
+-- A void run is not an issued invoice. Build now clears it and starts the cycle over, and the
+-- invoice number goes with it so the rebuilt run carries the same one rather than leaving a gap
+-- in a sequence the client reads.
+-- ============================================================================
+create or replace function public.build_payover_run(p_company uuid, p_period_start date)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_end date := public.payover_cycle_end(p_period_start);
+  v_from timestamptz := (p_period_start::timestamp) at time zone 'Africa/Johannesburg';
+  v_to timestamptz := ((v_end + 1)::timestamp) at time zone 'Africa/Johannesburg';
+  v_run uuid;
+  v_status text;
+  v_prev record;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select id, status into v_run, v_status
+    from public.payover_runs where company_id = p_company and period_start = p_period_start;
+
+  -- A VOIDED RUN IS NOT AN ISSUED ONE, SO IT DOES NOT HOLD THE CYCLE.
+  -- Voiding threw the working document away: it released every allocation, dropped every line and
+  -- went out to nobody. But UNIQUE (company_id, period_start) means the row still occupies the
+  -- slot, and this used to refuse it alongside approved and sent -- so a client whose run was
+  -- voided could never be paid over for that cycle again, and protect_payover_run refuses to
+  -- remove the row as well. Pressing Void was irreversible and nobody was warned.
+  -- The number goes with it, or payover_invoice_number hands out the next one and leaves a gap
+  -- in a sequence the client reads.
+  if v_run is not null and v_status = 'void' then
+    delete from public.payover_runs where id = v_run;
+    v_run := null;
+  end if;
+
+  if v_run is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'The % run for this client is already %; a correction belongs in the next run.',
+      to_char(p_period_start, 'DD Mon YYYY'), v_status;
+  end if;
+
+  if v_run is null then
+    insert into public.payover_runs (company_id, period_start, period_end, invoice_number)
+    values (p_company, p_period_start, v_end, public.payover_invoice_number(p_company, v_end))
+    returning id into v_run;
+  else
+    /* Let go of everything it was holding before it claims again, so a rebuild is not an append. */
+    update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
+    update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
+    update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    delete from public.payover_run_lines where run_id = v_run;
+  end if;
+
+  /* 1. THIS CYCLE'S OWN ALLOCATIONS. Claimed and drawn in one statement so an allocation cannot be
+        claimed by a run that then fails to list it. Demo money is excluded here as well as in the
+        engine -- R23,6m nobody paid, sitting in the same table as money somebody did. */
+  with claimed as (
+    update public.payment_allocations a
+       set payover_run_id = v_run
+      from public.account_payments p, public.debtor_accounts d
+     where p.id = a.payment_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       and p.created_at >= v_from
+       and p.created_at < v_to
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat,
+    excess_credit, needs_rate
+  )
+  select v_run, c.id, c.account_id,
+         case when c.paid_to_client then 'ptc' else 'trust' end,
+         c.paid_to_client,
+         coalesce(c.payment_amount, 0), c.to_interest, coalesce(c.to_costs, 0), c.to_capital,
+         c.commission, c.commission_vat, c.excess_credit, c.status = 'needs_rate'
+    from claimed c;
+
+  /* 2. REVERSALS OF PAYMENTS ALREADY INVOICED. The firm's decision 6: never edited in the run that
+        went out -- it becomes a negative line in the next one. */
+  with carried as (
+    update public.payment_allocations a
+       set reversal_carried_run_id = v_run
+      from public.payover_runs r, public.debtor_accounts d
+     where r.id = a.payover_run_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat, excess_credit
+  )
+  select v_run, c.id, c.account_id, 'reversal', c.paid_to_client,
+         -coalesce(c.payment_amount, 0), -c.to_interest, -coalesce(c.to_costs, 0), -c.to_capital,
+         -c.commission, -c.commission_vat, -c.excess_credit
+    from carried c;
+
+  /* 3. LAST RUN'S SHORTFALL, from the most recent INVOICED run rather than merely last month. */
+  select r.id, r.net_payover, r.invoice_number into v_prev
+    from public.payover_runs r
+   where r.company_id = p_company
+     and r.period_start < p_period_start
+     and r.status in ('approved', 'sent', 'paid')
+     and r.net_payover < 0
+     and r.carried_out_run_id is null
+   order by r.period_start desc limit 1;
+
+  if v_prev.id is not null then
+    insert into public.payover_run_lines (run_id, line_kind, carried_amount)
+    values (v_run, 'carried', v_prev.net_payover);
+    update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
+  end if;
+
+  perform public.recompute_payover_run(v_run);
+  return v_run;
+end $$;
+
+-- ============================================================================
+-- 2. WHICH DATABASE IS THIS? SQL CANNOT TELL ON ITS OWN.
+--
+-- Both projects' databases are called `postgres` and neither carries the project ref, so a
+-- function has no way to know whether it is running on staging or on the firm's real money.
+-- `testClock.ts` answers this in the BROWSER by reading the Supabase host -- which is right for
+-- deciding whether to draw a button, and useless as a boundary, because the browser is the thing
+-- being guarded against.
+--
+-- SO THE ANSWER IS A ROW, AND NOTHING IN THE APP CAN WRITE IT. `deployment` has a select policy
+-- and NO write policy at all, and the write grants are revoked, so PostgREST refuses -- the same
+-- reasoning as the four ledgers having no update policy, which is what makes the financial
+-- records immutable rather than merely un-edited.
+--
+-- IT DEFAULTS TO PRODUCTION. A fresh database, or one where this migration ran and nobody
+-- followed up, is production as far as every test control is concerned. That is the direction an
+-- unknown has to fail in, the same way round as `isTestAccount` defaulting to no.
+--
+-- THE ONE STATEMENT THAT IS NOT IN THIS FILE is the one that sets it to 'staging'. That is run by
+-- hand, once, against the staging project only. Putting it here would make every database that
+-- ever applies this schema a staging one, which is precisely the mistake the row exists to stop.
+-- ============================================================================
+create table if not exists public.deployment (
+  id boolean primary key default true check (id),
+  kind text not null default 'production' check (kind in ('production', 'staging')),
+  noted_at timestamptz not null default now()
+);
+
+insert into public.deployment (id, kind) values (true, 'production')
+on conflict (id) do nothing;
+
+alter table public.deployment enable row level security;
+
+create policy deployment_select on public.deployment
+  for select using (auth.uid() is not null);
+
+revoke insert, update, delete on public.deployment from authenticated, anon;
+revoke select on public.deployment from anon;
+
+comment on table public.deployment is
+  'Which deployment this database is. Read by the test controls, which refuse unless it says staging. It has no write policy on purpose: an Administrator cannot flip production into a test database from the app, the same way they cannot edit a ledger.';
+
+create or replace function public.is_staging_database()
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$ select exists (select 1 from public.deployment where kind = 'staging') $$;
+
+revoke execute on function public.is_staging_database() from public, anon;
+
+-- ============================================================================
+-- 3. RESETTING A FINISHED RUN, SO ONE CLIENT CAN BE TESTED MORE THAN ONCE.
+--
+-- Approve, email the advice, mark it paid -- and the run is frozen for good, which is correct for
+-- an invoice a client has received and useless for the firm testing the loop. There was no way to
+-- run the same client through it twice.
+--
+-- THIS IS NOT A WAY TO EDIT AN INVOICE. It removes the run entirely: every allocation goes back,
+-- every line goes, the bank debit returns to the unreconciled list, and the cycle slot and the
+-- invoice number are both freed so the next build starts from nothing. Nothing is altered in
+-- place, which is the rule the whole payover is built on -- a correction is a negative line in
+-- the next run.
+--
+-- TWO LOCKS, AND THEY ARE NOT THE SAME LOCK TWICE: the function refuses unless the DATABASE says
+-- staging, and the trigger refuses a removal unless this same function named that run in a
+-- transaction-local setting. Neither is reachable from the browser, so an ordinary statement that
+-- happens to be running cannot inherit the exception, and production refuses both halves even if
+-- somebody sets the setting by hand.
+-- ============================================================================
+create or replace function public.reset_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_run public.payover_runs%rowtype;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  -- STAGING ONLY, ASKED IN THE DATABASE. The browser will not offer this on production, but a
+  -- route guard in the browser is a courtesy and not a boundary -- the same reasoning payover.ts
+  -- gives for the whole Finance section. is_staging_database() reads a row nothing in the app can
+  -- write, so an Administrator cannot talk their way past it either.
+  if not public.is_staging_database() then
+    raise exception 'Resetting a payover run is a testing control and this is not the staging database.'
+      using errcode = '42501';
+  end if;
+
+  select * into v_run from public.payover_runs where id = p_run;
+  if not found then
+    raise exception 'That payover run no longer exists.' using errcode = 'P0002';
+  end if;
+
+  -- EVERYTHING IT WAS HOLDING GOES BACK, so the next build re-claims it from scratch rather than
+  -- finding it already spoken for and quietly producing an empty run.
+  update public.payment_allocations set payover_run_id = null where payover_run_id = p_run;
+  update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = p_run;
+  update public.payover_runs set carried_out_run_id = null where carried_out_run_id = p_run;
+
+  -- AND THE BANK DEBIT GOES BACK ON THE UNRECONCILED LIST. Marking a run paid is matched against a
+  -- real line out of the statement; leaving it reconciled against a run that no longer exists is a
+  -- payment out matched to nothing, and the next test cannot reconcile it again.
+  update public.bank_statement_lines
+     set payover_run_id = null, status = 'unallocated', placed_at = null, placed_by = null
+   where payover_run_id = p_run;
+
+  -- THE ROW ITSELF, because UNIQUE (company_id, period_start) means leaving it would hold the
+  -- cycle shut -- which is the whole thing being undone. The invoice number is freed with it, so
+  -- the rebuilt run carries the same one rather than leaving a gap.
+  perform set_config('raptor.reset_run', p_run::text, true);
+  delete from public.payover_runs where id = p_run;
+end $$;
+
+revoke execute on function public.reset_payover_run(uuid) from public, anon;
+
+-- THE TRIGGER'S HALF OF BOTH CHANGES: a void run may be cleared to restart its cycle, and a
+-- finished one may be removed by reset_payover_run alone, on staging alone. An issued invoice is
+-- otherwise exactly as untouchable as it was.
+create or replace function public.protect_payover_run()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  if tg_op = 'DELETE' then
+    -- A VOID RUN IS NOT AN INVOICE, SO REMOVING IT IS NOT REMOVING ONE.
+    -- Voiding already released every allocation and dropped every line; the row that is left went
+    -- out to nobody and claims no money. It was still refused here, and because
+    -- UNIQUE (company_id, period_start) keeps the slot, that made voiding a run the one
+    -- irreversible press in the Finance section -- the client could never be paid over for that
+    -- cycle again. build_payover_run now clears it to start the cycle over, and this is the half
+    -- that lets it.
+    if old.status = 'void' then return old; end if;
+
+    -- AND THE ONE TESTING EXCEPTION, WHICH IS TWO LOCKS AND NOT ONE.
+    -- reset_payover_run names the run it is resetting in a transaction-local setting, so this
+    -- cannot be reached by an ordinary statement that happens to be running at the time; and it
+    -- is refused outright unless the database says it is staging, which is a row nothing in the
+    -- app can write. The firm asked for the approve-email-paid loop to be repeatable while they
+    -- test, and an invoice that has gone to a client is still untouchable on production.
+    if public.is_staging_database()
+       and coalesce(current_setting('raptor.reset_run', true), '') = old.id::text then
+      return old;
+    end if;
+
+    if not public.payover_run_is_open(old.status) then
+      raise exception 'Payover run % is %; an invoice is not deleted.', old.invoice_number, old.status;
+    end if;
+    return old;
+  end if;
+
+  if public.payover_run_is_open(old.status) then return new; end if;
+
+  if public.payover_run_is_open(new.status) then
+    raise exception 'Payover run % has been %; it cannot go back to being a working document.',
+      old.invoice_number, old.status;
+  end if;
+
+  if (new.company_id, new.period_start, new.period_end, new.invoice_number,
+      new.trust_capital, new.trust_commission, new.due_to_client,
+      new.ptc_received, new.ptc_fees_taken, new.ptc_capital, new.ptc_commission, new.due_to_bf,
+      new.commission_vat, new.carried_in, new.net_payover)
+     is distinct from
+     (old.company_id, old.period_start, old.period_end, old.invoice_number,
+      old.trust_capital, old.trust_commission, old.due_to_client,
+      old.ptc_received, old.ptc_fees_taken, old.ptc_capital, old.ptc_commission, old.due_to_bf,
+      old.commission_vat, old.carried_in, old.net_payover) then
+    raise exception 'Payover run % is %; its figures are an issued invoice. A correction is a negative line in the next run.',
+      old.invoice_number, old.status;
+  end if;
+  return new;
+end $$;
+
+-- ============================================================================
+-- 4. MOVING A PAYMENT INTO ANOTHER CYCLE, which is the only way to reach half the scenarios.
+--
+-- A run claims allocations on `account_payments.created_at`, NOT on the received date somebody
+-- typed. That is right -- the cycle is when the firm took the money in, and a receipt backdated
+-- on capture must not reach back into an invoice already sent -- and it means a carry-forward, a
+-- negative payover and a reversal landing in the next run are all unreachable in testing: every
+-- payment you capture today is in today's cycle, whatever date you put on it.
+--
+-- WORSE, IT FAILS QUIETLY. Backdating the received date looks like it worked, the receipt appears
+-- with the old date everywhere, and it still lands in this cycle -- so a test of last month's
+-- carry-forward silently tests nothing.
+--
+-- AN INVOICED PAYMENT STILL DOES NOT MOVE, on staging or anywhere: its figures are on a
+-- remittance the client has had, and taking it out from under them is exactly what the
+-- negative-line rule exists to prevent. Reset that run first, deliberately, or leave it alone.
+-- ============================================================================
+create or replace function public.move_payment_to_cycle(p_payment uuid, p_period_start date)
+returns date
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_at timestamptz;
+  v_run record;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  -- STAGING ONLY, ASKED IN THE DATABASE, for the same reason reset_payover_run is: this moves
+  -- money between two invoices, and a browser guard is a courtesy rather than a boundary.
+  if not public.is_staging_database() then
+    raise exception 'Moving a payment between cycles is a testing control and this is not the staging database.'
+      using errcode = '42501';
+  end if;
+  if p_period_start is distinct from public.payover_cycle_start(
+       (p_period_start::timestamp at time zone 'Africa/Johannesburg')) then
+    raise exception 'A cycle starts on the 11th; % does not.', to_char(p_period_start, 'DD Mon YYYY')
+      using errcode = '22023';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+
+  -- AN INVOICED PAYMENT DOES NOT MOVE. Its figures are on a remittance a client has had, and
+  -- taking it out from under them is exactly what the reversal-as-a-negative-line rule exists to
+  -- prevent. Reset the run first if that is really what is wanted.
+  select r.invoice_number, r.status into v_run
+    from public.payment_allocations a
+    join public.payover_runs r on r.id = a.payover_run_id
+   where a.payment_id = p_payment and r.status in ('approved', 'sent', 'paid')
+   limit 1;
+  if v_run.invoice_number is not null then
+    raise exception 'That payment is on %, which is %. Reset that run first.',
+      v_run.invoice_number, v_run.status using errcode = '22023';
+  end if;
+
+  -- THE CYCLE IS DECIDED BY created_at, NOT BY THE RECEIVED DATE SOMEBODY TYPED. build_payover_run
+  -- claims on `p.created_at between the cycle's bounds`, so a backdated receipt still lands in the
+  -- cycle it was captured in -- which is right for an audit trail and is exactly what makes a
+  -- carry-forward or a negative payover untestable without this. Noon, so no timezone edge can
+  -- push it into the neighbouring cycle.
+  v_at := ((p_period_start + 15)::timestamp + time '12:00') at time zone 'Africa/Johannesburg';
+
+  update public.account_payments set created_at = v_at where id = p_payment;
+  -- AND IT LETS GO OF ANY OPEN RUN, or the next build finds it already claimed and silently
+  -- produces a run with the payment missing from both cycles.
+  update public.payment_allocations set payover_run_id = null where payment_id = p_payment;
+
+  return p_period_start;
+end $$;
+
+revoke execute on function public.move_payment_to_cycle(uuid, date) from public, anon;
+
+-- ============================================================================
+-- 5. WHICH CLIENTS HAVE MONEY IN A CYCLE, so the Build box can offer them.
+--
+-- `payover_work_queue` lists runs that have already been BUILT, which is why the Payover queue
+-- opened empty for ever: with no run, there is nothing for it to list and nothing to press. This
+-- is the other question -- who took money in this cycle, how much, and is there a run yet.
+--
+-- A CLIENT WITH NOTHING IS NOT OFFERED. A run built over an empty cycle is an invoice for R0,00
+-- that somebody then has to void -- and until the change above, voiding one held that cycle shut
+-- for good. A client that already HAS a run stays on the list, because rebuilding is the ordinary
+-- way to pick up a late receipt.
+-- ============================================================================
+create or replace function public.payover_buildable(p_period_start date)
+returns table(
+  company_id uuid, client text, client_code text,
+  payments integer, received numeric,
+  run_id uuid, run_status text, invoice_number text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with bounds as (
+    select (p_period_start::timestamp) at time zone 'Africa/Johannesburg' as lo,
+           ((public.payover_cycle_end(p_period_start) + 1)::timestamp) at time zone 'Africa/Johannesburg' as hi
+  ),
+  money as (
+    select d.company_id,
+           count(*)::integer as payments,
+           sum(coalesce(a.payment_amount, 0)) as received
+      from public.payment_allocations a
+      join public.account_payments p on p.id = a.payment_id
+      join public.debtor_accounts d on d.id = a.account_id
+      cross join bounds b
+     where a.status <> 'reversed'
+       and not p.is_demo
+       and p.created_at >= b.lo
+       and p.created_at < b.hi
+     group by d.company_id
+  )
+  select c.id, c.name, c.code,
+         coalesce(m.payments, 0), coalesce(m.received, 0),
+         r.id, r.status, r.invoice_number
+    from public.companies c
+    left join money m on m.company_id = c.id
+    left join public.payover_runs r
+           on r.company_id = c.id and r.period_start = p_period_start and r.status <> 'void'
+   where public.current_user_role() = 'Administrator'
+     and (coalesce(m.payments, 0) > 0 or r.id is not null)
+   order by coalesce(m.received, 0) desc, c.name
+$$;
+
+revoke execute on function public.payover_buildable(date) from public, anon;
+
+-- ============================================================================
+-- AND THE FIVE NEW ONES ARE IN THE REVOKE LIST.
+--
+-- Supabase grants EXECUTE on a new public-schema function to anon by default, so a create IS a
+-- grant. Each of these carries its own guard -- Administrator, and for the two test controls the
+-- database's own staging answer -- but that is the second lock; this is the first.
+--
+-- A NEW BLOCK AT THE END RATHER THAN THE NEW NAMES ADDED ABOVE, and that is not tidiness: the
+-- earlier loop runs BEFORE these functions are created on a fresh database, and it swallows
+-- `undefined_function` with a notice. Names added to it would be skipped in silence on exactly the
+-- database where the grant matters -- a brand new one.
+--
+-- THE WHOLE LIST IS RESTATED, for the append-only reason this file states throughout: the last
+-- block is the live one, so a block carrying only the new names would leave every other function
+-- un-revoked.
+-- ============================================================================
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    /* THE FIVE THAT ARE NEW: the Build box's own read, and the two testing controls with the
+       staging answer they both rest on. */
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;
+
+-- THE STAGING ANSWER IS ADMINISTRATOR-ONLY TOO, AND IT FILTERS RATHER THAN RAISES.
+--
+-- It had no guard at all, which `check-finance-is-administrator-only` caught: every RPC the
+-- Finance library calls has to refuse a caller who is not an Administrator, and this one is
+-- called -- the queue asks it to decide whether to draw the test controls.
+--
+-- FILTERS, NOT RAISES, and that is the point. `protect_payover_run` calls this on every delete of
+-- a run; a version that threw would turn an ordinary refusal into an error from inside a trigger,
+-- for a caller who was going to be refused anyway. Answering FALSE to anybody who is not an
+-- Administrator refuses in the right direction and leaves the trigger's own message intact.
+create or replace function public.is_staging_database()
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select exists (
+    select 1 from public.deployment
+     where kind = 'staging' and public.current_user_role() = 'Administrator'
+  )
+$$;
+
+revoke execute on function public.is_staging_database() from public, anon;
