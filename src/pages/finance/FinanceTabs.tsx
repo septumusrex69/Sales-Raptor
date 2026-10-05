@@ -4,7 +4,7 @@ import clsx from 'clsx'
 /**
  * The Finance section's own nav.
  *
- * FOUR ITEMS, NOT SIX. Prompt 5 listed an Overview, Payments, Exceptions, Payover runs, an account
+ * FIVE ITEMS, NOT SIX. Prompt 5 listed an Overview, Payments, Exceptions, Payover runs, an account
  * ledger tab and a settings page; prompt 7 folded the overview and the run list into the work
  * queue, because they were the same screen asked for twice. The account ledger lives on the
  * account, where the account is, and the tariff settings live in Settings with the firm's other
@@ -23,8 +23,18 @@ import clsx from 'clsx'
  * money arrives, it is allocated and approved, and only then is there anything to pay a client
  * with. The queue was the index because it was built first.
  */
+/*
+ * AND A FIFTH, FOR WHAT HAS ALREADY GONE THROUGH. The firm: "you can add whatever you need for the
+ * administrator to ensure that we can double check every single thing that comes in." Payments is
+ * the queue -- receipts that have NOT posted, checked before they do. Check is the other half:
+ * every receipt that HAS, with the same formulas run over what the engine actually wrote. It sits
+ * next to Payments because it is the same money one step later, and before Exceptions because an
+ * exception is something Raptor already noticed, while this is where somebody looks for what it
+ * did not.
+ */
 const TABS = [
   { to: '/finance', label: 'Payments', end: true },
+  { to: '/finance/check', label: 'Check' },
   { to: '/finance/payover', label: 'Payover queue' },
   { to: '/finance/exceptions', label: 'Exceptions' },
   { to: '/finance/back-office', label: 'Back office' },

@@ -22435,3 +22435,51 @@ comment on function public.payments_posted(date, date) is
 
 revoke execute on function public.payments_posted(date, date) from public, anon;
 grant execute on function public.payments_posted(date, date) to authenticated;
+
+-- ============================================================================
+-- AND THE NEW READ IS IN THE REVOKE LIST, WHICH IS WHERE IT WAS CAUGHT.
+--
+-- `payments_posted` hands the administrator every posted allocation. Supabase grants EXECUTE on a
+-- new public-schema function to anon by default, so a create is a grant -- and a finance function
+-- reachable by a stranger is the payover hole all over again. The function's own guard refuses a
+-- caller who is not an Administrator, but a guard is the second lock; this is the first.
+--
+-- THE WHOLE LIST IS RESTATED rather than the one name appended, for the reason the block above
+-- gives: schema.sql is append-only and the LAST block is the live one, so a block carrying one
+-- name would leave every other function in it un-revoked on a fresh database.
+--
+-- `fee_split` IS DELIBERATELY NOT HERE. It is a pure derivation with no guard of its own, called
+-- by preview_allocation and allocate_payment which both have one, and it is granted to
+-- authenticated the same way engine_balances' building blocks are. Adding it would be tidier and
+-- would also be a lie about where the guard is.
+-- ============================================================================
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    /* THE ONE THAT IS NEW. */
+    'payments_posted(date, date)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

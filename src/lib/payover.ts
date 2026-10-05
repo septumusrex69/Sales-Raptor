@@ -990,6 +990,210 @@ export async function fetchAwaitingApproval(): Promise<AwaitingPayment[]> {
   }))
 }
 
+/**
+ * A RECEIPT THAT HAS ALREADY BEEN POSTED, WITH ENOUGH ON IT TO BE CHECKED AGAIN.
+ *
+ * THE FIRM: "you can add whatever you need for the administrator to ensure that we can double
+ * check every single thing that comes in."
+ *
+ * THE APPROVAL QUEUE CHECKS THE PREVIEW AND THEN THE PAYMENT LEAVES IT. Once approved, the
+ * allocation is written and the client is paid on it, and nothing looks at it again -- so the one
+ * figure the firm could never revisit was the one that mattered. These rows are the allocation as
+ * the ENGINE WROTE IT, which is what makes running the formulas over them a real check rather than
+ * a restatement of a forecast.
+ */
+export interface PostedPayment {
+  paymentId: string
+  allocationId: string
+  accountId: string
+  caseNumber: string | null
+  accountNumber: string | null
+  debtor: string | null
+  client: string | null
+  receivedOn: string
+  approvedOn: string | null
+  approvedByName: string | null
+  amount: number
+  paidToClient: boolean
+  method: string | null
+  reference: string | null
+  bankDescription: string | null
+  source: string | null
+  /** `allocated`, `needs_rate` or `reversed` -- the allocation's own state, not the payment's. */
+  status: string | null
+  /*
+   * WHICH ENGINE WROTE IT, and it decides what the screen may claim about the row.
+   *
+   * `v1-5050` allocations have nought in the two fee-split columns and nothing in the thirteen
+   * before-figures, because neither existed when they were written. A screen that could not tell
+   * the two apart would draw an older payment as one that paid nothing towards its own receipt
+   * fee, which is a different and much worse statement than "this was written before we recorded
+   * that".
+   */
+  engineVersion: string | null
+  computedAt: string | null
+  runInvoice: string | null
+  runStatus: string | null
+  runPaidOn: string | null
+  reversedOn: string | null
+  reversalReason: string | null
+  receiptFee: number
+  receiptFeeVat: number
+  toInterest: number
+  toReceiptFees: number
+  toFees: number
+  toCosts: number
+  toCapital: number
+  excess: number
+  commission: number
+  commissionVat: number
+  toClient: number
+  dueToBf: number
+  commissionRate: number | null
+  vatRate: number
+  interestTotal: number
+  interestCant: number
+  interestRetained: number
+  interestBefore: number
+  interestAfter: number
+  rfTotal: number
+  rfCant: number
+  rfRetained: number
+  feesTotal: number
+  feesCant: number
+  feesRetained: number
+  costsBefore: number
+  costsAfter: number
+  capitalBefore: number
+  capitalAfter: number
+  /*
+   * AND WHAT THE ACCOUNT'S OWN ROWS ADD UP TO TODAY, which is a different question from everything
+   * above it. An allocation can be internally perfect and still sit on an account whose ledger
+   * says something else -- that is what a reversal that half-ran looks like, and it is invisible
+   * to any check that only reads the allocation.
+   */
+  feesRaised: number
+  interestPosted: number
+  paymentsBanked: number
+  /** True where this allocation predates the columns the five figures need. */
+  beforeTheRecord: boolean
+}
+
+export async function fetchPostedPayments(from?: string, to?: string): Promise<PostedPayment[]> {
+  const { data, error } = await supabase.rpc('payments_posted', {
+    p_from: from ?? null, p_to: to ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paymentId: String(r.payment_id),
+    allocationId: String(r.allocation_id),
+    accountId: String(r.account_id),
+    caseNumber: s(r.case_number),
+    accountNumber: s(r.account_number),
+    debtor: s(r.debtor),
+    client: s(r.client),
+    receivedOn: String(r.received_on),
+    approvedOn: s(r.approved_on),
+    approvedByName: s(r.approved_by_name),
+    amount: Number(r.amount ?? 0),
+    paidToClient: !!r.paid_to_client,
+    method: s(r.method),
+    reference: s(r.reference),
+    bankDescription: s(r.bank_description),
+    source: s(r.source),
+    status: s(r.status),
+    engineVersion: s(r.engine_version),
+    computedAt: s(r.computed_at),
+    runInvoice: s(r.run_invoice),
+    runStatus: s(r.run_status),
+    runPaidOn: s(r.run_paid_on),
+    reversedOn: s(r.reversed_on),
+    reversalReason: s(r.reversal_reason),
+    receiptFee: Number(r.receipt_fee_excl ?? 0),
+    receiptFeeVat: Number(r.receipt_fee_vat ?? 0),
+    toInterest: Number(r.to_interest ?? 0),
+    toReceiptFees: Number(r.to_receipt_fees ?? 0),
+    toFees: Number(r.to_fees ?? 0),
+    toCosts: Number(r.to_costs ?? 0),
+    toCapital: Number(r.to_capital ?? 0),
+    excess: Number(r.excess ?? 0),
+    commission: Number(r.commission ?? 0),
+    commissionVat: Number(r.commission_vat ?? 0),
+    toClient: Number(r.to_client ?? 0),
+    dueToBf: Number(r.due_to_bf ?? 0),
+    /* NULL AND NOT NOUGHT where the client has bands: nought is a rate somebody chose. */
+    commissionRate: r.commission_rate == null ? null : Number(r.commission_rate),
+    vatRate: Number(r.vat_rate ?? 0.15),
+    interestTotal: Number(r.interest_total ?? 0),
+    interestCant: Number(r.interest_cant ?? 0),
+    interestRetained: Number(r.interest_retained ?? 0),
+    interestBefore: Number(r.interest_before ?? 0),
+    interestAfter: Number(r.interest_after ?? 0),
+    rfTotal: Number(r.rf_total ?? 0),
+    rfCant: Number(r.rf_cant ?? 0),
+    rfRetained: Number(r.rf_retained ?? 0),
+    feesTotal: Number(r.fees_total ?? 0),
+    feesCant: Number(r.fees_cant ?? 0),
+    feesRetained: Number(r.fees_retained ?? 0),
+    costsBefore: Number(r.costs_before ?? 0),
+    costsAfter: Number(r.costs_after ?? 0),
+    capitalBefore: Number(r.capital_before ?? 0),
+    capitalAfter: Number(r.capital_after ?? 0),
+    feesRaised: Number(r.fees_raised ?? 0),
+    interestPosted: Number(r.interest_posted ?? 0),
+    paymentsBanked: Number(r.payments_banked ?? 0),
+    /*
+     * READ OFF A COLUMN BEING NULL RATHER THAN OFF THE ENGINE VERSION STRING.
+     *
+     * The version says which code wrote the row; this says whether the row has the figures. They
+     * agree today and the day somebody backfills one without bumping the other they would not --
+     * and the thing the screen needs to know is whether there is anything to draw.
+     */
+    beforeTheRecord: r.costs_before == null || r.interest_before == null,
+  }))
+}
+
+/**
+ * ONE POSTED ROW AS THE RULES WANT IT.
+ *
+ * THE INTEREST LINE TAKES THE STORED `interest_before` AND `interest_after`, which is what makes
+ * the firm's first formula a real comparison here too: those two were written by the engine at the
+ * moment of posting, arrived at a completely different way from `total - ceiling - retained`.
+ */
+export function postedAllocation(r: PostedPayment): Allocation {
+  return allocationOf({
+    payment: r.amount,
+    interestTotal: r.interestTotal,
+    interestCant: r.interestCant,
+    interestRetained: r.interestRetained,
+    interestBefore: r.interestBefore,
+    toInterest: r.toInterest,
+    interestAfter: r.interestAfter,
+    rfTotal: r.rfTotal,
+    rfCant: r.rfCant,
+    rfRetained: r.rfRetained,
+    toReceiptFees: r.toReceiptFees,
+    feesTotal: r.feesTotal,
+    feesCant: r.feesCant,
+    feesRetained: r.feesRetained,
+    toFees: r.toFees,
+    costsBefore: r.costsBefore,
+    costsAfter: r.costsAfter,
+    receiptFeeRaised: r.receiptFee + r.receiptFeeVat,
+    capitalBefore: r.capitalBefore,
+    toCapital: r.toCapital,
+    capitalAfter: r.capitalAfter,
+    commission: r.commission,
+    commissionVat: r.commissionVat,
+    toClient: r.toClient,
+    dueToBf: r.dueToBf,
+    excess: r.excess,
+    paidToClient: r.paidToClient,
+    commissionRate: r.commissionRate,
+    vatRate: r.vatRate,
+  })
+}
+
 export interface ApprovalOutcome {
   approved: number
   skipped: number

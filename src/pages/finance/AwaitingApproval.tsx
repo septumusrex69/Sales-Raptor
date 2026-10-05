@@ -1,7 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search,
-} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Check, Loader2, RotateCcw, Search } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
@@ -11,7 +9,16 @@ import {
   fetchAwaitingApproval, approvePayments, setPaymentAccount, suspendPayment,
   awaitingAllocation, type AwaitingPayment,
 } from '../../lib/payover'
-import { checkAllocation, type Allocation, type Component } from '../../lib/allocationRules'
+import { checkAllocation } from '../../lib/allocationRules'
+/*
+ * THE THREE SECTIONS ARE DRAWN BY ONE COMPONENT, shared with the administrator's check of posted
+ * payments. The firm asked to see these figures in two places; CLAUDE.md's rule about the same
+ * figures on two screens applies to the drawing as much as to the arithmetic -- written out twice,
+ * the queue and the audit list would quietly disagree about what a payment paid.
+ */
+import {
+  FeeBodyCells, FeeHeadCells, feeColumns, toggled, type SectionKey,
+} from '../../components/finance/FeeSections'
 
 /**
  * THE DAY'S PAYMENTS, WAITING TO BE APPROVED.
@@ -29,51 +36,6 @@ import { checkAllocation, type Allocation, type Component } from '../../lib/allo
  * specific day, then it carries over and it stays there." This list is everything not yet
  * approved, whatever day it arrived -- no nightly job, and so no night it fails to run.
  */
-/**
- * THE THREE THINGS THE FEES SIDE PAYS, IN THE ORDER IT PAYS THEM.
- *
- * THE FIRM: "the fees you need to split up into three sections. First is the interest, which is
- * the first thing that is taken. Then the receipt fee, which is the 10% excluding VAT. Then the
- * fees, which is the Annexure B fees."
- *
- * THE ORDER IS THE ENGINE'S ORDER AND NOT A PREFERENCE. finance_split pays interest out of half A
- * first and the costs pool after it, and the costs pool is settled oldest fee first -- which is
- * why on a small payment the receipt fee this very payment raises can take nothing at all. Drawn
- * in any other order the screen would imply a sequence the money does not follow.
- */
-const SECTIONS = [
-  { key: 'interest', label: 'Interest', of: (a: Allocation) => a.interest },
-  /* VAT-INCLUSIVE, which the firm asked for by name: "this receipt fee that's shown should be
-     inclusive of that". The rate is 10% EXCLUDING VAT and then VAT is added, so the inclusive
-     figure is both what the debtor is charged and what the split actually spends. It was drawn
-     exclusive beside inclusive costs, which is two units in one row. */
-  { key: 'receiptFee', label: 'Receipt fee', of: (a: Allocation) => a.receiptFee },
-  { key: 'fees', label: 'Fees', of: (a: Allocation) => a.fees },
-] as const
-
-type SectionKey = typeof SECTIONS[number]['key']
-
-/**
- * THE FOUR FIGURES BEHIND A "TAKING NOW", AS THE FIRM WROTE THEM OUT BY HAND.
- *
- *   a        total run         everything of this kind ever raised
- *   b        retained          what earlier payments took
- *   a - b    available         what is there to take
- *   c        taking now        what THIS payment takes -- the column that is always shown
- *   a-b-c    after             what is left
- *
- * THE FIFTH IS MINE AND IT IS NOT PADDING. In duplum (NCA s103(5)) stops interest and fees
- * together exceeding the capital outstanding, so on an account at its ceiling part of what RAN can
- * never be RECOVERED -- RRC00005 carries R437,01 of fees against R380 of capital. Without it the
- * expansion would not add up and the firm's own formula would look broken on correct arithmetic.
- */
-const BEFORE: { label: string; of: (c: Component) => number }[] = [
-  { label: 'run', of: (c) => c.total },
-  { label: 'ceiling refuses', of: (c) => c.cannotTake },
-  { label: 'retained', of: (c) => c.retained },
-  { label: 'available', of: (c) => c.available },
-]
-
 export function AwaitingApproval({ refreshKey, onApproved }: {
   refreshKey: number
   onApproved: () => void
@@ -139,7 +101,7 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
 
   function toggleSection(k: SectionKey) {
-    setOpened((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n })
+    setOpened((p) => toggled(p, k))
   }
 
   async function approve(ids: string[]) {
@@ -254,7 +216,7 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
           <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
             <tr className="border-b border-slate-100 text-slate-400">
               <th colSpan={5} />
-              <th colSpan={SECTIONS.reduce((n, x) => n + (opened.has(x.key) ? 5 : 1), 0)}
+              <th colSpan={feeColumns(opened)}
                 className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
                 The fees side — half the payment
               </th>
@@ -278,39 +240,7 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
               <th className="px-2 py-2 text-left font-medium">Account</th>
               <th className="px-2 py-2 text-left font-medium">Debtor</th>
               <th className="px-2 py-2 text-right font-medium">Payment</th>
-              {SECTIONS.map((sec, i) => (
-                <Fragment key={sec.key}>
-                  {opened.has(sec.key) && BEFORE.map((f) => (
-                    <th key={f.label}
-                      className={`px-2 py-2 text-right font-normal text-slate-400 ${
-                        f.label === 'run' ? 'border-l border-slate-200' : ''}`}>
-                      {sec.label} {f.label}
-                    </th>
-                  ))}
-                  {/*
-                    THE COLUMN THAT IS ALWAYS THERE, and it is a button. "If you click on the
-                    interest taking, it expands all of the other columns just to double check."
-                  */}
-                  <th className={`px-2 py-2 text-right font-medium ${
-                    !opened.has(sec.key) && i === 0 ? 'border-l border-slate-200'
-                      : !opened.has(sec.key) ? 'border-l border-slate-100' : ''}`}>
-                    <button type="button" onClick={() => toggleSection(sec.key)}
-                      className="inline-flex items-center gap-1 uppercase tracking-wide
-                        hover:text-navy-950"
-                      title={opened.has(sec.key)
-                        ? `Hide the ${sec.label.toLowerCase()} arithmetic`
-                        : `Show what this ${sec.label.toLowerCase()} figure comes out of`}>
-                      {opened.has(sec.key) ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                      {sec.label} taking
-                    </button>
-                  </th>
-                  {opened.has(sec.key) && (
-                    <th className="px-2 py-2 text-right font-normal text-slate-400">
-                      {sec.label} after
-                    </th>
-                  )}
-                </Fragment>
-              ))}
+              <FeeHeadCells opened={opened} onToggle={toggleSection} />
               {/*
                 THE LINE ITEM THE FIRM FOUND MISSING: "one line item that is missing is the capital
                 outstanding. So the capital outstanding will be what is outstanding on the capital
@@ -389,45 +319,18 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                 </td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
-                {SECTIONS.map((sec, i) => {
-                  const c = sec.of(a)
-                  /*
-                    NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of the interest here is the
-                    open period -- computed to the day the money arrived, written only when
-                    somebody approves. A collector reading it down the telephone is quoting a real
-                    amount; one looking for it in the ledger before approval will not find it, and
-                    the marker is what stops that being a surprise.
-                  */
-                  const note = sec.key === 'interest' && r.interestOpen > 0 && r.interestOpenFrom
+                {/*
+                  NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of the interest here is the
+                  open period -- computed to the day the money arrived, written only when somebody
+                  approves. A collector reading it down the telephone is quoting a real amount; one
+                  looking for it in the ledger before approval will not find it, and the marker is
+                  what stops that being a surprise.
+                */}
+                <FeeBodyCells a={a} opened={opened}
+                  note={r.interestOpen > 0 && r.interestOpenFrom
                     ? `${rand(r.interestOpen)} of the interest has accrued since ${
                         formatDate(r.interestOpenFrom)} and is posted when you approve`
-                    : undefined
-                  return (
-                    <Fragment key={sec.key}>
-                      {opened.has(sec.key) && BEFORE.map((f) => (
-                        <td key={f.label} title={f.label === 'available' ? note : undefined}
-                          className={`px-2 py-1.5 text-right tabular-nums text-slate-400 ${
-                            f.label === 'run' ? 'border-l border-slate-200' : ''}`}>
-                          {rand(f.of(c))}
-                          {f.label === 'available' && note && (
-                            <span className="ml-1 text-[10px] text-slate-400">·</span>
-                          )}
-                        </td>
-                      ))}
-                      <td title={note}
-                        className={`px-2 py-1.5 text-right tabular-nums text-slate-700 ${
-                          !opened.has(sec.key) && i === 0 ? 'border-l border-slate-200'
-                            : !opened.has(sec.key) ? 'border-l border-slate-100' : ''}`}>
-                        {rand(c.taking)}
-                      </td>
-                      {opened.has(sec.key) && (
-                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
-                          {rand(c.after)}
-                        </td>
-                      )}
-                    </Fragment>
-                  )
-                })}
+                    : undefined} />
                 <td className="px-2 py-1.5 text-right tabular-nums text-slate-400 border-l border-slate-200">
                   {rand(r.capitalBefore)}
                 </td>

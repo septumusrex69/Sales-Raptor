@@ -47,6 +47,7 @@ const FinanceExceptions = lazy(() => import('./pages/finance/FinanceExceptions')
 const BackOffice = lazy(() => import('./pages/finance/BackOffice').then((m) => ({ default: m.BackOffice })))
 const FinanceSettings = lazy(() => import('./pages/finance/FinanceSettings').then((m) => ({ default: m.FinanceSettings })))
 const FinancePayments = lazy(() => import('./pages/finance/FinancePayments').then((m) => ({ default: m.FinancePayments })))
+const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -146,6 +147,7 @@ function App() {
               <Route path="/finance/runs/:id" element={<RequireFinance><RunDetail /></RequireFinance>} handle={{ title: 'Payover run' }} />
               {/* The old address, kept so a bookmark or a link in somebody's email still lands. */}
               <Route path="/finance/payments" element={<Navigate to="/finance" replace />} />
+              <Route path="/finance/check" element={<RequireFinance><CheckPayments /></RequireFinance>} handle={{ title: 'Check what has gone through' }} />
               <Route path="/finance/exceptions" element={<RequireFinance><FinanceExceptions /></RequireFinance>} handle={{ title: 'Finance exceptions' }} />
               <Route path="/finance/back-office" element={<RequireFinance><BackOffice /></RequireFinance>} handle={{ title: 'Back office' }} />
               <Route path="/finance/settings" element={<RequireFinance><FinanceSettings /></RequireFinance>} handle={{ title: 'Finance settings' }} />

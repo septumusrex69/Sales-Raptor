@@ -369,102 +369,117 @@ ok('the audit list also reads what the account itself adds up to',
 ok('the audit list is Administrator only',
   /public\.current_user_role\(\) = 'Administrator'/.test(posted))
 
-/* ================================================================== AND THE SCREEN
+/* ================================================================== AND THE SCREENS
  *
  * The firm asked for one column a section, expanding to the rest: "the column that you will be
  * showing to us is the interest that we are taking now. But if you click on the interest taking,
  * it expands all of the other columns just to double check."
+ *
+ * AND IT IS DRAWN BY ONE COMPONENT NOW, because two screens show these figures: the approval queue,
+ * where the payment has not happened, and the administrator's check, where it has. CLAUDE.md's rule
+ * about the same figures on two screens applies to the drawing as much as to the arithmetic --
+ * written out twice, the queue and the audit list would quietly disagree about what a payment paid,
+ * and the audit list is the one somebody would believe.
  */
-const screen = readFileSync(
-  new URL('../../src/pages/finance/AwaitingApproval.tsx', import.meta.url), 'utf8')
-const bare = strip(screen.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))
+const read = (f) => readFileSync(new URL(`../../src/${f}`, import.meta.url), 'utf8')
+const bare = (t) => strip(t.replace(/\{\/\*[\s\S]*?\*\/\}/g, ''))
+const sections = bare(read('components/finance/FeeSections.tsx'))
+const queueScreen = bare(read('pages/finance/AwaitingApproval.tsx'))
+const checkScreen = bare(read('pages/finance/CheckPayments.tsx'))
+
+ok('the fee sections are one component', sections.length > 1500)
 ok('the three sections are drawn in the order the money is spent',
-  bare.indexOf("key: 'interest'") < bare.indexOf("key: 'receiptFee'")
-  && bare.indexOf("key: 'receiptFee'") < bare.indexOf("key: 'fees'")
-  && bare.includes("key: 'interest'"))
+  sections.includes("key: 'interest'")
+  && sections.indexOf("key: 'interest'") < sections.indexOf("key: 'receiptFee'")
+  && sections.indexOf("key: 'receiptFee'") < sections.indexOf("key: 'fees'"))
 ok('taking now is the column, and it opens the other four',
-  bare.includes('toggleSection(sec.key)') && bare.includes('{sec.label} taking'))
-ok('the capital outstanding the firm asked for is on it', bare.includes('Capital outstanding'))
-/* "THE RETAINED COLLECTION COMMISSION, JUST CALL THAT COMMISSION" -- the firm's own words. */
-ok('the commission column is called Commission',
-  bare.includes('>Commission<') && !bare.includes('Retained col. commission'))
-/* AND THE RULES ARE RUN ON THE SCREEN, not merely available to it. This is the firm's "if anything
+  sections.includes('onToggle(sec.key)') && sections.includes('{sec.label} taking'))
+check('and there are four figures behind a taking',
+  (sections.match(/\{ label: '[a-z ]+', of: \(c\) => c\./g) ?? []).length, 4)
+/* THE CEILING AMONG THEM, or the expansion does not add up on an in duplum account and the firm's
+   own formula looks broken on correct arithmetic. */
+ok('the ceiling is one of them', /label: 'ceiling refuses'/.test(sections))
+
+/* AND BOTH SCREENS DRAW IT RATHER THAN THEIR OWN. A screen that kept a local copy would pass every
+   assertion above while showing something else. */
+for (const [name, screen] of [['the approval queue', queueScreen], ['the check screen', checkScreen]]) {
+  ok(`${name} draws the shared sections`,
+    /FeeHeadCells opened=/.test(screen) && /FeeBodyCells a=/.test(screen))
+  ok(`${name} keeps no copy of its own`,
+    !/\{ key: 'receiptFee'/.test(screen) && !/label: 'ceiling refuses'/.test(screen))
+  /*
+   * AND THE GROUP HEADINGS LINE UP. "The fees side" and "The capital side" span the columns
+   * underneath them. A span one short does not fail, does not warn and does not look broken -- it
+   * SHIFTS every heading after it by one column, so the figure under "Commission" is the VAT and
+   * the firm reads the wrong number off the right-looking screen. The capital group was written as
+   * 6 while it covers 7, because `Due to BF` belongs on that side.
+   */
+  const thead = screen.slice(screen.indexOf('<thead'), screen.indexOf('</thead>'))
+  const groupRow = thead.slice(0, thead.indexOf('</tr>'))
+  const headRow = thead.slice(thead.indexOf('</tr>') + 5)
+  const spans = [...groupRow.matchAll(/colSpan=\{(\d+)\}/g)].map((m) => Number(m[1]))
+  check(`${name}: three of the four group spans are fixed numbers`, spans.length, 3)
+  /* THE FEES SIDE IS NOT A CONSTANT and must not become one -- it is the only span that changes
+     when somebody opens a section, and a number written here would be wrong on the first click. */
+  ok(`${name}: the fees side span is computed from what is open`,
+    /colSpan=\{feeColumns\(opened\)\}/.test(groupRow))
+  /* FOURTEEN FIXED COLUMNS either side of the three sections, and the body must have a cell for
+     each: one added to the head and not the row is the same shift read from the other end. */
+  const fixedCells = (headRow.match(/<th\b/g) ?? []).length
+  check(`${name}: the fixed columns are all there`, fixedCells, 14)
+  check(`${name}: the lead, the capital side and the tail cover every fixed column`,
+    spans[0] + spans[1] + spans[2], fixedCells)
+}
+/*
+ * AND THE OPENED RECEIPT IS DRAWN OUTSIDE THE TABLE, which a screenshot settled.
+ *
+ * It was a panel in a `colSpan` cell, which takes the TABLE's width -- and this table is wider
+ * than the window: fifteen columns before anybody opens a fee section, and five more each time
+ * they do. So the third of its three columns, headed "Whether it holds", was drawn off the
+ * right-hand edge: the verdict, which is the entire point of the screen, was the part you had to
+ * scroll sideways to read. Asserted because putting it back inside the table is the obvious thing
+ * to do and it fails silently -- the panel renders, every figure is in the DOM, and the one that
+ * matters is off-screen.
+ */
+ok('the opened receipt is drawn outside the scrolling table',
+  /data-check-panel/.test(checkScreen)
+  && !/colSpan=\{span\}/.test(checkScreen)
+  && checkScreen.indexOf('data-check-panel') > checkScreen.indexOf('</table>'))
+
+/* AND THE RULES ARE RUN ON BOTH, not merely available to them. This is the firm's "if anything
    touches a formula, there is a problem", and a library nothing calls is a library nothing
    protects. */
-ok('the screen checks every row against the rules',
-  bare.includes('checkAllocation(a)') && bare.includes('awaitingAllocation(r)'))
-
+ok('the approval queue checks every row against the rules',
+  queueScreen.includes('checkAllocation(a)') && queueScreen.includes('awaitingAllocation(r)'))
+ok('the check screen checks every posted row against the rules',
+  checkScreen.includes('checkAllocation(a)') && checkScreen.includes('postedAllocation(r)'))
 /*
- * ---------------------------------------------------------------- AND THE GROUP HEADINGS LINE UP
+ * AND AN ALLOCATION POSTED BEFORE THE FIGURES EXISTED IS NOT CALLED WRONG.
  *
- * "The fees side" and "The capital side" are drawn on a row of their own, spanning the columns
- * underneath them. A span that is one short does not fail, does not warn and does not look broken
- * -- it SHIFTS every heading after it by one column, so the figure under "Commission" is the VAT
- * and the firm reads the wrong number off the right-looking screen. The capital group was written
- * as 6 while it covers 7, because `Due to BF` belongs on that side.
- *
- * COUNTED OUT OF THE SOURCE, both rows, and compared. The fee sections are 1 column collapsed and
- * 5 opened, which is why the span is computed in the component rather than written down -- so the
- * fixed columns either side are what this has to hold.
+ * A v1-5050 row has nought in the two fee-split columns and null in the thirteen before-figures,
+ * so every formula that subtracts one of them would fire -- a screen of red on payments that were
+ * correct when they were made. "We did not record that then" and "that does not add up" are
+ * different sentences, and the firm must not be shown the second when the first is true.
  */
-const thead = bare.slice(bare.indexOf('<thead'), bare.indexOf('</thead>'))
-const groupRow = thead.slice(0, thead.indexOf('</tr>'))
-const headRow = thead.slice(thead.indexOf('</tr>') + 5)
-const bodyRow = bare.slice(bare.indexOf('<tbody'), bare.indexOf('</tbody>'))
-
+ok('an allocation posted before the figures existed is shown rather than checked',
+  /beforeTheRecord \? \[\] : checkAllocation\(a\)/.test(checkScreen))
+ok('and what makes it so is a missing column, not a version string',
+  /beforeTheRecord: r\.costs_before == null/.test(payover))
+/* THE CAPITAL OUTSTANDING THE FIRM FOUND MISSING, on both. */
+ok('capital outstanding is on both screens',
+  queueScreen.includes('Capital outstanding') && checkScreen.includes('Capital outstanding'))
+/* "THE RETAINED COLLECTION COMMISSION, JUST CALL THAT COMMISSION" -- the firm's own words. */
+ok('the commission column is called Commission',
+  queueScreen.includes('>Commission<') && !queueScreen.includes('Retained col. commission'))
 /*
- * THE SPANS WRITTEN AS NUMBERS: the blank lead, the capital side, and the blank tail. The fees
- * side is deliberately not one of them -- see below.
+ * AND THE CHECK SCREEN CHANGES NOTHING. Financial records are immutable once a payment has been
+ * processed -- the four ledgers have no update or delete policy and Postgres refuses -- so a
+ * button on this screen could only ever be a button that fails. Asserted because the temptation to
+ * add "fix it" next to a flagged row is exactly what somebody would do next.
  */
-const spans = [...groupRow.matchAll(/colSpan=\{(\d+)\}/g)].map((m) => Number(m[1]))
-check('three of the four group spans are fixed numbers', spans.length, 3)
-/* THE FEES SIDE IS NOT A CONSTANT and must not become one -- it is the only span that changes when
-   somebody opens a section, and a number written here would be wrong on the first click. */
-ok('the fees side span is computed from what is open',
-  /colSpan=\{SECTIONS\.reduce\(/.test(groupRow))
-
-/*
- * THE FIXED COLUMNS ARE EVERYTHING OUTSIDE THE SECTIONS MAP, and finding where that map ends has
- * to be done by MATCHING BRACES rather than by looking for its closing `))}`. The BEFORE map
- * nested inside it closes with the same three characters, so the first one found is the inner one
- * -- which left the "taking" and "after" columns counted as fixed, made the totals come out two
- * too high, and would have had this check reporting a misalignment that was not there.
- */
-function mapBody(text, open) {
-  const at = text.indexOf(open)
-  if (at < 0) return [-1, -1]
-  let depth = 0
-  for (let i = at; i < text.length; i += 1) {
-    if (text[i] === '{') depth += 1
-    else if (text[i] === '}') { depth -= 1; if (depth === 0) return [at, i + 1] }
-  }
-  return [at, -1]
-}
-const [headAt, headEnd] = mapBody(headRow, '{SECTIONS.map(')
-const [bodyAt, bodyEnd] = mapBody(bodyRow, '{SECTIONS.map(')
-ok('the sections map is found in both rows', headAt > 0 && headEnd > headAt
-  && bodyAt > 0 && bodyEnd > bodyAt)
-
-const fixedHead = headRow.slice(0, headAt) + headRow.slice(headEnd)
-const fixedCells = (fixedHead.match(/<th\b/g) ?? []).length
-/* FOURTEEN: the tick box, the four that say whose payment this is and how much, the seven on the
-   capital side, and the two that say what kind of receipt it was and what the debtor typed. */
-check('the fixed columns are all there', fixedCells, 14)
-check('the lead, the capital side and the tail cover every fixed column',
-  spans[0] + spans[1] + spans[2], fixedCells)
-
-/* AND THE BODY AGREES WITH THE HEAD, which is the other half: a cell added to one and not the
-   other is the same shift read from the row instead of the heading. */
-const fixedBody = bodyRow.slice(0, bodyAt) + bodyRow.slice(bodyEnd)
-check('the body has a cell for every fixed column in the head',
-  (fixedBody.match(/<td\b/g) ?? []).length, fixedCells)
-/* AND EACH SECTION DRAWS THE SAME THREE SHAPES EITHER SIDE: the four behind a taking, the taking,
-   and the after. */
-check('each section draws the same cells in the head and the body',
-  (bodyRow.slice(bodyAt, bodyEnd).match(/<td\b/g) ?? []).length,
-  (headRow.slice(headAt, headEnd).match(/<th\b/g) ?? []).length)
-check('and there are four figures behind a taking',
-  (bare.match(/\{ label: '[a-z ]+', of: \(c\) => c\./g) ?? []).length, 4)
+check('the check screen writes nothing',
+  ['supabase.from', 'supabase.rpc', '.update(', '.insert(', '.delete(']
+    .filter((w) => checkScreen.includes(w)), [])
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} failed, ${pass} passed\n`)

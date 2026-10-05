@@ -37,6 +37,8 @@
  * which is the only way it can disagree with them.
  */
 
+import { amount } from './money.ts'
+
 /** One of the three lines on the fees side, as the firm drew it. */
 export interface Component {
   /** a — everything of this kind ever raised on the account. */
@@ -119,7 +121,19 @@ export interface Violation {
 export const CENT = 0.005
 
 const near = (a: number, b: number) => Math.abs(a - b) <= CENT
-const money = (n: number) => n.toFixed(2)
+/*
+ * WRITTEN THE WAY THE FIRM WRITES MONEY, through the one formatter.
+ *
+ * This was `toFixed(2)`, which puts "1230.50" in a detail line next to "R 1 230.50" everywhere
+ * else on the same screen -- two formats for one figure, on the screen whose whole job is letting
+ * somebody check a figure. `amount` is money.ts's, grouped with the non-breaking space the firm
+ * asked for, and it is pure, so this file stays importable from the QA checks.
+ *
+ * THE R IS LEFT OFF, because these appear inside a sentence of arithmetic ("1 230.50 - 369.15 -
+ * 55.37 = 805.98") where a Rand sign on every term is noise rather than information. The column
+ * headings and the figures beside them carry it.
+ */
+const money = (n: number) => amount(n)
 
 /**
  * THE RECEIPT FEE IS SHOWN INCLUDING VAT, which is a correction rather than a preference.
