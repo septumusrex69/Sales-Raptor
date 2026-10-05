@@ -177,10 +177,23 @@ ok('...in that order, or there is nothing for the split to give interest to',
  */
 const accrueCall = (allocate.match(/accrue_interest_to\([^;]*\);/) ?? [''])[0]
 ok('...and the call is really there to read', accrueCall.length > 20)
-ok('the period is accrued to the payment’s date', /v_pay\.received_at/.test(accrueCall))
+/*
+ * THE DAY IS NAMED ONCE AND PASSED THREE TIMES, so the assertion follows the variable rather than
+ * the literal. allocate_payment used to compute the payment's day inside the accrue call and again
+ * for the tariff; it now sets `v_day` at the top and hands it to accrue_interest_to, to fee_split
+ * and to open_interest -- three readers that MUST agree about which day the money arrived, and
+ * three places a timezone could have been dropped from.
+ *
+ * ASSERTED AS A CHAIN: the day comes from the payment's own received_at read in Johannesburg, and
+ * the accrual is given that day. Either half alone would pass on code that had lost the other.
+ */
+const dayLine = (allocate.match(/v_day := [^;]*;/) ?? [''])[0]
+ok('the payment’s day is worked out once', dayLine.length > 20)
+ok('the period is accrued to the payment’s date',
+  /v_pay\.received_at/.test(dayLine) && /\bv_day\b/.test(accrueCall))
 /* THE FIRM'S DAY, not the first ten characters of a UTC timestamp -- a payment recorded on the 29th
    is stored as 22:00 on the 28th, and `::date` alone reads it a day early. */
-ok('...read in Johannesburg', /at time zone 'Africa\/Johannesburg'\)::date/.test(accrueCall))
+ok('...read in Johannesburg', /at time zone 'Africa\/Johannesburg'\)::date/.test(dayLine))
 
 /*
  * AND THE PAYMENT IS EXCLUDED FROM THE BALANCE IT IS BEING SPLIT AGAINST, exactly as

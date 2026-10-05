@@ -251,12 +251,20 @@ function lastFn(name) {
 const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '')
 const preview = strip(lastFn('preview_allocation'))
 const queue = strip(lastFn('payments_awaiting_approval'))
+/*
+ * AND THE SPLIT ITSELF IS ITS OWN FUNCTION NOW, because allocate_payment has to write the same
+ * answer onto the posted allocation. Two copies of that arithmetic would mean the approval screen
+ * promising the firm one thing and the ledger recording another, found at month end -- the same
+ * failure applyAccountFilters exists to prevent, applied to money.
+ */
+const feeSplit = strip(lastFn('fee_split'))
 const payover = readFileSync(new URL('../../src/lib/payover.ts', import.meta.url), 'utf8')
 
 /* THE FLOOR FIRST. An empty string satisfies every `.includes()` below, which is the vacuous pass
    this suite has been caught by before. */
 ok('preview_allocation is in the schema', preview.length > 3000)
 ok('payments_awaiting_approval is in the schema', queue.length > 1500)
+ok('fee_split is in the schema', feeSplit.length > 1200)
 
 /* EVERY ONE OF THE THREE SECTIONS, THROUGH ALL FOUR PLACES IT HAS TO BE NAMED: the preview's
    return type, the queue's return type, the queue's select list, and the hand-written mapper. */
@@ -294,21 +302,72 @@ ok('the VAT rate reaches the browser', queue.includes('vat_rate numeric')
  * about which fee a payment paid.
  */
 ok('the costs pool is split oldest fee first',
-  /order by r\.sk, r\.incurred_at, r\.id/.test(preview))
-/* AND THE FEE THIS PAYMENT RAISES SORTS LAST, because it is the newest -- which is why a small
-   payment can leave its own receipt fee outstanding. */
-ok('the receipt fee this payment raises is paid last', /select 1, '0{8}-/.test(preview))
+  /order by date\(r\.incurred_at\), r\.sk, r\.incurred_at, r\.id/.test(feeSplit))
+/*
+ * AND THE FEE THIS PAYMENT RAISES IS DATED THE DAY THE MONEY ARRIVED, not forced last.
+ *
+ * THE FIRST VERSION FORCED IT LAST, on the reasoning that it is the newest fee on the account --
+ * and allocate_payment is the proof that was wrong: it inserts the item 9 row with
+ * `incurred_at = v_pay.received_at`, the day the money was banked. So on a receipt banked on the
+ * 12th and captured on the 29th the preview paid that fee last while the posting paid it in the
+ * middle, the two disagreeing on exactly the payment somebody was already querying. `sk` now only
+ * breaks the tie WITHIN the day, which is still right: the receipt fee is raised at the moment of
+ * receipt, after whatever else was charged that day.
+ */
+ok('the receipt fee this payment raises is dated the day the money arrived',
+  /coalesce\(p_new_fee_day, current_date\)::timestamptz/.test(feeSplit)
+  && /select 1, '0{8}-/.test(feeSplit))
 /* AND THE RECOVERABLE RULE IS THE ENGINE'S. engine_balances gathers the pool with fee_stands() and
    `billed is not false`, and it is that pool to_costs came out of; the money position view's
    plainer reading would make the two buckets fail to add back on an imported Promise to Pay. */
 ok('what stands is decided by fee_stands, as the engine decides it',
-  /public\.fee_stands\(f\.cancelled_at, f\.legacy_name\)/.test(preview)
-  && /f\.billed is not false/.test(preview))
+  /public\.fee_stands\(f\.cancelled_at, f\.legacy_name\)/.test(feeSplit)
+  && /f\.billed is not false/.test(feeSplit))
 /* AND IN DUPLUM IS SPENT OLDEST-FIRST TOO, or an account at its ceiling shows more fees available
    than the engine will ever pay and the firm's own formula fires on correct arithmetic. */
 ok('the in duplum ceiling is attributed to the oldest fees',
-  preview.includes('public.in_duplum_cost_room(p_account)')
-  && /least\(greatest\(v_room - r\.raised_before, 0\), r\.incl\)/.test(preview))
+  feeSplit.includes('public.in_duplum_cost_room(p_account, p_interest_pending)')
+  && /least\(greatest\(\(select mm from room\) - r\.raised_before, 0\), r\.incl\)/.test(feeSplit))
+/*
+ * AND BOTH THE SCREEN AND THE LEDGER ASK IT. This is the assertion that makes the shared function
+ * worth having: either caller gathering the split itself would be the drift the sharing prevents.
+ */
+const allocate = strip(lastFn('allocate_payment'))
+ok('allocate_payment is in the schema', allocate.length > 2000)
+ok('the preview and the posting both ask fee_split',
+  /public\.fee_split\(\s*p_account, p_exclude_payment/.test(preview)
+  && /public\.fee_split\(\s*v_acct\.id, p_payment_id/.test(allocate))
+/*
+ * AND THE POSTING WRITES THE ANSWER RATHER THAN NOUGHT.
+ *
+ * `to_receipt_fee` and `to_fees` have been columns on payment_allocations since it was built and
+ * allocate_payment passed literal `0, 0` for them -- so every payment the firm would ever have
+ * approved recorded no answer at all to "did this pay its own receipt fee?", which is the one
+ * question the three-way split exists to answer.
+ */
+ok('the posted allocation carries the split rather than zeroes',
+  /k\.to_receipt_fees, k\.to_fees/.test(allocate) && !/\n\s*0, 0,\n/.test(allocate))
+/* AND THE FIVE FIGURES BEHIND EACH LINE, so a payment can be checked next year against the book as
+   it stood THEN rather than against one that has moved. */
+const POSTED = ['interest_total', 'interest_cant', 'interest_retained', 'interest_before',
+  'interest_after', 'rf_total', 'rf_cant', 'rf_retained', 'fees_total', 'fees_cant',
+  'fees_retained', 'costs_before', 'costs_after']
+check('the posted allocation stores what it was computed against',
+  POSTED.filter((c) => !allocate.includes(c)), [])
+/* AND THE AUDIT LIST HANDS ALL OF IT BACK, or the administrator cannot re-run a single formula. */
+const posted = strip(lastFn('payments_posted'))
+ok('payments_posted is in the schema', posted.length > 1500)
+check('and every stored figure reaches the audit list',
+  POSTED.filter((c) => !posted.includes(c)), [])
+/* THE LEDGER'S OWN TOTALS COME WITH THEM, which is a different question from what the allocation
+   says: an allocation can be internally perfect and sit on an account whose rows say otherwise. */
+ok('the audit list also reads what the account itself adds up to',
+  posted.includes('fees_raised') && posted.includes('interest_posted')
+  && posted.includes('payments_banked'))
+/* AND IT IS THE ADMINISTRATOR'S ALONE. This is security definer, so the guard has to be in the
+   query -- row-level security does not apply to it. */
+ok('the audit list is Administrator only',
+  /public\.current_user_role\(\) = 'Administrator'/.test(posted))
 
 /* ================================================================== AND THE SCREEN
  *

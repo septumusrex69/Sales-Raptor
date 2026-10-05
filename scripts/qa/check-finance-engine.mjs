@@ -60,12 +60,62 @@ function lastFn(name) {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '')
 }
 
+
+/*
+ * AND THE DEFINITION THAT CARRIES THE BODY IS NOT ALWAYS THE LAST ONE.
+ *
+ * CLAUDE.md's rule is that schema.sql is append-only so the last definition is the live one. That
+ * is still true -- but a function can now be live in TWO arities at once: `engine_balances` and
+ * `in_duplum_cost_room` each gained an argument, and the old shape was kept as a thin WRAPPER that
+ * passes nought so the arithmetic is not written twice. The wrapper is appended after the body, so
+ * `lastIndexOf` lands on three lines of delegation and every assertion about the real code passes
+ * vacuously. Six of them did.
+ *
+ * SO THE ARITY IS NAMED. Counting top-level commas in the parameter list is what distinguishes the
+ * body from the wrapper, and naming the number in the caller is what makes a future split of one
+ * of these fail here rather than go quiet.
+ */
+function fnOfArity(name, args) {
+  const marks = [`create or replace function public.${name}(`, `create function public.${name}(`]
+  let best = ''
+  for (const mark of marks) {
+    let at = sql.indexOf(mark)
+    while (at >= 0) {
+      /* The parameter list: from the opening bracket to the matching close. */
+      let depth = 0; let i = at + mark.length - 1; let shut = -1
+      for (; i < sql.length; i += 1) {
+        if (sql[i] === '(') depth += 1
+        else if (sql[i] === ')') { depth -= 1; if (depth === 0) { shut = i; break } }
+      }
+      if (shut > 0) {
+        const params = sql.slice(at + mark.length, shut)
+        /* Top-level commas only -- a default like `coalesce(a, b)` has its own. */
+        let d = 0; let n = params.trim() === '' ? 0 : 1
+        for (const ch of params) {
+          if (ch === '(') d += 1
+          else if (ch === ')') d -= 1
+          else if (ch === ',' && d === 0) n += 1
+        }
+        if (n === args) {
+          const end = sql.indexOf('$$;', at)
+          const got = end < 0 ? sql.slice(at) : sql.slice(at, end)
+          /* The LAST one of this arity wins, which is the append-only rule applied properly. */
+          if (got.length > 0) best = got
+        }
+      }
+      at = sql.indexOf(mark, at + 1)
+    }
+  }
+  return best.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '')
+}
+
 const split = lastFn('finance_split')
 const commission = lastFn('finance_commission')
 const allocate = lastFn('allocate_payment')
 const replay = lastFn('reallocate_account')
 const reverse = lastFn('reverse_payment_allocation')
-const balances = lastFn('engine_balances')
+/* THREE ARGUMENTS: the body. The two-argument shape is a wrapper -- see fnOfArity. */
+const balances = fnOfArity('engine_balances', 3)
 
 /* PRESENCE BEFORE ANYTHING ELSE. An empty string satisfies most negative assertions, so a deleted
    function would otherwise read as a clean pass -- CLAUDE.md's `indexOf` trap in another shape. */
@@ -149,7 +199,20 @@ ok('invented data and reversed money are skipped',
  */
 ok('the engine asks for its balances rather than gathering them',
   /from public\.engine_balances\(v_acct\.id, p_payment_id\)/.test(allocate))
-ok('...and so does the dry run', /from public\.engine_balances\(p_account, null\)/.test(lastFn('preview_allocation')))
+/*
+ * AND THE DRY RUN ASKS THE SAME FUNCTION -- read off the LIVE preview_allocation, which is a plain
+ * `create function` because it has been dropped and recreated. `lastFn` only matches `create or
+ * replace`, so this assertion was reading a superseded copy from thousands of lines earlier and
+ * asserting `(p_account, null)` against code that has not said that for months. CLAUDE.md's trap,
+ * found while fixing the arity one.
+ *
+ * THE THIRD ARGUMENT IS THE OPEN INTEREST PERIOD, which the dry run has and the posting does not:
+ * without it the preview handed the costs the whole in duplum ceiling and then added the open
+ * interest on top of it.
+ */
+ok('...and so does the dry run, with the interest it is about to post',
+  /from public\.engine_balances\(p_account, p_exclude_payment, interest_open\)/
+    .test(fnOfArity('preview_allocation', 5)))
 ok('half A takes recoverable interest', /sum\(amount_recoverable\), 0\) into interest/.test(balances))
 check('...and never the accrued figure', (balances.match(/amount_accrued/g) ?? []), [])
 

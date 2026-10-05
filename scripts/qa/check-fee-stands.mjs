@@ -209,7 +209,15 @@ ok('...a promise to pay survives cancellation',
 ok('...matched exactly rather than by substring', !/ilike '%promise to pay%'/.test(fn))
 /* AND THE ENGINE ASKS IT rather than repeating `cancelled_at is null`, which is what it did and
    which is what was taking the PTP charges off. */
-const engAt = sql.lastIndexOf('create or replace function public.engine_balances(')
+/*
+ * THE THREE-ARGUMENT DEFINITION, which is the one with the body in it. `engine_balances` is live
+ * in two arities -- it gained an argument for interest about to be posted, and the old shape was
+ * kept as a thin wrapper passing nought rather than a second copy of the gathering. The wrapper is
+ * appended AFTER the body, so `lastIndexOf` landed on three lines of delegation and the assertion
+ * below passed vacuously. CLAUDE.md's append-only rule still holds; it just needs the arity.
+ */
+const engMark = 'create or replace function public.engine_balances(\n  p_account uuid, p_exclude_payment uuid, p_interest_pending numeric)'
+const engAt = sql.lastIndexOf(engMark)
 ok('the engine exists', engAt > 0)
 const eng = engAt > 0 ? sql.slice(engAt, sql.indexOf('$$;', engAt)) : ''
 ok('...and asks fee_stands', /public\.fee_stands\(f\.cancelled_at, f\.legacy_name\)/.test(eng))

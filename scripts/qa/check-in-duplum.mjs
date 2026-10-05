@@ -52,6 +52,52 @@ function lastFunction(name) {
   return stop < 0 ? schema.slice(at) : schema.slice(at, stop)
 }
 
+
+/*
+ * AND THE DEFINITION THAT CARRIES THE BODY IS NOT ALWAYS THE LAST ONE.
+ *
+ * CLAUDE.md's rule is that schema.sql is append-only so the last definition is the live one. That
+ * is still true -- but a function can now be live in TWO arities at once: `engine_balances` and
+ * `in_duplum_cost_room` each gained an argument for interest that is about to be POSTED, and the
+ * old shape was kept as a thin WRAPPER passing nought so the arithmetic is not written twice. The
+ * wrapper is appended after the body, so `lastIndexOf` lands on three lines of delegation and
+ * every assertion about the real code passes vacuously. Six in this file did.
+ *
+ * SO THE ARITY IS NAMED, and naming it is what makes a future split of one of these fail here
+ * rather than go quiet.
+ */
+function fnOfArity(name, args) {
+  const marks = [`create or replace function public.${name}(`, `create function public.${name}(`]
+  let best = ''
+  for (const mark of marks) {
+    let at = schema.indexOf(mark)
+    while (at >= 0) {
+      let depth = 0; let shut = -1
+      for (let i = at + mark.length - 1; i < schema.length; i += 1) {
+        if (schema[i] === '(') depth += 1
+        else if (schema[i] === ')') { depth -= 1; if (depth === 0) { shut = i; break } }
+      }
+      if (shut > 0) {
+        const params = schema.slice(at + mark.length, shut)
+        let d = 0; let n = params.trim() === '' ? 0 : 1
+        for (const ch of params) {
+          if (ch === '(') d += 1
+          else if (ch === ')') d -= 1
+          else if (ch === ',' && d === 0) n += 1
+        }
+        if (n === args) {
+          const end = schema.indexOf('\nend $$;', at)
+          const alt = schema.indexOf('\n$fn$;', at)
+          const stop = end < 0 ? alt : (alt < 0 ? end : Math.min(end, alt))
+          best = stop < 0 ? schema.slice(at) : schema.slice(at, stop)
+        }
+      }
+      at = schema.indexOf(mark, at + 1)
+    }
+  }
+  return best
+}
+
 /* ---------------------------------------------------------------------------------------------
  * 1. RRC00005, WHICH IS THE ACCOUNT THE FIRM WAS LOOKING AT
  * ------------------------------------------------------------------------------------------- */
@@ -233,10 +279,12 @@ ok('...counted as what was allowed rather than what accrued',
  * of it VAT. That was reported to the firm as an unresolved discrepancy this morning; their
  * decision closes it.
  */
-const engine = lastFunction('engine_balances')
+/* THREE ARGUMENTS: the body. The two-argument shape is a wrapper -- see fnOfArity. */
+const engine = fnOfArity('engine_balances', 3)
 ok('the split engine is found', engine.length > 0)
 ok('...and clips the costs to what in duplum leaves',
-  /costs := least\(costs, public\.in_duplum_cost_room\(p_account\)\)/.test(engine))
+  /costs := least\(costs, public\.in_duplum_cost_room\(p_account, p_interest_pending\)\)/
+    .test(engine))
 /*
  * CLIPPED BEFORE THE ALLOCATIONS ARE NETTED OFF, so an account that has already had costs taken is
  * measured against the same ceiling as one that has not.
@@ -258,8 +306,25 @@ ok('...and never reads as a negative', /costs := greatest\(0, costs\)/.test(engi
  * ONE DEFINITION OF THE ROOM, because three readers need it and written out in each they would
  * disagree about how much of one account's fees may be collected.
  */
-const room = lastFunction('in_duplum_cost_room')
+/*
+ * TWO ARGUMENTS: the body. The one-argument shape is a wrapper that passes nought -- see
+ * fnOfArity, and the reason there are two is that the dry run has interest in hand the ledger has
+ * not seen yet while the posting does not.
+ */
+const room = fnOfArity('in_duplum_cost_room', 2)
 ok('there is one definition of what the fees may take', room.length > 0)
+/* AND INTEREST THAT IS ABOUT TO BE POSTED COMES OFF THE ROOM TOO. Without this the preview gave
+   the costs the whole ceiling and then added the open interest on top -- R385,62 of non-capital
+   against a R380,00 ceiling on RRC00005, which is the thing the ceiling exists to stop. */
+ok('...less interest that is about to be posted',
+  /greatest\(coalesce\(p_interest_pending, 0\), 0\)/.test(room))
+/* AND THE OLD SHAPE IS A WRAPPER RATHER THAN A SECOND COPY. Two bodies would eventually disagree
+   about how much of an account's fees may be collected, and the wrong one would still look like a
+   figure about that account. */
+const roomWrapper = fnOfArity('in_duplum_cost_room', 1)
+ok('the one-argument shape delegates rather than repeating the arithmetic',
+  /select public\.in_duplum_cost_room\(p_account, 0\)/.test(roomWrapper)
+  && !/capital_handed_over/.test(roomWrapper))
 ok('...measured against the capital handed over',
   /coalesce\(d\.capital_handed_over, 0\)/.test(room))
 ok('...less what interest has been allowed', /sum\(a\.amount_recoverable\)/.test(room))
