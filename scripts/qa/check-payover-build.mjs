@@ -128,9 +128,28 @@ no('schema.sql never declares a database to be staging',
 
 /* ---------------- 3. the two test controls, and both locks on each ---------------- */
 
+/*
+ * EACH GATED, AND THE TWO ARE SPELLED DIFFERENTLY ON PURPOSE.
+ *
+ * move_payment_to_cycle asks has_capability('payment.move') -- it is one of the capabilities the
+ * settings screen offers, and a role spelled out in its body would mean granting somebody
+ * payment.move ticked a box and changed nothing.
+ *
+ * reset_payover_run is NOT a capability anybody can be granted: it throws a client's finished run
+ * away so the same test can be run again, and it exists only on staging. There is nothing to grant,
+ * so it keeps the role test -- in the SAFE `is distinct from` form, for the reason
+ * check-silent-triggers records at length: with no session current_user_role() is NULL, `null <>
+ * 'Administrator'` is NULL, and `if NULL then` does not run.
+ */
+const GATES = {
+  reset_payover_run: /current_user_role\(\) is distinct from 'Administrator'/,
+  move_payment_to_cycle: /not public\.has_capability\('payment\.move'\)/,
+}
 for (const [name, body] of [['reset_payover_run', reset], ['move_payment_to_cycle', move]]) {
-  ok(`${name} is Administrator only`,
-    /current_user_role\(\) is distinct from 'Administrator'/.test(body ?? ''))
+  ok(`${name} is gated`, GATES[name].test(body ?? ''))
+  /* NEITHER MAY USE THE FAIL-OPEN COMPARISON. `<>` against a NULL role yields NULL and the guard
+     is skipped for exactly the caller that should be refused hardest. */
+  no(`...without the fail-open comparison`, /current_user_role\(\)\s*<>/.test(body ?? ''))
   /* THE LOCK THAT MATTERS. A browser guard decides whether to draw a button; this is the boundary,
      and it reads a row the app cannot write. */
   ok(`...and refuses unless the DATABASE says staging`,

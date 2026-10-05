@@ -153,10 +153,22 @@ function triggerStatement(name, table) {
      * that should be refused hardest. So the check now holds the SAFE form, and the old spelling
      * fails here rather than sitting in the schema looking deliberate.
      */
-    ok('...and it lets an Administrator through and nobody else',
-      /if\s+public\.current_user_role\(\)\s+is distinct from\s+'Administrator'\s+then/i.test(body))
-    ok('...failing closed rather than open when there is no session',
-      !/current_user_role\(\)\s*<>/.test(body))
+    /*
+     * IT NOW ASKS THE CAPABILITY, which is both the house rule and strictly safer here.
+     *
+     * THE RULE: a role spelled out in a body cannot be reached by a grant, so ticking `mail.refile`
+     * on the settings screen used to change nothing at all.
+     *
+     * AND THE SAFETY, which is the point this comment was originally about. `has_capability`
+     * is `select X = any(...) and exists(...)` -- both halves are boolean, never NULL -- so with no
+     * session it returns FALSE, `not FALSE` is TRUE, and the trigger restores. The old
+     * `is distinct from` was needed precisely because the bare `<>` it replaced went NULL and let
+     * the guard be skipped; the capability form cannot go NULL at all, so it fails closed by
+     * construction rather than by careful spelling.
+     */
+    ok('...and it lets through only somebody who may refile',
+      /if not public\.has_capability\('mail\.refile'\) then/.test(body))
+    ok('...with no role comparison left to go NULL', !/current_user_role\(\)/.test(body))
 
     /*
      * ALL FIVE LINKS, each re-asserted ONLY where the old value was not null. The `is not null`

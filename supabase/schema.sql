@@ -25732,3 +25732,230 @@ grant execute on function public.dispose_excess_credit(uuid, text, text, text, u
 grant execute on function public.parked_credits() to authenticated;
 grant execute on function public.take_parked_credit(uuid, text) to authenticated;
 grant execute on function public.return_parked_credit(uuid, text) to authenticated;
+
+-- ============================================================================================
+-- THE FIRM'S OWN BOOKS: WHAT IT SPENT, AND WHAT IT THEREFORE MADE
+--
+-- Until now Raptor could say what the firm EARNED and not what it MADE, and the business overview
+-- said so in words because an empty expenses table reads as a firm that spent nothing.
+--
+-- THIS IS THE FIRST TABLE BEHIND `business.view`, which matters beyond itself: the capability was
+-- added deliberately NOT marked `inDatabase`, because capabilities.ts's own rule is that only what
+-- is enforced goes in and "a tick drawn on the settings screen that nothing checks is worse than
+-- the missing rule it pretends to be". Its three policies all ask has_capability('business.view'),
+-- so the flag is set in src/lib/capabilities.ts in this same commit -- which is what that comment
+-- said would happen.
+--
+-- NO DELETE POLICY, DELIBERATELY. An expense is CANCELLED with a reason, never removed: "what did
+-- we spend in March" has to keep answering the same way next year. The four trust ledgers have the
+-- same shape for the same reason, and check-financial-immutability asserts it of them.
+--
+-- THE CATEGORIES ARE THE FIRM'S OWN WORDS, from the list they gave when describing what is
+-- missing: "salaries, rent, the bureau's invoices, the SMS gateway, bank charges on both accounts."
+-- ============================================================================================
+
+create table if not exists public.business_expenses (
+  id uuid primary key default gen_random_uuid(),
+  incurred_on date not null default current_date,
+  category text not null,
+  supplier text,
+  description text not null,
+  amount numeric(14,2) not null check (amount > 0),
+  vat numeric(14,2) not null default 0 check (vat >= 0),
+  paid_at timestamptz,
+  paid_reference text,
+  cancelled_at timestamptz,
+  cancelled_reason text,
+  created_by uuid references public.profiles(id),
+  created_at timestamptz not null default now(),
+  constraint business_expenses_category_check check (category in (
+    'Premises', 'Payroll', 'Technology', 'Communications',
+    'Bureau and gateway', 'Bank charges', 'Professional fees', 'Other'))
+);
+
+create index if not exists business_expenses_month_idx
+  on public.business_expenses (incurred_on desc) where cancelled_at is null;
+
+alter table public.business_expenses enable row level security;
+
+create policy business_expenses_select on public.business_expenses
+  for select using (public.has_capability('business.view'));
+
+create policy business_expenses_insert on public.business_expenses
+  for insert with check (public.has_capability('business.view'));
+
+create policy business_expenses_update on public.business_expenses
+  for update using (public.has_capability('business.view'))
+  with check (public.has_capability('business.view'));
+
+/*
+ * THE MONTH, ON THE FIRM'S OWN SIDE.
+ *
+ * WHAT IT EARNED IS READ OFF THE TRUST LEDGER rather than summed again from the allocations. The
+ * firm's positive entries ARE its commission, interest and fees falling due, and its negative ones
+ * are drawings to the business account -- one arithmetic, which is the rule the payover figures
+ * were centralised under and holds just as hard here.
+ *
+ * AND "MADE" IS EARNED LESS SPENT, NOT DRAWN LESS SPENT. Money earned and still sitting in trust
+ * has been earned; a month read on drawings would say the firm made nothing in any month it chose
+ * not to transfer, which is a statement about a bank transfer rather than about the business.
+ */
+create or replace function public.business_month(p_from date, p_to date)
+returns table(earned numeric, drawn numeric, still_in_trust numeric,
+              invoiced numeric, invoices_paid numeric, owed_by_clients numeric,
+              expenses numeric, expenses_vat numeric, made numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(sum(amount) filter (where amount > 0), 0) as earned,
+           coalesce(-sum(amount) filter (where amount < 0), 0) as drawn
+      from public.trust_creditor_entries
+     where party = 'firm'
+       and (entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  held as (
+    -- Not period-bound: what is sitting in trust right now, whenever it was earned.
+    select coalesce(sum(amount), 0) as bal from public.trust_creditor_entries where party = 'firm'
+  ),
+  charges as (
+    select coalesce(sum(amount + vat) filter (where cancelled_at is null), 0) as invoiced,
+           coalesce(sum(amount + vat) filter (where cancelled_at is null and paid_at is not null), 0) as paid
+      from public.client_charges
+     where raised_on between p_from and p_to
+  ),
+  owing as (
+    select coalesce(sum(amount + vat), 0) as bal from public.client_charges
+     where cancelled_at is null and paid_at is null
+  ),
+  spent as (
+    select coalesce(sum(amount), 0) as ex, coalesce(sum(vat), 0) as vat
+      from public.business_expenses
+     where cancelled_at is null and incurred_on between p_from and p_to
+  )
+  select f.earned, f.drawn, h.bal, c.invoiced, c.paid, o.bal, s.ex, s.vat,
+         f.earned + c.invoiced - s.ex
+    from firm f, held h, charges c, owing o, spent s
+   where public.has_capability('business.view')
+$$;
+
+revoke all on function public.business_month(date, date) from public;
+revoke all on function public.business_month(date, date) from anon;
+grant execute on function public.business_month(date, date) to authenticated;
+
+
+-- ============================================================================================
+-- EVERY ENFORCED CAPABILITY NOW ASKS FOR ITSELF
+--
+-- A HOLE FOUND BY TIGHTENING A CHECK, NOT BY ANYTHING FAILING. Five of the eight capabilities
+-- marked `inDatabase` were enforced by naming the Administrator ROLE rather than asking the
+-- capability -- so granting somebody `library.edit`, `mail.refile` or `payment.move` ticked a box
+-- on the settings screen and changed nothing at all. The grants column was decorative for them.
+--
+-- THE CHECK THAT SHOULD HAVE CAUGHT IT COULD NOT. check-capability-screen asserted that each
+-- enforced capability "is asked for in the database", but its test was
+-- `has_capability('X') || sql.includes("'X'")` -- and the second half matches the role_capabilities
+-- TEMPLATE, which lists every capability by name. It could never fail. It now requires the real
+-- form.
+--
+-- AN ADMINISTRATOR PASSES EXACTLY AS BEFORE. What changes is that a grant now reaches these, which
+-- is the entire purpose of the column -- the same correction already made to the trust functions,
+-- finished across the rest of the set.
+--
+-- THE POLICIES WERE ALTERED RATHER THAN REPLACED (alter policy ... using ...), so no window exists
+-- in which a table sits with no policy at all.
+-- ============================================================================================
+
+alter policy message_templates_insert on public.message_templates
+  with check (public.has_capability('library.edit'));
+alter policy message_templates_update on public.message_templates
+  using (public.has_capability('library.edit'))
+  with check (public.has_capability('library.edit'));
+alter policy message_templates_delete on public.message_templates
+  using (public.has_capability('library.edit'));
+alter policy workflow_versions_write on public.workflow_versions
+  using (public.has_capability('library.edit'))
+  with check (public.has_capability('library.edit'));
+alter policy workflow_nodes_write on public.workflow_nodes
+  using (public.has_capability('library.edit'))
+  with check (public.has_capability('library.edit'));
+
+create or replace function public.protect_filed_mail_target()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- `is distinct from`, never a bare `<>`: NULL is not an Administrator, and a comparison that
+  -- yields NULL would skip every line below.
+  if not public.has_capability('mail.refile') then
+    -- Only ever re-assert a link that was ALREADY set. Filing unfiled mail stays open to
+    -- everyone, which is the everyday action.
+    if old.linked_account_id is not null then new.linked_account_id := old.linked_account_id; end if;
+    if old.linked_lead_id is not null then new.linked_lead_id := old.linked_lead_id; end if;
+    if old.linked_deal_id is not null then new.linked_deal_id := old.linked_deal_id; end if;
+    if old.linked_company_id is not null then new.linked_company_id := old.linked_company_id; end if;
+    if old.linked_contact_id is not null then new.linked_contact_id := old.linked_contact_id; end if;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.move_payment_to_cycle(p_payment uuid, p_period_start date)
+returns date
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_at timestamptz;
+  v_run record;
+begin
+  if not public.has_capability('payment.move') then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  -- STAGING ONLY, ASKED IN THE DATABASE, for the same reason reset_payover_run is: this moves
+  -- money between two invoices, and a browser guard is a courtesy rather than a boundary.
+  if not public.is_staging_database() then
+    raise exception 'Moving a payment between cycles is a testing control and this is not the staging database.'
+      using errcode = '42501';
+  end if;
+  if p_period_start is distinct from public.payover_cycle_start(
+       (p_period_start::timestamp at time zone 'Africa/Johannesburg')) then
+    raise exception 'A cycle starts on the 11th; % does not.', to_char(p_period_start, 'DD Mon YYYY')
+      using errcode = '22023';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+
+  -- AN INVOICED PAYMENT DOES NOT MOVE. Its figures are on a remittance a client has had, and
+  -- taking it out from under them is exactly what the reversal-as-a-negative-line rule exists to
+  -- prevent. Reset the run first if that is really what is wanted.
+  select r.invoice_number, r.status into v_run
+    from public.payment_allocations a
+    join public.payover_runs r on r.id = a.payover_run_id
+   where a.payment_id = p_payment and r.status in ('approved', 'sent', 'paid')
+   limit 1;
+  if v_run.invoice_number is not null then
+    raise exception 'That payment is on %, which is %. Reset that run first.',
+      v_run.invoice_number, v_run.status using errcode = '22023';
+  end if;
+
+  -- THE CYCLE IS DECIDED BY created_at, NOT BY THE RECEIVED DATE SOMEBODY TYPED. build_payover_run
+  -- claims on `p.created_at between the cycle's bounds`, so a backdated receipt still lands in the
+  -- cycle it was captured in -- which is right for an audit trail and is exactly what makes a
+  -- carry-forward or a negative payover untestable without this. Noon, so no timezone edge can
+  -- push it into the neighbouring cycle.
+  v_at := ((p_period_start + 15)::timestamp + time '12:00') at time zone 'Africa/Johannesburg';
+
+  update public.account_payments set created_at = v_at where id = p_payment;
+  -- AND IT LETS GO OF ANY OPEN RUN, or the next build finds it already claimed and silently
+  -- produces a run with the payment missing from both cycles.
+  update public.payment_allocations set payover_run_id = null where payment_id = p_payment;
+
+  return p_period_start;
+end $$;

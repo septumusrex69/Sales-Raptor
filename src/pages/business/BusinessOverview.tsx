@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
+import { Link } from 'react-router-dom'
 import { fetchClientDebts, type ClientDebt } from '../../lib/business'
 import { fetchTrustPosition, type TrustPosition } from '../../lib/trust'
+import { monthBounds, monthLabel, thisMonth, type BusinessMonth } from '../../lib/businessMonth'
+import { fetchBusinessMonth } from '../../lib/businessApi'
 
 /**
  * WHAT THE FIRM IS WORTH THIS MONTH — or the part of it Raptor can honestly answer today.
@@ -22,13 +24,16 @@ import { fetchTrustPosition, type TrustPosition } from '../../lib/trust'
 export function BusinessOverview() {
   const [debts, setDebts] = useState<ClientDebt[]>([])
   const [trust, setTrust] = useState<TrustPosition | null>(null)
+  const [month, setMonth] = useState<BusinessMonth | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
-    Promise.all([fetchClientDebts(), fetchTrustPosition()])
-      .then(([d, t]) => { if (live) { setDebts(d); setTrust(t) } })
+    const now = thisMonth(new Date())
+    const b = monthBounds(now.year, now.month)
+    Promise.all([fetchClientDebts(), fetchTrustPosition(), fetchBusinessMonth(b.from, b.to)])
+      .then(([d, t, m]) => { if (live) { setDebts(d); setTrust(t); setMonth(m) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -135,29 +140,46 @@ export function BusinessOverview() {
 
         <div className="flex-[1_1_20rem] min-w-0">
           <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-            What the firm spent
+            This month
           </div>
           {/*
-            NOT BUILT, AND DRAWN AS NOT BUILT. A dashed panel saying so is worth more than an empty
-            table of expenses: the empty table reads as a firm that spent nothing this month, which
-            is a figure, and a wrong one.
+            IT USED TO SAY "NOT BUILT YET" AND MEAN IT. A dashed panel was worth more than an empty
+            expenses table, because an empty table reads as a firm that spent nothing -- a figure,
+            and a wrong one. Now there is a real one.
           */}
-          <Card className="p-5 border-dashed">
-            <p className="text-[13px] text-slate-500 leading-relaxed">
-              Salaries, rent, the bureau's invoices, the SMS gateway, bank charges on both
-              accounts. None of it is built yet, so Raptor can say what the firm earned but not
-              what it made.
-            </p>
-            <div className="flex flex-wrap gap-1.5 mt-3">
-              {['Supplier invoices', 'Payroll', 'Bureau and gateway costs', 'Bank charges'].map((t) => (
-                <span key={t} className="text-[12px] text-slate-500 bg-slate-100 rounded-full px-2.5 py-1">
-                  {t}
-                </span>
-              ))}
+          <Card className="p-5 space-y-2.5">
+            <div className="text-[12.5px] text-slate-400">{monthLabel(thisMonth(new Date()).year, thisMonth(new Date()).month)}</div>
+            <Row label="Earned" value={rand(month?.earned ?? 0)} />
+            <Row label="Invoiced to clients" value={rand(month?.invoiced ?? 0)} />
+            <Row label="Spent" value={`(${rand(month?.expenses ?? 0)})`} />
+            <div className="flex justify-between pt-2 border-t border-slate-100">
+              <span className="text-[13px] font-semibold text-slate-700">Made</span>
+              <span className="text-base font-semibold tabular-nums">{rand(month?.made ?? 0)}</span>
             </div>
+            {/*
+              EARNED LESS SPENT, NOT DRAWN LESS SPENT. Money earned and still in trust has been
+              earned; a month read on drawings would say the firm made nothing in any month it
+              chose not to transfer.
+            */}
+            <p className="text-[12px] text-slate-500 leading-relaxed pt-1">
+              Earned counts what fell due this month whether or not it has left the trust account.
+              {(month?.drawn ?? 0) > 0 && ` ${rand(month?.drawn ?? 0)} was drawn across.`}
+            </p>
+            <Link to="/business/expenses"
+              className="block text-[13px] font-medium text-gold-700 hover:text-gold-800 pt-1">
+              See what it went on &rarr;
+            </Link>
           </Card>
         </div>
       </div>
+    </div>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between text-[13px] text-slate-600">
+      <span>{label}</span><span className="tabular-nums">{value}</span>
     </div>
   )
 }

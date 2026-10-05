@@ -152,13 +152,22 @@ ok('each row says what it lets somebody do', /CAPABILITIES\[c\]\.blurb/.test(mod
 ok('...and which ones the database enforces', /CAPABILITIES\[c\]\.inDatabase/.test(modal))
 check('the ones marked as enforced are the ones the database really checks',
   CAPABILITY_ORDER.filter((c) => CAPABILITIES[c].inDatabase).sort(),
-  ['finance.view', 'library.edit', 'mail.refile', 'payment.approve', 'payment.move',
-    'payment.record', 'payment.reverse'].sort())
-/* AND EVERY ONE OF THOSE IS NAMED SOMEWHERE IN THE SCHEMA, so the mark is a fact rather than a
-   claim somebody typed. */
+  ['business.view', 'finance.view', 'library.edit', 'mail.refile', 'payment.approve',
+    'payment.move', 'payment.record', 'payment.reverse'].sort())
+/*
+ * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
+ *
+ * THIS ASSERTION USED TO BE VACUOUS AND HID A REAL HOLE. It read
+ * `has_capability('X') || sql.includes("'X'")`, and the second half matches the role_capabilities
+ * TEMPLATE -- which lists every capability by name -- so it could never fail. Behind it, five of
+ * the eight were enforced by naming the Administrator ROLE instead: granting somebody
+ * `library.edit`, `mail.refile` or `payment.move` ticked a box and changed nothing, because a role
+ * spelled out in a policy cannot be reached by a grant.
+ *
+ * The fallback is gone. Only the real form counts.
+ */
 for (const c of CAPABILITY_ORDER.filter((x) => CAPABILITIES[x].inDatabase)) {
-  ok(`${c} is asked for in the database`,
-    sql.includes(`has_capability('${c}')`) || sql.includes(`'${c}'`))
+  ok(`${c} is asked for in the database`, sql.includes(`has_capability('${c}')`))
 }
 
 /* ---------------- and the groups hold every capability ---------------- */

@@ -53,6 +53,7 @@ const TrustOverview = lazy(() => import('./pages/trust/TrustOverview').then((m) 
 const TrustLedger = lazy(() => import('./pages/trust/TrustLedger').then((m) => ({ default: m.TrustLedger })))
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
+const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
 const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
@@ -187,6 +188,7 @@ function App() {
 
               <Route path="/business" element={<RequireBusiness><BusinessLayout /></RequireBusiness>}>
                 <Route index element={<BusinessOverview />} handle={{ title: 'Business overview' }} />
+                <Route path="expenses" element={<BusinessExpenses />} handle={{ title: 'Expenses' }} />
                 <Route path="back-office" element={<BackOffice />} handle={{ title: 'Back office' }} />
               </Route>
 

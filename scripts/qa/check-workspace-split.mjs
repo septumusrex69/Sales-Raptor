@@ -170,7 +170,7 @@ const businessTargets = railTargets(businessLayout)
 /* Read the count first: a loop over an empty list passes vacuously, which is this file's
    sibling-check trap written down. */
 check('the trust rail has its six, settings and the door', trustTargets.length, 8)
-check('the business rail has its two and the door', businessTargets.length, 3)
+check('the business rail has its three and the door', businessTargets.length, 4)
 
 const routeExists = (to) => {
   if (to === '/trust') return /<Route path="\/trust"/.test(app)
@@ -214,13 +214,25 @@ ok('...and folded it still names the workspace', /PanelLeftOpen[\s\S]{0,120}\{ti
 ok('business.view is a capability', /\| 'business\.view'/.test(caps))
 ok('...with a label and a blurb', /'business\.view': \{[\s\S]{0,400}?blurb:/.test(caps))
 /*
- * AND IT DOES NOT CLAIM THE DATABASE ENFORCES IT, because nothing does yet. This is the assertion
- * to DELETE in the migration that adds the first business table with a policy -- not before.
+ * AND IT NOW CLAIMS THE DATABASE ENFORCES IT, BECAUSE IT DOES. This assertion was the opposite
+ * until `business_expenses` arrived: the tick was added without the flag because nothing checked
+ * it, and capabilities.ts's rule is that a tick claiming an enforcement it lacks is worse than the
+ * missing rule it pretends to be. The table's three policies all ask the capability, so the flag
+ * and the assertion turned over together -- which is what the earlier version of this comment said
+ * would happen.
  */
 const businessMeta = caps.slice(caps.indexOf("'business.view': {"))
   .slice(0, caps.slice(caps.indexOf("'business.view': {")).indexOf('},') + 2)
 ok('the business meta was found', businessMeta.length > 20)
-no('...and does not claim the database enforces it', /inDatabase/.test(businessMeta))
+ok('...and claims the database enforces it', /inDatabase: true/.test(businessMeta))
+/* AND SOMETHING ACTUALLY DOES. The flag is only honest while a policy asks for it, so the policy
+   is asserted here rather than taken on trust from the flag. */
+/* Read here rather than using the `sql` const, which is declared further down the file. */
+const schema = read('supabase/schema.sql')
+ok('...which a real policy backs',
+  /using \(public\.has_capability\('business\.view'\)\)/.test(schema))
+no('...and the expenses are never deleted, only cancelled',
+  /create policy business_expenses_delete/.test(schema))
 /* finance.view's does, and must keep doing: it is behind real RLS. */
 const financeMeta = caps.slice(caps.indexOf("'finance.view': {"))
   .slice(0, caps.slice(caps.indexOf("'finance.view': {")).indexOf('},') + 2)

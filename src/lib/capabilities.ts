@@ -134,10 +134,12 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
    * moving client trust money, and the administrator who runs payovers does not need payroll.
    * One gate over both could only ever be the wider of the two.
    *
-   * NOT inDatabase, deliberately and visibly. Every table behind the business side is still to be
-   * built; when the first one arrives with RLS on it, this gains the flag in the SAME commit --
-   * the rule at the top of this file. A tick that claims an enforcement it does not have is worse
-   * than the missing rule it pretends to be.
+   * inDatabase NOW, AND IT WAS NOT AT FIRST. The tick was added without the flag because nothing
+   * enforced it -- the rule at the top of this file is that only what is enforced goes in, and a
+   * tick claiming an enforcement it does not have is worse than the missing rule it pretends to
+   * be. `business_expenses` is the first table behind it, and its three policies all ask
+   * has_capability('business.view'), so the flag arrives in the same migration as the table did.
+   * That is the promise the earlier version of this comment made.
    *
    * ADMINISTRATOR ONLY FOR NOW, which is the allow-list direction: a role added later is refused
    * until somebody decides it belongs. finance.view stays exactly as it was and still gates the
@@ -149,6 +151,7 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     blurb: 'The business account: what the firm earned, what it spent, and which clients owe it. '
       + 'Separate from the trust account, which is money held for other people and is a different tick.',
     group: 'Money',
+    inDatabase: true,
   },
   'payment.record': {
     label: 'Record a payment',

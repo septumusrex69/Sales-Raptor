@@ -93,6 +93,13 @@ const BALANCES = [
     balance: -320.00, entries: 2, last_at: '2026-10-04T08:00:00Z' },
 ]
 
+/* The firm's own month: earned, invoiced, spent, and what that leaves. */
+const MONTH = {
+  earned: 4420.07, drawn: 0, still_in_trust: 4420.07,
+  invoiced: 1955.00, invoices_paid: 0, owed_by_clients: 1955.00,
+  expenses: 26000.00, expenses_vat: 3900.00, made: -19624.93,
+}
+
 function handlersFor(profile) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [profile] })],
@@ -102,6 +109,7 @@ function handlersFor(profile) {
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
     [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
     [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
+    [(u) => /\/rpc\/business_month/.test(u), () => ({ body: [MONTH] })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
@@ -251,10 +259,17 @@ try {
     /* The earnings figure is READ FROM THE TRUST SIDE: one number, one function, two screens. */
     t.ok('what the firm has earned shows', /R 4 420\.07/.test(body))
     /*
-     * EXPENSES ARE ADMITTED, NOT DRAWN EMPTY. An empty expenses table reads as a firm that spent
-     * nothing this month, which is a figure, and a wrong one.
+     * AND WHAT IT MADE, WHICH USED TO SAY "not built yet". The panel was an admission while the
+     * firm's own spending had nowhere to live; now business_month answers it, and the figure is
+     * EARNED less spent rather than DRAWN less spent -- money earned and still in trust has been
+     * earned, and a month read on drawings would say the firm made nothing in any month it chose
+     * not to transfer.
      */
-    t.ok('and what is missing is said in words', /None of it is built yet/.test(body))
+    t.ok('what the firm earned this month shows', /Earned/.test(body))
+    t.ok('...and what it spent', /Spent/.test(body))
+    t.ok('...and what it therefore made', /\bMade\b/.test(body))
+    t.ok('...with the earned-not-drawn rule said out loud',
+      /whether or not it has left the trust account/.test(body))
 
     /*
      * THE TWO WAYS A CHARGE IS SETTLED, SHOWN APART. Added together they would read as one overdue
