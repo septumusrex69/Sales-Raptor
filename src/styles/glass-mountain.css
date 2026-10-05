@@ -319,17 +319,28 @@ html[data-theme='glass-mountain'] .text-slate-400 {
   color: #718796 !important;
 }
 
-/* ── Settings sidebar active nav item ───────────────────────────────────── */
-/* bg-brand-50 at 8% opacity is invisible on the mountain. Give active items
-   the same gold glass treatment as the main sidebar active links. */
-html[data-theme='glass-mountain'] button.bg-brand-50,
-html[data-theme='glass-mountain'] [class~='bg-brand-50'] {
-  background: linear-gradient(
-    135deg,
-    rgba(214, 166, 79, 0.28),
-    rgba(170, 123, 45, 0.16)
-  ) !important;
-  border: 1px solid rgba(229, 190, 111, 0.55) !important;
+/* ── Settings sidebar nav ────────────────────────────────────────────────── */
+/* The settings nav sits inside a transparent container over the mountain.
+   Ghost buttons all look similar — the active item needs a strong gold border
+   and enough fill to stand apart from the inactive rows. */
+
+/* Inactive buttons: subtle glass */
+html[data-theme='glass-mountain'] nav.w-52 button {
+  color: rgba(244, 246, 247, 0.65) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+}
+
+html[data-theme='glass-mountain'] nav.w-52 button:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #f4f6f7 !important;
+}
+
+/* Active button: clear gold glass with visible border */
+html[data-theme='glass-mountain'] nav.w-52 button.bg-brand-50 {
+  background: rgba(220, 175, 89, 0.20) !important;
+  border: 1px solid rgba(220, 175, 89, 0.70) !important;
+  box-shadow: 0 0 0 1px rgba(220, 175, 89, 0.15), inset 0 1px 0 rgba(255,255,255,0.12) !important;
   color: #f5dfa0 !important;
 }
 
