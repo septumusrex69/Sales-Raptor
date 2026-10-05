@@ -319,7 +319,9 @@ ok('a refund takes the debtor\u2019s credit out',
  * shortfall -- the most serious thing that can happen in this account -- so it is refused at the
  * moment of asking rather than found at a reconciliation weeks later, by which time it has gone.
  */
-ok('drawing is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(draw ?? ''))
+/* A CAPABILITY, NOT A ROLE NAME: a role spelled out here cannot be reached by a grant. */
+ok('drawing asks for the trust capability', /has_capability\('finance\.view'\)/.test(draw ?? ''))
+ok('...rather than naming the role', !/current_user_role\(\)/.test(draw ?? ''))
 /* THE COMPARISON, NOT THE MESSAGE. Asserted on the wording first, which passed happily with the
    test replaced by `if false` -- the sentence sat there unreachable inside a dead branch. */
 ok('...and refuses to overdraw', /if p_amount > v_held then/.test(draw ?? ''))

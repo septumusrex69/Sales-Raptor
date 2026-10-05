@@ -286,6 +286,57 @@ ok('...and the closing figure is the last row', /entries\[entries\.length - 1\]\
  */
 no('...and nothing is re-summed', /\.reduce\(|balance \+=|total \+=/.test(panel))
 
+/* -------- 9. the trust functions ask a capability, and read only the trust account -------- */
+
+/*
+ * A ROLE NAME IN A FUNCTION BODY CANNOT BE REACHED BY A GRANT. check-capabilities already asserts
+ * this for may_record_payment, may_approve_payment and reverse_payment -- "asks for a capability,
+ * rather than naming roles" -- because the alternative is that giving somebody the trust account
+ * works on the button and not on the rule underneath it. These four were the ones still spelling
+ * the role out.
+ *
+ * READ THE LAST DEFINITION. schema.sql is append-only, so a function replaced by a later migration
+ * appears in the file twice and indexOf lands on the superseded copy. The opening paren is part of
+ * the search: the bare name also appears in that function's own grant, revoke and comment lines.
+ */
+function liveBody(name) {
+  const at = sql.lastIndexOf(`create or replace function public.${name}(`)
+  if (at < 0) return null
+  const opens = sql.indexOf('as $$', at)
+  const ends = sql.indexOf('$$;', opens)
+  return opens < 0 || ends < 0 ? null : sql.slice(opens, ends)
+}
+
+for (const fn of ['trust_position', 'unreconciled_payouts', 'draw_from_trust', 'reconcile_bank_debit']) {
+  const body = liveBody(fn)
+  ok(`${fn} is in schema.sql`, !!body)
+  ok(`${fn} asks a capability`, /has_capability\('finance\.view'\)/.test(body ?? ''))
+  no(`...rather than naming the role`, /current_user_role\(\) (is distinct from|=) 'Administrator'/.test(body ?? ''))
+}
+
+/*
+ * AND THE TWO READERS LOOK AT THE TRUST ACCOUNT ONLY.
+ *
+ * unreconciled_payouts never did. trust_position has always compared trust cash against trust
+ * creditors, but the function that EXPLAINS the difference read every debit in the table whatever
+ * account it was on -- so a payment out of the BUSINESS account appeared on the trust
+ * reconciliation as an unexplained trust payout, and somebody would go hunting for a payover run
+ * behind a supplier invoice. It matters more now that the business account is a place in Raptor
+ * rather than a column nothing reads.
+ */
+for (const fn of ['trust_position', 'unreconciled_payouts']) {
+  ok(`${fn} reads the trust account only`,
+    /l\.bank_account = f\.trust_account_number/.test(liveBody(fn) ?? ''))
+}
+
+/* NOT TO anon. Supabase grants EXECUTE on a new public function to anon by default, and these
+   answer questions about -- or move -- other people's money. */
+for (const sig of ['trust_position()', 'unreconciled_payouts()',
+  'draw_from_trust(numeric, text, uuid)', 'reconcile_bank_debit(uuid, uuid)']) {
+  ok(`${sig} is revoked from anon`,
+    sql.includes(`revoke all on function public.${sig} from anon;`))
+}
+
 console.log(`check-workspace-split: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 if (failures.length) process.exit(1)

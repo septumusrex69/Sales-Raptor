@@ -24759,3 +24759,372 @@ $$;
 revoke all on function public.role_capabilities(text) from public;
 revoke all on function public.role_capabilities(text) from anon;
 grant execute on function public.role_capabilities(text) to authenticated;
+
+-- ============================================================================================
+-- THE TRUST FUNCTIONS ASK A CAPABILITY, AND THE READERS FILTER BY BANK ACCOUNT
+--
+-- TWO FIXES IN ONE MIGRATION, BOTH FOUND BY READING RATHER THAN BY ANYTHING FAILING.
+--
+-- 1. A ROLE NAME CANNOT BE REACHED BY A GRANT. These four spelled `current_user_role() =
+--    'Administrator'`, where may_record_payment, may_approve_payment and reverse_payment all ask
+--    has_capability -- and check-capabilities already asserts that direction for those three,
+--    because a role spelled out in a function body means "add them more functionality" works on
+--    the button and not on the rule underneath it. An Administrator passes either way; what
+--    changes is that somebody explicitly GRANTED finance.view now passes too, which is the entire
+--    purpose of the grants column.
+--
+-- 2. `unreconciled_payouts` NEVER FILTERED BY BANK ACCOUNT. trust_position has always compared
+--    trust cash against trust creditors -- its `cash` CTE joins firm_settings and matches
+--    trust_account_number -- but the function that EXPLAINS the difference read every debit in
+--    bank_statement_lines, whichever account it was on. So a payment out of the BUSINESS account
+--    would have appeared on the trust reconciliation as an unexplained trust payout, and somebody
+--    would have gone looking for a payover run behind a supplier invoice. It matters more now
+--    than it did: the business account is a place in Raptor rather than a column nothing reads.
+--
+-- dispose_excess_credit is deliberately untouched: it already asks may_approve_payment(), which
+-- is a capability one level down.
+-- ============================================================================================
+
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+  ),
+  /*
+   * ONE BALANCE PER PARTY, AND THE PARTY IS NOT ALWAYS THE ACCOUNT.
+   *
+   * A CLIENT NETS ACROSS THEIR WHOLE BOOK, because that is how they are paid: one payover run for
+   * the company, not one per account. Netting per account instead showed a client owed R100 on one
+   * file and owing R50 on another as a R100 creditor AND a R50 debtor, when the firm will hand them
+   * R50 -- both sides overstated, and a reconciliation that reads worse than the truth is as
+   * useless as one that reads better.
+   *
+   * A DEBTOR NETS PER ACCOUNT. Their overpayment is about that file, and two files of the same
+   * person are two debts; offsetting one against the other is a decision somebody makes, not an
+   * arithmetic convenience.
+   */
+  by_party as (
+    select party,
+           case when party = 'client' then company_id::text else coalesce(account_id::text, party) end as who,
+           sum(amount) as bal
+      from public.trust_creditor_entries
+     group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      /* THE TWO SIDES KEPT APART. A trust DEBTOR is a negative balance -- somebody who owes the
+         trust rather than is owed by it, which is what a PTC makes of a client. Summing them
+         together hides a receivable inside a smaller payable, and the reconciliation then reads
+         as though less is held than really is. */
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal,
+         h.owed_in,
+         (h.owed_out + u.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u
+   where public.has_capability('finance.view')
+$$;
+
+create or replace function public.unreconciled_payouts()
+returns table(id uuid, txn_date date, amount numeric, description text,
+              candidate_run uuid, candidate_invoice text, candidate_client text)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description,
+         r.id, r.invoice_number, c.name
+    from public.bank_statement_lines l
+    /* THE TRUST ACCOUNT ONLY. Without this join a debit on the business account read as an
+       unexplained trust payout -- see the note above this migration. */
+    join public.firm_settings f on true
+    left join public.payover_runs r
+      on r.status in ('approved', 'sent')
+     and r.net_payover = abs(l.amount)
+    left join public.companies c on c.id = r.company_id
+   where public.has_capability('finance.view')
+     and l.bank_account = f.trust_account_number
+     and l.direction = 'debit'
+     and l.payover_run_id is null
+   order by l.txn_date desc
+$$;
+
+create or replace function public.draw_from_trust(p_amount numeric, p_reference text, p_company uuid default null)
+returns uuid language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_held numeric;
+  v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  -- A CAPABILITY, NOT A ROLE NAME. A role spelled out here cannot be reached by a grant, so
+  -- "give this person the trust account" would work on the button and not on the rule underneath.
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to draw from.' using errcode = '42501';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A drawing is an amount, so it has to be more than nothing.' using errcode = '22023';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which transfer this is.' using errcode = '22023';
+  end if;
+
+  -- THE FIRM CANNOT DRAW MORE THAN IT HAS EARNED. Drawing against another party's money is a
+  -- trust shortfall, which is the single most serious thing that can happen in this account --
+  -- so it is refused here rather than found at a reconciliation three weeks later.
+  select coalesce(sum(amount), 0) into v_held
+    from public.trust_creditor_entries
+   where party = 'firm' and (p_company is null or company_id = p_company);
+  if p_amount > v_held then
+    raise exception 'The firm has % in trust and this would draw %. Drawing more than is earned is a trust shortfall.',
+      to_char(v_held, 'FM999999990.00'), to_char(p_amount, 'FM999999990.00')
+      using errcode = '22023';
+  end if;
+
+  insert into public.trust_creditor_entries (party, company_id, amount, reason, created_by)
+  values ('firm', p_company, -round(p_amount, 2),
+          'Drawn to the business account - ' || v_ref, auth.uid())
+  returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function public.reconcile_bank_debit(p_line uuid, p_run uuid)
+returns void language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_status text;
+  v_net numeric;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to reconcile.' using errcode = '42501';
+  end if;
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  if v_line.direction <> 'debit' then
+    raise exception 'Only money paid out can settle a payover run.';
+  end if;
+  if v_line.payover_run_id is not null then
+    raise exception 'That payment out is already against a run.';
+  end if;
+  select status, net_payover into v_status, v_net from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if v_status not in ('approved', 'sent') then
+    raise exception 'Only an approved or sent run can be settled, and that one is %.', v_status;
+  end if;
+  /*
+   * THE AMOUNTS MUST AGREE. The statement's debit is negative and the run's net payover is
+   * positive, so they are compared as magnitudes. A mismatch is not something to round past: it
+   * means either the wrong run was picked or the firm paid a different figure from the one on the
+   * remittance advice the client received, and both are worth stopping for.
+   */
+  if abs(v_line.amount) <> v_net then
+    raise exception 'That payment out is % and the run is %. Pick the run that matches, or ask why they differ.',
+      to_char(abs(v_line.amount), 'FM999999990.00'), to_char(v_net, 'FM999999990.00');
+  end if;
+  update public.bank_statement_lines
+     set payover_run_id = p_run, status = 'reconciled',
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+  /* AND THE RUN IS PAID, witnessed rather than asserted. Only from sent/approved -- the same
+     transition mark_payover_run_paid allows, so the two routes cannot disagree. */
+  update public.payover_runs
+     set status = 'paid', paid_at = coalesce(paid_at, (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg')),
+         eft_reference = coalesce(eft_reference, left(v_line.description, 80))
+   where id = p_run and status in ('approved', 'sent');
+end $$;
+
+revoke all on function public.trust_position() from public;
+revoke all on function public.trust_position() from anon;
+revoke all on function public.unreconciled_payouts() from public;
+revoke all on function public.unreconciled_payouts() from anon;
+revoke all on function public.draw_from_trust(numeric, text, uuid) from public;
+revoke all on function public.draw_from_trust(numeric, text, uuid) from anon;
+revoke all on function public.reconcile_bank_debit(uuid, uuid) from public;
+revoke all on function public.reconcile_bank_debit(uuid, uuid) from anon;
+grant execute on function public.trust_position() to authenticated;
+grant execute on function public.unreconciled_payouts() to authenticated;
+grant execute on function public.draw_from_trust(numeric, text, uuid) to authenticated;
+grant execute on function public.reconcile_bank_debit(uuid, uuid) to authenticated;
+
+
+-- ============================================================================================
+-- AND THE TWO THAT PUT MONEY INTO THE TRUST ACCOUNT ASK THE SAME CAPABILITY
+--
+-- Finishing the set rather than half-converting it. import_bank_lines reads the trust statement
+-- and place_bank_line credits a debtor with a receipt off it; both are trust operations in exactly
+-- the sense the four above are, and leaving them naming the role would mean a person granted
+-- finance.view could reconcile a payout but not place the receipt that caused it.
+--
+-- The bodies are otherwise untouched: only the guard changed, so this is a diff somebody can read.
+-- ============================================================================================
+
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to import into.' using errcode = '42501';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'credit' then 'unallocated' else 'excluded' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- EXACTLY ONE ACCOUNT, OR NOBODY. account_number is the reference the DEBTOR knows and types.
+    -- It is not unique the way case_number is, so a reference naming two accounts is counted and
+    -- left for a person -- guessing credits one debtor with another's money, and a payment is
+    -- immutable once processed. (array_agg, not min(): there is no min(uuid).)
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.account_number) = v_ref;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid()
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;
+
+create or replace function public.place_bank_line(p_line uuid, p_account uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_payment uuid;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to place a receipt in.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  -- The three ways this could put money somewhere it does not belong, each refused by name.
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be placed against an account.';
+  end if;
+  if v_line.payment_id is not null then
+    raise exception 'That receipt has already been placed.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client,
+    created_by, bank_line_id
+  ) values (
+    p_account,
+    (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+    v_line.amount, 'EFT',
+    coalesce(v_line.reference, left(v_line.description, 60)),
+    v_line.description, 'bank', false, auth.uid(), p_line
+  ) returning id into v_payment;
+
+  update public.bank_statement_lines
+     set status = 'allocated', account_id = p_account, payment_id = v_payment,
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_payment;
+end $$;

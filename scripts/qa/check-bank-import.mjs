@@ -98,8 +98,14 @@ ok('the trigger is attached',
 
 const imp = liveFn('import_bank_lines')
 ok('the import exists', imp !== null)
-/* ADMINISTRATOR ONLY, in the database -- see check-finance-is-administrator-only for the rule. */
-ok('...Administrator only', /is distinct from 'Administrator'/.test(imp ?? ''))
+/*
+ * A CAPABILITY, NOT A ROLE NAME -- the house rule, and these moved to it with the trust workspace.
+ * A role spelled out in a function body cannot be reached by a grant, so "give this person the
+ * trust account" would work on the button and not on the rule underneath it. An Administrator
+ * passes either way; what changed is that somebody explicitly granted finance.view passes too.
+ */
+ok('...asks for the trust capability', /has_capability\('finance\.view'\)/.test(imp ?? ''))
+ok('...rather than naming the role', !/current_user_role\(\)/.test(imp ?? ''))
 /* THE RE-UPLOAD IS SKIPPED RATHER THAN REFUSED: uploading September plus a week of October is the
    ordinary way the firm works, and a statement that refuses wholesale is one nobody can use. */
 ok('...a line already imported is skipped', /on conflict \(line_key\) do nothing/.test(imp ?? ''))
@@ -140,7 +146,8 @@ ok('...dated when the bank says it landed, at the firm’s own timezone',
 
 const place = liveFn('place_bank_line')
 ok('an unplaced receipt can be placed by hand', place !== null)
-ok('...Administrator only', /is distinct from 'Administrator'/.test(place ?? ''))
+ok('...asks for the trust capability', /has_capability\('finance\.view'\)/.test(place ?? ''))
+ok('...rather than naming the role', !/current_user_role\(\)/.test(place ?? ''))
 /* THE THREE WAYS THIS COULD PUT MONEY SOMEWHERE IT DOES NOT BELONG. */
 ok('...refusing anything that is not money received',
   /direction <> 'credit'/.test(place ?? ''))
@@ -153,7 +160,8 @@ ok('...and it is trust money too', /'bank', false/.test(place ?? ''))
 
 const rec = liveFn('reconcile_bank_debit')
 ok('a payment out can settle a run', rec !== null)
-ok('...Administrator only', /is distinct from 'Administrator'/.test(rec ?? ''))
+ok('...asks for the trust capability', /has_capability\('finance\.view'\)/.test(rec ?? ''))
+ok('...rather than naming the role', !/current_user_role\(\)/.test(rec ?? ''))
 ok('...only money that actually left', /direction <> 'debit'/.test(rec ?? ''))
 ok('...only a run that was approved or sent',
   /v_status not in \('approved', 'sent'\)/.test(rec ?? ''))
