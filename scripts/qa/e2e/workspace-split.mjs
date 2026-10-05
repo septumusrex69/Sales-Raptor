@@ -56,6 +56,21 @@ const PAYOUTS = [
   },
 ]
 
+/*
+ * ONE CHARGE OF EACH KIND, SPELLED THE WAY THE DATABASE SPELLS THEM.
+ *
+ * `client_charges_settlement_check` permits exactly 'set_off' and 'invoice'. The fixture uses those
+ * two literals on purpose: business.ts was written comparing against 'off_payover', which matches
+ * neither, so every charge fell silently into the invoiced column. A fixture carrying the browser's
+ * wrong spelling would have agreed with it and proved nothing.
+ */
+const CHARGES = [
+  { company_id: 'c1', amount: 1200, vat: 180, settlement: 'invoice', raised_on: '2026-10-01',
+    companies: { name: 'Rinda Roo Company' } },
+  { company_id: 'c1', amount: 500, vat: 75, settlement: 'set_off', raised_on: '2026-10-03',
+    companies: { name: 'Rinda Roo Company' } },
+]
+
 function handlersFor(profile) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [profile] })],
@@ -63,7 +78,7 @@ function handlersFor(profile) {
       () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
-    [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: [] })],
+    [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
@@ -170,6 +185,16 @@ try {
      * nothing this month, which is a figure, and a wrong one.
      */
     t.ok('and what is missing is said in words', /None of it is built yet/.test(body))
+
+    /*
+     * THE TWO WAYS A CHARGE IS SETTLED, SHOWN APART. Added together they would read as one overdue
+     * figure and somebody would chase a client for money already coming off their next run. This
+     * is also what holds business.ts to the database's spelling: with the literal wrong, BOTH
+     * charges land in "invoiced" and the set-off line disappears.
+     */
+    t.ok('a charge coming off the payover says so', /R 575\.00 off their payover/.test(body))
+    t.ok('...and an invoiced one says that instead', /R 1 380\.00 invoiced/.test(body))
+    t.ok('...with the client owing the two together', /R 1 955\.00/.test(body))
     await context.close()
   }
 

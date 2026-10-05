@@ -234,6 +234,36 @@ ok('role_capabilities is in schema.sql', lastRoleFn > -1)
 const adminArray = sql.slice(lastRoleFn, sql.indexOf('$$;', lastRoleFn))
 ok("...and the Administrator's template has business.view", /'business\.view'/.test(adminArray))
 
+/* ------------------- 7. the browser spells the database's closed lists ------------------- */
+
+/*
+ * A LITERAL THAT DRIFTS FROM A CHECK CONSTRAINT DOES NOT THROW -- IT SILENTLY NEVER MATCHES.
+ *
+ * `client_charges.settlement` is a closed list of exactly ('set_off', 'invoice'). business.ts
+ * compares against it to decide whether a charge comes off the client's next payover or is
+ * invoiced for them to pay. Written as 'off_payover' -- which it was -- every charge fell into the
+ * invoiced column, and somebody would have chased a client for money already coming off their run.
+ * Nothing failed, nothing logged, and the screen looked complete.
+ *
+ * SO THE CONSTRAINT IS THE SOURCE AND THE BROWSER IS HELD TO IT, rather than the two being written
+ * out twice and trusted to agree.
+ */
+const business = strip(read('src/lib/business.ts'))
+const settlementCheck = sql.match(/settlement = ANY \(ARRAY\[([^\]]*)\]\)/)
+  ?? sql.match(/settlement in \(([^)]*)\)/)
+  ?? sql.match(/check \(settlement in \(([^)]*)\)\)/)
+ok('the settlement constraint is in schema.sql', !!settlementCheck)
+const allowed = (settlementCheck?.[1] ?? '')
+  .split(',').map((x) => x.trim().replace(/::text/g, '').replace(/^'|'$/g, '')).filter(Boolean)
+check('...and it is the two the firm has', [...allowed].sort(), ['invoice', 'set_off'])
+
+/* Every settlement literal the browser compares against must be one the constraint permits. */
+const compared = [...business.matchAll(/settlement === '([^']*)'/g)].map((m) => m[1])
+ok('business.ts compares a settlement at all', compared.length > 0)
+for (const lit of compared) {
+  ok(`'${lit}' is a settlement the database allows`, allowed.includes(lit))
+}
+
 console.log(`check-workspace-split: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 if (failures.length) process.exit(1)

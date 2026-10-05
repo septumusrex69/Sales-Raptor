@@ -29,9 +29,16 @@ const n = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v)
  * is a trust shortfall however it is later repaid: those are different people's money sitting in
  * one bank account.
  *
- * SO `settlement` IS PART OF THE CHARGE, not a decision taken later at payover time. 'off_payover'
+ * SO `settlement` IS PART OF THE CHARGE, not a decision taken later at payover time. 'set_off'
  * says this one comes off what the client is owed; 'invoice' says the client is billed and pays it
  * from their own account. The first requires that they have a credit to take it from.
+ *
+ * THOSE TWO SPELLINGS ARE THE DATABASE'S, NOT THIS FILE'S. client_charges_settlement_check is a
+ * closed list of exactly ('set_off', 'invoice'), and a literal here that drifts from it does not
+ * throw -- it silently never matches, so every charge falls into the other bucket. This file was
+ * written with 'off_payover' and did precisely that: the whole column read as invoiced, which
+ * would have had somebody chase a client for money already coming off their next run.
+ * check-workspace-split now holds the literal against the constraint in schema.sql.
  */
 export interface ClientDebt {
   companyId: string
@@ -71,7 +78,7 @@ export async function fetchClientDebts(): Promise<ClientDebt[]> {
     const row = by.get(id) ?? {
       companyId: id, client: name, invoiced: 0, offPayover: 0, total: 0, oldest: null, count: 0,
     }
-    if (r.settlement === 'off_payover') row.offPayover += gross
+    if (r.settlement === 'set_off') row.offPayover += gross
     else row.invoiced += gross
     row.total += gross
     row.count += 1
