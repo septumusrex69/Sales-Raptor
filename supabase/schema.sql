@@ -25195,3 +25195,266 @@ $$;
 revoke all on function public.trust_balances() from public;
 revoke all on function public.trust_balances() from anon;
 grant execute on function public.trust_balances() to authenticated;
+
+-- ============================================================================================
+-- THE THREE WAYS AN ACCOUNT ENDS
+--
+-- Raptor had none. An account could be frozen, traced out or parked, but there was no way to say
+-- it was finished -- so "do we have an option to make accounts paid up? Write accounts off? Freeze
+-- accounts? Or withdraw accounts?" had one answer out of four.
+--
+-- IT IS ITS OWN COLUMN, NOT A `status` STRING. `status` is Swordfish's and describes how a row got
+-- into the table ('Active: Activated'); CLAUDE.md's first rule is that it says nothing about the
+-- debtor. An ending is a fact the firm asserts, so it carries who said so and when, and
+-- clientPosition's `closed` input is what turns it into the word a client is shown.
+--
+-- WITHDRAWN IS NOT WRITTEN OFF. A withdrawal is the CLIENT taking the file back and the firm
+-- invoicing for the work already done; a write-off is the firm cancelling the debt. One produces a
+-- charge and the other produces a conversation.
+-- ============================================================================================
+
+alter table public.debtor_accounts
+  add column if not exists ended_as text,
+  add column if not exists ended_on date,
+  add column if not exists ended_reason text,
+  add column if not exists ended_note text,
+  add column if not exists ended_by uuid references public.profiles(id),
+  add column if not exists ended_at timestamptz;
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'debtor_accounts_ended_as_check') then
+    alter table public.debtor_accounts
+      add constraint debtor_accounts_ended_as_check
+      check (ended_as is null or ended_as in ('paid_up', 'written_off', 'withdrawn'));
+  end if;
+end $$;
+
+create index if not exists debtor_accounts_ended_idx
+  on public.debtor_accounts (company_id, ended_as) where ended_as is not null;
+
+/*
+ * WHAT A WITHDRAWAL WOULD COST, BEFORE ANYBODY COMMITS TO IT.
+ *
+ * Read separately from the function that charges it so the screen can show the figure while the
+ * boxes are being ticked. Same source either way -- engine_balances, which is the allocation
+ * engine's own view of the three pools -- so the preview cannot differ from what is raised.
+ */
+create or replace function public.withdrawal_basis(p_account uuid)
+returns table(fees numeric, interest numeric, commission numeric, vat_rate numeric,
+              capital numeric, commission_rate numeric)
+language plpgsql stable security definer set search_path to 'public'
+as $$
+declare
+  v_bal record;
+  v_rate numeric;
+  v_vat numeric;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Withdrawal figures are not yours to see.' using errcode = '42501';
+  end if;
+
+  select * into v_bal from public.engine_balances(p_account, null);
+  select coalesce(a.commission_rate, a.commission_rate_expected, 0) into v_rate
+    from public.debtor_accounts a where a.id = p_account;
+  select coalesce(f.vat_rate, 0.15) into v_vat from public.firm_settings f limit 1;
+
+  fees := round(coalesce(v_bal.costs, 0), 2);
+  interest := round(coalesce(v_bal.interest, 0), 2);
+  capital := round(coalesce(v_bal.capital, 0), 2);
+  commission_rate := v_rate;
+  vat_rate := v_vat;
+  -- WHAT THE COMMISSION WOULD HAVE BEEN. The firm: "the commission should have come to us because
+  -- they made an arrangement due to the result of our work." The arrangement is for the balance
+  -- still outstanding, so that is what the commission is reckoned on.
+  commission := round(capital * v_rate, 2);
+  return next;
+end $$;
+
+/*
+ * WITHDRAWING AN ACCOUNT, AND WHAT THE CLIENT IS CHARGED FOR IT.
+ *
+ * THE FIRM DESCRIBED TWO CASES AND THEY ARE THE TWO PRESETS THE SCREEN OFFERS:
+ *   "If they made an arrangement with a client, then we would charge them the commission, the
+ *    interest, and the fees that we've already invested because the commission should have come to
+ *    us because they made an arrangement due to the result of our work."
+ *   "If a client just wants to withdraw an account because they missed a payment on their side and
+ *    their data shouldn't have been handed over, we've already invested money in the account. Then
+ *    we usually just charge them the fees and not the interest."
+ *
+ * SO THE BOXES ARE SEPARATE AND SO IS A TYPED FIGURE -- "we should have tick boxes what we charge
+ * or we can charge an amount we type in." A typed amount is the WHOLE charge and ignores the boxes:
+ * mixing the two would make the number mean something different depending on what happened to be
+ * ticked.
+ *
+ * INTEREST CARRIES NO VAT. It is not a service the firm rendered, it is the cost of money. Fees and
+ * commission are services and are VATed.
+ *
+ * A ZERO CHARGE RAISES NOTHING. "We can charge no fees" is one of the firm's own options, and an
+ * invoice line for R0.00 is a document somebody then has to explain.
+ */
+create or replace function public.withdraw_account(
+  p_account uuid, p_reason text,
+  p_fees boolean default true, p_interest boolean default false, p_commission boolean default false,
+  p_amount numeric default null, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_b record;
+  v_excl numeric := 0;
+  v_vatable numeric := 0;
+  v_vat numeric := 0;
+  v_charge uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Withdrawing an account is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why the client is withdrawing it.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  select * into v_b from public.withdrawal_basis(p_account);
+
+  if p_amount is not null then
+    if p_amount < 0 then
+      raise exception 'A withdrawal charge cannot be negative.' using errcode = '22023';
+    end if;
+    v_excl := round(p_amount, 2);
+    v_vatable := v_excl;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account') || ' - agreed amount';
+  else
+    if p_fees then v_excl := v_excl + v_b.fees; v_vatable := v_vatable + v_b.fees; end if;
+    if p_interest then v_excl := v_excl + v_b.interest; end if;
+    if p_commission then v_excl := v_excl + v_b.commission; v_vatable := v_vatable + v_b.commission; end if;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account')
+      || case when p_fees and p_interest and p_commission then ' - fees, interest and commission'
+              when p_fees and p_interest then ' - fees and interest'
+              when p_fees and p_commission then ' - fees and commission'
+              when p_fees then ' - fees'
+              when p_interest then ' - interest'
+              when p_commission then ' - commission'
+              else ' - no charge' end;
+  end if;
+
+  v_vat := round(v_vatable * coalesce(v_b.vat_rate, 0.15), 2);
+
+  /*
+   * THE CHARGE GOES TO THE CLIENT, NEVER ONTO THE ACCOUNT'S OWN LEDGER. A withdrawal fee that found
+   * its way into account_fees would be a charge the DEBTOR never incurred, on a file the client has
+   * taken back -- and it would ride in duplum and the Annexure B cap with it. The firm invoices its
+   * client; the tariff is between the firm and the debtor, and the two are not the same book.
+   */
+  if v_excl > 0 then
+    v_charge := public.raise_client_charge(
+      p_company => v_a.company_id, p_kind => 'withdrawal', p_description => v_desc,
+      p_amount => v_excl, p_vat => v_vat, p_settlement => 'set_off', p_account => p_account);
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = 'withdrawn', ended_on = current_date, ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = now()
+   where id = p_account;
+
+  return v_charge;
+end $$;
+
+/*
+ * THE OTHER TWO ENDINGS, AND THE MANDATE BEHIND THEM.
+ *
+ * THE FIRM: "if we have to inform every client about everything that's going to be handed over or
+ * that's going to be withdrawn, and get their permission, it's going to be stupid. It's going to
+ * take a lot of time. The book will never be on. So we hold the mandate to be able to cancel any
+ * debt or a part thereof."
+ *
+ * So no client instruction is required and none is asked for. What IS required is a reason, because
+ * the liaison has to be able to tell the client why.
+ *
+ * TWO DIFFERENT TICKS. Writing off is the Administrator's, at the firm's own instruction. Marking
+ * one paid up is not: somebody confirms the money arrived, which is the collections floor's work
+ * and is what may_record_payment already describes.
+ *
+ * A WRITE-OFF TELLS THE CLIENT LIAISON, as a task they own and clear. The firm: "maybe we should,
+ * for example, send it to the client liaison and tell them, okay, these accounts have been written
+ * off... so that they can email them and ask them if they want, for example, an executive listing."
+ * It is NOT an approval waiting on anybody -- the firm holds the mandate -- it is work that now
+ * exists. A PAID-UP account raises nothing: nobody needs telling a debt was paid, and a task for
+ * every settled account would bury the write-offs among them, which is the one thing this is for.
+ */
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  if p_as not in ('paid_up', 'written_off') then
+    raise exception 'An account is settled as paid up or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  if p_as = 'written_off' and not public.has_capability('finance.view') then
+    raise exception 'Writing an account off is not yours to do.' using errcode = '42501';
+  end if;
+  if p_as = 'paid_up' and not public.may_record_payment() then
+    raise exception 'Closing an account as paid up is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = current_date, ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = now()
+   where id = p_account;
+
+  if p_as = 'written_off' then
+    select c.name, p.id into v_client, v_liaison
+      from public.companies c
+      left join public.profiles p on p.name = c.liaison
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, current_date + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+revoke all on function public.withdrawal_basis(uuid) from public;
+revoke all on function public.withdrawal_basis(uuid) from anon;
+revoke all on function public.withdraw_account(uuid, text, boolean, boolean, boolean, numeric, text) from public;
+revoke all on function public.withdraw_account(uuid, text, boolean, boolean, boolean, numeric, text) from anon;
+revoke all on function public.settle_account(uuid, text, text, text) from public;
+revoke all on function public.settle_account(uuid, text, text, text) from anon;
+grant execute on function public.withdrawal_basis(uuid) to authenticated;
+grant execute on function public.withdraw_account(uuid, text, boolean, boolean, boolean, numeric, text) to authenticated;
+grant execute on function public.settle_account(uuid, text, text, text) to authenticated;

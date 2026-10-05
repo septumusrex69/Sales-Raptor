@@ -105,6 +105,15 @@ export interface DebtorAccount {
   frozenBy: FrozenBy | null
   frozenReason: string | null
   frozenAt: string | null
+  /*
+   * HOW THE ACCOUNT ENDED, AND IT IS NOT `status`. `status` is Swordfish's and says how the row got
+   * into the table; an ending is a fact the firm asserts, so it carries who said so and when.
+   * Null while the account is still live, which is what clientPosition's `closed` input reads.
+   */
+  endedAs: 'paid_up' | 'written_off' | 'withdrawn' | null
+  endedOn: string | null
+  endedReason: string | null
+  endedNote: string | null
   /** What the firm needs from the client before this account can move. Null = nothing owed. */
   clientActionAsk: string | null
   clientActionDue: string | null
@@ -210,6 +219,10 @@ const toAccount = (r: any): DebtorAccount => ({
   frozenBy: (r.frozen_by as FrozenBy | null) ?? null,
   frozenReason: r.frozen_reason ?? null,
   frozenAt: r.frozen_at ?? null,
+  endedAs: (r.ended_as as 'paid_up' | 'written_off' | 'withdrawn' | null) ?? null,
+  endedOn: r.ended_on ?? null,
+  endedReason: r.ended_reason ?? null,
+  endedNote: r.ended_note ?? null,
   clientActionAsk: r.client_action_ask ?? null,
   clientActionDue: r.client_action_due ?? null,
   bucket: r.bucket,

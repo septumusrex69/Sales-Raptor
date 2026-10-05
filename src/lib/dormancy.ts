@@ -97,20 +97,24 @@ export function wakeDate(from: string, months = DORMANT_MONTHS): string {
  * the telephone is a different account from one whose every number is dead -- and it is not
  * "refusing to pay", which is a decision somebody made and told us.
  *
- * THE CLIENT DECIDES, ALWAYS. These are the reasons a REQUEST quotes; nothing here writes a
- * write-off onto an account.
+ * THE FIRM HOLDS THE MANDATE, AND THIS NOTE USED TO SAY THE OPPOSITE.
+ *
+ * It read "THE CLIENT DECIDES, ALWAYS", which the firm corrected: *"if we have to inform every
+ * client about everything that's going to be handed over or that's going to be withdrawn, and get
+ * their permission, it's going to be stupid. It's going to take a lot of time. The book will never
+ * be on. So we hold the mandate to be able to cancel any debt or a part thereof."*
+ *
+ * So a write-off goes through on the firm's own authority. What the client gets is a TELLING, not
+ * an asking -- `settle_account` raises the liaison a task so they can pass it on and offer an
+ * executive listing. These reasons are what that conversation starts from, which is why they stay
+ * a closed list.
+ *
+ * THE LIST ITSELF MOVED to src/lib/accountEnding.ts, beside the functions that write an ending onto
+ * an account, and gained "Small residue, not worth chasing". It is NOT re-exported from here: a
+ * re-export would make this file import a module it does not use, and the QA layer resolves lib
+ * imports without extensions -- check-trace-ending broke on exactly that. Nothing imported the list
+ * from here anyway.
  */
-export const WRITE_OFF_REASONS = [
-  'Uncontactable',
-  'Cannot pay',
-  'Deceased, no estate',
-  'Sequestrated, no dividend',
-  'Liquidated, no dividend',
-  'Prescribed',
-  'Disputed and conceded',
-] as const
-
-export type WriteOffReason = typeof WRITE_OFF_REASONS[number]
 
 /**
  * THE REQUEST THE FIRM PUTS TO THE CLIENT, in the firm's own words.

@@ -26,9 +26,13 @@ import {
   ROUNDS_BEFORE_REALLOCATION, reallocationDue, reallocationLine, roundsSpentBy, traceRound,
 } from '../../src/lib/traceRound.ts'
 import {
-  DORMANT_MONTHS, DORMANT_PREFIX, WRITE_OFF_REASONS, dormantFreezeReason, isDormant,
+  DORMANT_MONTHS, DORMANT_PREFIX, dormantFreezeReason, isDormant,
   uncontactableAsk, wakeDate,
 } from '../../src/lib/dormancy.ts'
+/* THE REASONS MOVED to accountEnding.ts, beside the functions that write an ending onto an account
+   -- the firm holds the mandate, so they name a decision the firm has made rather than one it is
+   asking the client for. The assertions below are unchanged. */
+import { WRITE_OFF_REASONS } from '../../src/lib/accountEnding.ts'
 
 let pass = 0
 const failures = []

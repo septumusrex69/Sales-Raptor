@@ -25,7 +25,7 @@ import {
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
 import { isWrittenOff } from '../../lib/accountStatus'
 import {
-  canFreezeAccounts, canHandOutAccounts, canViewClients, isAssignableOwner,
+  canFreezeAccounts, canHandOutAccounts, canViewClients, canViewFinance, isAssignableOwner,
 } from '../../lib/permissions'
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
@@ -35,11 +35,13 @@ import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
 import { canRecordPayment } from '../../lib/permissions'
+import { ENDING_LABEL } from '../../lib/accountEnding'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
+import { EndAccountModal } from '../../components/accounts/EndAccountModal'
 import { ClientActionModal } from './ClientActionModal'
 import {
   CLIENT_FLAGS, CLIENT_POSITIONS, DESK_POSITIONS, deskPosition, frozenByLabel, positionReport,
@@ -309,6 +311,7 @@ export function AccountDetail() {
    */
   const [payingIn, setPayingIn] = useState(false)
   const [freezing, setFreezing] = useState(false)
+  const [ending, setEnding] = useState(false)
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
@@ -1433,7 +1436,10 @@ export function AccountDetail() {
   const positionPanel = (
     <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
       clientLiaisonName={clientLiaison?.name ?? null}
-      onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null} />
+      onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null}
+      /* Closing an account is not freezing it: a freeze is reversible and an ending is not. Both
+         live beside the status because that is where work is stopped, not in the action row. */
+      onEnd={canRecordPayment(currentUser) ? () => setEnding(true) : null} />
   )
 
   return (
@@ -1958,6 +1964,17 @@ export function AccountDetail() {
            * drawn inside `details`. One panel, one place, whichever arrangement is on.
            */
           underMain={underTimeline ? standingPanel : null}
+        />
+      )}
+
+      {ending && (
+        <EndAccountModal
+          accountId={account.id}
+          caseNumber={account.caseNumber}
+          balance={account.capitalOutstanding ?? 0}
+          canWriteOff={canViewFinance(currentUser)}
+          onClose={() => setEnding(false)}
+          onDone={() => { setEnding(false); reload() }}
         />
       )}
 
@@ -4370,13 +4387,14 @@ function Directorships({ companies }: { companies: DirectorCompany[] }) {
   )
 }
 
-function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, onFreeze }: {
+function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, onFreeze, onEnd }: {
   account: DebtorAccount
   ceiling: { limit: number } | null
   chargedExclVat: number
   clientLiaisonName: string | null
   /** Null where this person may not stop work — the field then simply has no control on it. */
   onFreeze: (() => void) | null
+  onEnd: (() => void) | null
 }) {
   const handedOver = account.handoverDate
     ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
@@ -4424,6 +4442,22 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, on
           action={onFreeze
             ? { label: account.frozenBy || /^frozen/i.test(account.status) ? 'Restart' : 'Stop work',
                 onClick: onFreeze }
+            : undefined}
+        />
+        {/*
+          HOW IT ENDED, OR THE WAY TO END IT. One field rather than a button that appears and
+          disappears: an account that is finished has to SAY so wherever somebody looks at it, and
+          "Closed as written off — Uncontactable" is the answer to the question they came with.
+        */}
+        <Field
+          label="Ending"
+          value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
+          note={account.endedAs
+            ? [account.endedReason, account.endedOn ? formatDate(account.endedOn) : null]
+              .filter(Boolean).join(' \u2014 ')
+            : undefined}
+          action={!account.endedAs && onEnd
+            ? { label: 'Close it', onClick: onEnd }
             : undefined}
         />
         <Field label="Bucket" value={account.bucket} />
