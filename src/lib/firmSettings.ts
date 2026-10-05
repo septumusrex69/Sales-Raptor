@@ -37,6 +37,8 @@ export { EMAIL_FONTS, emailBodyCss, emailBodyStyle } from './emailStyle.ts'
  */
 export * from './firmSettingsRow.ts'
 import { COLUMNS, FIRM_UNSET, toSettings, type FirmSettings, type Row } from './firmSettingsRow.ts'
+import { useEffect, useState } from 'react'
+import { DEFAULT_TIME_ZONE } from './calendarInvite.ts'
 
 /**
  * The firm's details, or the unset defaults.
@@ -49,6 +51,50 @@ export async function fetchFirmSettings(): Promise<FirmSettings> {
   const { data, error } = await supabase.from('firm_settings').select(COLUMNS).maybeSingle()
   if (error || !data) return FIRM_UNSET
   return toSettings(data as unknown as Row)
+}
+
+/**
+ * THE FIRM'S OWN CLOCK, CACHED, because a floating calendar invitation needs it on every render.
+ *
+ * A booking confirmation carries no zone at all -- RFC 5545 says such a time is read on the
+ * observer's clock -- so the mail card, the accept and the calendar all have to know which clock
+ * that is. Fetching the whole settings row on each of them would be three round trips to answer a
+ * question whose answer changes about once a decade.
+ *
+ * NEVER THROWS, like fetchFirmSettings: a settings row that failed to load gives Johannesburg,
+ * which is the default in the column anyway. Getting this wrong by an hour is bad; getting it
+ * wrong by refusing to place the meeting at all is what this whole change is undoing.
+ *
+ * `forgetFirmTimeZone` is for the settings screen, which has just changed it.
+ */
+let zoneCache: string | null = null
+export async function firmTimeZone(): Promise<string> {
+  if (zoneCache) return zoneCache
+  const { data } = await supabase.from('firm_settings').select('time_zone').maybeSingle()
+  zoneCache = (data as { time_zone?: string } | null)?.time_zone || DEFAULT_TIME_ZONE
+  return zoneCache
+}
+export function forgetFirmTimeZone(): void { zoneCache = null }
+
+/**
+ * The same answer, for a component that has to decide something while it renders.
+ *
+ * THE CARD AND THE WRITE MUST AGREE. The invite card works out whether a meeting can be placed at
+ * an hour; acceptInvite works out the hour. They used to compute it two different ways and the
+ * screen was the one that was wrong -- it stayed quiet while the event was stored with no date.
+ * Now they run the same function over the same zone, and this is how the synchronous half gets it.
+ *
+ * It starts on the default rather than on null, so the first render places a floating time on
+ * Johannesburg rather than reporting it unplaceable for a frame.
+ */
+export function useFirmTimeZone(): string {
+  const [zone, setZone] = useState(zoneCache ?? DEFAULT_TIME_ZONE)
+  useEffect(() => {
+    let alive = true
+    void firmTimeZone().then((z) => { if (alive) setZone(z) })
+    return () => { alive = false }
+  }, [])
+  return zone
 }
 
 export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): Promise<void> {
@@ -83,6 +129,7 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     email_font: next.emailFont,
     email_size_pt: next.emailSizePt,
     vat_rate: next.vatRate,
+    time_zone: next.timeZone,
     /*
      * WRITTEN BACK LIKE EVERY OTHER FIELD, AND THE DATABASE IS WHAT KEEPS IT SAFE.
      *
@@ -98,6 +145,8 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     updated_at: new Date().toISOString(),
     updated_by: me.user?.id ?? null,
   }).eq('id', true)
+  /* The zone may have just changed; the next invitation must not be placed on the old one. */
+  forgetFirmTimeZone()
   if (error) throw new Error(error.message)
 }
 

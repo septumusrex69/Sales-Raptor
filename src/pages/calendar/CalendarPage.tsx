@@ -283,9 +283,16 @@ export function CalendarPage() {
               </li>
             ))}
           </ul>
+          {/*
+            AND HOW TO FIX IT, because the first thing the firm asked on seeing this banner was
+            what they were supposed to do about it. A meeting stored before Raptor could read its
+            time keeps the nothing it was stored with -- nothing goes back and re-reads it -- so
+            the way out is to take it off and add it again from the message, which is two presses
+            on the card that is already there.
+          */}
           <p className="text-[11px] text-slate-500 mt-1">
-            The invitation gave a timezone Raptor could not read. Open the message in Mail to see
-            the time the organiser sent.
+            Open the message in Mail to see the time the organiser sent. If the card there now
+            shows an hour, take the meeting off and add it again and it will land on the grid.
           </p>
         </div>
       )}

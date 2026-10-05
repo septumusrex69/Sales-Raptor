@@ -23015,3 +23015,31 @@ begin
     end;
   end loop;
 end $$;
+
+-- ============================================================================
+-- THE ZONE THE FIRM WORKS IN, AND WHAT A FLOATING INVITATION MEANS.
+--
+-- A booking confirmation from simplybook.me arrived with `DTSTART:20261012T103000` -- no `Z`, no
+-- `TZID`. Raptor refused to place it, said "the invite gives no timezone", and the meeting went on
+-- the calendar with no time at all, which put it in a banner above the grid instead of on it.
+--
+-- IT WAS READABLE THE WHOLE TIME. RFC 5545 §3.3.5 FORM #1 says a DATE-TIME with neither a `Z` nor
+-- a `TZID` is a FLOATING time, and that such a time "is interpreted using the local time zone of
+-- the observer" -- 10:30 means 10:30 wherever you are reading it. So resolving it in the firm's
+-- own zone is not a guess at an offset, which is what calendarInvite.ts exists to refuse; it is
+-- what the format says the value means. The firm, looking at the banner: "it's 10:30 South African
+-- time... either figure out and see if you could have read this. Otherwise, make South Africa time
+-- default time. Unless you deliberately change it."
+--
+-- A SETTING RATHER THAN A CONSTANT, for exactly that last clause. 'Africa/Johannesburg' is the
+-- default and every row gets it; a firm that one day works from somewhere else changes it in one
+-- place rather than in the sixteen SQL functions that already name the zone literally.
+--
+-- NOT NULLABLE AND DEFAULTED, because a null here is a calendar that silently stops placing
+-- floating invitations again -- the state this column exists to end.
+-- ============================================================================
+alter table public.firm_settings
+  add column if not exists time_zone text not null default 'Africa/Johannesburg';
+
+comment on column public.firm_settings.time_zone is
+  'The zone the firm works in. It is what a FLOATING time in a calendar invitation means -- RFC 5545 says such a time is read on the observer''s own clock, and for this firm that clock is Johannesburg. A setting rather than a constant because the firm asked for it that way: South Africa unless somebody deliberately changes it.';

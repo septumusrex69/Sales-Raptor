@@ -36,6 +36,31 @@ type TextKey = {
  * debtor's money in a client's account and nobody finds out until month end, so the screen says
  * which one it is asking for.
  */
+/*
+ * THE ZONES WORTH OFFERING, which is not all 400-odd of them.
+ *
+ * A free-text box here would be a way to type `Africa/Johanesburg` and have every floating
+ * invitation quietly stop resolving -- Intl rejects an unknown name, so the meeting goes back to
+ * having no hour, which is the bug this whole setting exists to end. A list cannot be misspelt.
+ *
+ * SOUTH AFRICA FIRST AND IT IS THE DEFAULT. The rest are the places a South African firm actually
+ * deals with rather than a world atlas.
+ */
+const TIME_ZONES = [
+  { id: 'Africa/Johannesburg', label: 'South Africa (SAST)' },
+  { id: 'Africa/Windhoek', label: 'Namibia' },
+  { id: 'Africa/Gaborone', label: 'Botswana' },
+  { id: 'Africa/Harare', label: 'Zimbabwe' },
+  { id: 'Africa/Maputo', label: 'Mozambique' },
+  { id: 'Africa/Lagos', label: 'Nigeria' },
+  { id: 'Africa/Nairobi', label: 'Kenya' },
+  { id: 'Europe/London', label: 'United Kingdom' },
+  { id: 'Europe/Amsterdam', label: 'Netherlands' },
+  { id: 'Australia/Sydney', label: 'Australia (east)' },
+  { id: 'America/New_York', label: 'United States (east)' },
+  { id: 'UTC', label: 'UTC' },
+]
+
 export function FirmSettingsPage() {
   const { currentUser } = useAuth()
   const mayEdit = canEditLibrary(currentUser)
@@ -219,6 +244,25 @@ export function FirmSettingsPage() {
           {text('officeHours', 'Office hours',
             'Fills {{firm_hours}}. Written out \u2014 nothing in the app reads it as a time.',
             'Monday to Friday, 08:00 \u2013 16:30')}
+          {/*
+            THE OTHER HALF OF "WHEN THE FIRM WORKS", AND THE ONLY ONE THE APP ACTS ON.
+            Office hours above are free text nothing reads; this is a real zone, and it is what a
+            calendar invitation carrying no timezone of its own is read on -- RFC 5545 says such a
+            time is the reader's local one, and this says whose local that is. South Africa unless
+            somebody deliberately changes it, which is how the firm asked for it.
+          */}
+          <label className="block">
+            <span className="block text-[11px] uppercase tracking-wide text-slate-400 mb-1">
+              Time zone
+            </span>
+            <select className={inputClass} disabled={!mayEdit} value={draft.timeZone}
+              onChange={(e) => set('timeZone', e.target.value)}>
+              {TIME_ZONES.map((z) => <option key={z.id} value={z.id}>{z.label}</option>)}
+            </select>
+            <span className="block text-[11px] text-slate-400 mt-1">
+              A meeting invitation that names no time zone of its own is read on this clock.
+            </span>
+          </label>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 mt-4">
           {text('email', 'Email address', 'Fills {{firm_email}}.', 'info@bredellferreira.co.za')}

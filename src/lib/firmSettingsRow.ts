@@ -33,7 +33,7 @@ export const COLUMNS = 'firm_name, registration_number, vat_number, council_numb
   + 'trust_account_type, payment_instruction, '
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
-  + 'email_font, email_size_pt, vat_rate, finance_cutover_at, updated_at'
+  + 'email_font, email_size_pt, vat_rate, time_zone, finance_cutover_at, updated_at'
 
 export interface Row {
   firm_name: string
@@ -63,6 +63,7 @@ export interface Row {
   email_size_pt: number | string
   /* numeric comes back as a string over the wire, like every other numeric here. */
   vat_rate: number | string
+  time_zone: string
   finance_cutover_at: string | null
   updated_at: string
 }
@@ -118,6 +119,18 @@ export interface FirmSettings {
    */
   vatRate: number
   /**
+   * THE ZONE THE FIRM WORKS IN, AND WHAT A FLOATING INVITATION MEANS.
+   *
+   * RFC 5545 calls a DATE-TIME with neither a `Z` nor a `TZID` a FLOATING time, and says it is
+   * read on the observer's own clock -- 10:30 means 10:30 wherever you are. Raptor used to refuse
+   * those, so a booking confirmation went on the calendar with no time and sat in a banner above
+   * the grid rather than on it. This is the clock they are read on.
+   *
+   * A SETTING RATHER THAN A CONSTANT because the firm asked for it that way: South Africa by
+   * default, "unless you deliberately change it".
+   */
+  timeZone: string
+  /**
    * WHEN THE ALLOCATION ENGINE STARTS SPLITTING PAYMENTS, AND NULL UNTIL THE FIRM SAYS SO.
    *
    * Payments CAPTURED on or after this are split by Raptor; everything earlier keeps the outcome
@@ -168,6 +181,8 @@ export const FIRM_UNSET: FirmSettings = {
   emailSizePt: 10.5,
   /* The rate today, and the one every figure in the codebase already assumes. */
   vatRate: 0.15,
+  /* The zone every date in this codebase already names literally, in one place for once. */
+  timeZone: 'Africa/Johannesburg',
   /* Off. An engine that switched itself on across the whole book would not be undoable. */
   financeCutoverAt: null,
   updatedAt: '',
@@ -208,6 +223,9 @@ export function toSettings(r: Row): FirmSettings {
     emailFont: r.email_font,
     emailSizePt: Number(r.email_size_pt),
     vatRate: Number(r.vat_rate),
+    /* A row written before the column existed reads null over the wire, and a null zone is a
+       calendar that stops placing floating invitations -- the state this column exists to end. */
+    timeZone: r.time_zone || 'Africa/Johannesburg',
     financeCutoverAt: r.finance_cutover_at ?? null,
     updatedAt: r.updated_at,
   }

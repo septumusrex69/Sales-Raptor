@@ -10,6 +10,7 @@
  */
 import { supabase } from './supabase'
 import { inviteInstant, type CalendarInvite } from './calendarInvite.ts'
+import { firmTimeZone } from './firmSettings.ts'
 import {
   attendeeFor, replyBody, replyIcs, replySubject, type InviteResponse,
 } from './inviteReply.ts'
@@ -94,7 +95,9 @@ export async function acceptInvite(input: {
   const { invite, ownerId, userEmailId } = input
   if (invite.cancelled) throw new Error('That meeting has been cancelled — there is nothing to add.')
 
-  const at = inviteInstant(invite.when)
+  /* THE FIRM'S OWN CLOCK, for a floating time -- RFC 5545 reads one on the observer's.
+     Everything else resolves without it and ignores the argument. */
+  const at = inviteInstant(invite.when, await firmTimeZone())
   const row = {
     owner_id: ownerId,
     title: invite.summary ?? 'Untitled meeting',
@@ -189,7 +192,9 @@ export async function replyToInvite(input: {
   const me = attendeeFor(invite.attendees, myAddresses)
   if (!me) throw new Error('Raptor does not know which address you were invited as.')
 
-  const at = inviteInstant(invite.when)
+  /* THE FIRM'S OWN CLOCK, for a floating time -- RFC 5545 reads one on the observer's.
+     Everything else resolves without it and ignores the argument. */
+  const at = inviteInstant(invite.when, await firmTimeZone())
   const ics = replyIcs({
     uid: invite.uid,
     sequence: invite.sequence,

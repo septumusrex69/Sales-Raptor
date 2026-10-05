@@ -276,12 +276,22 @@ eq('a UTC invite is already an instant',
   inviteInstant({ startsAt: '2026-09-17T14:00', endsAt: null, allDay: false, timeZone: 'UTC' }).startsAt,
   '2026-09-17T14:00:00.000Z')
 /*
- * A FLOATING TIME IS NOT A FACT ABOUT THE MEETING. With no zone it means "whatever the reader's
- * own clock says", and recording that as an instant would put it in somebody's day at an hour
- * the organiser never named.
+ * A FLOATING TIME IS READ ON THE FIRM'S OWN CLOCK, which is what RFC 5545 says it means.
+ *
+ * This used to come back null, on the reasoning that "whatever the reader's own clock says" is not
+ * a fact about the meeting. The spec disagrees -- §3.3.5 FORM #1 defines a DATE-TIME with neither
+ * a `Z` nor a `TZID` as interpreted in the observer's local zone -- and so did the firm, whose
+ * booking confirmation went on the calendar with no hour at all. 16:00 floating is 16:00 in
+ * Johannesburg, which is 14:00Z.
  */
-eq('a floating time is not recorded as an instant',
-  inviteInstant({ startsAt: '2026-09-17T16:00', endsAt: null, allDay: false, timeZone: null }).startsAt, null)
+eq('a floating time is read on the firm\u2019s clock',
+  inviteInstant({ startsAt: '2026-09-17T16:00', endsAt: null, allDay: false, timeZone: null }).startsAt,
+  '2026-09-17T14:00:00.000Z')
+/* AND THE ZONE IS THE FIRM'S SETTING, not a constant -- "unless you deliberately change it". */
+eq('...and on another firm\u2019s clock if that is where they work',
+  inviteInstant({ startsAt: '2026-09-17T16:00', endsAt: null, allDay: false, timeZone: null },
+    'Europe/London').startsAt,
+  '2026-09-17T15:00:00.000Z')
 /* An all-day event is a date and has no time to resolve. */
 eq('a whole day stays a date',
   inviteInstant({ startsAt: '2026-09-17', endsAt: '2026-09-18', allDay: true, timeZone: null }).startsAt,
@@ -438,11 +448,18 @@ ok('...and renders it', /<InviteCard ics=\{calendar\} events=\{events\}/.test(pa
     /const canAnswer = canReplyTo\(invite\)/.test(card))
   ok('...and the calendar-only button is what is left otherwise', /Add to my calendar/.test(card))
   /*
-   * A FLOATING TIME CANNOT BE PLACED IN A DAY. The invite named no zone, which means the reader's
-   * own clock, so it is stored without an hour rather than being given one nobody stands behind.
+   * A FLOATING TIME IS PLACED IN A DAY AFTER ALL, so the card no longer says it cannot be.
+   *
+   * The invite names no zone, which RFC 5545 defines as the reader's own clock -- and the reader
+   * is this firm, so the hour IS one somebody stands behind. What is left of the warning is the
+   * other case: an organiser who named a zone nothing here could resolve. check-invite-timezone
+   * holds both halves; this is only that the retired half really left the page, because a warning
+   * that fires when nothing is wrong teaches people to stop reading warnings.
    */
-  ok('...and an invite with no timezone says it cannot be placed at an hour',
-    /gives no timezone/.test(card))
+  ok('...and no longer says an invite with no timezone cannot be placed at an hour',
+    !/gives no timezone/.test(card))
+  ok('...while still saying so where the zone was named and unreadable',
+    /does not recognise this invite/.test(card))
 }
 
 /* ---------- and the calendar page shows them ---------- */

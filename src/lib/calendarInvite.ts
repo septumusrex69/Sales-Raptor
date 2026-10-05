@@ -13,7 +13,13 @@
  * `DTSTART;TZID=Africa/Johannesburg:20260917T160000` is a wall-clock time in a zone whose offset
  * depends on a database this file does not have, so the time is carried AS WRITTEN with the zone
  * named beside it. Guessing an offset would put a meeting an hour out, and a meeting an hour out
- * is worse than one you had to read the zone off.
+ * is worse than one you had to read the zone off. (`inviteInstant` resolves it at the moment the
+ * meeting is STORED, out of Intl, which is a different question and a different file's problem.)
+ *
+ * A FLOATING TIME IS THE ONE CASE THAT IS NOT A GUESS. `DTSTART:20261012T103000`, with neither a
+ * `Z` nor a `TZID`, is defined by RFC 5545 as read on the observer's own clock -- so the firm's
+ * own zone is not an assumption about the meeting, it is what the value means. This file refused
+ * those for months and a booking confirmation went on the calendar with no hour on it.
  */
 
 /** One line of an ICS file, once the folding is undone and the parameters split off. */
@@ -560,18 +566,46 @@ export function zonedTimeToUtc(wall: string, timeZone: string): string | null {
 }
 
 /**
+ * The zone a floating time is read on when nobody says otherwise.
+ *
+ * The firm works in one country and this is it. `firm_settings.time_zone` is the real answer and
+ * overrides it; this is what the pure rules fall back to, because this file has no database.
+ */
+export const DEFAULT_TIME_ZONE = 'Africa/Johannesburg'
+
+/**
  * When the meeting actually is, ready to be stored.
  *
- * Null where the invite gave a floating time and no zone: that means "whatever the reader's own
- * clock says", which is not a fact about the meeting and must not be recorded as one.
+ * A FLOATING TIME IS NOT AN UNREADABLE ONE, which is what this used to treat it as.
+ *
+ * RFC 5545 §3.3.5 FORM #1: a DATE-TIME with neither a trailing `Z` nor a `TZID` is a FLOATING
+ * time, and the specification says it "is interpreted using the local time zone of the observer".
+ * 10:30 means 10:30 wherever you are reading it. So resolving it on the firm's own clock is not
+ * the offset-guessing this file exists to refuse -- it is what the value MEANS, and refusing it
+ * was reading the spec right and drawing the wrong conclusion from it.
+ *
+ * WHAT IT COST: a booking confirmation from simplybook.me, `DTSTART:20261012T103000`, went on the
+ * calendar with no time at all. It sat in a banner over the grid saying no hour could be worked
+ * out, on a day that was entirely empty. The firm: "it's 10:30 South African time... either
+ * figure out and see if you could have read this. Otherwise, make South Africa time default."
+ *
+ * `homeZone` IS THE FIRM'S OWN, PASSED IN. The firm's setting decides it, and a caller with no
+ * settings to hand gets Johannesburg -- South Africa unless somebody deliberately changes it.
+ *
+ * A NAMED ZONE IS STILL NOT GUESSED AT. Where the invitation DID name a zone and nothing here can
+ * resolve it, the organiser asserted a fact we failed to read, and reading it as Johannesburg
+ * could be ten hours out. That still comes back null, and the card says which of the two it is.
  */
-export function inviteInstant(when: InviteWhen): { startsAt: string | null; endsAt: string | null } {
+export function inviteInstant(
+  when: InviteWhen, homeZone: string = DEFAULT_TIME_ZONE,
+): { startsAt: string | null; endsAt: string | null } {
   const one = (wall: string | null): string | null => {
     if (!wall) return null
     /* An all-day event is a DATE and has no time to resolve; it is stored as the date it is. */
     if (when.allDay) return wall.slice(0, 10)
     if (when.timeZone === 'UTC') return `${wall}:00.000Z`
-    if (!when.timeZone) return null
+    /* FLOATING: the observer's clock, which for this firm is the firm's own. */
+    if (!when.timeZone) return zonedTimeToUtc(wall, homeZone) ?? zonedTimeToUtc(wall, DEFAULT_TIME_ZONE)
 
     /*
      * THE NAME FIRST, THEN WHAT THE INVITE SAID ITSELF.

@@ -211,13 +211,38 @@ check('an unknown zone falls back to the offset the invite declared',
 const NOTHING = ODD.replace(/BEGIN:VTIMEZONE[\s\S]*END:VTIMEZONE\r\n/, '')
 check('an unknown zone with nothing to fall back on stays unresolved',
   inviteInstant(parseInvite(NOTHING).when).startsAt, null)
-/* A floating time means "whatever the reader's clock says", which is not a fact about a meeting. */
+/*
+ * A FLOATING TIME IS THE ONE CASE THAT IS NOT A GUESS, AND IT USED TO BE REFUSED ANYWAY.
+ *
+ * RFC 5545 §3.3.5 FORM #1: a DATE-TIME with neither a `Z` nor a `TZID` "is interpreted using the
+ * local time zone of the observer". So reading it on the firm's clock is what the value MEANS,
+ * not an offset invented to fill a gap -- which is the thing the rest of this file refuses.
+ *
+ * WHAT THE REFUSAL COST: a booking confirmation from simplybook.me, `DTSTART:20261012T103000`,
+ * was stored with no date, left off the calendar grid entirely, and announced in a banner as a
+ * meeting whose hour could not be worked out. The firm: "it's 10:30 South African time."
+ */
 const FLOATING = [
   'BEGIN:VCALENDAR', 'METHOD:REQUEST', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:F',
   'DTSTART:20260929T140000', 'ORGANIZER:mailto:a@b.example', 'END:VEVENT', 'END:VCALENDAR',
 ].join('\r\n')
-check('a floating time is still not placed at an hour',
-  inviteInstant(parseInvite(FLOATING).when).startsAt, null)
+check('a floating time is placed on the firm\u2019s own clock',
+  inviteInstant(parseInvite(FLOATING).when).startsAt, '2026-09-29T12:00:00.000Z')
+/* THE ZONE IS A SETTING, not a constant -- the firm asked for South Africa "unless you
+   deliberately change it", and this is the deliberate change working. */
+check('...and the firm\u2019s setting really moves it',
+  inviteInstant(parseInvite(FLOATING).when, 'Asia/Tokyo').startsAt, '2026-09-29T05:00:00.000Z')
+/* AND THE REAL ONE, as simplybook.me sent it: 10:30 on 12 October is 08:30Z. */
+const BOOKING = FLOATING.replace('DTSTART:20260929T140000', 'DTSTART:20261012T103000')
+check('the booking confirmation that started this lands at 10:30 SAST',
+  inviteInstant(parseInvite(BOOKING).when).startsAt, '2026-10-12T08:30:00.000Z')
+
+/*
+ * A NAMED ZONE NOBODY CAN RESOLVE IS STILL REFUSED, and the difference is the whole point. A
+ * floating time states no zone, so the observer's is the answer. A named one the organiser DID
+ * state and we failed to read is a fact we lost -- reading it as Johannesburg could be ten hours
+ * out, and a meeting ten hours out is worse than one somebody has to open the mail to find.
+ */
 /* Z is an instant and needs no zone database at all. */
 const ZULU = FLOATING.replace('20260929T140000', '20260929T140000Z')
 check('a UTC time needs no zone at all',
@@ -242,11 +267,85 @@ const calendar = read('../../src/pages/calendar/CalendarPage.tsx')
  * event went in undated. Two different tests for one question is how that happens.
  */
 ok('the card asks whether the time RESOLVES, not whether a zone was named',
-  /const undated = !invite\.when\.allDay\s*\n\s*&& invite\.when\.startsAt !== null\s*\n\s*&& inviteInstant\(invite\.when\)\.startsAt === null/.test(page))
+  /const undated = !invite\.when\.allDay\s*\n\s*&& invite\.when\.startsAt !== null\s*\n\s*&& inviteInstant\(invite\.when, homeZone\)\.startsAt === null/.test(page))
+/*
+ * AND ON THE SAME CLOCK THE WRITE USES. The card decides whether a meeting can be placed; the
+ * accept decides where. Reading the firm's zone in one and defaulting in the other is the same
+ * two-tests-for-one-question shape that let an event go in undated while the card said nothing --
+ * it would just be silent in the other direction, on a firm that had changed the setting.
+ */
+ok('...on the firm\u2019s own clock', /const homeZone = useFirmTimeZone\(\)/.test(page))
+/*
+ * AND THE HOOK IS ABOVE THE EARLY RETURN. A message with no calendar part returns null before the
+ * line that uses the zone, so a hook written beside that line runs on some renders of this
+ * component and not others, and React loses its place in the hook list. Caught by the linter the
+ * first time; asserted here because the obvious place to put it is the wrong one.
+ */
+const card0 = page.slice(page.indexOf('function InviteCard('))
+ok('...and called before the card can return early',
+  card0.indexOf('const homeZone = useFirmTimeZone()') < card0.indexOf('if (!invite) return null'))
+ok('...and the write reads the same setting',
+  /inviteInstant\(invite\.when, await firmTimeZone\(\)\)/.test(read('../../src/lib/calendarEvents.ts')))
 ok('...and warns on that', /\{!invite\.cancelled && undated && \(/.test(page))
 ok('...naming the zone it could not read', /does not recognise this invite&rsquo;s timezone/.test(page))
-ok('...and still covers an invite with no zone at all', /The invite gives no timezone/.test(page))
-ok('...saying in both cases what will happen', /go on your calendar without a time/.test(page))
+/*
+ * AND THE "NO TIMEZONE" HALF IS GONE, because it can no longer happen: an invitation that names
+ * no zone is a floating time and resolves on the firm's clock. Leaving the branch in would be a
+ * warning that fires when nothing is wrong, which CLAUDE.md calls worse than no warning.
+ */
+ok('...and no longer warns about an invite that simply has no zone',
+  !/The invite gives no timezone/.test(page))
+ok('...saying what will happen to the one that is left', /go on your calendar without a time/.test(page))
+
+/* ---------- the firm's own clock is a setting, not a constant ---------- */
+
+/*
+ * "MAKE SOUTH AFRICA TIME DEFAULT TIME. UNLESS YOU DELIBERATELY CHANGE IT." -- the firm, which is
+ * both halves: a default that needs nobody to set it, and a way to set it.
+ */
+const schema = read('../../supabase/schema.sql')
+const row = read('../../src/lib/firmSettingsRow.ts')
+const save = read('../../src/lib/firmSettings.ts')
+const firmPage = read('../../src/pages/library/FirmSettings.tsx')
+
+ok('the firm\u2019s zone is a column on their own settings',
+  /add column if not exists time_zone text not null default 'Africa\/Johannesburg'/.test(schema))
+/* NOT NULL AND DEFAULTED, because a null here is a calendar that silently stops placing floating
+   invitations again -- the state the column exists to end. */
+ok('...which cannot be null', /time_zone text not null/.test(schema))
+ok('...and it is in all five of the hand-written lists',
+  /time_zone, finance_cutover_at/.test(row)      /* the select */
+  && /^  time_zone: string$/m.test(row)           /* the Row */
+  && /^  timeZone: string$/m.test(row)            /* the interface */
+  && /timeZone: 'Africa\/Johannesburg',/.test(row) /* the unset defaults */
+  && /timeZone: r\.time_zone \|\| 'Africa\/Johannesburg',/.test(row)) /* the mapper */
+ok('...and in the update, or saving the firm\u2019s phone number would reset it',
+  /time_zone: next\.timeZone,/.test(save))
+
+/* A LIST, NOT A TEXT BOX. `Africa/Johanesburg` typed by hand is a zone Intl rejects, and every
+   floating invitation quietly goes back to having no hour. */
+ok('the firm can change it', /onChange=\{\(e\) => set\('timeZone', e\.target\.value\)\}/.test(firmPage))
+ok('...from a list that cannot be misspelt', /TIME_ZONES\.map\(/.test(firmPage))
+ok('...with South Africa first', /\{ id: 'Africa\/Johannesburg', label: 'South Africa \(SAST\)' \}/.test(firmPage))
+/* EVERY ONE OF THEM HAS TO BE A ZONE Intl ACTUALLY KNOWS, or the picker offers a way to break it.
+   Checked by asking Intl, not by reading the list back to itself. */
+const offered = [...firmPage.matchAll(/\{ id: '([^']+)', label:/g)].map((m) => m[1])
+ok('the picker offers a real list', offered.length >= 8)
+const unknown = offered.filter((z) => {
+  try { new Intl.DateTimeFormat('en', { timeZone: z }); return false } catch { return true }
+})
+check('every zone offered is one Intl can resolve', unknown.join(','), '')
+
+/*
+ * AND THE CACHE IS DROPPED WHEN IT CHANGES, or the next invitation lands on the old clock.
+ *
+ * READ OUT OF saveFirmSettings' OWN BODY. `forgetFirmTimeZone()` is also the name of the function
+ * being exported two screens up, so a file-wide search matched the DEFINITION and passed happily
+ * with the call deleted -- the vacuous pass, found by breaking it rather than by reading it.
+ */
+const saveBody = save.slice(save.indexOf('export async function saveFirmSettings('))
+ok('saveFirmSettings is really in this file', saveBody.length > 200)
+ok('changing it forgets the cached answer', /forgetFirmTimeZone\(\)/.test(saveBody))
 
 /*
  * AND THE CALENDAR STOPS DROPPING THEM IN SILENCE. A meeting with no hour has no square to sit

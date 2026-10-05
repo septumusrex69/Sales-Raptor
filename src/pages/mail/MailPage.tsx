@@ -14,6 +14,7 @@ import { Modal } from '../../components/ui/Modal'
 import {
   inviteHeadline, inviteInstant, inviteWhen, parseInvite, type CalendarInvite,
 } from '../../lib/calendarInvite.ts'
+import { useFirmTimeZone } from '../../lib/firmSettings'
 import {
   RESPONSE_WORD, canReplyTo, type InviteResponse,
 } from '../../lib/inviteReply.ts'
@@ -2955,6 +2956,16 @@ function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * THE FIRM'S OWN CLOCK, AND THE SAME ONE acceptInvite USES. A floating time -- no `Z`, no
+   * `TZID` -- is read on the observer's clock by RFC 5545, and the observer here is the firm.
+   * Reading it any other way than the write does is how the two came to disagree before.
+   *
+   * ABOVE THE EARLY RETURN WITH THE OTHER HOOKS, not down beside the line that uses it: a message
+   * with no calendar part returns null before that point, so a hook there runs on some renders of
+   * this component and not others and React loses its place in the hook list.
+   */
+  const homeZone = useFirmTimeZone()
   const invite = parseInvite(ics)
   if (!invite) return null
 
@@ -2968,7 +2979,7 @@ function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
    */
   const undated = !invite.when.allDay
     && invite.when.startsAt !== null
-    && inviteInstant(invite.when).startsAt === null
+    && inviteInstant(invite.when, homeZone).startsAt === null
   /* Offered only where a reply would actually reach somebody — see canReplyTo. */
   const canAnswer = canReplyTo(invite)
   const organiserName = invite.organiser?.name ?? invite.organiser?.email ?? 'The organiser'
@@ -3092,12 +3103,16 @@ function InviteCard({ ics, events, onAccept, onRespond, answered, onRemove }: {
       */}
       {!invite.cancelled && undated && (
         <p className="text-[11px] text-gold-700 mt-1.5">
-          {invite.when.timeZone
-            ? <>Raptor does not recognise this invite&rsquo;s timezone
-              (&ldquo;{invite.when.timeZone}&rdquo;), so it cannot be placed at an hour. It will
-              go on your calendar without a time.</>
-            : <>The invite gives no timezone, so this cannot be placed at an hour with any
-              confidence. It will go on your calendar without a time.</>}
+          {/*
+            ONLY A NAMED ZONE CAN REACH THIS NOW. An invitation that gives NO zone is a floating
+            time, which RFC 5545 defines as read on the observer's own clock -- so it resolves on
+            the firm's and is never undated. What is left is an organiser who named a zone nothing
+            here could resolve, and that is a fact we failed to read rather than one nobody stated:
+            reading it as Johannesburg could be ten hours out.
+          */}
+          Raptor does not recognise this invite&rsquo;s timezone
+          (&ldquo;{invite.when.timeZone}&rdquo;), so it cannot be placed at an hour. It will
+          go on your calendar without a time.
         </p>
       )}
 
