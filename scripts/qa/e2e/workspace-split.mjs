@@ -267,7 +267,14 @@ try {
      */
     t.ok('what the firm earned this month shows', /Earned/.test(body))
     t.ok('...and what it spent', /Spent/.test(body))
-    t.ok('...and what it therefore made', /\bMade\b/.test(body))
+    /*
+     * THE FIXTURE'S MONTH IS A LOSS, SO THE WORD IS "Lost". A loss drawn exactly like a profit is
+     * how a month in the red gets skimmed past -- the minus sign is one character doing all the
+     * work -- so the label changes with the sign and the assertion follows it. Asserting a bare
+     * /Made/ here passed until the label was fixed, and then failed on correct code.
+     */
+    t.ok('...and that the month was a loss', /\bLost\b/.test(body))
+    t.check('...not called a profit', /\bMade\b/.test(body), false)
     t.ok('...with the earned-not-drawn rule said out loud',
       /whether or not it has left the trust account/.test(body))
 
