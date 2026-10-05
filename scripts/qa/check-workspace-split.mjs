@@ -264,6 +264,28 @@ for (const lit of compared) {
   ok(`'${lit}' is a settlement the database allows`, allowed.includes(lit))
 }
 
+/* --------------- 8. the client statement does ONE arithmetic, the database's --------------- */
+
+/*
+ * `client_account` computes the running balance in one ordered window. A component that added the
+ * amounts up again would be a SECOND arithmetic over the same money, and the day the two disagreed
+ * a client would be holding a statement that does not match the payover it was built from.
+ *
+ * ASSERTED IN SOURCE BECAUSE IT CANNOT BE ASSERTED IN THE BROWSER. A faithful fixture's amounts
+ * necessarily total its balances, so a re-summing component draws exactly the same figures and the
+ * e2e passes either way. That is recorded in e2e/client-statement.mjs rather than left for
+ * somebody to discover by trusting a green run.
+ */
+const panel = strip(read('src/components/companies/ClientAccountPanel.tsx'))
+ok('the panel draws the balance it was given', /rand\(e\.balance\)/.test(panel))
+/* The closing figure likewise: the LAST row's balance, not a total of the column. */
+ok('...and the closing figure is the last row', /entries\[entries\.length - 1\]\.balance/.test(panel))
+/*
+ * AND IT SUMS NOTHING. Any reduce/+= over the entries is the second arithmetic arriving, whatever
+ * it is called.
+ */
+no('...and nothing is re-summed', /\.reduce\(|balance \+=|total \+=/.test(panel))
+
 console.log(`check-workspace-split: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 if (failures.length) process.exit(1)

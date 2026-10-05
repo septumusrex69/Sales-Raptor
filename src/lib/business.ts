@@ -89,3 +89,50 @@ export async function fetchClientDebts(): Promise<ClientDebt[]> {
   }
   return [...by.values()].sort((a, b) => b.total - a.total)
 }
+
+/**
+ * THE RUNNING STATEMENT BETWEEN THE FIRM AND ONE CLIENT.
+ *
+ * THE FIRM ASKED FOR IT BY LISTING IT, which is the specification and is asserted line for line in
+ * check-client-account: *"Payover due to client. Payover paid to client. Withdrawal invoice for
+ * client. Payover due to client. Withdrawal fee subtracted from payover. Client paid payover.
+ * Invoice for executive listing. Invoice paid by client."*
+ *
+ * THIS IS WHERE THE TWO BOOKS MEET, and it is deliberately neither workspace. The firm does not
+ * settle "an invoice from trust" -- it settles Rinda Roo's invoice from Rinda Roo's own money, so
+ * the place that shows both is the CLIENT. Trust holds what is owed to them; Business holds what
+ * they owe; this is the one view where the two are a single running balance.
+ *
+ * THE BALANCE IS THE DATABASE'S, NOT THIS FILE'S. `client_account` carries a running `balance`
+ * computed in one ordered window, and re-summing the rows in the browser would be a second
+ * arithmetic that drifts the first time a same-day ordering differs. A statement whose balance
+ * disagrees with the payover it came from is worse than no statement.
+ */
+export type ClientEntryKind =
+  | 'payover_due' | 'charge_set_off' | 'payover_paid' | 'invoice_raised' | 'invoice_paid'
+
+export interface ClientEntry {
+  on: string
+  kind: ClientEntryKind
+  description: string
+  reference: string | null
+  amount: number
+  balance: number
+  runId: string | null
+  chargeId: string | null
+}
+
+export async function fetchClientAccount(companyId: string): Promise<ClientEntry[]> {
+  const { data, error } = await supabase.rpc('client_account', { p_company: companyId })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    on: String(r.entry_on ?? ''),
+    kind: String(r.kind) as ClientEntryKind,
+    description: String(r.description ?? ''),
+    reference: (r.reference as string | null) ?? null,
+    amount: n(r.amount),
+    balance: n(r.balance),
+    runId: (r.run_id as string | null) ?? null,
+    chargeId: (r.charge_id as string | null) ?? null,
+  }))
+}

@@ -49,12 +49,20 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
-import { canBeClientLiaison, canEditOwned } from '../../lib/permissions'
+import { canBeClientLiaison, canEditOwned, canViewTrust } from '../../lib/permissions'
+import { ClientAccountPanel } from '../../components/companies/ClientAccountPanel'
 import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
 
-type ClientTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
+/*
+ * ACCOUNT IS A TAB, NOT A PANEL ON THE OVERVIEW, and it is gated separately from the rest of the
+ * page. The firm: "Now we are going to need a financial section where we see a client balance."
+ * A sales representative works this screen every day and may not see the payment split, so the
+ * statement -- which is payovers, commission taken off them and what the client is invoiced --
+ * cannot simply sit in the Overview's scroll.
+ */
+type ClientTab = 'Overview' | 'Account' | 'Emails' | 'Notes' | 'Tasks'
 
 export function CompanyDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -792,6 +800,10 @@ export function CompanyDetail() {
       <RecordTabs<ClientTab>
         tabs={[
           { id: 'Overview', label: 'Overview' },
+          /* Only for somebody who may see the trust side: the statement IS the payover run and
+             the commission that came off it. Hidden rather than refusing, like every other
+             money screen -- the tab is a courtesy and canViewTrust is the rule. */
+          ...(canViewTrust(currentUser) ? [{ id: 'Account' as const, label: 'Account' }] : []),
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
           { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
@@ -803,6 +815,10 @@ export function CompanyDetail() {
           ? <RecordLayoutSwitcher layout={layout} onChange={chooseLayout} />
           : undefined}
       />
+
+      {tab === 'Account' && company && (
+        <ClientAccountPanel companyId={company.id} />
+      )}
 
       {tab === 'Overview' && (
         <RecordLayout
