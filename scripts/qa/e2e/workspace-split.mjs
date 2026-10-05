@@ -23,6 +23,11 @@ import { PROFILE } from './fixtures.mjs'
 
 const t = makeRunner('workspace-split')
 
+/* U+00A0 built rather than typed: en-ZA groups thousands with it, and a literal non-breaking space
+   sitting invisibly inside a regex is unreadable and un-greppable. */
+const NBSP = String.fromCharCode(0xa0)
+const plain = (text) => text.split(NBSP).join(' ')
+
 const ADMIN = { ...PROFILE, name: 'Stephan', role: 'Administrator' }
 /* A Liaison has payment.record and client.view, and neither finance.view nor business.view --
    so they are the right person to prove the guards turn somebody away. */
@@ -71,6 +76,23 @@ const CHARGES = [
     companies: { name: 'Rinda Roo Company' } },
 ]
 
+/*
+ * THE LEDGER, WITH A PARTY ON EACH SIDE. Mielie Meal Co is NEGATIVE on purpose: a PTC -- the
+ * debtor paid the client direct -- is what turns a client from a trust creditor into a trust
+ * debtor, and a fixture with only positives cannot tell the two tabs apart.
+ */
+const BALANCES = [
+  { party: 'firm', who_id: 'firm', who_name: 'Bredell Ferreira',
+    who_detail: 'Fees, interest and commission earned', balance: 4420.07, entries: 14,
+    last_at: '2026-10-05T10:00:00Z' },
+  { party: 'client', who_id: 'c1', who_name: 'Rinda Roo Company', who_detail: 'RRC',
+    balance: 2557.90, entries: 8, last_at: '2026-10-05T09:00:00Z' },
+  { party: 'debtor', who_id: 'a1', who_name: 'L Swakamisa', who_detail: 'RAP-123850',
+    balance: 410.63, entries: 1, last_at: '2026-10-05T08:00:00Z' },
+  { party: 'client', who_id: 'c2', who_name: 'Mielie Meal Co', who_detail: 'MMC',
+    balance: -320.00, entries: 2, last_at: '2026-10-04T08:00:00Z' },
+]
+
 function handlersFor(profile) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [profile] })],
@@ -78,6 +100,7 @@ function handlersFor(profile) {
       () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
+    [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
     [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
@@ -123,7 +146,7 @@ try {
      * the page is not the string a test types with ordinary spaces -- and an assertion that
      * silently never matched would pass the day the figure disappeared.
      */
-    const body = (await page.locator('main').innerText()).replace(/\u00a0/g, ' ')
+    const body = plain(await page.locator('main').innerText())
     t.ok('the bank balance is on the page', /R 6 910\.10/.test(body))
     t.ok('what is owed out of it is too', /R 7 873\.60/.test(body))
     /*
@@ -160,6 +183,53 @@ try {
     await context.close()
   }
 
+  /* ---------------------------------------------------------------------- the trust ledger */
+  {
+    const { context, page } = await open(browser, ADMIN, '/trust/ledger')
+    await page.waitForSelector('text=Trust ledger', { timeout: 15000 })
+
+    /*
+     * ONE LEDGER READ IN TWO DIRECTIONS. Positive is owed OUT of trust and negative owes it; a PTC
+     * is exactly what moves a client from one side to the other. The two tabs must therefore split
+     * the SAME rows rather than listing everything twice.
+     */
+    let body = plain(await page.locator('main').innerText())
+    t.ok('the firm is a creditor', /Bredell Ferreira/.test(body))
+    t.ok('...and so is a client', /Rinda Roo Company/.test(body))
+    t.ok('...and a debtor who overpaid', /L Swakamisa/.test(body))
+    t.check('the client who OWES the trust is not on this side',
+      /Mielie Meal Co/.test(body), false)
+    t.ok('the creditors total', /R 7 388\.60/.test(body))
+
+    /*
+     * AND THE LEDGER'S TOTAL IS EXPLAINED AGAINST THE OVERVIEW'S. They differ by the unplaced
+     * receipts, and two figures that differ with nothing saying why read as a system disagreeing
+     * with itself.
+     */
+    t.ok('the gap to the overview is explained',
+      /R 7 873\.60 is owed out/.test(body) && /R 485\.00 of receipts nobody has placed/.test(body))
+
+    await page.getByRole('button', { name: /Owed back to trust/ }).click()
+    await page.waitForTimeout(300)
+    body = plain(await page.locator('main').innerText())
+    t.ok('the client who owes the trust is on the other side', /Mielie Meal Co/.test(body))
+    t.check('...and the creditors are not', /Bredell Ferreira/.test(body), false)
+
+    /* THE RECONCILIATION IS A WORKED SUM, not two figures and a verdict: when it does not come
+       out, the next question is always which part. */
+    await page.getByRole('button', { name: /Against the bank/ }).click()
+    await page.waitForTimeout(300)
+    body = plain(await page.locator('main').innerText())
+    for (const line of ['In the trust bank account', 'Owed to clients',
+      'Owed to debtors who overpaid', 'Earned by the firm, not yet drawn',
+      'Receipts nobody has placed']) {
+      t.ok(`the sum shows "${line}"`, body.includes(line))
+    }
+    t.ok('...and the difference it comes to', /-R 963\.50/.test(body))
+    t.ok('...said as not balancing', /does not balance/.test(body))
+    await context.close()
+  }
+
   /* ------------------------------------------------------------- the business workspace */
   {
     const { context, page } = await open(browser, ADMIN, '/business')
@@ -177,7 +247,7 @@ try {
       t.check(`${item} is not a business item`, await rail.getByRole('link', { name: item }).count(), 0)
     }
 
-    const body = (await page.locator('main').innerText()).replace(/\u00a0/g, ' ')
+    const body = plain(await page.locator('main').innerText())
     /* The earnings figure is READ FROM THE TRUST SIDE: one number, one function, two screens. */
     t.ok('what the firm has earned shows', /R 4 420\.07/.test(body))
     /*

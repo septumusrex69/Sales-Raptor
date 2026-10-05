@@ -169,7 +169,7 @@ const trustTargets = railTargets(trustLayout)
 const businessTargets = railTargets(businessLayout)
 /* Read the count first: a loop over an empty list passes vacuously, which is this file's
    sibling-check trap written down. */
-check('the trust rail has its five, settings and the door', trustTargets.length, 7)
+check('the trust rail has its six, settings and the door', trustTargets.length, 8)
 check('the business rail has its two and the door', businessTargets.length, 3)
 
 const routeExists = (to) => {
@@ -183,10 +183,10 @@ for (const to of [...trustTargets, ...businessTargets]) {
   ok(`${to} opens a real route`, routeExists(to))
 }
 
-/* THE LEDGER IS NOT LISTED, and this is the assertion that will fail the day somebody adds it
-   without a page. It is phrased as "absent" rather than "never mentioned" so the comment
-   explaining WHY it is absent can stay. */
-no('the trust ledger is not in the rail yet', trustTargets.includes('/trust/ledger'))
+/* THE LEDGER IS LISTED NOW THAT IT OPENS. It was deliberately absent while it was database-only;
+   the general assertion above -- every rail item points at a route that exists -- is what kept it
+   honest then and what keeps the next one honest now. */
+ok('the trust ledger is in the rail', trustTargets.includes('/trust/ledger'))
 
 /* Each rail carries a door to the other book, which is how somebody crosses without a tab. */
 ok('trust has a door to business', trustTargets.includes('/business'))

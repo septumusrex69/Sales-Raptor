@@ -96,3 +96,44 @@ export async function fetchUnreconciledPayouts(): Promise<UnreconciledPayout[]> 
     candidateClient: (r.candidate_client as string | null) ?? null,
   }))
 }
+
+/**
+ * WHO THE TRUST OWES, AND WHO OWES IT, ONE ROW PER PARTY.
+ *
+ * `trust_position` says how MUCH is owed out of the account; this says to WHOM. The netting is the
+ * database's and is the same expression the position uses -- a client across their whole book, a
+ * debtor per account -- so the ledger and the reconciliation cannot disagree about who is owed
+ * what, which is the one thing a trust ledger exists to settle.
+ *
+ * IT DOES NOT SUM TO `netOwed`, AND THAT IS CORRECT. The position adds unplaced receipts to what is
+ * owed, because money on the statement with nobody's name on it is still somebody's; this can only
+ * list parties it knows. The screen says so, rather than leaving two figures looking like a
+ * disagreement.
+ */
+export type TrustParty = 'client' | 'debtor' | 'firm' | 'unidentified'
+
+export interface TrustBalance {
+  party: TrustParty
+  whoId: string
+  whoName: string
+  /** The client's code, the account's case number, or a line saying what the money is. */
+  whoDetail: string
+  /** Positive is owed OUT of the trust; negative owes the trust. */
+  balance: number
+  entries: number
+  lastAt: string | null
+}
+
+export async function fetchTrustBalances(): Promise<TrustBalance[]> {
+  const { data, error } = await supabase.rpc('trust_balances')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    party: String(r.party) as TrustParty,
+    whoId: String(r.who_id ?? ''),
+    whoName: String(r.who_name ?? ''),
+    whoDetail: String(r.who_detail ?? ''),
+    balance: n(r.balance),
+    entries: Number(r.entries ?? 0),
+    lastAt: (r.last_at as string | null) ?? null,
+  }))
+}

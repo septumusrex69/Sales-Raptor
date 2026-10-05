@@ -25128,3 +25128,70 @@ begin
 
   return v_payment;
 end $$;
+
+-- ============================================================================================
+-- THE TRUST LEDGER, LISTED: ONE BALANCE PER PARTY
+--
+-- trust_position says how much is owed out of the trust account. This says WHO it is owed to, and
+-- it is the reader behind the ledger screen -- the last thing built in the database over the past
+-- few prompts that had no face.
+--
+-- THE NETTING IS COPIED FROM trust_position ON PURPOSE, down to the grouping expression: a client
+-- nets across their whole book because that is how they are paid, and a debtor nets per account
+-- because two files of the same person are two debts. Listed any other way the ledger and the
+-- reconciliation would disagree about who is owed what, which is the single thing a trust ledger
+-- exists to settle. Verified against the position's own arithmetic before shipping.
+--
+-- A ZERO BALANCE IS NOT LISTED. A client paid out in full has entries on both sides that cancel;
+-- drawing them as a R0.00 row would bury the ten people who are actually owed something among
+-- hundreds who are not. The entries themselves are never deleted -- the ledger has no update or
+-- delete policy at all, which check-financial-immutability asserts.
+--
+-- IT WILL NOT SUM TO net_owed, AND THAT IS CORRECT. trust_position adds unplaced receipts to what
+-- is owed, because money sitting on the statement with nobody's name on it is still somebody's;
+-- this function can only list parties it knows. The screen says so rather than leaving two figures
+-- to look like a disagreement.
+-- ============================================================================================
+
+create or replace function public.trust_balances()
+returns table(party text, who_id text, who_name text, who_detail text,
+              balance numeric, entries bigint, last_at timestamptz)
+language sql stable security definer set search_path to 'public'
+as $$
+  with by_party as (
+    select e.party,
+           case when e.party = 'client' then e.company_id::text
+                else coalesce(e.account_id::text, e.party) end as who,
+           sum(e.amount) as bal,
+           count(*) as n,
+           max(e.entry_at) as last_at
+      from public.trust_creditor_entries e
+     group by 1, 2
+  )
+  select b.party,
+         b.who,
+         case b.party
+           when 'client' then coalesce(c.name, 'Unknown client')
+           when 'debtor' then coalesce(nullif(btrim(coalesce(a.debtor_first_name, a.debtor_initials, '')
+                                     || ' ' || coalesce(a.debtor_surname, '')), ''), 'Unknown debtor')
+           when 'firm' then 'Bredell Ferreira'
+           else 'Not yet identified'
+         end,
+         case b.party
+           when 'client' then coalesce(c.code, '')
+           when 'debtor' then coalesce(a.case_number, '')
+           when 'firm' then 'Fees, interest and commission earned'
+           else 'Receipts nobody has placed'
+         end,
+         round(b.bal, 2), b.n, b.last_at
+    from by_party b
+    left join public.companies c on b.party = 'client' and c.id = b.who::uuid
+    left join public.debtor_accounts a on b.party = 'debtor' and a.id = b.who::uuid
+   where public.has_capability('finance.view')
+     and round(b.bal, 2) <> 0
+   order by abs(b.bal) desc
+$$;
+
+revoke all on function public.trust_balances() from public;
+revoke all on function public.trust_balances() from anon;
+grant execute on function public.trust_balances() to authenticated;

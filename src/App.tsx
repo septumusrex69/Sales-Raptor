@@ -50,6 +50,7 @@ const FinanceSettings = lazy(() => import('./pages/finance/FinanceSettings').the
 const FinancePayments = lazy(() => import('./pages/finance/FinancePayments').then((m) => ({ default: m.FinancePayments })))
 const TrustLayout = lazy(() => import('./pages/trust/TrustLayout').then((m) => ({ default: m.TrustLayout })))
 const TrustOverview = lazy(() => import('./pages/trust/TrustOverview').then((m) => ({ default: m.TrustOverview })))
+const TrustLedger = lazy(() => import('./pages/trust/TrustLedger').then((m) => ({ default: m.TrustLedger })))
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
 const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
@@ -179,14 +180,9 @@ function App() {
                 <Route path="check" element={<CheckPayments />} handle={{ title: 'Check what has gone through' }} />
                 <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
                 <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
+                <Route path="ledger" element={<TrustLedger />} handle={{ title: 'Trust ledger' }} />
                 <Route path="exceptions" element={<FinanceExceptions />} handle={{ title: 'Exceptions' }} />
                 <Route path="settings" element={<FinanceSettings />} handle={{ title: 'Trust settings' }} />
-                {/*
-                  THE LEDGER HAS NO SCREEN YET. trust_creditor_entries, the debtors inside it and
-                  the reconciliation are all live in the database; what is missing is the page. It
-                  is NOT listed in the rail until it opens -- a menu item that goes nowhere is a
-                  menu that lies -- and the Overview carries the figures in the meantime.
-                */}
               </Route>
 
               <Route path="/business" element={<RequireBusiness><BusinessLayout /></RequireBusiness>}>
