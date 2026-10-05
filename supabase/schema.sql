@@ -24702,3 +24702,60 @@ as $$
 $$;
 
 revoke execute on function public.trust_position() from public, anon;
+
+-- ============================================================================================
+-- TRUST AND BUSINESS ARE TWO BOOKS, SO THEY ARE TWO TICKS
+--
+-- THE FIRM: "the trust and the business should be separated. It shouldn't be in the same tab in
+-- finance. It should be like outside, for example. So the trust, we have one place where we
+-- manage the trust and we have another place outside where we manage the business."
+--
+-- `finance.view` IS UNCHANGED AND STILL GATES THE TRUST SIDE. It is written into RLS policies and
+-- into live profiles' grants and revokes; renaming it so it reads better on a settings screen
+-- would be a migration about who may see client money, for nothing. What it gates is now called
+-- Trust; what it is called stays.
+--
+-- `business.view` IS NEW AND ADMINISTRATOR-ONLY, which is the allow-list direction: a role added
+-- later is refused until somebody decides it belongs. It gates the firm's own accounts -- what
+-- was earned, what was spent, which clients owe -- and the reason it is separate rather than a
+-- second heading under one tick is that a bookkeeper capturing supplier invoices has no business
+-- moving client trust money. One gate over both could only ever be the wider of the two.
+--
+-- NOTHING ENFORCES IT IN THE DATABASE YET, because no business table exists yet. When the first
+-- one arrives its policy asks has_capability('business.view') in the same migration, and the
+-- capability's `inDatabase` flag in src/lib/capabilities.ts is set then and not before.
+-- ============================================================================================
+
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile',
+      'library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+revoke all on function public.role_capabilities(text) from public;
+revoke all on function public.role_capabilities(text) from anon;
+grant execute on function public.role_capabilities(text) to authenticated;

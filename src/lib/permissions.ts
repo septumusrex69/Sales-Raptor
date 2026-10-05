@@ -308,6 +308,44 @@ export function canViewFinance(user: Pick<User, 'role' | 'grants' | 'revokes'> |
 }
 
 /**
+ * WHO SEES THE TRUST ACCOUNT. The same question canViewFinance has always answered, under the
+ * name the firm uses for it now.
+ *
+ * NOT A RENAME OF THE CAPABILITY, only of the predicate. 'finance.view' is written into RLS
+ * policies and into live profiles' grants and revokes; what it gates is called Trust, what it is
+ * called stays. canViewFinance is kept beside it because the account screen and the payment
+ * modals already ask for it by that name, and a sweep through them would be a diff nobody can
+ * review for the sake of a word.
+ */
+export function canViewTrust(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view')
+}
+
+/**
+ * WHO SEES THE FIRM'S OWN ACCOUNTS, and it is deliberately a different question.
+ *
+ * THE FIRM: "the trust and the business should be separated. It shouldn't be in the same tab in
+ * finance... we have one place where we manage the trust and we have another place outside where
+ * we manage the business."
+ *
+ * The separation is worth having for its own sake -- they are separately governed and separately
+ * audited books -- but this predicate is what pays for it. Trust is other people's money and
+ * business is the firm's, and the lists of people who should see each are not the same list in
+ * either direction: a bookkeeper capturing supplier invoices has no business moving client trust
+ * money, and the administrator who runs payovers does not need to see salaries. One gate over
+ * both could only ever be the wider of the two.
+ *
+ * NOTHING IN THE DATABASE ENFORCES IT YET, because nothing is behind it yet -- the business
+ * tables are still to be built. This is the courtesy on the menu and the route; the boundary
+ * arrives with the first table, in that table's own migration. Said plainly here because the
+ * opposite mistake -- a tick that claims an enforcement it does not have -- is the one
+ * capabilities.ts was written to stop.
+ */
+export function canViewBusiness(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'business.view')
+}
+
+/**
  * WHO MAY RECORD THAT MONEY ARRIVED.
  *
  * NOT THE SAME QUESTION AS canViewFinance, and keeping them apart is the point. The firm's rule

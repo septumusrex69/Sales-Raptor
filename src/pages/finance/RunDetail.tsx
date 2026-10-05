@@ -188,7 +188,7 @@ export function RunDetail() {
 
   return (
     <div className="space-y-4">
-      <Link to="/finance/payover" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
+      <Link to="/trust/payover" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
         <ArrowLeft className="w-4 h-4" /> Payover queue
       </Link>
 
@@ -247,7 +247,7 @@ export function RunDetail() {
                 {b.amount !== null && <span className="shrink-0 tabular-nums">{rand(b.amount)}</span>}
               </div>
             ))}
-            <Link to="/finance/exceptions" className="inline-block pt-1 text-[12.5px] font-medium text-amber-800 underline">
+            <Link to="/trust/exceptions" className="inline-block pt-1 text-[12.5px] font-medium text-amber-800 underline">
               Work through the exceptions
             </Link>
           </div>

@@ -27,6 +27,7 @@ import {
 import {
   canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canViewLibrary, canEditLibrary, mayPoolDisputes,
+  canViewTrust, canViewBusiness,
 } from '../../src/lib/permissions.ts'
 
 let pass = 0
@@ -112,6 +113,18 @@ check('the template itself is not', departsFromRole(asUser('Liaison'), 'client.v
  */
 const EXPECTED = {
   canViewFinance: ['Administrator'],
+  /*
+   * THE TWO WORKSPACES, AND THEY ARE DELIBERATELY NOT THE SAME QUESTION. canViewTrust is
+   * canViewFinance under the name the firm uses now -- the same capability, because 'finance.view'
+   * is written into RLS and into live profiles' grants and renaming it would be a migration about
+   * who may see client money. canViewBusiness is genuinely new.
+   *
+   * BOTH ADMINISTRATOR-ONLY TODAY, which is the allow-list direction. Asserted per role anyway: if
+   * a later prompt gives a bookkeeper the business side, the edit has to be visible HERE as well
+   * as in the template, and the one that must never follow it quietly is the trust row.
+   */
+  canViewTrust: ['Administrator'],
+  canViewBusiness: ['Administrator'],
   canRecordPayment: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader', 'Liaison Manager', 'Liaison'],
   canViewClients: ROLES.filter((r) => r !== 'Pre-legal Agent' && r !== 'Read Only'),
   canFreezeAccounts: ['Administrator', 'Pre-legal Team Leader', 'Liaison Manager', 'Liaison'],
@@ -124,7 +137,7 @@ const EXPECTED = {
   canViewLibrary: ROLES,
 }
 const FN = {
-  canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
+  canViewFinance, canViewTrust, canViewBusiness, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canEditLibrary, mayPoolDisputes, canViewLibrary,
 }
 for (const [name, allowed] of Object.entries(EXPECTED)) {
@@ -145,7 +158,7 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 12)
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 14)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:

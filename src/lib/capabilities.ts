@@ -67,6 +67,7 @@ import type { User, UserRole } from '../types'
 export type Capability =
   /* ---- money: Swordfish's "Access Permissions: Data", which is the panel worth copying ---- */
   | 'finance.view'
+  | 'business.view'
   | 'payment.record'
   | 'payment.approve'
   | 'payment.reverse'
@@ -106,12 +107,48 @@ export interface CapabilityMeta {
  */
 export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
   /* ---------------------------------- money ---------------------------------- */
+  /*
+   * THE TRUST ACCOUNT. Still spelled `finance.view` on purpose: the name is written into RLS
+   * policies, into grants and revokes on live profiles, and into has_capability. Renaming it to
+   * read better on a settings screen would be a migration that can lock somebody out of client
+   * money, for nothing. What it GATES is now called Trust; what it is CALLED stays.
+   */
   'finance.view': {
-    label: 'See the Finance section',
+    label: 'See the trust account',
     blurb: 'Payover runs, the split on every payment, and what the firm earns. The firm: '
       + '"The Finance section is Administrator only. Sales representatives never see the payment split."',
     group: 'Money',
     inDatabase: true,
+  },
+  /*
+   * THE SECOND BOOK, AND THE REASON IT IS A SEPARATE TICK.
+   *
+   * THE FIRM, ON SEEING THE TWO AS ONE "FINANCE" SECTION: "the trust and the business should be
+   * separated. It shouldn't be in the same tab in finance. It should be like outside... we have
+   * one place where we manage the trust and we have another place outside where we manage the
+   * business."
+   *
+   * They are separately governed and separately audited books, and the word Finance over both of
+   * them said they were one pot with two drawers. The split is worth having on its own, but the
+   * tick is the part that pays for it: a bookkeeper capturing supplier invoices has no business
+   * moving client trust money, and the administrator who runs payovers does not need payroll.
+   * One gate over both could only ever be the wider of the two.
+   *
+   * NOT inDatabase, deliberately and visibly. Every table behind the business side is still to be
+   * built; when the first one arrives with RLS on it, this gains the flag in the SAME commit --
+   * the rule at the top of this file. A tick that claims an enforcement it does not have is worse
+   * than the missing rule it pretends to be.
+   *
+   * ADMINISTRATOR ONLY FOR NOW, which is the allow-list direction: a role added later is refused
+   * until somebody decides it belongs. finance.view stays exactly as it was and still gates the
+   * trust side -- it is enforced in the database, and splitting an enforced capability is a
+   * migration about who may see client money, not a navigation change.
+   */
+  'business.view': {
+    label: "See the firm's own accounts",
+    blurb: 'The business account: what the firm earned, what it spent, and which clients owe it. '
+      + 'Separate from the trust account, which is money held for other people and is a different tick.',
+    group: 'Money',
   },
   'payment.record': {
     label: 'Record a payment',

@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
-import { FinanceTabs } from './FinanceTabs'
 import { rand } from '../../lib/money'
 import {
   NEXT_STEP_LABEL, RUN_STATUS_LABEL,
@@ -117,7 +116,7 @@ export function FinanceWorkQueue() {
        emailing the advice and recording an EFT all need something the queue does not have — which
        row, which address, which reference — and a button that half-does a job is worse than one
        that takes you to where the job is done. Approve is the exception: there is nothing to ask. */
-    if (row.nextStep !== 'approve') { navigate(`/finance/runs/${row.runId}`); return }
+    if (row.nextStep !== 'approve') { navigate(`/trust/runs/${row.runId}`); return }
     setBusy(row.runId)
     setError(null)
     try {
@@ -136,7 +135,6 @@ export function FinanceWorkQueue() {
 
   return (
     <div className="space-y-4">
-      <FinanceTabs />
       {error && (
         <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -187,7 +185,7 @@ export function FinanceWorkQueue() {
             label="Money received"
             value={rand(tiles?.moneyReceived ?? 0)}
             note="Trust account, this cycle"
-            to="/finance"
+            to="/trust/payments"
           />
           <Tile
             label="Due to clients"
@@ -204,7 +202,7 @@ export function FinanceWorkQueue() {
             value={`${tiles?.waitingCount ?? 0} ${(tiles?.waitingCount ?? 0) === 1 ? 'payover' : 'payovers'}`}
             note={`${tiles?.needsReviewCount ?? 0} need review, ${tiles?.readyCount ?? 0} ready to approve`}
             tone={(tiles?.waitingCount ?? 0) > 0 ? 'warn' : undefined}
-            to="/finance/exceptions"
+            to="/trust/exceptions"
           />
         </div>
 
@@ -253,7 +251,7 @@ export function FinanceWorkQueue() {
               {!loading && shown.map((r) => (
                 <tr
                   key={r.runId}
-                  onClick={() => navigate(`/finance/runs/${r.runId}`)}
+                  onClick={() => navigate(`/trust/runs/${r.runId}`)}
                   className="cursor-pointer border-b border-slate-50 text-sm hover:bg-slate-50"
                 >
                   <td className="px-4 py-3">
@@ -310,7 +308,7 @@ export function FinanceWorkQueue() {
           staging={staging}
           onClose={() => setBuilding(false)}
           onBuilt={async () => { await load() }}
-          onOpen={(runId) => { setBuilding(false); navigate(`/finance/runs/${runId}`) }}
+          onOpen={(runId) => { setBuilding(false); navigate(`/trust/runs/${runId}`) }}
         />
       )}
     </div>

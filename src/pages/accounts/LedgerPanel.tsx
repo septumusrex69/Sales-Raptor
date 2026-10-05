@@ -97,7 +97,7 @@ export function LedgerPanel({ accountId }: { accountId: string }) {
                 <td className="px-4 py-2.5 text-xs">
                   {l.runId
                     ? (
-                      <Link to={`/finance/runs/${l.runId}`} className="text-navy-700 hover:underline">
+                      <Link to={`/trust/runs/${l.runId}`} className="text-navy-700 hover:underline">
                         {l.runInvoice}
                         <span className="block text-slate-400">
                           {l.runStatus ? RUN_STATUS_LABEL[l.runStatus] : ''}

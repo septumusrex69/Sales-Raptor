@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2, Plus } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
-import { FinanceTabs } from './FinanceTabs'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { supabase } from '../../lib/supabase'
 import { rand } from '../../lib/money'
@@ -112,7 +111,6 @@ export function FinancePayments() {
 
   return (
     <div className="space-y-4">
-      <FinanceTabs />
       {/*
         THE IMPORT COMES FIRST, above the ledger it fills. This screen already listed every
         payment with its full allocation and could reverse one; what it could not do was record a

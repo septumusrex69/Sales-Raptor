@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useNavCounts, type NavCounts } from '../../lib/navCounts'
 import {
-  Activity, BarChart3, BookOpen, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
+  Activity, BarChart3, BookOpen, Briefcase, Building2, Calendar, CalendarClock, CheckSquare, ChevronDown, Handshake, Inbox, LayoutDashboard, Landmark, Library, LogOut, MessageCircleQuestion, PanelLeftClose, PanelLeftOpen, Settings, Target, Users, type LucideIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../store/AuthContext'
 import { UserAvatar } from '../ui/Avatar'
 import { useTheme } from '../../store/ThemeContext'
-import { canViewClients, canViewLibrary , canViewFinance } from '../../lib/permissions'
+import { canViewClients, canViewLibrary, canViewFinance, canViewBusiness } from '../../lib/permissions'
 import { useSidebarCollapsed } from '../../lib/sidebarCollapsed'
 
 /**
@@ -57,11 +57,31 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean; badge?:
   // library is content a person maintains and comes back to, not a switch they set once. It sits
   // by Reports because both are reference rather than a queue somebody works down.
   /*
-   * FINANCE: remittances, payovers and the back office. ADMINISTRATOR ONLY, on the firm's own
-   * condition for the module. It sits above Library rather than under Settings because it is a
-   * queue somebody works down every month, not a switch they set once.
+   * TWO ITEMS, NOT ONE "FINANCE", at the firm's instruction: "the trust and the business should
+   * be separated. It shouldn't be in the same tab in finance. It should be like outside, for
+   * example. So the trust, we have one place where we manage the trust and we have another place
+   * outside where we manage the business."
+   *
+   * AND "FINANCE" IS GONE AS A WORD, because it was the word doing the damage: one heading over
+   * both books says they are one pot with two drawers. They are separately governed and
+   * separately audited, and a business expense paid out of a trust account is the single mistake
+   * that closes an attorney's practice.
+   *
+   * THE COST TO A CROWDED MENU IS ONE ITEM, not six. The firm's worry was the six finance screens
+   * arriving here -- "there are already so many panes on the left side" -- and they have not:
+   * they are a rail inside each workspace, the way Settings has worked since the firm asked for
+   * that pane to fold.
+   *
+   * SEPARATE TICKS, WHICH IS THE PART THAT PAYS FOR THE SPLIT. finance.view gates the trust side
+   * and is unchanged; business.view is new and Administrator-only. A bookkeeper capturing supplier
+   * invoices has no business moving client trust money, and one gate over both could only ever be
+   * the wider of the two.
+   *
+   * Both sit above Library rather than under Settings because they are queues somebody works down
+   * every month, not switches they set once.
    */
-  { to: '/finance', label: 'Finance', icon: Landmark },
+  { to: '/trust', label: 'Trust', icon: Landmark },
+  { to: '/business', label: 'Business', icon: Briefcase },
   { to: '/library', label: 'Library', icon: Library },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings },
@@ -112,7 +132,8 @@ export function Sidebar() {
              nobody may enter and teaches people that the sidebar lies. The page keeps its own
              guard for anyone who types the address. */
           .filter((n) => n.to !== '/library' || canViewLibrary(currentUser))
-          .filter((n) => n.to !== '/finance' || canViewFinance(currentUser))
+          .filter((n) => n.to !== '/trust' || canViewFinance(currentUser))
+          .filter((n) => n.to !== '/business' || canViewBusiness(currentUser))
           .map(({ to, label, icon: Icon, end, badge }) => {
           const count = badge ? counts[badge] : 0
           return (

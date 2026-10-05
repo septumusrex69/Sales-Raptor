@@ -3,7 +3,6 @@ import { AlertTriangle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
-import { FinanceTabs } from './FinanceTabs'
 import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
 import {
@@ -98,7 +97,6 @@ export function FinanceSettings() {
 
   return (
     <div className="space-y-4">
-      <FinanceTabs />
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-4 py-3 text-sm text-negative-700">

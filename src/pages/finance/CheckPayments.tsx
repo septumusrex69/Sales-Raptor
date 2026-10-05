@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
-import { FinanceTabs } from './FinanceTabs'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import {
@@ -88,7 +87,6 @@ export function CheckPayments() {
 
   return (
     <div>
-      <FinanceTabs />
 
       <Card padded={false}>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">

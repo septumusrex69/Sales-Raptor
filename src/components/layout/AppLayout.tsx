@@ -20,6 +20,23 @@ const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/activities/, title: 'Activities' },
   { test: /^\/reports/, title: 'Reports' },
   { test: /^\/settings/, title: 'Settings' },
+  /*
+   * THE TWO WORKSPACES. Specific before general, as everywhere in this table: /trust/payover
+   * would otherwise be headed "Trust" and somebody landing on a payover run from a link would
+   * have no idea which screen they were on.
+   *
+   * The rail says which workspace you are in and this bar says which screen -- the two halves of
+   * "where am I", and the reason the rail keeps the workspace's name even when it is folded.
+   */
+  { test: /^\/trust\/payments/, title: 'Payments in' },
+  { test: /^\/trust\/check/, title: 'Check what has gone through' },
+  { test: /^\/trust\/payover/, title: 'Payover runs' },
+  { test: /^\/trust\/runs/, title: 'Payover run' },
+  { test: /^\/trust\/exceptions/, title: 'Exceptions' },
+  { test: /^\/trust\/settings/, title: 'Trust settings' },
+  { test: /^\/trust/, title: 'Trust' },
+  { test: /^\/business\/back-office/, title: 'Back office' },
+  { test: /^\/business/, title: 'Business' },
   { test: /^\/reps\/[^/]+$/, title: 'Rep Performance' },
   /*
    * The two Collections routes, which were missing from this table entirely — so the bar above

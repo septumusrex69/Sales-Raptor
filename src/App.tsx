@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { AppStoreProvider } from './store/AppStore'
 import { AuthProvider } from './store/AuthContext'
 import { ThemeProvider } from './store/ThemeContext'
@@ -14,6 +14,7 @@ import { AppLayout } from './components/layout/AppLayout'
 import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
 import { RequireFinance } from './components/auth/RequireFinance'
+import { RequireBusiness } from './components/auth/RequireBusiness'
 
 import { CollectorDashboard } from './pages/CollectorDashboard'
 /*
@@ -47,6 +48,10 @@ const FinanceExceptions = lazy(() => import('./pages/finance/FinanceExceptions')
 const BackOffice = lazy(() => import('./pages/finance/BackOffice').then((m) => ({ default: m.BackOffice })))
 const FinanceSettings = lazy(() => import('./pages/finance/FinanceSettings').then((m) => ({ default: m.FinanceSettings })))
 const FinancePayments = lazy(() => import('./pages/finance/FinancePayments').then((m) => ({ default: m.FinancePayments })))
+const TrustLayout = lazy(() => import('./pages/trust/TrustLayout').then((m) => ({ default: m.TrustLayout })))
+const TrustOverview = lazy(() => import('./pages/trust/TrustOverview').then((m) => ({ default: m.TrustOverview })))
+const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
+const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
 const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
@@ -73,6 +78,19 @@ const TasksPage = lazy(() => import('./pages/tasks/TasksPage').then((m) => ({ de
 const CalendarPage = lazy(() => import('./pages/calendar/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const ActivitiesPage = lazy(() => import('./pages/activities/ActivitiesPage').then((m) => ({ default: m.ActivitiesPage })))
 const RepDetailPage = lazy(() => import('./pages/reps/RepDetailPage').then((m) => ({ default: m.RepDetailPage })))
+
+/**
+ * ONE PAYOVER RUN, AT ITS OLD ADDRESS.
+ *
+ * The only moved path that carries a parameter, so it cannot be a plain <Navigate to="...">: the
+ * run's id has to be read off the old URL and put back into the new one. Worth the component --
+ * a run's page is what the firm links to when they send somebody a payover to look at, and those
+ * links are in sent mail where nobody can fix them.
+ */
+function RunRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/trust/runs/${id}`} replace />
+}
 
 function App() {
   return (
@@ -132,25 +150,61 @@ function App() {
               <Route path="/companies/:id" element={<RequireClientAccess><CompanyDetail /></RequireClientAccess>} handle={{ title: 'Client Details' }} />
               <Route path="/mail" element={<MailPage />} handle={{ title: 'Mail' }} />
               {/*
-                * THE FINANCE SECTION. Its landing page is the payover WORK QUEUE, not an overview:
-                * prompt 7 replaced prompt 5's overview because this is the screen the team opens
-                * to find out what to do, not a set of figures to read.
-                */}
-              {/*
-                PAYMENTS IS THE FRONT OF THE FINANCE SECTION, at the firm's instruction: "the first
-                pane and the first tab that I want to see... first I want to see the payments. So
-                first we work with payments. And then we work with a pay over queue." The queue was
-                the index because it was built first, which is not a reason.
+                TWO WORKSPACES, BECAUSE THEY ARE TWO BOOKS.
+
+                THE FIRM: "the trust and the business should be separated. It shouldn't be in the
+                same tab in finance. It should be like outside, for example. So the trust, we have
+                one place where we manage the trust and we have another place outside where we
+                manage the business."
+
+                They are separately governed and separately audited, and "Finance" over both of
+                them said they were one pot with two drawers. The six screens that were tabs in a
+                strip are now a rail inside /trust; Back office, which is the firm's OWN income and
+                spent its life fifth in that strip, has moved to /business where it belongs.
+
+                EVERY OLD ADDRESS STILL LANDS. The paths below are redirects, not leftovers: the
+                payover queue is linked from emails the firm has already sent, and /finance is in
+                somebody's bookmarks. A moved section that breaks them is a moved section people
+                stop using.
+
+                PAYMENTS KEEPS ITS PLACE IN THE ORDER, at the firm's instruction about the old
+                strip: "first I want to see the payments. So first we work with payments. And then
+                we work with a pay over queue." What is above it now is the Overview, which is the
+                only screen that answers whether the trust account is right at all -- and that
+                question comes before any day's work on it.
               */}
-              <Route path="/finance" element={<RequireFinance><FinancePayments /></RequireFinance>} handle={{ title: 'Payments' }} />
-              <Route path="/finance/payover" element={<RequireFinance><FinanceWorkQueue /></RequireFinance>} handle={{ title: 'Payover queue' }} />
-              <Route path="/finance/runs/:id" element={<RequireFinance><RunDetail /></RequireFinance>} handle={{ title: 'Payover run' }} />
-              {/* The old address, kept so a bookmark or a link in somebody's email still lands. */}
-              <Route path="/finance/payments" element={<Navigate to="/finance" replace />} />
-              <Route path="/finance/check" element={<RequireFinance><CheckPayments /></RequireFinance>} handle={{ title: 'Check what has gone through' }} />
-              <Route path="/finance/exceptions" element={<RequireFinance><FinanceExceptions /></RequireFinance>} handle={{ title: 'Finance exceptions' }} />
-              <Route path="/finance/back-office" element={<RequireFinance><BackOffice /></RequireFinance>} handle={{ title: 'Back office' }} />
-              <Route path="/finance/settings" element={<RequireFinance><FinanceSettings /></RequireFinance>} handle={{ title: 'Finance settings' }} />
+              <Route path="/trust" element={<RequireFinance><TrustLayout /></RequireFinance>}>
+                <Route index element={<TrustOverview />} handle={{ title: 'Trust overview' }} />
+                <Route path="payments" element={<FinancePayments />} handle={{ title: 'Payments in' }} />
+                <Route path="check" element={<CheckPayments />} handle={{ title: 'Check what has gone through' }} />
+                <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
+                <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
+                <Route path="exceptions" element={<FinanceExceptions />} handle={{ title: 'Exceptions' }} />
+                <Route path="settings" element={<FinanceSettings />} handle={{ title: 'Trust settings' }} />
+                {/*
+                  THE LEDGER HAS NO SCREEN YET. trust_creditor_entries, the debtors inside it and
+                  the reconciliation are all live in the database; what is missing is the page. It
+                  is NOT listed in the rail until it opens -- a menu item that goes nowhere is a
+                  menu that lies -- and the Overview carries the figures in the meantime.
+                */}
+              </Route>
+
+              <Route path="/business" element={<RequireBusiness><BusinessLayout /></RequireBusiness>}>
+                <Route index element={<BusinessOverview />} handle={{ title: 'Business overview' }} />
+                <Route path="back-office" element={<BackOffice />} handle={{ title: 'Back office' }} />
+              </Route>
+
+              {/* The old addresses. Every one of them, so nothing anybody saved goes dead. */}
+              <Route path="/finance" element={<Navigate to="/trust" replace />} />
+              <Route path="/finance/payments" element={<Navigate to="/trust/payments" replace />} />
+              <Route path="/finance/check" element={<Navigate to="/trust/check" replace />} />
+              <Route path="/finance/payover" element={<Navigate to="/trust/payover" replace />} />
+              <Route path="/finance/runs/:id" element={<RunRedirect />} />
+              <Route path="/finance/exceptions" element={<Navigate to="/trust/exceptions" replace />} />
+              <Route path="/finance/settings" element={<Navigate to="/trust/settings" replace />} />
+              {/* Back office changed WORKSPACE as well as address, which is the one redirect here
+                  that is a decision rather than a move. */}
+              <Route path="/finance/back-office" element={<Navigate to="/business/back-office" replace />} />
               <Route path="/accounts" element={<AccountsList />} handle={{ title: 'Accounts' }} />
               {/*
                 THE OLD WAY IN, KEPT AS A REDIRECT. The read-only page that lived here showed the
