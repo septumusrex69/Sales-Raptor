@@ -22483,3 +22483,535 @@ begin
     end;
   end loop;
 end $$;
+
+-- ============================================================================
+-- REJECTING A RECEIPT OFF THE APPROVAL QUEUE
+--
+-- The firm, looking at the queue their first import filled: "there are no way to reject payments
+-- that are imported. From an import sheet... there's some ones waiting in the queue to be
+-- approved, but I don't want to approve them. I want to start throwing things in."
+--
+-- A REJECTION IS THE THIRD THING, AND IT IS NOT EITHER OF THE OTHER TWO.
+--   * A REVERSAL undoes a payment that WAS approved: allocate_payment ran, balances moved, the
+--     four ledgers carry entries and a payover run may already have passed. Undoing it writes
+--     contra entries, because the financial records are immutable -- the firm: "everything
+--     that's been logged and booked as stamped and cannot be changed."
+--   * SUSPENSE is "I do not know whose money this is yet". The payment survives, waiting.
+--   * A REJECTION is "this is not a payment at all." Nothing ran. There is nothing to reverse
+--     and nothing to wait for. The row stops where it is and the bank line goes back on the
+--     unallocated list for somebody to place properly.
+-- Which is why rejection is a flag on account_payments rather than an entry anywhere: writing a
+-- ledger pair to cancel something that never reached the ledger would invent a transaction.
+--
+-- IT REFUSES AN APPROVED PAYMENT ON PURPOSE, and says so in the firm's words -- "Reverse it
+-- instead." A rejection that silently did a reversal's job would leave balances moved and no
+-- contra entries behind them.
+-- ============================================================================
+alter table public.account_payments
+  add column if not exists rejected_at timestamptz,
+  add column if not exists rejected_by uuid references public.profiles(id),
+  add column if not exists rejection_reason text;
+
+comment on column public.account_payments.rejected_at is
+  'When somebody said this receipt should not become a payment at all. NOT a reversal: a reversal undoes a payment that was approved and posted, and writes contra entries. A rejection happens before any of that -- the row never reaches allocate_payment, never moves a balance and never reaches a payover run. And NOT a suspense either: suspense is "I do not know whose this is yet".';
+comment on column public.account_payments.rejection_reason is
+  'Why, in the firm''s own words. Required, like the suspense reason and for the same purpose: the bank line goes back on the unallocated list and the next person to pick it up has nothing else to go on.';
+
+-- ============================================================================
+-- FIRST, THE LINK THE RELEASE NEEDS, WHICH WAS NOT BEING WRITTEN.
+--
+-- `bank_line_id` is described further up this file as "the authoritative answer to 'where did
+-- this money come from'" -- and `place_bank_line`, the ORDINARY one-to-one path, never set it.
+-- Only `split_bank_line` did. The column read null on every receipt placed off a statement since
+-- the one-off backfill that introduced it, which is 8 of 8 on staging.
+--
+-- IT WAS FOUND BY THE REJECTION BEING A SILENT NO-OP. reject_payment releases the line it finds
+-- through `bank_line_id`; null there meant the payment was marked rejected, vanished off the
+-- queue, and the statement line stayed `allocated` and still pointing at it -- money held by a
+-- payment nobody was ever going to make, off every screen that could show it. Nothing failed.
+-- That is the shape `AuthContext.mapProfileRow` and `accountBook.toAccount` are warned about in
+-- CLAUDE.md: a column in the table, in the type and in the select, missing from one writer.
+--
+-- The backfill is repeated because it is how a database written before this fix catches up, and
+-- it is idempotent -- `where p.bank_line_id is null` -- so it costs a fresh database nothing.
+-- ============================================================================
+create or replace function public.place_bank_line(p_line uuid, p_account uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_payment uuid;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  -- The three ways this could put money somewhere it does not belong, each refused by name.
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be placed against an account.';
+  end if;
+  if v_line.payment_id is not null then
+    raise exception 'That receipt has already been placed.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client,
+    created_by, bank_line_id
+  ) values (
+    p_account,
+    (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+    v_line.amount, 'EFT',
+    coalesce(v_line.reference, left(v_line.description, 60)),
+    v_line.description, 'bank', false, auth.uid(), p_line
+  ) returning id into v_payment;
+
+  update public.bank_statement_lines
+     set status = 'allocated', account_id = p_account, payment_id = v_payment,
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_payment;
+end $$;
+
+update public.account_payments p
+   set bank_line_id = l.id
+  from public.bank_statement_lines l
+ where l.payment_id = p.id and p.bank_line_id is null;
+
+-- THE BANK LINE'S GUARD NEEDED A NARROW HOLE, AND IT ASKS THE PAYMENT RATHER THAN THE CALLER.
+-- protect_bank_statement_line refuses to clear payment_id once it is set, which is right for
+-- every other path and is what blocked the rejection: the first probe showed `status` and
+-- `placed_at` changing while `payment_id` quietly survived, so the line read as unallocated and
+-- was still held by a payment nobody would ever make. The exception is only a CLEARING
+-- (new.payment_id is null) of a payment that really carries a rejection, read out of the table
+-- rather than taken on trust -- an ordinary unlink, a swap to a different payment, a clearing of
+-- an approved one, are all refused exactly as before.
+create or replace function public.protect_bank_statement_line()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  new.bank_account := old.bank_account;
+  new.line_key := old.line_key;
+  new.txn_date := old.txn_date;
+  new.amount := old.amount;
+  new.balance := old.balance;
+  new.description := old.description;
+  new.direction := old.direction;
+  new.imported_at := old.imported_at;
+  new.imported_by := old.imported_by;
+  -- A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is what FinancePayments
+  -- does, through the ledger, with a reason written on it.
+  --
+  -- EXCEPT WHERE THE PAYMENT WAS REJECTED, which is the one case where nothing was ever made.
+  -- The firm: "there are no way to reject payments that are imported... I do not want to approve
+  -- them." A rejected receipt never reached allocate_payment, never moved a balance and never
+  -- reached a payover run -- so there is no ledger to reverse it through, and leaving the line
+  -- pointing at it would keep the money claimed by a payment nobody is going to make. The line
+  -- has to go back on the unallocated list to be placed properly, and it cannot while it is held.
+  --
+  -- NARROW ON PURPOSE, AND IT ASKS THE PAYMENT RATHER THAN TRUSTING THE CALLER: only a clearing
+  -- (new.payment_id is null), and only where that payment really carries a rejection. Anything
+  -- else -- a different payment, a half-written one, an approved one -- is refused exactly as
+  -- before.
+  if old.payment_id is not null
+     and not (new.payment_id is null
+              and exists (select 1 from public.account_payments p
+                           where p.id = old.payment_id and p.rejected_at is not null))
+  then
+    new.payment_id := old.payment_id;
+    new.account_id := old.account_id;
+  end if;
+  return new;
+end $$;
+
+-- ============================================================================
+-- ONE REJECTION, AND THE SECOND ARGUMENT IS WHAT THE BANK LINE DOES NEXT.
+--
+-- `unallocated` is the ordinary case: the money did arrive, it is just not this debtor's, so the
+-- line goes back on the queue and keeps nothing of the guess (account_id cleared too, or the
+-- next person inherits the wrong name). `excluded` is "it is not a debtor receipt at all" -- a
+-- bank charge, a transfer between the firm's own accounts, an interest credit -- and that line
+-- should stop appearing on the unallocated list for somebody to try again on. It keeps its
+-- account_id because excluding says nothing about who it was once thought to be.
+--
+-- THE LINE IS FOUND BOTH WAYS ROUND, AND THE ANSWER IS WRITTEN DOWN. `bank_line_id` is the
+-- authoritative link and `payments_awaiting_approval` finds the same line through the line's own
+-- `payment_id`, so this reads whichever is set -- a payment written before place_bank_line was
+-- fixed has only the second. And it WRITES `bank_line_id` while it is there, because the release
+-- clears the line's `payment_id`: after that moment the reverse lookup finds nothing, so this is
+-- the last instant at which "put it back" can still learn which line to restore.
+--
+-- A SPLIT LINE IS NOT RELEASED WHILE ITS SIBLINGS ARE LIVE. A debt counsellor's R5 000 is one
+-- credit and five payments (see split_bank_line, above), so rejecting one part must not put the
+-- whole line back on the unallocated queue with four payments still hanging off it. The count is
+-- of OTHER payments on the line that are neither rejected nor reversed; where there are none,
+-- this is the ordinary one-to-one case and the line is released.
+--
+-- Clearing suspense is deliberate: a payment can be in suspense AND wrong, and the two reads
+-- (suspended_payments, payments_rejected) must not both claim the same row.
+-- ============================================================================
+create or replace function public.reject_payment(
+  p_payment uuid, p_reason text, p_not_a_receipt boolean default false)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_line uuid;
+  v_siblings integer;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to reject a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why it is being rejected.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.approved_at is not null then
+    raise exception 'That payment has been approved and split. Reverse it instead.' using errcode = '22023';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed.' using errcode = '22023';
+  end if;
+  /* ALREADY REJECTED IS A NO-OP, NOT A FAILURE -- the same reason approve_payment gives: two
+     people clearing one morning's queue is the ordinary case, and the second must not see an
+     error for work that is already done. */
+  if v_pay.rejected_at is not null then return; end if;
+
+  v_line := coalesce(
+    v_pay.bank_line_id,
+    (select l.id from public.bank_statement_lines l where l.payment_id = p_payment));
+
+  update public.account_payments
+     set rejected_at = now(), rejected_by = auth.uid(), rejection_reason = v_reason,
+         bank_line_id = v_line,
+         suspended_at = null, suspense_reason = null
+   where id = p_payment;
+
+  if v_line is not null then
+    select count(*) into v_siblings
+      from public.account_payments s
+     where s.bank_line_id = v_line and s.id <> p_payment
+       and s.rejected_at is null and s.reversed_at is null;
+    if v_siblings = 0 then
+      update public.bank_statement_lines
+         set status = case when p_not_a_receipt then 'excluded' else 'unallocated' end,
+             payment_id = null,
+             account_id = case when p_not_a_receipt then account_id else null end,
+             placed_at = null, placed_by = null
+       where id = v_line;
+    end if;
+  end if;
+end $$;
+
+-- PUT IT BACK. A rejection is a judgement somebody made in a second and can be wrong, so there
+-- is an undo -- and the undo is the only reason the reason is kept on the row rather than the
+-- row being deleted.
+--
+-- IT REFUSES WHERE THE LINE HAS MOVED ON. The whole point of rejecting is that the bank line
+-- goes back on the unallocated list, so by the time somebody presses Put it back the line may
+-- already carry a different payment. Re-pointing it would quietly take the money off a payment
+-- somebody has since made properly.
+--
+-- AND ON A SPLIT LINE IT RESTORES THE STATUS WITHOUT CLAIMING THE LINE: `payment_id` stays null
+-- where siblings exist, which is what split_bank_line's own comment requires -- no single payment
+-- is the answer for a line that became five.
+create or replace function public.unreject_payment(p_payment uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_line public.bank_statement_lines%rowtype;
+  v_siblings integer;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to change a payment.' using errcode = '42501';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.rejected_at is null then return; end if;
+
+  if v_pay.bank_line_id is not null then
+    select * into v_line from public.bank_statement_lines where id = v_pay.bank_line_id;
+    if v_line.payment_id is not null and v_line.payment_id <> p_payment then
+      raise exception 'That receipt has since been placed on another payment, so this one cannot come back.'
+        using errcode = '22023';
+    end if;
+    select count(*) into v_siblings
+      from public.account_payments s
+     where s.bank_line_id = v_pay.bank_line_id and s.id <> p_payment
+       and s.rejected_at is null and s.reversed_at is null;
+  end if;
+
+  update public.account_payments
+     set rejected_at = null, rejected_by = null, rejection_reason = null
+   where id = p_payment;
+
+  if v_pay.bank_line_id is not null then
+    update public.bank_statement_lines
+       set status = 'allocated',
+           payment_id = case when v_siblings = 0 then p_payment else payment_id end,
+           account_id = coalesce(account_id, case when v_siblings = 0 then v_pay.account_id end),
+           placed_at = coalesce(placed_at, now()),
+           placed_by = coalesce(placed_by, auth.uid())
+     where id = v_pay.bank_line_id;
+  end if;
+end $$;
+
+-- MANY AT ONCE, BUILT ON THE ONE. The firm is "throwing things in" off a whole imported sheet,
+-- so the queue has a tick box and a Reject button over it -- and this mirrors approve_payments
+-- exactly: each row in its own sub-transaction, so one refusal does not take the other
+-- twenty-nine with it, and the refusals come back as text for the screen to show rather than
+-- being swallowed.
+create or replace function public.reject_payments(
+  p_payments uuid[], p_reason text, p_not_a_receipt boolean default false)
+returns table(rejected integer, skipped integer, problems text[])
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_problems text[] := array[]::text[];
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to reject payments.' using errcode = '42501';
+  end if;
+  rejected := 0; skipped := 0;
+  foreach v_id in array coalesce(p_payments, array[]::uuid[]) loop
+    begin
+      perform public.reject_payment(v_id, p_reason, p_not_a_receipt);
+      rejected := rejected + 1;
+    exception when others then
+      skipped := skipped + 1;
+      v_problems := array_append(v_problems, sqlerrm);
+    end;
+  end loop;
+  problems := v_problems;
+  return next;
+end $$;
+
+-- WHAT WAS REJECTED, SO THE UNDO IS REACHABLE. `p_since` is how the approval queue shows only
+-- today's: a rejection that happened weeks ago is history, and a strip of fifty Put it back
+-- buttons over the queue would be noise on a screen whose job is the queue.
+--
+-- The line is joined through `bank_line_id`, which is the only direction left once the release
+-- has cleared the line's own `payment_id` -- and which reject_payment writes for exactly that
+-- reason.
+create or replace function public.payments_rejected(p_since date default null)
+returns table(
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric, reference text,
+  bank_description text, source text,
+  rejected_on date, rejected_at timestamptz, rejected_by_name text, rejection_reason text,
+  line_status text, bank_line_id uuid)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.reference, l.description, p.source,
+    (p.rejected_at at time zone 'Africa/Johannesburg')::date, p.rejected_at,
+    who.name, p.rejection_reason,
+    l.status, l.id
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  left join public.profiles who on who.id = p.rejected_by
+  left join public.bank_statement_lines l on l.id = p.bank_line_id
+  where public.may_approve_payment()
+    and p.rejected_at is not null
+    and not p.is_demo
+    and (p_since is null or (p.rejected_at at time zone 'Africa/Johannesburg')::date >= p_since)
+  order by p.rejected_at desc
+$$;
+
+-- ============================================================================
+-- AND APPROVE REFUSES A REJECTED RECEIPT, WHICH IT DID NOT.
+--
+-- The queue stops OFFERING a rejected row, which is not the same thing as the row being
+-- unapprovable: `approve_payment` is an RPC, `approve_payments` takes a list of ids, and a browser
+-- holding a queue from before the rejection would post one straight through. What it would do is
+-- worse than ordinary double work -- the bank line has already gone back on the unallocated list
+-- and may since have been placed on a DIFFERENT payment, so approving the rejected one allocates
+-- one statement line twice, on a row that no screen shows.
+--
+-- "Put it back first" is the firm's own undo, named in the message, because that is the honest
+-- route: if the receipt should be approved after all it should also be back on the queue, with the
+-- bank line pointing at it again.
+-- ============================================================================
+create or replace function public.approve_payment(p_payment uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to approve payments.' using errcode = '42501';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then raise exception 'That payment no longer exists.'; end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed. It cannot be approved.';
+  end if;
+  if v_pay.rejected_at is not null then
+    raise exception 'That receipt was rejected. Put it back first if it should be approved.'
+      using errcode = '22023';
+  end if;
+  /* ALREADY APPROVED IS A NO-OP, NOT A FAILURE: two people pressing Approve all at the same
+     moment is the ordinary case on a morning's list, and the second must not see an error. */
+  if v_pay.approved_at is not null then return p_payment; end if;
+
+  update public.account_payments
+     set approved_at = now(), approved_by = auth.uid()
+   where id = p_payment;
+
+  /* AND THE SPLIT HAPPENS NOW, which is the whole point of the gate. */
+  perform public.allocate_payment(p_payment);
+  return p_payment;
+end $$;
+
+-- THE QUEUE STOPS OFFERING WHAT WAS REJECTED. One line added -- `and p.rejected_at is null` --
+-- and the whole function restated, because schema.sql is append-only and the LAST definition is
+-- the live one. Without it the rejected row keeps its place on the queue with a preview under it,
+-- which is the opposite of what the firm asked for.
+create or replace function public.payments_awaiting_approval()
+returns table(
+  payment_id uuid, account_id uuid, case_number text, account_number text,
+  debtor text, client text, received_on date, amount numeric, paid_to_client boolean,
+  method text, reference text, details text, source text,
+  receipt_fee numeric, receipt_fee_vat numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric, excess numeric,
+  commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric,
+  has_rate boolean, capital_before numeric, capital_after numeric,
+  bank_line_id uuid, bank_description text,
+  came_back_from uuid, came_back_reason text, came_back_on date,
+  interest_to_date numeric, interest_after numeric,
+  interest_open numeric, interest_open_from date,
+  interest_total numeric, interest_cant numeric, interest_retained numeric,
+  rf_total numeric, rf_cant numeric, rf_retained numeric,
+  to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric,
+  costs_before numeric, costs_after numeric,
+  commission_rate numeric, vat_rate numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select
+    p.id, p.account_id, d.case_number, d.account_number,
+    public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+    c.name,
+    (p.received_at at time zone 'Africa/Johannesburg')::date,
+    p.amount, p.paid_to_client, p.method, p.reference, p.details, p.source,
+    pv.receipt_fee_excl, pv.receipt_fee_vat,
+    pv.to_interest, pv.to_costs, pv.to_capital, pv.excess_credit,
+    pv.commission, pv.commission_vat, pv.to_client, pv.due_to_bf,
+    pv.has_rate, pv.capital_before, pv.capital_after,
+    l.id, l.description,
+    was.id, was.reversal_reason,
+    (was.reversed_at at time zone 'Africa/Johannesburg')::date,
+    pv.interest_before, pv.interest_after,
+    pv.interest_open, pv.interest_open_from,
+    pv.interest_total, pv.interest_cant, pv.interest_retained,
+    pv.rf_total, pv.rf_cant, pv.rf_retained, pv.to_receipt_fees,
+    pv.fees_total, pv.fees_cant, pv.fees_retained, pv.to_fees,
+    pv.costs_before, pv.costs_after,
+    case when c.commission_bands is null
+         then coalesce(d.commission_rate, c.commission_rate) end,
+    fs.vat_rate
+  from public.account_payments p
+  join public.debtor_accounts d on d.id = p.account_id
+  left join public.companies c on c.id = d.company_id
+  cross join lateral (select vat_rate from public.firm_settings limit 1) fs
+  left join public.bank_statement_lines l on l.payment_id = p.id
+  left join public.account_payments was on was.id = p.replaces_payment_id
+  left join lateral public.preview_allocation(
+    p.account_id, p.amount, p.paid_to_client,
+    (p.received_at at time zone 'Africa/Johannesburg')::date, p.id) pv on true
+  where public.may_approve_payment()
+    and p.approved_at is null
+    and p.reversed_at is null
+    and p.suspended_at is null
+    and p.rejected_at is null
+    and not p.is_demo
+  order by (p.received_at at time zone 'Africa/Johannesburg')::date desc, p.amount desc
+$$;
+
+-- ============================================================================
+-- AND THE FOUR NEW FUNCTIONS ARE IN THE REVOKE LIST.
+--
+-- Supabase grants EXECUTE on a new public-schema function to anon by default, so a create IS a
+-- grant -- and `reject_payment` reachable by a stranger would let anybody take a receipt off the
+-- queue and put its bank line back on the unallocated list. Each function's own
+-- `may_approve_payment()` guard is the second lock; this is the first.
+--
+-- THE WHOLE LIST IS RESTATED, not the four names appended, for the reason above: the last block
+-- is the live one, so a block carrying only the new names would leave every other function
+-- un-revoked on a fresh database -- including `approve_payment` and `place_bank_line`, both
+-- re-created above, which a create or replace does not re-grant but a fresh database's first
+-- create does.
+-- ============================================================================
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    /* THE FOUR THAT ARE NEW. */
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, Loader2, RotateCcw, Search } from 'lucide-react'
+import { AlertTriangle, Check, Loader2, RotateCcw, Search, Undo2, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
@@ -7,7 +7,8 @@ import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
   fetchAwaitingApproval, approvePayments, setPaymentAccount, suspendPayment,
-  awaitingAllocation, type AwaitingPayment,
+  awaitingAllocation, fetchRejectedPayments, rejectPayments, unrejectPayment,
+  type AwaitingPayment, type RejectedPayment,
 } from '../../lib/payover'
 import { checkAllocation } from '../../lib/allocationRules'
 /*
@@ -57,6 +58,24 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
    */
   const [parking, setParking] = useState<AwaitingPayment | null>(null)
   /*
+   * AND THE ONES BEING THROWN OUT, which is neither of the two above.
+   *
+   * THE FIRM: "there are no way to reject payments that are imported. From an import sheet...
+   * there's some ones waiting in the queue to be approved, but I don't want to approve them."
+   *
+   * Move is "I know whose this is and it is not this debtor's". Suspense is "I do not know whose
+   * this is yet". Reject is "this should not become a payment at all" -- and until now the only
+   * way to clear one off the list was to approve it, which is the one thing the firm was saying
+   * they did not want to do.
+   *
+   * A LIST RATHER THAN A ROW, because a morning's rubbish is thrown out together and for the same
+   * reason. One row goes through the same box with one id in it.
+   */
+  const [rejecting, setRejecting] = useState<AwaitingPayment[] | null>(null)
+  /* WHAT WAS THROWN OUT, so it is visible rather than vanished -- and so the undo is beside the
+     mistake. Rejecting happens at speed down a list, which is when the wrong row gets pressed. */
+  const [rejected, setRejected] = useState<RejectedPayment[]>([])
+  /*
    * WHICH OF THE THREE FEE SECTIONS IS OPENED OUT.
    *
    * THE FIRM: "the column that you will be showing to us is the interest that we are taking now.
@@ -70,9 +89,18 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    try { setRows(await fetchAwaitingApproval()) }
-    catch (e) { setError(e instanceof Error ? e.message : 'Could not load the day’s payments.') }
-    finally { setLoading(false) }
+    try {
+      const [queue, thrown] = await Promise.all([
+        fetchAwaitingApproval(),
+        /* TODAY'S ONLY. The record is permanent, but the strip under the queue is about what just
+           happened -- a month of rejections there would be a second list nobody reads. */
+        fetchRejectedPayments(new Date().toISOString().slice(0, 10)),
+      ])
+      setRows(queue)
+      setRejected(thrown)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load the day’s payments.')
+    } finally { setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load, refreshKey])
 
@@ -122,6 +150,21 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
     } finally { setBusy(false) }
   }
 
+  /*
+   * PUT ONE BACK. Refused by the database where the statement line has since been placed on
+   * another payment -- then putting this one back would claim money that is already somewhere
+   * else -- so the error is shown rather than swallowed.
+   */
+  async function putBack(id: string) {
+    setBusy(true); setError(null)
+    try {
+      await unrejectPayment(id)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That receipt could not be put back.')
+    } finally { setBusy(false) }
+  }
+
   function toggle(id: string) {
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
@@ -129,12 +172,25 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
   if (loading) {
     return <Card><div className="py-8 text-center"><Loader2 className="mx-auto w-4 h-4 animate-spin text-slate-400" /></div></Card>
   }
+  /*
+   * AN EMPTY QUEUE STILL CARRIES THE UNDO, because rejecting the last receipt is how the queue
+   * empties -- the firm's own words are "I want to start throwing things in", and a Put it back
+   * button that disappears at the moment it is most likely to be wanted is not an undo at all.
+   *
+   * AND IT NO LONGER SAYS EVERYTHING WAS APPROVED. It said that unconditionally, which is untrue
+   * on exactly the morning this screen was built for: nothing was approved, eight things were
+   * thrown out. A line that is wrong when something unusual has happened is worse than no line,
+   * because it is read on the day somebody is checking.
+   */
   if (rows.length === 0) {
     return (
-      <Card>
-        <p className="py-4 text-center text-[13px] text-slate-500">
-          No payments waiting. Everything that has arrived has been approved.
+      <Card padded={false}>
+        <p className="px-4 py-4 text-center text-[13px] text-slate-500">
+          {rejected.length > 0
+            ? 'No payments waiting. Everything that has arrived has been approved or rejected.'
+            : 'No payments waiting. Everything that has arrived has been approved.'}
         </p>
+        <RejectedToday rejected={rejected} busy={busy} onPutBack={putBack} />
       </Card>
     )
   }
@@ -155,6 +211,18 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
             className="text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-200
               text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
             Approve {picked.size} · {rand(pickedTotal)}
+          </button>
+          {/*
+            AND THE OTHER WAY OFF THE LIST, beside the one that was there.
+
+            THE FIRM: "there's some ones waiting in the queue to be approved, but I don't want to
+            approve them." Until now the only button that cleared a row was the one that posted it.
+          */}
+          <button type="button" disabled={busy || picked.size === 0}
+            onClick={() => setRejecting(rows.filter((r) => picked.has(r.paymentId)))}
+            className="text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-200
+              text-slate-600 hover:border-negative-300 hover:bg-negative-50 disabled:opacity-40">
+            Reject {picked.size}
           </button>
           <button type="button" disabled={busy}
             onClick={() => void approve(rows.map((r) => r.paymentId))}
@@ -316,6 +384,13 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                       hover:text-slate-700">
                     Suspense
                   </button>
+                  {/* AND THE THIRD ANSWER. Move is "I know whose this is"; Suspense is "I do not
+                      know whose"; Reject is "this should not be a payment at all". */}
+                  <button type="button" onClick={() => setRejecting([r])}
+                    className="ml-1.5 text-[11px] font-medium text-slate-400 underline underline-offset-2
+                      hover:text-negative-700">
+                    Reject
+                  </button>
                 </td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
@@ -393,6 +468,15 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
           onDone={async () => { setMoving(null); await load() }}
         />
       )}
+      <RejectedToday rejected={rejected} busy={busy} onPutBack={putBack} />
+
+      {rejecting && (
+        <RejectModal
+          payments={rejecting}
+          onClose={() => setRejecting(null)}
+          onDone={async () => { setRejecting(null); setPicked(new Set()); await load() }}
+        />
+      )}
       {parking && (
         <SuspendModal
           payment={parking}
@@ -401,6 +485,207 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
         />
       )}
     </Card>
+  )
+}
+
+/**
+ * THROWING ONE OUT.
+ *
+ * THE FIRM: "there are no way to reject payments that are imported. From an import sheet. I don't
+ * know if we can quickly build that in. So there's some ones waiting in the queue to be approved,
+ * but I don't want to approve them."
+ *
+ * ------------------------------------------------------------------------------------------------
+ * REJECTING IS NOT REVERSING, AND THE DIFFERENCE IS THE WHOLE DESIGN
+ * ------------------------------------------------------------------------------------------------
+ *
+ * A REVERSAL undoes a payment that was approved and POSTED: a balance moved, a fee was raised, a
+ * client may already have been paid on it, so it writes contra entries through the ledger. A
+ * rejected receipt never reached any of that -- no allocation, no balance, no payover run -- so
+ * there is nothing to reverse, and calling it one would put it on reports as money that came back.
+ *
+ * NOTHING IS DELETED EITHER. The money arrived in the trust account whatever anybody decided about
+ * it; a receipt that disappeared from every screen is one nobody can reconcile against the bank
+ * statement. So the payment row stands with the reason on it and the STATEMENT LINE is what moves.
+ *
+ * ------------------------------------------------------------------------------------------------
+ * AND WHERE THE LINE GOES IS THE QUESTION THE BOX ASKS
+ * ------------------------------------------------------------------------------------------------
+ *
+ * Two answers, and they are genuinely different work:
+ *
+ *   BACK ON THE UNALLOCATED LIST -- the money arrived and still has to be placed; it is this
+ *   PAYMENT that is wrong. The firm picks it up on the Back office tab and places it properly.
+ *
+ *   NOT A RECEIPT AT ALL -- an interbank transfer, a bank error, something the importer misread.
+ *   The line is marked excluded and leaves both lists. Putting one of these back on the
+ *   unallocated list is work the firm would do again every morning, for ever.
+ *
+ * THE FIRST IS THE DEFAULT, because it is the safer wrong answer: a line that should have been
+ * excluded and is on the unallocated list is noise somebody clears, and a line that should have
+ * been placed and was excluded is money nobody is looking for.
+ *
+ * ONE REASON BETWEEN THEM. The receipts being thrown out together are being thrown out for the
+ * same reason, and asking eight times is how somebody starts typing "x".
+ */
+/**
+ * WHAT WAS THROWN OUT TODAY, AND THE WAY BACK.
+ *
+ * A rejection that left no trace would be a receipt gone from every screen -- and the money still
+ * arrived in the trust account, so the bank would never reconcile against a list that quietly lost
+ * rows.
+ *
+ * TODAY'S ONLY. The record is permanent and `payments_rejected` carries all of it, but this strip
+ * is about what just happened; a month of rejections here would be a second list nobody reads.
+ *
+ * ONE COMPONENT BECAUSE IT IS DRAWN IN TWO PLACES -- under the queue, and under the empty-queue
+ * line, since rejecting the last receipt is how the queue empties. Written out twice they drift,
+ * and the half that would rot is the one somebody only sees on the morning they threw everything
+ * out.
+ */
+function RejectedToday({ rejected, busy, onPutBack }: {
+  rejected: RejectedPayment[]
+  busy: boolean
+  onPutBack: (id: string) => Promise<void>
+}) {
+  if (rejected.length === 0) return null
+  return (
+    <div className="border-t border-slate-100 px-4 py-2.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        Rejected today · {rejected.length}
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        {rejected.map((r) => (
+          <li key={r.paymentId} className="flex flex-wrap items-baseline gap-x-2 text-[12.5px]">
+            <span className="text-slate-600">{r.caseNumber ?? r.accountNumber}</span>
+            <span className="tabular-nums text-slate-500">{rand(r.amount)}</span>
+            <span className="text-slate-500 truncate max-w-[22rem]"
+              title={r.rejectionReason ?? ''}>
+              {r.rejectionReason}
+            </span>
+            {/* WHERE THE STATEMENT LINE WENT, because that is what somebody has to act on
+                next: back on the unallocated list to be placed, or marked as not a receipt. */}
+            <span className="text-[11px] text-slate-400">
+              {r.lineStatus === 'excluded' ? 'not a receipt'
+                : r.lineStatus === 'unallocated' ? 'back on the unallocated list'
+                  : r.source === 'bank_import' ? '' : 'captured by hand'}
+            </span>
+            <button type="button" disabled={busy} onClick={() => void onPutBack(r.paymentId)}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400
+                underline underline-offset-2 hover:text-slate-700 disabled:opacity-40">
+              <Undo2 size={10} /> Put it back
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function RejectModal({ payments, onClose, onDone }: {
+  payments: AwaitingPayment[]
+  onClose: () => void
+  onDone: () => Promise<void> | void
+}) {
+  const [reason, setReason] = useState('')
+  const [notAReceipt, setNotAReceipt] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const total = payments.reduce((n, p) => n + p.amount, 0)
+  /* ONLY WHAT CAME OFF A STATEMENT HAS A LINE TO SEND ANYWHERE. A receipt captured by hand has
+     none, so the choice below would be a question about nothing -- and offering it would suggest
+     the firm is deciding something they are not. */
+  const fromTheBank = payments.filter((p) => p.bankLineId).length
+
+  async function throwOut() {
+    if (!reason.trim()) return
+    setBusy(true); setError(null)
+    try {
+      const out = await rejectPayments(
+        payments.map((p) => p.paymentId), reason.trim(), notAReceipt)
+      /* ONE THAT COULD NOT BE REJECTED NAMES ITSELF AND THE REST STILL WERE -- the same shape
+         approve uses, because two people clearing one morning's queue is ordinary. */
+      if (out.problems.length > 0) {
+        setError(`${out.rejected} rejected, ${out.skipped} could not be: ${
+          out.problems.slice(0, 3).join('; ')}`)
+        setBusy(false)
+        return
+      }
+      await onDone()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Those receipts could not be rejected.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      title={payments.length === 1 ? 'Reject this receipt' : `Reject ${payments.length} receipts`}
+      subtitle={`${rand(total)}`}
+      onClose={onClose} width={480}>
+      <p className="text-sm text-slate-500">
+        {payments.length === 1 ? 'It leaves' : 'They leave'} the approval queue without being
+        split. No balance moves, no fee is raised and nothing reaches a payover run.
+      </p>
+      {/* NOT DELETED, SAID ON THE SCREEN. Somebody pressing this needs to know the money is still
+          accounted for, or they will go looking for it. */}
+      <p className="text-[11px] text-slate-400 mt-2">
+        Nothing is deleted. {payments.length === 1 ? 'The receipt stays' : 'The receipts stay'} on
+        the record with your reason, and you can put {payments.length === 1 ? 'it' : 'them'} back.
+      </p>
+
+      <label className="block mt-3">
+        <span className="text-xs font-medium text-slate-600">Why?</span>
+        <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder="Duplicate of the receipt on the 3rd"
+          className={`${inputClass} mt-1`} />
+      </label>
+
+      {fromTheBank > 0 && (
+        <fieldset className="mt-3">
+          <legend className="text-xs font-medium text-slate-600">
+            And the {fromTheBank === 1 ? 'statement line' : 'statement lines'}?
+          </legend>
+          <label className="mt-1.5 flex items-start gap-2 text-[13px] text-slate-600">
+            <input type="radio" name="line" checked={!notAReceipt} className="mt-0.5"
+              onChange={() => setNotAReceipt(false)} />
+            <span>
+              Back on the unallocated list
+              <span className="block text-[11px] text-slate-400">
+                The money arrived and still has to be placed — it is this payment that is wrong.
+              </span>
+            </span>
+          </label>
+          <label className="mt-1.5 flex items-start gap-2 text-[13px] text-slate-600">
+            <input type="radio" name="line" checked={notAReceipt} className="mt-0.5"
+              onChange={() => setNotAReceipt(true)} />
+            <span>
+              It is not a debtor receipt at all
+              <span className="block text-[11px] text-slate-400">
+                A transfer, a bank error, something the import misread. It leaves both lists.
+              </span>
+            </span>
+          </label>
+        </fieldset>
+      )}
+
+      {error && <p className="text-sm text-negative-700 mt-3">{error}</p>}
+
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose}
+          className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600">
+          Keep {payments.length === 1 ? 'it' : 'them'}
+        </button>
+        <button type="button" disabled={busy || !reason.trim()} onClick={() => void throwOut()}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-1.5 rounded-lg
+            border border-negative-200 bg-negative-50 text-negative-700
+            hover:bg-negative-100 disabled:opacity-40">
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+          Reject {payments.length === 1 ? 'it' : `all ${payments.length}`}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

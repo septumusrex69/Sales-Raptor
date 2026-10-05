@@ -1274,6 +1274,126 @@ export async function setPaymentAccount(paymentId: string, accountId: string): P
   if (error) throw new Error(error.message)
 }
 
+/* ---------------- rejecting one, which is neither a reversal nor a suspense ---------------- */
+
+/**
+ * A RECEIPT SOMEBODY TOOK OFF THE QUEUE WITHOUT APPROVING IT.
+ *
+ * THE FIRM: "there are no way to reject payments that are imported. From an import sheet... there's
+ * some ones waiting in the queue to be approved, but I don't want to approve them."
+ *
+ * THREE WORDS FOR THREE DIFFERENT THINGS, and the screen had only two of them:
+ *
+ *   MOVE      — I know whose this is, and it is not this debtor's.
+ *   SUSPENSE  — I do not know whose this is yet. Park it; somebody will place it.
+ *   REJECT    — this should not become a payment at all.
+ *
+ * AND IT IS NOT A REVERSAL. A reversal undoes a payment that was approved and POSTED: it writes
+ * contra entries through the ledger, because a balance moved and a client may already have been
+ * paid on it. A rejected receipt never reached allocate_payment, so there is nothing to reverse --
+ * and calling it a reversal would put it on reports as money that came back.
+ *
+ * NOTHING IS DELETED. The money arrived in the trust account whatever anybody decided about it, so
+ * the payment row stands with its reason and the statement line goes back on the unallocated list
+ * to be placed properly. A receipt that vanished from every screen is one nobody can reconcile
+ * against the bank.
+ */
+export interface RejectedPayment {
+  paymentId: string
+  accountId: string
+  caseNumber: string | null
+  accountNumber: string | null
+  debtor: string | null
+  client: string | null
+  receivedOn: string
+  amount: number
+  reference: string | null
+  bankDescription: string | null
+  source: string | null
+  rejectedOn: string
+  rejectedAt: string
+  rejectedByName: string | null
+  rejectionReason: string | null
+  /** Where the statement line went: back on the unallocated list, or marked as not a receipt. */
+  lineStatus: string | null
+  bankLineId: string | null
+}
+
+export async function fetchRejectedPayments(since?: string): Promise<RejectedPayment[]> {
+  const { data, error } = await supabase.rpc('payments_rejected', { p_since: since ?? null })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paymentId: String(r.payment_id),
+    accountId: String(r.account_id),
+    caseNumber: s(r.case_number),
+    accountNumber: s(r.account_number),
+    debtor: s(r.debtor),
+    client: s(r.client),
+    receivedOn: String(r.received_on),
+    amount: Number(r.amount ?? 0),
+    reference: s(r.reference),
+    bankDescription: s(r.bank_description),
+    source: s(r.source),
+    rejectedOn: String(r.rejected_on),
+    rejectedAt: String(r.rejected_at),
+    rejectedByName: s(r.rejected_by_name),
+    rejectionReason: s(r.rejection_reason),
+    lineStatus: s(r.line_status),
+    bankLineId: s(r.bank_line_id),
+  }))
+}
+
+/** What a batch of rejections did, in the shape `approvePayments` returns. */
+export interface RejectionOutcome {
+  rejected: number
+  skipped: number
+  problems: string[]
+}
+
+/**
+ * Reject some.
+ *
+ * ONE CALL FOR ANY NUMBER AND ONE REASON BETWEEN THEM, because the firm clears a morning's list:
+ * the receipts being thrown out together are being thrown out for the same reason, and asking
+ * eight times is how somebody starts typing "x".
+ *
+ * `notAReceipt` DECIDES WHERE THE STATEMENT LINE GOES, and the two answers are genuinely
+ * different. False -- the default -- puts it back on the unallocated list, because the money
+ * arrived and still has to be placed; it is this PAYMENT that is wrong. True marks the line
+ * excluded, for a line that is not a debtor receipt at all: an interbank transfer, a bank error,
+ * something the importer misread. Putting one of those back on the unallocated list is work the
+ * firm would do again every morning.
+ */
+export async function rejectPayments(
+  paymentIds: string[], reason: string, notAReceipt = false,
+): Promise<RejectionOutcome> {
+  const { data, error } = await supabase.rpc('reject_payments', {
+    p_payments: paymentIds,
+    p_reason: reason,
+    p_not_a_receipt: notAReceipt,
+  })
+  if (error) throw new Error(error.message)
+  const r = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
+  return {
+    rejected: Number(r?.rejected ?? 0),
+    skipped: Number(r?.skipped ?? 0),
+    problems: (r?.problems as string[] | null) ?? [],
+  }
+}
+
+/**
+ * BACK ON THE QUEUE, for one rejected by mistake.
+ *
+ * Rejecting is done at speed down a morning's list, which is exactly when the wrong row gets
+ * pressed -- so the undo sits beside the mistake rather than in a screen somebody has to find.
+ * Refused by the database where the statement line has since been placed on another payment,
+ * because then putting this one back would claim money that is already somewhere else.
+ */
+export async function unrejectPayment(paymentId: string): Promise<void> {
+  const { error } = await supabase.rpc('unreject_payment', { p_payment: paymentId })
+  if (error) throw new Error(error.message)
+}
+
 /* ---------------- suspense, the half that is a PAYMENT rather than a bank line ---------------- */
 
 /**

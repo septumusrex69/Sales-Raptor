@@ -74,10 +74,23 @@ ok('a trigger protects what the bank said', guard !== null)
 for (const col of ['line_key', 'txn_date', 'amount', 'description', 'direction', 'bank_account']) {
   ok(`...reverting ${col}`, new RegExp(`new\\.${col} := old\\.${col};`).test(guard ?? ''))
 }
-/* AND A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is the ledger's job, with
-   a reason written on it -- not a field somebody clears. */
+/*
+ * AND A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is the ledger's job, with
+ * a reason written on it -- not a field somebody clears.
+ *
+ * WITH ONE EXCEPTION, ADDED WHEN REJECTING BECAME POSSIBLE: a REJECTED payment never reached
+ * allocate_payment, so there is no ledger to reverse it through, and a line still pointing at it
+ * is money claimed by a payment nobody is going to make. The exception is deliberately narrow and
+ * this asserts the narrowness rather than just its presence -- it is a CLEARING only
+ * (new.payment_id is null), and it asks the payment table whether the rejection is real instead of
+ * trusting the caller. check-reject-payment holds the other half.
+ */
 ok('...and a placed payment cannot be detached',
-  /if old\.payment_id is not null then[\s\S]{0,160}?new\.payment_id := old\.payment_id;/.test(guard ?? ''))
+  /new\.payment_id := old\.payment_id;/.test(guard ?? ''))
+ok('...except by a rejection, and only by clearing it',
+  /if old\.payment_id is not null\s*\n\s*and not \(new\.payment_id is null/.test(guard ?? ''))
+ok('...which is read off the payment rather than taken on trust',
+  /p\.id = old\.payment_id and p\.rejected_at is not null/.test(guard ?? ''))
 ok('the trigger is attached',
   /create trigger protect_bank_statement_line\s*\n\s*before update on public\.bank_statement_lines/.test(sql))
 
