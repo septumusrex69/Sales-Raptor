@@ -6830,6 +6830,1006 @@
    }
   ]
  },
+ "letter-affordability-individual": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Identity number: {{debtor_id_masked}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "AFFORDABILITY ASSESSMENT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Financial information required before a payment arrangement can be put to the creditor"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear {{debtor_name}} — we act on behalf of {{client_name}}, the creditor. You have asked to pay the balance of {{balance}} over time. Before a proposal can be put to the creditor, we need the information set out below."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT TO SEND US"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send these to us by email. Fill in the summary below, sign at the foot of this document, and attach the documents to your reply."
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": true,
+    "keepTogether": true,
+    "items": [
+     [
+      {
+       "text": "Proof of income for the last three months: payslips if you are employed, or bank statements if you are not."
+      }
+     ],
+     [
+      {
+       "text": "Bank statements for your main account for the last three months."
+      }
+     ],
+     [
+      {
+       "text": "A copy of your identity document."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "YOUR INCOME"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "INCOME",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT PER MONTH",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Salary or wages, after deductions"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_salary}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Income from any other source"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_other}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Income of a spouse or partner who contributes"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_partner}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total income",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{income_total}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "YOUR EXPENSES"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "EXPENSES",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT PER MONTH",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Rent or bond"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_housing}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Rates, water and electricity"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_utilities}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Food and household"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_food}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Transport, fuel or taxi fares"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_transport}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "School fees and childcare"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_school}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Insurance and medical aid"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_medical}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Other credit repayments"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_credit}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Everything else"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_other}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Total expenses",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{expense_total}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "table",
+    "borders": "all",
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "What is left each month",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{affordability_left}}",
+         "bold": true
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT YOU CAN PAY"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "YOUR PROPOSAL",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Amount you propose to pay each time"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{ptp_amount}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "How often it will be paid"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_frequency}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "The date of the first payment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Any lump sum you can pay now"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{offer_lump_sum}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT HAPPENS NEXT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We use this information only to assess the proposal and to put it to the creditor, and we process it in accordance with the Protection of Personal Information Act 4 of 2013. A proposal cannot be considered until the information above has reached us, and the account continues on its normal course in the meantime."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send the documents to {{agent_email}}, quoting reference {{case_number}}. We will revert as soon as the creditor has considered the proposal."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "By signing below you confirm that the information given above is true and complete. This document is not an agreement to accept your proposal and it does not suspend the account."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "{{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{firm_name}}, duly authorised agent of {{client_name}}"
+     }
+    ]
+   }
+  ]
+ },
+ "letter-affordability-company": {
+  "defaults": {
+   "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",
+   "size": 10.5,
+   "colour": "#1f2937",
+   "lineHeight": 1.45
+  },
+  "blocks": [
+   {
+    "kind": "table",
+    "borders": "none",
+    "widths": [
+     28,
+     72
+    ],
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "DATE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{today}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "OUR REFERENCE",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{case_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "ACCOUNT",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{account_number}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "DELIVERY",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "By email, with notification by SMS"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{debtor_name}}"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Registration number: {{debtor_reg_no}}"
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 1,
+    "spans": [
+     {
+      "text": "AFFORDABILITY ASSESSMENT"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Financial information required before a payment arrangement can be put to the creditor"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Dear Sirs / Madams — we act on behalf of {{client_name}}, the creditor. The company has asked to pay the balance of {{balance}} over time. Before a proposal can be put to the creditor, we need the information set out below."
+     }
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT TO SEND US"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send these to us by email. Fill in the proposal below, sign at the foot of this document, and attach the documents to your reply."
+     }
+    ]
+   },
+   {
+    "kind": "list",
+    "ordered": true,
+    "keepTogether": true,
+    "items": [
+     [
+      {
+       "text": "The company’s latest management accounts, or its most recent annual financial statements if management accounts are not available."
+      }
+     ],
+     [
+      {
+       "text": "Bank statements for the company’s main account for the last three months."
+      }
+     ],
+     [
+      {
+       "text": "A debtors and creditors age analysis as at the date of this proposal."
+      }
+     ],
+     [
+      {
+       "text": "The name and capacity of the person signing on behalf of the company."
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "THE PROPOSAL"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "table",
+    "borders": "rows",
+    "headerRow": true,
+    "widths": [
+     62,
+     38
+    ],
+    "keepTogether": true,
+    "rows": [
+     [
+      {
+       "spans": [
+        {
+         "text": "YOUR PROPOSAL",
+         "bold": true
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "AMOUNT",
+         "bold": true
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Amount the company proposes to pay each time"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{ptp_amount}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "How often it will be paid"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_frequency}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "The date of the first payment"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{ptp_date}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Number of instalments proposed"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "{{offer_instalments}}"
+        }
+       ]
+      }
+     ],
+     [
+      {
+       "spans": [
+        {
+         "text": "Any lump sum the company can pay now"
+        }
+       ]
+      },
+      {
+       "spans": [
+        {
+         "text": "R {{offer_lump_sum}}"
+        }
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "kind": "heading",
+    "level": 2,
+    "spans": [
+     {
+      "text": "WHAT HAPPENS NEXT"
+     }
+    ],
+    "numbered": true
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "We use this information only to assess the proposal and to put it to the creditor, and we process it in accordance with the Protection of Personal Information Act 4 of 2013. A proposal cannot be considered until the information above has reached us, and the account continues on its normal course in the meantime."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "Send the documents to {{agent_email}}, quoting reference {{case_number}}. We will revert as soon as the creditor has considered the proposal."
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "By signing below the company confirms that the information given above is true and complete. This document is not an agreement to accept the proposal and it does not suspend the account."
+     }
+    ]
+   },
+   {
+    "kind": "spacer",
+    "mm": 6
+   },
+   {
+    "kind": "signature",
+    "widthMm": 70,
+    "signer": "debtor",
+    "spans": [
+     {
+      "text": "for {{debtor_name}} ({{debtor_reg_no}}), duly authorised"
+     }
+    ]
+   },
+   {
+    "kind": "paragraph",
+    "spans": [
+     {
+      "text": "{{firm_name}}, duly authorised agent of {{client_name}}"
+     }
+    ]
+   }
+  ]
+ },
  "letter-s129-individual": {
   "defaults": {
    "font": "\"Charter\", \"Bitstream Charter\", Georgia, serif",

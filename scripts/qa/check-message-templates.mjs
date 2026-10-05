@@ -231,9 +231,35 @@ check('a balance that is not known answers nothing rather than nought',
   }).balance, null)
 check('the date is written out, never ISO', values.today, '18 September 2026')
 check('longDate leaves a date it cannot read alone', longDate('not a date'), 'not a date')
-/* Every field in the catalogue must be answerable, or a template can use one nothing ever fills. */
-check('every collections field can be answered',
-  MERGE_FIELDS.collections.filter((f) => !(f.key in values)).map((f) => f.key), [])
+/*
+ * EVERY FIELD IN THE CATALOGUE MUST BE ANSWERABLE, or a template can use one nothing ever fills --
+ * EXCEPT THE SIXTEEN THE AFFORDABILITY ASSESSMENT ASKS, which are the deliberate opposite of that.
+ *
+ * THE FIRM: "we will call them the affordability assessment letters and build them in exactly like
+ * the acknowledgement of debt so that they can sign it online." It is the only document in the
+ * library that ASKS rather than says, and Raptor has no column for what somebody earns or what
+ * their transport costs -- it never will, because the whole purpose of the form is to find out.
+ * They are filled by the SIGNER, through signingBlanks.
+ *
+ * SO THE EXCEPTION IS NAMED ONE BY ONE AND HELD FROM BOTH SIDES. check-optional-fields asserts
+ * that mergeValuesFor answers NONE of these -- the day somebody starts answering one from the
+ * account is the day the form stops asking a question and starts telling a debtor what they earn.
+ * This file asserts that nothing ELSE has quietly joined them.
+ */
+const ASKED_OF_THE_SIGNER = [
+  'income_salary', 'income_other', 'income_partner', 'income_total',
+  'expense_housing', 'expense_utilities', 'expense_food', 'expense_transport',
+  'expense_school', 'expense_medical', 'expense_credit', 'expense_other', 'expense_total',
+  'affordability_left', 'offer_lump_sum', 'offer_instalments',
+]
+check('every collections field can be answered, bar the ones the signer answers',
+  MERGE_FIELDS.collections
+    .filter((f) => !(f.key in values) && !ASKED_OF_THE_SIGNER.includes(f.key))
+    .map((f) => f.key), [])
+/* AND ALL SIXTEEN ARE REALLY IN THE CATALOGUE, or this list is excusing fields that do not exist
+   and the assertion above is weaker than it reads. */
+check('and all sixteen of those are really in it',
+  ASKED_OF_THE_SIGNER.filter((k) => !MERGE_FIELDS.collections.some((f) => f.key === k)), [])
 /*
  * The firm's own fields on the OTHER side, which nothing checked before.
  *

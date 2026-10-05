@@ -99,27 +99,58 @@ export function signingLink(token: string, origin: string): string {
 }
 
 /**
- * ONLY THE ACKNOWLEDGEMENT OF DEBT IS SIGNED FROM A DEBTOR'S FILE.
+ * TWO DOCUMENTS ARE SIGNED FROM A DEBTOR'S FILE, AND NOTHING ELSE IS.
  *
  * THE FIRM, twice and in as many words: "the acknowledgement of debt that's sent to signature is
  * the only thing that needs to be signed from the debtor's pane. You don't have to sign any other
  * document." And again: "the only document, and I repeat myself, is the acknowledgement of debt
  * that can be signed within the debtor's pane. All of the other ones are not in."
  *
- * A LETTER IS NOT AN AGREEMENT. A section 129, a final notice and a listing notice are things the
- * firm SENDS; offering a debtor a signature pad under one invites them to sign a notice, which
- * means nothing and muddies what a signature on this account is for. The AoD is the only
- * instrument among them -- the one the firm would sue on.
+ * AND THEN, SENDING THEIR FINANCIAL-INFORMATION REQUEST: "We will call them the affordability
+ * assessment letters and build them in exactly like the acknowledgement of debt so that they can
+ * sign it online." That is the firm adding ONE document to a list they had closed twice, so it is
+ * written as a list of two rather than as a rule somebody has to re-derive -- and the old
+ * instruction is kept above it, because the next letter that arrives is not automatically a third.
  *
- * MATCHED ON THE NAME because that is what the firm edits and what they called it. The seed keys
- * are checked first and are the reliable half; the name is the half that still works when somebody
- * writes a third AoD for a particular client.
+ * A LETTER IS NOT AN AGREEMENT AND A FORM IS NOT A LETTER. A section 129, a final notice and a
+ * listing notice are things the firm SENDS; offering a debtor a signature pad under one invites
+ * them to sign a notice, which means nothing and muddies what a signature on this account is for.
+ * The AoD is an instrument -- the one the firm would sue on. The affordability assessment is
+ * neither: it is a set of questions, and the signature is the debtor confirming their own answers.
+ *
+ * ------------------------------------------------------------------------------------------------
+ * AND THE SEED KEYS WERE WRONG, WHICH NOTHING NOTICED
+ * ------------------------------------------------------------------------------------------------
+ *
+ * This list read `['aod-individual', 'aod-company']`. The rows in the database are seeded as
+ * `letter-aod-individual` and `letter-aod-company` -- see seed-aod.mjs -- so the key branch has
+ * never matched a single template and every AoD has been found by the NAME regex underneath it.
+ * It worked, which is why nobody saw it, and the half it cost is the half the comment claimed was
+ * reliable: a firm that renames their own agreement in the Library loses the ability to send it
+ * for signature, and the name is exactly what the firm edits.
  */
-export const SIGNABLE_SEED_KEYS = ['aod-individual', 'aod-company']
+export const SIGNABLE_SEED_KEYS = [
+  'letter-aod-individual', 'letter-aod-company',
+  'letter-affordability-individual', 'letter-affordability-company',
+]
+
+/**
+ * THE NAMES, as a fallback for a template the firm wrote themselves.
+ *
+ * "FINANCIAL INFORMATION" IS HERE TOO, because that is what the firm's own PDFs are called and
+ * what anybody who copies one will name it. The firm renamed the document in the same sentence
+ * that asked for it -- "we will call them the affordability assessment letters" -- so the new name
+ * leads and the old one still opens.
+ */
+const SIGNABLE_NAMES = [
+  /acknowledgement of debt/i,
+  /affordability assessment/i,
+  /financial information/i,
+]
 
 export function isSignable(template: { seedKey?: string | null; name: string }): boolean {
   if (template.seedKey && SIGNABLE_SEED_KEYS.includes(template.seedKey)) return true
-  return /acknowledgement of debt/i.test(template.name)
+  return SIGNABLE_NAMES.some((re) => re.test(template.name))
 }
 
 /**

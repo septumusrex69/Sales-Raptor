@@ -31,7 +31,72 @@ import type { AttachedFile } from '../../lib/letterAttachment.ts'
  * edit, they are written twice -- once for a person and once for a company -- and a sentence
  * hard-coded here is a sentence they would have to ask somebody to change.
  */
-const COVERING_KEY = { individual: 'email-aod-individual', company: 'email-aod-company' } as const
+/*
+ * AND THERE ARE TWO DOCUMENTS NOW, so what is true of one is written down rather than assumed.
+ *
+ * THE FIRM: "We will call them the affordability assessment letters and build them in exactly like
+ * the acknowledgement of debt so that they can sign it online." "Exactly like" is right about the
+ * machinery and wrong about three things, and all three are here rather than spread through send():
+ *
+ *   THE COVERING EMAIL IS ITS OWN. A note saying "attached is an acknowledgement of debt" on a
+ *   form asking what somebody earns is a different document described.
+ *
+ *   THE CHARGE IS NOT ITEM 4(a). The gazette's 4(a) prices the DRAWING of an acknowledgement of
+ *   debt, banded on the claim, and it runs to hundreds of rand. An affordability assessment is a
+ *   set of questions: nothing is drafted and nothing is acknowledged. Charging a debtor 4(a) for a
+ *   questionnaire would be a wrong charge on a statement the firm has to be able to defend, so
+ *   this one raises nothing at all -- the email that carries it is charged under item 1(a) like
+ *   every other message, by the composer, as it always was.
+ *
+ *   AND THE TERMS ARE ALWAYS THE DEBTOR'S. The acknowledgement asks whether to print the promise
+ *   the firm already has or leave it for the debtor to offer -- "it should use the PTP data, or it
+ *   should ask". On an affordability assessment there is nothing to print: the whole document is
+ *   the debtor saying what they can afford, and a form arriving with the firm's own figure already
+ *   in it is the firm answering its own question.
+ */
+type DocKind = 'aod' | 'affordability'
+
+const DOCUMENTS: Record<DocKind, {
+  covering: Record<'individual' | 'company', string>
+  /** Item 4(a), banded on the claim. Null where the document raises nothing. */
+  charges: boolean
+  /** Whether the firm is offered the choice of printing the promise it already has. */
+  offersTerms: boolean
+  /** What the thing is called, in the firm's words, for a subject line and a note. */
+  noun: string
+}> = {
+  aod: {
+    covering: { individual: 'email-aod-individual', company: 'email-aod-company' },
+    charges: true,
+    offersTerms: true,
+    noun: 'acknowledgement of debt',
+  },
+  affordability: {
+    covering: {
+      individual: 'email-affordability-individual',
+      company: 'email-affordability-company',
+    },
+    charges: false,
+    offersTerms: false,
+    noun: 'affordability assessment',
+  },
+}
+
+/*
+ * WHICH OF THE TWO A TEMPLATE IS.
+ *
+ * READ OFF THE SEED KEY FIRST and off the name second, the same order isSignable uses -- and for
+ * the same reason: the key is what the app never lets anybody edit, and the name is what still
+ * works when the firm writes a third one for a particular client. Anything that is not plainly the
+ * affordability form is treated as an acknowledgement, which is the safe way round: the AoD is the
+ * one with the charge and the terms question, so a document that fell through to the wrong branch
+ * would be a form that silently stopped asking rather than a questionnaire that silently billed.
+ */
+function docKindOf(t: { seedKey?: string | null; name: string }): DocKind {
+  if (t.seedKey?.includes('affordability')) return 'affordability'
+  if (/affordability assessment|financial information/i.test(t.name)) return 'affordability'
+  return 'aod'
+}
 
 
 /**
@@ -120,7 +185,9 @@ export function SigningPanel({
   const [choosing, setChoosing] = useState(false)
   const [letters, setLetters] = useState<LibraryTemplate[] | null>(null)
   /* The covering email, kept beside the letters so sending does not fetch the library twice. */
-  const [covering, setCovering] = useState<LibraryTemplate | null>(null)
+  /* EVERY COVERING ROW, not one: which is wanted is decided by the document that is picked, and
+     that happens after this list is loaded. */
+  const [coverings, setCoverings] = useState<LibraryTemplate[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [made, setMade] = useState<{
@@ -163,11 +230,13 @@ export function SigningPanel({
        * THE SAME FILTER AttachLetter USES, AND TWO MORE. A template stored as text has no blocks
        * to freeze, and a signing link built from one would open on an empty sheet.
        *
-       * ONLY THE ACKNOWLEDGEMENT OF DEBT. See isSignable, which carries the firm's words: "the
-       * only document, and I repeat myself, is the acknowledgement of debt that can be signed
-       * within the debtor's pane. All of the other ones are not in." The picker offered the whole
-       * collections library -- a section 129, a final notice, a listing notice -- each of which a
-       * debtor could then have put their signature on, which means nothing.
+       * TWO DOCUMENTS, AND NOTHING ELSE. See isSignable, which carries the firm's words both
+       * times: "the only document, and I repeat myself, is the acknowledgement of debt that can be
+       * signed within the debtor's pane" -- and then "we will call them the affordability
+       * assessment letters and build them in exactly like the acknowledgement of debt so that they
+       * can sign it online." The picker once offered the whole collections library -- a section
+       * 129, a final notice, a listing notice -- each of which a debtor could then have put their
+       * signature on, which means nothing.
        *
        * AND ONLY THE HALF WRITTEN FOR THIS DEBTOR. The library is written twice all the way down;
        * offering a company's acknowledgement on a person's file is the choice between two rows
@@ -176,8 +245,10 @@ export function SigningPanel({
       setLetters(library.filter((r) => r.kind === 'letter' && r.format === 'document' && r.active
         && isSignable(r) && (r.audience === null || r.audience === debtorKind)))
       /* MATCHED ON THE SEED KEY, which is the one identifier the app never lets anybody edit --
-         so the firm can rename and rewrite the covering email and it is still found. */
-      setCovering(library.find((r) => r.seedKey === COVERING_KEY[debtorKind]) ?? null)
+         so the firm can rename and rewrite the covering email and it is still found. Both
+         documents' rows are kept; send() picks the one for whichever was chosen. */
+      setCoverings(library.filter((r) => r.kind === 'email'
+        && Object.values(DOCUMENTS).some((d) => r.seedKey === d.covering[debtorKind])))
     } catch (e) {
       setLetters([])
       setError(e instanceof Error ? e.message : String(e))
@@ -206,11 +277,19 @@ export function SigningPanel({
        * address, their identity number -- because those are theirs and a blank is better than
        * braces. signingBlanks.ts holds the closed list of what may ever be asked.
        */
+      const doc_ = DOCUMENTS[docKindOf(template)]
       const unanswered = FILLABLE
         .filter((b) => !(values[b.key] ?? '').trim())
         .map((b) => b.key)
       const terms = ['ptp_amount', 'ptp_frequency', 'ptp_date']
-      const blanks = blanksFor(leaveBlank ? [...unanswered, ...terms] : unanswered, debtorKind)
+      /*
+       * ON THE AFFORDABILITY ASSESSMENT THE TERMS ARE ALWAYS THE DEBTOR'S. There is nothing for
+       * the firm to print: the document IS the question. `leaveBlank` is the acknowledgement's
+       * choice and it is not asked on this one -- see DOCUMENTS.offersTerms.
+       */
+      const blanks = blanksFor(
+        (!doc_.offersTerms || leaveBlank) ? [...unanswered, ...terms] : unanswered,
+        debtorKind)
       const token = await createSigningRequest({
         accountId,
         title: template.name,
@@ -234,9 +313,11 @@ export function SigningPanel({
        * and "issued, nothing charged" is a sentence somebody needs to be able to read off the
        * screen rather than discover on a statement at month end.
        */
-      const fee = claimAmount === null ? null : await chargeAcknowledgementOfDebt({
-        accountId, claimAmount,
-      })
+      /* ITEM 4(a) PRICES THE DRAWING OF AN ACKNOWLEDGEMENT OF DEBT AND NOTHING ELSE -- see
+         DOCUMENTS. A questionnaire raises no charge of its own; the email that carries it is
+         charged under item 1(a) by the composer, like every other message. */
+      const fee = (!doc_.charges || claimAmount === null) ? null
+        : await chargeAcknowledgementOfDebt({ accountId, claimAmount })
       setMade({ title: template.name, url, fee, claimAmount })
       setChoosing(false)
       setCopied(false)
@@ -257,12 +338,14 @@ export function SigningPanel({
        * and nothing more: a library row somebody deactivated must not stop an agreement going out,
        * and three short lines is a better covering note than none.
        */
-      const words = covering
-        ? renderTemplate(covering.body, values).text
+      const cover = coverings.find((r) => r.seedKey === doc_.covering[debtorKind]) ?? null
+      const words = cover
+        ? renderTemplate(cover.body, values).text
         : signingEmailBody(debtorName, caseNumber)
-      const subject = covering?.subject
-        ? renderTemplate(covering.subject, values).text
-        : `Acknowledgement of debt${caseNumber ? ` - ${caseNumber}` : ''}`
+      const subject = cover?.subject
+        ? renderTemplate(cover.subject, values).text
+        : `${doc_.noun[0].toUpperCase()}${doc_.noun.slice(1)}${
+          caseNumber ? ` - ${caseNumber}` : ''}`
       onEmail({
         subject,
         /* THE ADDRESS IN THE WORDS, not only in the button. See signingLinkLine: the button is
@@ -270,7 +353,7 @@ export function SigningPanel({
            read their own sent copy as proof that none had gone. */
         body: `${words.replace(/\s+$/, '')}\n\n${signingLinkLine(url)}`,
         appendHtml: signingButtonHtml(url),
-        note: 'The button in this message opens the acknowledgement of debt for signature.',
+        note: `The button in this message opens the ${doc_.noun} for signature.`,
       })
       await load()
     } catch (e) {
@@ -306,7 +389,10 @@ export function SigningPanel({
       onEmail({
         subject: `Signed ${row.title.toLowerCase()}${caseNumber ? ` - ${caseNumber}` : ''}`,
         body: `${debtorName ? `Dear ${debtorName}` : 'Good day'}\n\n`
-          + 'Attached is the signed copy of the acknowledgement of debt, for your records.\n\n'
+          /* THE DOCUMENT'S OWN TITLE, not a hard-coded noun: this same button sends back a signed
+             affordability assessment, and "attached is the signed copy of the acknowledgement of
+             debt" on one would describe a document that is not attached. */
+          + `Attached is the signed copy of the ${row.title.toLowerCase()}, for your records.\n\n`
           + 'Kind regards',
         appendHtml: '',
         note: 'The signed copy is attached.',
@@ -332,13 +418,15 @@ export function SigningPanel({
 
   return (
     <Card>
+      {/* TWO DOCUMENTS NOW, so the subtitle names neither -- "the acknowledgement of debt" over a
+          button that also sends an affordability assessment is a screen that lies about itself. */}
       <CardHeader title="Signing"
-        subtitle="Email the acknowledgement of debt out to be signed. Anyone with the link can open it." />
+        subtitle="Email a document out to be signed. Anyone with the link can open it." />
 
       <button type="button" onClick={() => void openPicker()}
         className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg
           border border-slate-200 text-slate-700 hover:bg-slate-50">
-        <PenLine size={12} /> Send the acknowledgement of debt
+        <PenLine size={12} /> Send a document to be signed
       </button>
 
       {made && (
@@ -444,13 +532,13 @@ export function SigningPanel({
           )}
           {letters?.length === 0 && (
             <p className="text-sm text-slate-500">
-              {/* NAMED, because the list is now narrow on purpose and an empty one would otherwise
-                  read as a broken library. Only the acknowledgement of debt is ever offered here
-                  -- see isSignable -- so the thing that is missing is the acknowledgement of debt
-                  written for {debtorKind === 'company' ? 'a company' : 'a person'}. */}
-              There is no acknowledgement of debt in the library for
-              {debtorKind === 'company' ? ' a company' : ' a person'} yet. One is seeded by
-              scripts/letters/seed-aod.sql. Nothing else is signed from a debtor&rsquo;s file.
+              {/* NAMED, because the list is narrow on purpose and an empty one would otherwise
+                  read as a broken library. Two documents are ever offered here -- see isSignable --
+                  so what is missing is one of those two, written for this kind of debtor. */}
+              There is no acknowledgement of debt and no affordability assessment in the library for
+              {debtorKind === 'company' ? ' a company' : ' a person'} yet. They are seeded by
+              scripts/letters/seed-aod.sql and scripts/letters/seed-affordability.sql. Nothing else
+              is signed from a debtor&rsquo;s file.
             </p>
           )}
           <div className="space-y-2">
@@ -478,11 +566,22 @@ export function SigningPanel({
                 asks the debtor for one. A tick somebody leaves as they found it is how the wrong
                 one goes out.
               */}
-              <button type="button" onClick={() => void send(t, true)} disabled={busy !== null}
-                className="w-full text-left px-3.5 py-2 border-t border-slate-100 text-xs
-                  text-slate-500 hover:bg-gold-50 disabled:opacity-50 rounded-b-lg">
-                Or send it with the arrangement left blank, for the debtor to fill in
-              </button>
+              {/*
+                AND ONLY WHERE THERE IS A CHOICE TO MAKE.
+
+                An affordability assessment has no second way of being sent: the whole document is
+                the debtor saying what they can afford, so the arrangement is always theirs to fill
+                in. Offering "or send it with the arrangement left blank" under a form that has no
+                other mode is a second button that does the same thing, which is how somebody
+                learns to stop reading the first one.
+              */}
+              {DOCUMENTS[docKindOf(t)].offersTerms && (
+                <button type="button" onClick={() => void send(t, true)} disabled={busy !== null}
+                  className="w-full text-left px-3.5 py-2 border-t border-slate-100 text-xs
+                    text-slate-500 hover:bg-gold-50 disabled:opacity-50 rounded-b-lg">
+                  Or send it with the arrangement left blank, for the debtor to fill in
+                </button>
+              )}
               </div>
             ))}
           </div>

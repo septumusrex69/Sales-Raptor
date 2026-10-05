@@ -50,18 +50,28 @@ const WANTED = [
   'letter-summons-individual', 'letter-summons-company',
 ]
 /*
- * AND THE TWO THAT ARE NOT NOTICES. The acknowledgements of debt live in the same file and are a
- * different animal: everything above DEMANDS payment and no workflow attaches these -- they are an
- * agreement somebody signs, sent by hand when a debtor asks for terms. Named separately rather
- * than folded into WANTED, so "the eight the workflow needs" keeps meaning exactly that.
+ * AND THE FOUR THAT ARE NOT NOTICES. They live in the same file and are a different animal:
+ * everything above DEMANDS payment and no workflow attaches any of these.
+ *
+ * THE ACKNOWLEDGEMENTS OF DEBT are an agreement somebody signs, sent by hand when a debtor asks
+ * for terms. THE AFFORDABILITY ASSESSMENTS are the only documents in the library that ASK rather
+ * than say -- the firm: "we will call them the affordability assessment letters and build them in
+ * exactly like the acknowledgement of debt so that they can sign it online."
+ *
+ * NAMED SEPARATELY RATHER THAN FOLDED INTO WANTED, so "the eight the workflow needs" keeps meaning
+ * exactly that -- a form that crept into the workflow's list is a form a sequence would attach to
+ * a section 129.
  */
-const BY_HAND = ['letter-aod-individual', 'letter-aod-company']
+const BY_HAND = [
+  'letter-aod-individual', 'letter-aod-company',
+  'letter-affordability-individual', 'letter-affordability-company',
+]
 
 check('the eight notices the workflow attaches are all there',
   Object.keys(letters).filter((k) => !BY_HAND.includes(k)).sort(), [...WANTED].sort())
-/* AND BOTH AGREEMENTS ARE BUILT. Asserted here as well as in check-aod, because this is the file
-   that knows what letters.json is supposed to contain. */
-check('...and the two agreements are there too',
+/* AND THE FOUR SIGNED DOCUMENTS ARE BUILT. Asserted here as well as in check-aod and
+   check-affordability, because this is the file that knows what letters.json should contain. */
+check('...and the four signed documents are there too',
   Object.keys(letters).filter((k) => BY_HAND.includes(k)).sort(), [...BY_HAND].sort())
 
 /** Every span of a document, wherever it is nested. The parse must be total, so this must be. */

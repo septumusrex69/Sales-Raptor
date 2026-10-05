@@ -8,7 +8,7 @@ import {
 import {
   A4_LETTERHEAD, blankLetter, letterCss, letterToHtml,
 } from '../../lib/letterDocument.ts'
-import { amountOf, missingBlanks, withFilled } from '../../lib/signingBlanks.ts'
+import { amountOf, missingBlanks, totalOf, withFilled } from '../../lib/signingBlanks.ts'
 import type { SignedMark } from '../../lib/signedMark.ts'
 import { formatMoney } from '../../data/mockData'
 
@@ -329,6 +329,40 @@ export default function SignPage() {
                           className="flex-1 min-w-[10rem] text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
                       )}
                     </div>
+                  ) : b.kind === 'total' ? (
+                    /*
+                      A TOTAL IS SHOWN, NOT ASKED.
+                      
+                      The firm's own form has "Total income" under three lines and "Total expenses"
+                      under eight, as boxes. A debtor who types a total that does not equal their
+                      own lines gives the firm a figure it cannot use -- and the gap between the two
+                      totals is the whole of what an affordability assessment is read for. So it
+                      adds itself up, in front of them, as they type.
+                      
+                      AND IT IS NOT AN INPUT AT ALL. Disabled would still post a value; this draws
+                      no field, so there is nothing for a browser to send and withFilled recomputes
+                      it regardless -- the one figure on this form a debtor would gain by editing.
+                    */
+                    <div className="flex items-center justify-between gap-2 rounded-lg
+                      border border-slate-200 bg-slate-50 px-2 py-1.5">
+                      <span className="text-xs text-slate-500">Worked out for you</span>
+                      <span className="text-sm font-medium tabular-nums text-slate-800">
+                        {totalOf(b, filled) === null
+                          ? '—'
+                          : formatMoney(totalOf(b, filled) ?? 0)}
+                      </span>
+                    </div>
+                  ) : b.kind === 'count' ? (
+                    /*
+                      A COUNT HAS NO RAND SIGN. The firm's own form prints "Number of instalments
+                      proposed  R ___", and a form that draws an R in front of a count is a form
+                      somebody answers in rands -- which would reach a collector as an offer to pay
+                      twelve rand.
+                    */
+                    <input type="text" inputMode="numeric" value={filled[b.key] ?? ''}
+                      placeholder="12"
+                      onChange={(e) => set(b.key, e.target.value.replace(/\D/g, '').slice(0, 3))}
+                      className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5" />
                   ) : b.kind === 'amount' ? (
                     /*
                       THE R IS DRAWN, NOT TYPED. THE FIRM: "there is an R -- some people can put R

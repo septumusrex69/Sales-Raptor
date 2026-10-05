@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs'
 import { MERGE_FIELDS, isOptionalField, mergeValuesFor, renderTemplate } from '../../src/lib/messageTemplates.ts'
 import { documentWithoutOptional, letterToHtml } from '../../src/lib/letterDocument.ts'
 import { smsCost } from '../../src/lib/smsSegments.ts'
+import { FILLABLE } from '../../src/lib/signingBlanks.ts'
 
 let pass = 0
 const failures = []
@@ -105,11 +106,66 @@ check('the posting address still holds the notice', isOptionalField('debtor_addr
  */
 const optional = Object.values(MERGE_FIELDS)
   .flatMap((list) => list.filter((f) => f.optional).map((f) => f.key))
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * AND SIXTEEN MORE ARRIVED WITH THE AFFORDABILITY ASSESSMENT, which is a different kind of thing
+ * ---------------------------------------------------------------------------------------------
+ *
+ * THE FIRM: "We will call them the affordability assessment letters and build them in exactly like
+ * the acknowledgement of debt so that they can sign it online."
+ *
+ * OPTIONAL MEANS SOMETHING ELSE ON A FORM. On a notice it is "97% of the book cannot answer this,
+ * so the line leaves rather than holding the demand". Here it is "the debtor did not answer this
+ * line", which on a form is an answer -- I have no other income -- and what prints is "R" with
+ * nothing after it: exactly what the firm's own paper form looks like. The alternative is
+ * {{income_other}} showing on a form somebody is being asked to sign.
+ *
+ * RAPTOR HAS NO COLUMN FOR ANY OF THEM AND NEVER WILL. That is what makes the widening safe rather
+ * than a hole: these are not facts the book might one day hold and fail to merge, they are facts
+ * the form exists to ASK. accountMergeValues supplies none of them, and the assertion below says
+ * so -- a day somebody starts answering one of these from the account is a day this fails.
+ *
+ * THE LIST IS STILL CLOSED AND STILL NAMED ONE BY ONE. The guard it replaces was never "few"; it
+ * was "exactly these", and it still is.
+ */
+const FORM_FIELDS = [
+  'affordability_left', 'expense_credit', 'expense_food', 'expense_housing', 'expense_medical',
+  'expense_other', 'expense_school', 'expense_total', 'expense_transport', 'expense_utilities',
+  'income_other', 'income_partner', 'income_salary', 'income_total',
+  'offer_instalments', 'offer_lump_sum',
+]
 check('nothing else has been quietly marked optional',
   [...new Set(optional)].sort().join(', '),
-  'agent_whatsapp, collector_phone, collector_whatsapp, debtor_email, debtor_employer, '
-  + 'debtor_home_phone, debtor_id_masked, debtor_mobile, debtor_reg_no, debtor_work_phone, '
-  + 'liaison_whatsapp')
+  [...new Set([
+    'agent_whatsapp', 'collector_phone', 'collector_whatsapp', 'debtor_email', 'debtor_employer',
+    'debtor_home_phone', 'debtor_id_masked', 'debtor_mobile', 'debtor_reg_no', 'debtor_work_phone',
+    'liaison_whatsapp', ...FORM_FIELDS,
+  ])].sort().join(', '))
+
+/*
+ * AND NOT ONE OF THEM IS ANSWERED FROM THE ACCOUNT.
+ *
+ * This is the assertion that keeps the paragraph above true. The moment somebody adds
+ * `income_salary` to mergeValuesFor it stops being a question the form asks and becomes a figure
+ * Raptor believes it knows -- printed on a form the debtor is then asked to confirm, which is a
+ * document that tells somebody what they earn.
+ */
+const values = readFileSync(
+  new URL('../../src/lib/accountMergeValues.ts', import.meta.url), 'utf8')
+/* JOINED, because this file's `check` compares with Object.is and two arrays are never the same
+   object -- the first version of these two read "expected [] got []" and passed nothing. */
+check('the form asks for them rather than answering them',
+  FORM_FIELDS.filter((k) => new RegExp(`\\b${k}\\s*:`).test(values)).join(', '), '')
+
+/*
+ * AND EVERY ONE OF THEM IS A BLANK THE SIGNER CAN FILL, which is the other half: a merge field on
+ * a form with no box behind it is a field that can only ever print empty. The two lists are
+ * written in different files for different reasons, so they are held against each other here.
+ */
+const fillable = new Set(FILLABLE.map((b) => b.key))
+check('and every one of them is a box on the signing page',
+  FORM_FIELDS.filter((k) => !fillable.has(k)).join(', '), '')
 for (const key of ['balance', 'case_number', 'respond_by', 'debtor_name', 'firm_name']) {
   check(`${key} still holds the notice`, isOptionalField(key), false)
 }

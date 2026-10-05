@@ -47,11 +47,30 @@ const account = read('src/pages/accounts/AccountDetail.tsx')
 const charges = read('src/lib/accountCharges.ts')
 const engine = read('src/lib/chargeEngine.ts')
 
-/* ------------------------------------------------ only the acknowledgement of debt */
+/* ------------------------------------------------ two documents, and nothing else */
 
-ok('the seeded acknowledgement for a person is signable',
-  isSignable({ seedKey: 'aod-individual', name: 'Acknowledgement of debt (individual)' }))
-ok('...and the one for a company', isSignable({ seedKey: 'aod-company', name: 'Anything at all' }))
+/*
+ * THE SEED KEYS HERE WERE WRONG, AND SO WERE THE ONES IN THE CODE.
+ *
+ * This read `seedKey: 'aod-individual'`, matching SIGNABLE_SEED_KEYS, which read the same. The rows
+ * in the database are seeded as `letter-aod-individual` -- see seed-aod.mjs -- so the key branch
+ * never matched a real template and every acknowledgement of debt has been found by the NAME regex
+ * underneath it. The check agreed with the code and both were wrong about the data, which is the
+ * failure a check written from the same assumption cannot catch.
+ *
+ * SO THE KEYS ARE THE ONES SOMETHING IS ACTUALLY SEEDED WITH, and the name is deliberately one the
+ * regex does not match -- otherwise this passes on the fallback again and proves nothing.
+ */
+ok('the seeded acknowledgement for a person is signable by its key',
+  isSignable({ seedKey: 'letter-aod-individual', name: 'Anything at all' }))
+ok('...and the one for a company',
+  isSignable({ seedKey: 'letter-aod-company', name: 'Anything at all' }))
+/* AND THE AFFORDABILITY ASSESSMENT, which the firm added to a list they had closed twice: "we will
+   call them the affordability assessment letters and build them in exactly like the
+   acknowledgement of debt so that they can sign it online." */
+ok('the affordability assessment is signable too',
+  isSignable({ seedKey: 'letter-affordability-individual', name: 'Anything at all' })
+  && isSignable({ seedKey: 'letter-affordability-company', name: 'Anything at all' }))
 /* THE NAME IS THE HALF THAT STILL WORKS when the firm writes a third one for a particular client,
    which is a thing they do and which no seed key covers. */
 ok('one the firm wrote themselves is signable by its name',
@@ -160,9 +179,17 @@ ok('issuing one hands a message to the composer', /onEmail\(\{/.test(panel))
  * missing: an agreement must not fail to go out because somebody deactivated a template.
  */
 ok('...in the firm’s own covering words, merged',
-  /renderTemplate\(covering\.body, values\)\.text/.test(panel))
+  /renderTemplate\(cover\.body, values\)\.text/.test(panel))
+/*
+ * FOUND BY THE SEED KEY, WHICH NOBODY CAN EDIT -- and there are two sets of them now, because each
+ * document carries its own. A note saying "attached is an acknowledgement of debt" on a form asking
+ * what somebody earns is a different document described.
+ */
 ok('...found by the seed key, which nobody can edit',
-  /COVERING_KEY = \{ individual: 'email-aod-individual', company: 'email-aod-company' \}/.test(panel))
+  /covering: \{ individual: 'email-aod-individual', company: 'email-aod-company' \}/.test(panel)
+  && /individual: 'email-affordability-individual'/.test(panel))
+ok('...and the one that is sent is the one for the document chosen',
+  /coverings\.find\(\(r\) => r\.seedKey === doc_\.covering\[debtorKind\]\)/.test(panel))
 ok('...with the short wording kept as the fallback',
   /: signingEmailBody\(debtorName, caseNumber\)/.test(panel))
 ok('...and the button under it', /appendHtml: signingButtonHtml\(url\)/.test(panel))
@@ -248,7 +275,19 @@ ok('...and a cap is said apart from a missing claim',
   /a cap left no room/.test(panel) && /could not be decided/.test(panel))
 /* NOTHING IS CHARGED ON A GUESS. No claim figure, no fee: a band guessed at is a fee the firm
    cannot defend when a debtor's attorney asks which one applied. */
-ok('no claim means no charge', /claimAmount === null \? null : await chargeAcknowledgementOfDebt/.test(panel))
+ok('no claim means no charge',
+  /claimAmount === null\) \? null\s*\n\s*: await chargeAcknowledgementOfDebt/.test(panel))
+/*
+ * AND NOTHING IS CHARGED ON THE FORM AT ALL.
+ *
+ * Item 4(a) prices the DRAWING of an acknowledgement of debt, banded on the claim, and it runs to
+ * hundreds of rand. An affordability assessment is a set of questions: nothing is drafted and
+ * nothing is acknowledged. A debtor charged 4(a) for a questionnaire is a wrong charge on a
+ * statement the firm has to be able to defend, and it is one line of code away.
+ */
+ok('the affordability assessment raises nothing',
+  /charges: false,[\s\S]{0,160}noun: 'affordability assessment'/.test(panel)
+  && /!doc_\.charges \|\| claimAmount === null/.test(panel))
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-signing-email: ${pass} passed, ${failures.length} failed`)

@@ -1,5 +1,6 @@
 import { writeFileSync, readFileSync } from 'node:fs'
 import { aod } from './aod.mjs'
+import { affordability } from './affordability.mjs'
 import {
   t, p, h, cell, row, headerStrip, addressee, howToPay, signOff, whereItStands, paidSoFar,
 } from './blocks.mjs'
@@ -312,6 +313,13 @@ out['letter-summons-company'] = summons('company')
  * signs. See aod.mjs. */
 out['letter-aod-individual'] = aod('individual')
 out['letter-aod-company'] = aod('company')
+
+/* ------------------------------------------------- the affordability assessments
+ * Their own module too, and for the opposite reason to the AoD's: these are the only two documents
+ * in the library that ASK rather than say. Every money line is a merge field backed by a signing
+ * blank, and the two totals work themselves out. See affordability.mjs. */
+out['letter-affordability-individual'] = affordability('individual')
+out['letter-affordability-company'] = affordability('company')
 
 /* The section 129 was built and verified first. */
 out['letter-s129-individual'] = JSON.parse(readFileSync(new URL('./s129.json', import.meta.url), 'utf8'))

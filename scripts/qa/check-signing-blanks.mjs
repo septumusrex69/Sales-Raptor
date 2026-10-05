@@ -52,17 +52,35 @@ for (const key of ['balance', 'capital', 'fees', 'interest', 'settlement', 'to_s
   ok(`the debtor may not fill in {{${key}}}`, !isFillable(key))
 }
 /*
- * AND THE LIST IS SHORT ENOUGH TO READ. A closed list that grows past a dozen is a list nobody
- * checks, which is how a balance ends up on it.
+ * AND THE LIST IS SHORT ENOUGH TO READ -- WHICH IS NO LONGER THE TEST, AND THE REASON MATTERS.
  *
- * TWELVE RATHER THAN TEN, because the firm added four ways of reaching the debtor -- "like your
- * work number, home, your cell phone number, work number, and email address, just kind of to
- * confirm that stuff". The ceiling is a reading limit and not a principle; the principle is the
- * assertion under it, which is that nothing on this list is a figure.
+ * It was "twelve or fewer", on the argument that a closed list which grows past a dozen is a list
+ * nobody checks, and that is how a balance ends up on it. Then the affordability assessment
+ * arrived: the firm's own financial-information form, with twelve money lines and a proposal on
+ * it, every one a question only the debtor can answer. A ceiling of twelve would have refused the
+ * firm's own document.
+ *
+ * SO THE CEILING GOES AND THE PRINCIPLE STAYS, stated directly instead of approximated by a
+ * count. The principle was never "few"; it was that NOTHING ON THIS LIST IS A FIGURE RAPTOR KNOWS.
+ * A balance, a capital amount, an interest figure, a fee -- those are the firm's to print and a
+ * debtor who typed one would be writing their own acknowledgement. What the signer may be asked
+ * for is their own particulars, the terms they are offering, and now what they earn and spend,
+ * which Raptor has no column for and never will.
+ *
+ * THE ASSERTION UNDER IT IS THE ONE THAT WAS DOING THE WORK ALL ALONG.
  */
-ok('the fillable list is a closed handful', FILLABLE.length > 0 && FILLABLE.length <= 12)
-ok('...and nothing on it is a money field',
+ok('the fillable list is not empty', FILLABLE.length > 0)
+ok('...and nothing on it is a figure the firm prints',
   !FILLABLE.some((b) => /balance|capital|interest|fee|settle|commission/i.test(b.key)))
+/*
+ * AND EVERY ENTRY IS EITHER THE DEBTOR'S OWN PARTICULARS, THE TERMS THEY OFFER, OR THEIR OWN
+ * MONEY. Named by prefix, which is the shape the three families already have -- so a key that is
+ * none of them has to be added here deliberately, and adding it here is where somebody notices
+ * they are about to let a debtor type a figure the firm is supposed to state.
+ */
+const FAMILIES = /^(debtor_|ptp_|income_|expense_|affordability_|offer_)/
+check('every blank belongs to one of the three families',
+  FILLABLE.filter((b) => !FAMILIES.test(b.key)).map((b) => b.key), [])
 
 /* WHAT IS ON IT: their own particulars, and the terms they are offering. */
 for (const key of ['debtor_address', 'debtor_id_masked', 'debtor_reg_no', 'debtor_employer',
@@ -180,8 +198,12 @@ check('...while a real answer settles one',
  * THE SIGNER'S ANSWER WINS ONLY WHERE THERE WAS A BLANK, which is the lock that keeps a balance a
  * balance. A stray key in what comes back from the page cannot overwrite a value the firm printed.
  */
+/* AND IT IS WRITTEN THE WAY THE FIRM WRITES MONEY. A debtor types "R500" and the signed document
+   says "500.00" -- the first rendered affordability form put "R 18400" on the line above
+   "R 23 650.00", two formats for one kind of figure on one page. amountOf reads what they pasted;
+   money.ts writes the firm's own shape back. */
 check('an answer fills its own blank',
-  withFilled({ balance: 'R 1 134,40' }, terms, { ptp_amount: 'R500' }).ptp_amount, 'R500')
+  withFilled({ balance: 'R 1 134,40' }, terms, { ptp_amount: 'R500' }).ptp_amount, '500.00')
 check('...and cannot touch a figure the firm printed',
   withFilled({ balance: 'R 1 134,40' }, terms, { balance: 'R1,00' }).balance, 'R 1 134,40')
 check('...nor can an empty answer erase what was there',

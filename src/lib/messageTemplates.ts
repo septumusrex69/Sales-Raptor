@@ -406,6 +406,48 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'ptp_amount', label: 'The next instalment under the arrangement', sample: 'R 2,500.00' },
     { key: 'ptp_date', label: 'The day that instalment is due', sample: '5 October 2026' },
     /*
+     * ---------------------------------------------------------------------------------------------
+     * THE AFFORDABILITY ASSESSMENT'S OWN FIGURES, WHICH THE BOOK CANNOT ANSWER AND NEVER WILL
+     * ---------------------------------------------------------------------------------------------
+     *
+     * THE FIRM, sending their financial-information request: "We will call them the affordability
+     * assessment letters and build them in exactly like the acknowledgement of debt so that they
+     * can sign it online."
+     *
+     * EVERY ONE OF THESE IS A FACT ONLY THE DEBTOR HOLDS. Raptor has no column for what somebody
+     * earns or what their transport costs, and it never will -- the whole purpose of the form is to
+     * ask. So they exist here only to be MERGE FIELDS on that one document, answered by the
+     * signer's own blanks. accountMergeValues deliberately supplies none of them.
+     *
+     * AND ALL OF THEM ARE OPTIONAL, which on a form means something different from what it means on
+     * a notice. On a section 129 an optional field is one 97% of the book cannot answer, and the
+     * line leaves rather than holding the demand. Here it is a line the DEBTOR has not answered --
+     * "I have no other income" -- and what prints is "R" with nothing after it, which is exactly
+     * what the firm's own paper form looks like before somebody fills it in. The alternative is
+     * braces on a form, which is the thing optional exists to stop.
+     *
+     * THEY CAN ONLY EVER APPEAR ON THIS FORM, which is the half that keeps the guard honest: a
+     * notice quoting {{income_salary}} is a notice somebody wrote by hand on purpose, and nothing
+     * in the firm's eleven letters comes near one.
+     */
+    { key: 'income_salary', label: 'Salary or wages, after deductions', sample: '18 400.00', optional: true },
+    { key: 'income_other', label: 'Income from any other source', sample: '1 250.00', optional: true },
+    { key: 'income_partner', label: "A partner's contribution", sample: '4 000.00', optional: true },
+    { key: 'income_total', label: 'Total income (worked out by the form)', sample: '23 650.00', optional: true },
+    { key: 'expense_housing', label: 'Rent or bond', sample: '6 500.00', optional: true },
+    { key: 'expense_utilities', label: 'Rates, water and electricity', sample: '1 900.00', optional: true },
+    { key: 'expense_food', label: 'Food and household', sample: '4 200.00', optional: true },
+    { key: 'expense_transport', label: 'Transport, fuel or taxi fares', sample: '2 300.00', optional: true },
+    { key: 'expense_school', label: 'School fees and childcare', sample: '2 800.00', optional: true },
+    { key: 'expense_medical', label: 'Insurance and medical aid', sample: '1 750.00', optional: true },
+    { key: 'expense_credit', label: 'Other credit repayments', sample: '3 100.00', optional: true },
+    { key: 'expense_other', label: 'Everything else', sample: '900.00', optional: true },
+    { key: 'expense_total', label: 'Total expenses (worked out by the form)', sample: '23 450.00', optional: true },
+    /* THE ONE THE FIRM'S PAPER FORM DOES NOT HAVE, and the figure the whole assessment is read for. */
+    { key: 'affordability_left', label: 'What is left each month (worked out by the form)', sample: '200.00', optional: true },
+    { key: 'offer_lump_sum', label: 'A lump sum offered now', sample: '2 000.00', optional: true },
+    { key: 'offer_instalments', label: 'How many instalments are offered', sample: '12', optional: true },
+    /*
      * AND HOW OFTEN IT FALLS, WHICH IS THE FACT THAT MAKES IT AN ARRANGEMENT.
      *
      * THE FIRM, READING THE CONFIRMATION THAT WENT OUT: "it should be weekly monthly, like that
@@ -670,6 +712,16 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
      and these two are what was agreed to pay it off. Grouped apart so a writer reaching for "the
      amount" is not offered {{balance}} and {{ptp_amount}} side by side. */
   { title: 'The arrangement', keys: ['ptp_amount', 'ptp_date', 'ptp_frequency', 'ptp_paid'] },
+  /* APART FROM THE ARRANGEMENT, because an arrangement is what has been AGREED and these are what
+     the debtor says they can afford before anything is. Offered side by side, a writer reaching for
+     "the amount" would be shown {{ptp_amount}} and {{income_salary}} under one heading. */
+  {
+    title: 'The affordability assessment',
+    keys: ['income_salary', 'income_other', 'income_partner', 'income_total',
+      'expense_housing', 'expense_utilities', 'expense_food', 'expense_transport',
+      'expense_school', 'expense_medical', 'expense_credit', 'expense_other', 'expense_total',
+      'affordability_left', 'offer_lump_sum', 'offer_instalments'],
+  },
   /* APART FROM THE ARRANGEMENT, because a simulation is not one -- it is what an arrangement WOULD
      cost, sent while there is still nothing agreed. Grouped together so a writer reaching for the
      starting date of a live arrangement is not offered {{sim_start}} beside {{ptp_date}}. */
