@@ -101,7 +101,7 @@ async function openCheck(browser, rows) {
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
-  await page.goto(`http://127.0.0.1:${PORT}/finance/check`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`http://127.0.0.1:${PORT}/trust/check`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('table', { timeout: 15000 })
   return { context, page }
 }

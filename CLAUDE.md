@@ -231,6 +231,36 @@ protection is the closed list, not a warning. Bank and branch code are stored ap
 instruction; `{{firm_bank}}` still prints them joined, and `bankLine` is the only place that join
 happens, because the same account written two ways across two notices reads as two accounts.
 
+**TRUST AND BUSINESS ARE TWO WORKSPACES, NOT TWO TABS.** The firm: *"the trust and the business
+should be separated. It shouldn't be in the same tab in finance. It should be like outside, for
+example. So the trust, we have one place where we manage the trust and we have another place
+outside where we manage the business."* `Finance` is gone as a word — it was the word doing the
+damage, because one heading over both books says they are one pot with two drawers. `/trust/*` and
+`/business/*`, a sidebar item each, and a `WorkspaceRail` inside each one rather than the six-tab
+strip they replaced (*"that pane where you toggle between the top... just make it look messy"*).
+**Two ticks, which is what pays for the split**: `finance.view` is unchanged and still gates trust
+— it is written into RLS and into live profiles' grants, so renaming it would be a migration about
+who may see client money — and `business.view` is new, Administrator-only, and deliberately **not**
+`inDatabase` until the first business table arrives with a policy. A bookkeeper capturing supplier
+invoices has no business moving client trust money. **Back office changed workspace**, not only
+address: it is the firm's own income and spent its life fifth in a strip of trust screens.
+**Every `/finance/*` address still redirects** — the payover queue is linked from mail the firm has
+already sent.
+
+**THE FIRM MAY SETTLE A CLIENT'S DEBT OUT OF THAT CLIENT'S OWN TRUST MONEY, AND ONLY THAT.** The
+firm, working it through: *"now we're taking money for the business out of the trust for somebody
+else that owes us, you know, instead of owing the trust. But basically, if they owe the trust, they
+owe us so we can do that."* Which is right, and the reason it is right is the whole rule: the firm
+is not taking business money out of the trust account in general — it is **reducing what it hands
+this client, by what this client owes it**. Settling one client's invoice from another client's
+trust credit, from a debtor's overpayment, or from a receipt nobody has placed yet is a trust
+shortfall however it is later repaid; those are different people's money in one bank account.
+So `client_charges.settlement` is part of the CHARGE (`off_payover` or `invoice`), decided when it
+is raised rather than at payover time, and `off_payover` requires that the client has a credit to
+take it from. **Where the two books meet is the CLIENT**, not either workspace — the running
+statement on the client record — because the firm does not settle "an invoice from trust", it
+settles Rinda Roo's invoice from Rinda Roo's money.
+
 **A new account nobody worked is carried into the day, not filed into the backlog.** The firm:
 "the remaining 10 should automatically carry over as priority on the next day's diary, not on the
 backlog", and the team leader is told. `src/lib/newAccounts.ts` decides it and three things there

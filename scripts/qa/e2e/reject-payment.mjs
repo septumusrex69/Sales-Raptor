@@ -104,7 +104,7 @@ async function openQueue(browser, { waiting, rejected = [], onReject = null }) {
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
-  await page.goto(`http://127.0.0.1:${PORT}/finance`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payments`, { waitUntil: 'domcontentloaded' })
   return { context, page, calls }
 }
 

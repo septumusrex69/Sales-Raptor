@@ -1,7 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CheckCheck, CircleGauge, Scale, Settings,
-  TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CheckCheck, CircleGauge, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -13,10 +12,17 @@ import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceR
  * we have one place where we manage the trust and we have another place outside where we manage
  * the business."
  *
- * SIX ITEMS, AND AT SIX IT NEEDS NO HEADINGS. The strip this replaced carried the same six plus
- * Back office, which is the firm's own income and was held apart from them by nothing but a
- * comment. Under a workspace that names itself Trust, Back office is visibly in the wrong room
- * and has moved to the other one.
+ * FIVE ITEMS, AND AT FIVE IT NEEDS NO HEADINGS. The strip this replaced carried six, of which one
+ * -- Back office -- is the firm's OWN income and was held apart from the rest by nothing but a
+ * comment. Under a workspace that names itself Trust it is visibly in the wrong room, and it has
+ * moved to the other one.
+ *
+ * THE TRUST LEDGER IS NOT HERE, AND THAT IS THE POINT RATHER THAN AN OVERSIGHT. The creditors
+ * ledger, the debtors inside it and the reconciliation are all live in the DATABASE and have no
+ * page yet. Listing it would draw a menu item that opens nothing -- "a menu item that always
+ * refuses is worse than no menu item", which this app has already paid for once. Its figures are
+ * on the Overview in the meantime, and check-workspace-split fails the day it is listed without a
+ * route behind it.
  *
  * THE ORDER IS THE ORDER THE WORK HAPPENS IN, which is the firm's own instruction about the old
  * strip -- "first I want to see the payments. So first we work with payments. And then we work
@@ -28,7 +34,6 @@ const ITEMS: RailItem[] = [
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
   { to: '/trust/check', label: 'Check', icon: CheckCheck },
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
-  { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
   { to: '/trust/exceptions', label: 'Exceptions', icon: TriangleAlert },
 ]
 
