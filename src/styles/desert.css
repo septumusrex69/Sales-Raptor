@@ -322,11 +322,19 @@ html[data-theme='desert'] .collections-hero {
  * it is a different answer from the hero's: the hero is a wide panel and centres, because centred
  * is what keeps both the dune field and the sun on a shape that is close to the picture's own.
  *
- * 62% RATHER THAN CENTRED, AT THE FIRM'S ASKING: "move the image a little bit to the left so that
- * you can see the nice dune more better." Moving the PICTURE left means showing more of its RIGHT,
- * which is a position above 50%. Centred, the dune's curled tip sat on the right edge of the
- * column with half of the lit flank cut off behind the panel's fade; at 62% the whole of it is in
- * frame -- the curl against the dark sky, the ridge and the sunlit face under it.
+ * 84% RATHER THAN CENTRED, AT THE FIRM'S ASKING, TWICE. First: "move the image a little bit to
+ * the left so that you can see the nice dune more better." That bought 62%, and it was not enough:
+ * "I can't see the dune properly. The dune is not the focal point. So move it more to the left, so
+ * it's more prominent." Moving the PICTURE left means showing more of its RIGHT, which is a
+ * position above 50%.
+ *
+ * 62% WAS TUNED ON THE WRONG SHAPE, which is why it fell short. The slice this column shows is
+ * about 47% of the picture on the firm's iPad and only 34% on a narrower window -- so the SAME
+ * percentage lands somewhere different on every screen, and a number checked on a narrow one
+ * leaves the dune further right everywhere wider. 84% is set against the proportions the firm
+ * actually works at: the curl sits a little left of centre, the lit flank sweeps the width of the
+ * column, and the ridge runs out to the edge. On a narrow window the curl crowds the left edge,
+ * which is the price of the picture being the focal point rather than being fully contained.
  *
  * AND THE VERTICAL HALF IS 50% NOW, which is a correction. It read 70%, which does nothing on a
  * column this shape -- fitted to the height there is no vertical overflow to choose from -- and
@@ -343,7 +351,7 @@ html[data-theme='desert'] .collections-hero {
  */
 html[data-theme='desert'] .login-photo {
   background-image: url('/brand/desert-hero.webp');
-  background-position: 62% 50%;
+  background-position: 84% 50%;
 }
 @media (min-resolution: 2dppx) {
   html[data-theme='desert'] .login-photo {
