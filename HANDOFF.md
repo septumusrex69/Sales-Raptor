@@ -21,7 +21,7 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run: see §2 — the run at the end of the second session.
+At the last full run (end of the second session): **all green, 17 762 checks across 272 files.**
 
 ---
 
