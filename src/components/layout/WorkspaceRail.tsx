@@ -62,19 +62,52 @@ export function WorkspaceRail({
 
   if (collapsed) {
     /*
-     * FOLDED, THE RAIL BECOMES THE WAY BACK AND THE ANSWER TO "WHERE AM I", exactly as the
-     * settings menu does. The workspace's own name is the label and the control: without it a
-     * folded rail would reclaim the width and leave somebody unable to tell the trust account
-     * from the business one, which is the single thing this whole split exists to keep clear.
+     * FOLDED, IT IS A RAIL OF ICONS -- STILL EVERY PLACE, STILL ONE CLICK. It used to fold into a
+     * single button carrying the workspace's name, which reclaimed the width and took every item
+     * with it. The firm: "when you narrow this menu, you can't click on the business account or you
+     * can't see any of the icons. It would be much more convenient if you narrow the menu so that
+     * you can see the icons that you can click on them." Which is how the main menu has always
+     * folded, so this is the same pattern rather than a new one.
+     *
+     * AND IT STILL SAYS WHICH BOOK YOU ARE IN. The name over the icons is the reason the old fold
+     * existed -- a column of bare icons would leave somebody unable to tell the trust account from
+     * the business one, which is the single thing this whole split exists to keep clear -- so it
+     * stays, small, as the control that widens the rail again. Each icon carries its label as a
+     * tooltip and an accessible name: a row of unlabelled icons is a quiz.
      */
     return (
-      <button
-        type="button" onClick={toggle} aria-expanded="false" title={`Show the ${title} menu`}
-        className="flex items-center gap-2 mb-3 -mt-1 px-2 py-1.5 rounded-lg text-sm font-medium
-          text-slate-500 hover:bg-slate-100 hover:text-slate-700 self-start shrink-0"
-      >
-        <PanelLeftOpen size={15} /> {title}
-      </button>
+      <nav aria-label={`${title} menu`} className="w-14 shrink-0 flex flex-col items-center">
+        <button
+          type="button" onClick={toggle} aria-expanded="false" title={`Show the ${title} menu`}
+          className="w-full flex flex-col items-center gap-0.5 pb-2 mb-1 rounded-lg
+            text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+        >
+          <PanelLeftOpen size={15} />
+          <span className="text-[10.5px] font-semibold leading-tight">{title}</span>
+        </button>
+
+        <div className="space-y-0.5 w-full">
+          {items.map((item) => <RailLink key={item.to} {...item} folded />)}
+        </div>
+
+        {settings && (
+          <div className="mt-3 pt-2 border-t border-slate-100 w-full">
+            <RailLink {...settings} folded />
+          </div>
+        )}
+
+        {door && (
+          <div className="mt-auto pt-3 border-t border-slate-100 w-full">
+            <NavLink
+              to={door.to} title={door.label} aria-label={door.label}
+              className="flex items-center justify-center py-2 rounded-lg text-slate-400
+                hover:bg-slate-100 hover:text-slate-600"
+            >
+              <door.icon size={16} />
+            </NavLink>
+          </div>
+        )}
+      </nav>
     )
   }
 
@@ -127,13 +160,17 @@ export function WorkspaceRail({
   )
 }
 
-function RailLink({ to, label, icon: Icon, end, badge }: RailItem) {
+function RailLink({ to, label, icon: Icon, end, badge, folded = false }: RailItem & { folded?: boolean }) {
   return (
     <NavLink
       to={to}
       end={end}
+      /* Folded, the label is the tooltip and the accessible name, because it is no longer drawn. */
+      title={folded ? label : undefined}
+      aria-label={folded ? label : undefined}
       className={({ isActive }) => clsx(
-        'relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13.5px] font-medium',
+        'relative flex items-center rounded-lg text-[13.5px] font-medium',
+        folded ? 'justify-center py-2' : 'gap-2.5 px-3 py-2',
         isActive ? 'bg-gold-50 text-gold-800' : 'text-slate-500 hover:bg-slate-100',
       )}
     >
@@ -144,8 +181,13 @@ function RailLink({ to, label, icon: Icon, end, badge }: RailItem) {
             <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-gold-500" />
           )}
           <Icon size={16} className="shrink-0" />
-          <span className="truncate">{label}</span>
-          {badge !== undefined && badge > 0 && (
+          {!folded && <span className="truncate">{label}</span>}
+          {/* Folded, the count becomes a dot, as on the main menu: "38" does not fit beside a
+              16px icon, and a dot still says there is something to clear here. */}
+          {folded && badge !== undefined && badge > 0 && (
+            <span title={`${badge}`} className="absolute top-1 right-2 w-2 h-2 rounded-full bg-negative" />
+          )}
+          {!folded && badge !== undefined && badge > 0 && (
             <span className="ml-auto min-w-[18px] text-center rounded-full bg-negative px-1.5
               py-px text-[11px] font-semibold text-white tabular-nums">
               {badge}

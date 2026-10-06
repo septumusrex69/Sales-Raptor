@@ -97,6 +97,19 @@ export async function startServer() {
   const server = spawn('npm', ['run', 'dev', '--', '--port', String(PORT)], {
     stdio: 'ignore', detached: true,
   })
+  /*
+   * AND WAIT UNTIL IT ANSWERS. Spawning returns at once; a suite that navigates on the next line
+   * gets ERR_CONNECTION_REFUSED whenever it is run on its own, and passed inside run-all only
+   * because the suite before it had left Vite's cache warm. Some suites retry their first goto
+   * and some do not, so the wait is here, once, for all of them. Thirty seconds, then on regardless
+   * -- a suite that cannot reach the server should fail on its own goto, saying so.
+   */
+  for (let i = 0; i < 60; i += 1) {
+    try {
+      await fetch(`http://127.0.0.1:${PORT}/`)
+      break
+    } catch { await new Promise((r) => setTimeout(r, 500)) }
+  }
   return server
 }
 

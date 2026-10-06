@@ -347,6 +347,26 @@ try {
      */
     t.ok('...but it still says Trust',
       (await page.getByRole('button', { name: 'Trust', exact: true }).count()) > 0)
+    /*
+     * AND EVERY PLACE IS STILL AN ICON YOU CAN CLICK. The firm: "when you narrow this menu, you
+     * can't click on the business account or you can't see any of the icons." It folded into the
+     * name alone; now the name heads a rail of icons, the way the main menu folds.
+     */
+    const folded = page.getByRole('navigation', { name: 'Trust menu' })
+    for (const label of ['Overview', 'Payments in', 'Check', 'Payover runs', 'Trust ledger', 'Exceptions', 'Trust settings']) {
+      t.ok(`folded, ${label} is still an icon on screen`, await folded.getByRole('link', { name: label, exact: true }).isVisible())
+    }
+    const foldedBox = await folded.boundingBox()
+    t.ok(`...in a narrow rail, not the open one (${Math.round(foldedBox?.width ?? 0)}px)`, !!foldedBox && foldedBox.width <= 64)
+    await t.shot(page, 'trust-rail-folded')
+    /* THE DOOR, which is exactly what the firm could not reach. */
+    await folded.getByRole('link', { name: 'Business account', exact: true }).click()
+    await page.waitForURL(/\/business/, { timeout: 10000 })
+    t.ok('...and the Business account opens from the folded rail', /\/business/.test(page.url()))
+    /* Waited for: the Business workspace is a lazy chunk, and the URL changes before it draws. */
+    const businessRail = page.getByRole('navigation', { name: 'Business menu' })
+    await businessRail.waitFor({ timeout: 10000 }).catch(() => {})
+    t.ok('...which stays folded there too, under its own name', await businessRail.isVisible())
     await context.close()
   }
 
