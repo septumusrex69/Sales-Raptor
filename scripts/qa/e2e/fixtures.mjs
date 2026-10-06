@@ -126,6 +126,17 @@ export const TEAM = { id: TEAM_ID, name: 'Pre-legal', kind: 'Sales' }
 /** The counts the views row must show. Chosen to be unmistakable in an assertion. */
 export const VIEW_COUNTS = {
   whole_book: 736,
+  /*
+   * THE THREE BOOKS, AND THEY SUM TO THE WHOLE ONE.
+   *
+   * 701 + 23 + 12 = 736, which is not decoration: `book` is a generated column with exactly three
+   * possible values, so every account is in one book and in only one. A fixture where the three did
+   * not sum to the whole book would model a state the database cannot hold, and a screen reading
+   * "Active 0" beside "Showing 100 of 736" is the kind of incoherence a reviewer learns to ignore.
+   */
+  active: 701,
+  on_hold: 23,
+  closed: 12,
   my_desk: 12,
   unallocated: 730,
   adrift: 2,

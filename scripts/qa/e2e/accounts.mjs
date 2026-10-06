@@ -238,13 +238,73 @@ try {
   await page.waitForFunction(() => /Showing \d+ of 736/.test(document.body.innerText), { timeout: 15000 })
   await t.shot(page, '02-accounts-whole-book')
 
-  /* ---------- the views row ---------- */
+  /* ---------- the book chooser, and the shortcuts that only live inside Active ---------- */
 
-  const views = page.locator('button', { hasText: /^(Whole book|My desk|Unallocated|No diary date|Broken promises|Promises due|Gone quiet)/ })
-  const viewLabels = (await views.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim())
-  console.log('  views on screen:', JSON.stringify(viewLabels))
+  /*
+   * THE SHORTCUTS ARE GONE ON WHOLE BOOK, AND THAT IS THE RULE, NOT A GAP.
+   *
+   * THE FIRM: "A frozen or closed account must never appear in a collector's queue or a dialler
+   * campaign." Every shortcut is a question about the ACTIVE book -- there is no such thing as a
+   * broken promise on a written-off account or a missing diary date on a frozen one -- so Whole
+   * book, which is the find-an-account view rather than a queue, offers none of them.
+   *
+   * This used to assert seven buttons in one row, with Whole book among them. It is now a BOOK,
+   * not a view: the row above chooses Active / On hold / Closed / Whole book, and the shortcut row
+   * below it draws only on Active. Asserted here rather than only in e2e/books.mjs because this is
+   * the file that walks the screen the way a collector does, and the failure it catches -- a queue
+   * quietly offering closed accounts -- is invisible until somebody rings one.
+   */
+  const shortcutRx = /^(My desk|Unallocated|No diary date|Broken promises|Promises due|Gone quiet)/
+  const shortcuts = page.locator('button', { hasText: shortcutRx })
+  t.check('no shortcut is offered on the whole book', await shortcuts.count(), 0)
+
+  /* THE WHOLE BOOK STILL CARRIES ITS OWN COUNT, on the book button where it now lives. */
+  const countIn = async (name) => {
+    const text = await page.getByRole('button', { name }).innerText()
+    /* en-ZA groups thousands with a NON-BREAKING space, so stripping ordinary spaces alone
+       leaves "736" as "7 36". See CLAUDE.md. */
+    return (text.replace(/[\s ]/g, '').match(/\d+/g) ?? []).map(Number)
+  }
+  t.ok(`the whole book shows its count (${(await countIn(/Whole book/)).join(',')})`,
+    (await countIn(/Whole book/)).includes(736))
+  /*
+   * AND THE THREE BOOKS SUM TO IT. `book` is a generated column with three possible values, so
+   * every account is in exactly one -- which makes the sum an invariant rather than a coincidence,
+   * and the cheapest thing that catches a chooser whose countKey is wired to the wrong column.
+   */
+  const bookCounts = {}
+  for (const [label, key] of [[/^Active/, 'active'], [/^On hold/, 'on_hold'], [/^Closed/, 'closed']]) {
+    bookCounts[key] = (await countIn(label)).at(-1)
+  }
+  t.check('the three books sum to the whole book',
+    bookCounts.active + bookCounts.on_hold + bookCounts.closed, 736)
+  t.check('...and each reads its own count',
+    [bookCounts.active, bookCounts.on_hold, bookCounts.closed].join(),
+    [VIEW_COUNTS.active, VIEW_COUNTS.on_hold, VIEW_COUNTS.closed].join())
+
+  /*
+   * BACK TO ACTIVE, which is where the rest of this walk belongs: it is where the screen opens and
+   * the only book the queues exist in. Picking a book clears the question with it -- carrying "Gone
+   * quiet" across to Closed would ask a question nobody has -- so nothing is lit after this click
+   * and the list is the whole Active book.
+   */
+  await page.getByRole('button', { name: /^Active/ }).click()
+  await page.waitForFunction(() => new URL(window.location.href).searchParams.get('book') === 'active',
+    { timeout: 15000 })
+  t.ok('the Active book is one click back', new URL(page.url()).searchParams.get('book') === 'active')
+
+  /*
+   * WAITED FOR, NOT READ ON THE NEXT LINE. The URL changes before React has drawn the row it
+   * decides, so the first draft of this read an empty list, printed it, and then counted SIX a
+   * millisecond later -- a check that reported the wrong number and passed. Anything asserted off
+   * this row waits for the row first.
+   */
+  await shortcuts.first().waitFor({ timeout: 15000 })
+  const viewLabels = (await shortcuts.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim())
+  console.log('  shortcuts on screen:', JSON.stringify(viewLabels))
   console.log('  scope line:', JSON.stringify((await page.locator('text=/Showing .* of /').first().innerText().catch(() => '(none)'))))
-  t.check('all seven views are offered', await views.count(), 7)
+  /* SIX, NOT SEVEN: the seventh was Whole book, and it is a book. */
+  t.check('all six shortcuts are offered inside Active', await shortcuts.count(), 6)
 
   /*
    * THE DIGITS, COMPARED EXACTLY, not looked for as a substring.
@@ -254,15 +314,6 @@ try {
    * that matters most -- broken promises -- is a two-digit number, which is the easiest of all to
    * find inside a bigger one.
    */
-  const countIn = async (name) => {
-    const text = await page.getByRole('button', { name }).innerText()
-    /* en-ZA groups thousands with a NON-BREAKING space, so stripping ordinary spaces alone
-       leaves "736" as "7 36". See CLAUDE.md. */
-    return (text.replace(/[\s\u00a0]/g, '').match(/\d+/g) ?? []).map(Number)
-  }
-  const bookBtn = page.getByRole('button', { name: /Whole book/ })
-  t.ok(`the whole book shows its count (${(await countIn(/Whole book/)).join(',')})`,
-    (await countIn(/Whole book/)).includes(736))
   t.ok('broken promises shows its count',
     (await countIn(/Broken promises/)).includes(VIEW_COUNTS.broken_promises))
   t.ok('gone quiet shows its count',
@@ -976,7 +1027,7 @@ try {
   stopServer(server)
 }
 
-const good = t.finish(`The account list renders its seven views with the right counts, narrows when
-one is clicked, says so in the scope line and the URL, and hands the selection to the allocate
-modal with a number on it. Screenshots in ${OUT}.`)
+const good = t.finish(`The account list chooses a book, offers its six shortcuts inside Active and
+none of them on the whole book, narrows when one is clicked, says so in the scope line and the URL,
+and hands the selection to the allocate modal with a number on it. Screenshots in ${OUT}.`)
 process.exit(good ? 0 : 1)

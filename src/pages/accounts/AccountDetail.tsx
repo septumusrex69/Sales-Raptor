@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { rand } from '../../lib/money'
 import { PhoneLink } from '../../components/PhoneLink'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import {
@@ -42,6 +43,9 @@ import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
 import { EndAccountModal } from '../../components/accounts/EndAccountModal'
+import { HoldAccountModal, ReleaseAccountModal } from '../../components/accounts/HoldAccountModal'
+import { bookLabel, holdLabel } from '../../lib/accountBooks'
+import { compareWithSwordfish } from '../../lib/importGap'
 import { ClientActionModal } from './ClientActionModal'
 import {
   CLIENT_FLAGS, CLIENT_POSITIONS, DESK_POSITIONS, deskPosition, frozenByLabel, positionReport,
@@ -312,6 +316,10 @@ export function AccountDetail() {
   const [payingIn, setPayingIn] = useState(false)
   const [freezing, setFreezing] = useState(false)
   const [ending, setEnding] = useState(false)
+  /* ON HOLD AND BACK AGAIN. Separate from `ending`, because a hold is reversible and an ending is
+     not, and the difference is the thing somebody needs to feel before they press either. */
+  const [holding, setHolding] = useState(false)
+  const [releasing, setReleasing] = useState(false)
   const [askingClient, setAskingClient] = useState(false)
   const [smsOpen, setSmsOpen] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
@@ -1150,6 +1158,12 @@ export function AccountDetail() {
         * its result now sit on one screen, where somebody can see what they just did instead of
         * changing a tab to find out. See StatementTable.
         */}
+      {/*
+        AGAINST SWORDFISH, where the firm asked for it: "Explain each gap on the account... A
+        balance the firm cannot explain must not reach a client statement or payover." Above the
+        ledgers because it is about the figure the ledgers produce.
+      */}
+      <SwordfishGapPanel account={account} breakdown={statement?.breakdown ?? null} />
       <MoneyPanel accountId={account.id} />
       <LedgerPanel accountId={account.id} />
       {/* SENDING SOMETHING OUT TO BE SIGNED. With the money because that is what the firm is
@@ -1439,7 +1453,11 @@ export function AccountDetail() {
       onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null}
       /* Closing an account is not freezing it: a freeze is reversible and an ending is not. Both
          live beside the status because that is where work is stopped, not in the action row. */
-      onEnd={canRecordPayment(currentUser) ? () => setEnding(true) : null} />
+      onEnd={canRecordPayment(currentUser) ? () => setEnding(true) : null}
+      /* THE SAME TICK THE DATABASE ASKS FOR -- `book.freeze` -- so the button is not offered to
+         somebody the function would refuse. The function is still the guard; this is the courtesy. */
+      onHold={canFreezeAccounts(currentUser) ? () => setHolding(true) : null}
+      onRelease={canFreezeAccounts(currentUser) ? () => setReleasing(true) : null} />
   )
 
   return (
@@ -1975,6 +1993,25 @@ export function AccountDetail() {
           canWriteOff={canViewFinance(currentUser)}
           onClose={() => setEnding(false)}
           onDone={() => { setEnding(false); reload() }}
+        />
+      )}
+
+      {holding && (
+        <HoldAccountModal
+          accountId={account.id}
+          caseNumber={account.caseNumber}
+          onClose={() => setHolding(false)}
+          onDone={() => { setHolding(false); reload() }}
+        />
+      )}
+
+      {releasing && (
+        <ReleaseAccountModal
+          accountId={account.id}
+          caseNumber={account.caseNumber}
+          from={account.book === 'closed' ? 'closed' : 'on_hold'}
+          onClose={() => setReleasing(false)}
+          onDone={() => { setReleasing(false); reload() }}
         />
       )}
 
@@ -4387,7 +4424,9 @@ function Directorships({ companies }: { companies: DirectorCompany[] }) {
   )
 }
 
-function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, onFreeze, onEnd }: {
+function PositionPanel({
+  account, ceiling, chargedExclVat, clientLiaisonName, onFreeze, onEnd, onHold, onRelease,
+}: {
   account: DebtorAccount
   ceiling: { limit: number } | null
   chargedExclVat: number
@@ -4395,6 +4434,8 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, on
   /** Null where this person may not stop work — the field then simply has no control on it. */
   onFreeze: (() => void) | null
   onEnd: (() => void) | null
+  onHold: (() => void) | null
+  onRelease: (() => void) | null
 }) {
   const handedOver = account.handoverDate
     ? [formatDate(account.handoverDate), timeOnDesk(account.handoverDate)].filter(Boolean).join(' · ')
@@ -4449,6 +4490,26 @@ function PositionPanel({ account, ceiling, chargedExclVat, clientLiaisonName, on
           disappears: an account that is finished has to SAY so wherever somebody looks at it, and
           "Closed as written off — Uncontactable" is the answer to the question they came with.
         */}
+        {/*
+          WHICH BOOK IT IS IN, which is the first thing anybody wants off this panel and the one
+          thing the screen could not say. Read off the database's own generated column, never
+          computed here: a screen that worked it out again would be the second source of truth the
+          firm said not to build.
+        */}
+        <Field
+          label="Book"
+          value={bookLabel(account.book)}
+          note={account.book === 'on_hold'
+            ? [holdLabel(account.holdReason), account.holdNote,
+               account.holdReviewOn ? `look again ${formatDate(account.holdReviewOn)}` : null]
+              .filter(Boolean).join(' \u2014 ')
+            : undefined}
+          action={account.book === 'active'
+            ? (onHold ? { label: 'Put on hold', onClick: onHold } : undefined)
+            : (onRelease
+              ? { label: account.book === 'closed' ? 'Re-open' : 'Back to active', onClick: onRelease }
+              : undefined)}
+        />
         <Field
           label="Ending"
           value={account.endedAs ? ENDING_LABEL[account.endedAs] : null}
@@ -4648,3 +4709,82 @@ function StatementTable({
   )
 }
 
+/**
+ * RAPTOR'S BALANCE AGAINST THE ONE THAT CAME ACROSS.
+ *
+ * THE FIRM: "Balances disagree with Swordfish, mainly on fees... Explain each gap on the account,
+ * or fix the rebuild. A balance the firm cannot explain must not reach a client statement or
+ * payover."
+ *
+ * ABSENT WHERE THERE IS NOTHING TO COMPARE, and absent where the two AGREE. An account opened in
+ * Raptor has no imported figure, and a panel reading "no difference" on every one of twenty-three
+ * thousand accounts is the warning that fires when nothing is wrong. It draws when there is
+ * something to say.
+ *
+ * AND IT NAMES THE KNOWN REASON FIRST. Most of the difference is not a disagreement at all:
+ * Swordfish reports one "Fees & Expenses" column with the receipt fees inside it, and Raptor keeps
+ * item 9 apart because it is charged per receipt. Measured on the firm's own five accounts, the two
+ * with NO payments differ by R577.30 to the cent -- one settlement receipt fee at the R502 cap plus
+ * VAT -- and the three with payments differ by that plus the fee on each receipt.
+ */
+function SwordfishGapPanel({ account, breakdown }: {
+  account: DebtorAccount
+  breakdown: { balance: number; fees: number; receiptFees: number } | null
+}) {
+  if (!breakdown) return null
+  const gap = compareWithSwordfish({
+    swordfishBalance: account.swordfishBalanceAtImport,
+    swordfishFees: account.swordfishFeesAtImport,
+    balance: breakdown.balance,
+    fees: breakdown.fees,
+    receiptFees: breakdown.receiptFees,
+  })
+  if (!gap || gap.agrees) return null
+
+  return (
+    <Card className="p-5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+        Against Swordfish
+      </div>
+      <div className="flex flex-wrap items-end gap-8">
+        <Figure2 label="Raptor says" value={rand(breakdown.balance)} />
+        <Figure2 label="Swordfish said, at import"
+          value={rand(account.swordfishBalanceAtImport ?? 0)} />
+        <Figure2 label="Difference" value={rand(gap.difference)} tone />
+      </div>
+      {account.swordfishFeesAtImport !== null && (
+        <div className="mt-3 text-[12.5px] text-slate-600 tabular-nums">
+          Fees and receipt fees together: {rand(gap.feesLikeSwordfish)} against
+          Swordfish&rsquo;s {rand(account.swordfishFeesAtImport)}.
+        </div>
+      )}
+      <ul className="mt-3 space-y-1.5">
+        {gap.reasons.map((why) => (
+          <li key={why} className="text-[12.5px] text-slate-500 leading-relaxed">&middot; {why}</li>
+        ))}
+      </ul>
+      {/*
+        THE IMPORTED FIGURE IS THE RECORD AND SAYS SO. CLAUDE.md: what was imported is what the
+        client was invoiced on, so the difference is REPORTED rather than reconciled away -- and
+        correcting one is the firm's decision, case by case, never a migration that sweeps.
+      */}
+      <p className="mt-3 pt-3 border-t border-slate-100 text-[12px] text-slate-500 leading-relaxed">
+        Swordfish&rsquo;s figure is what the client was invoiced on, so it stays as it is. This
+        says where the two differ; it does not change either.
+      </p>
+    </Card>
+  )
+}
+
+function Figure2({ label, value, tone }: { label: string; value: string; tone?: boolean }) {
+  return (
+    <div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+        {label}
+      </div>
+      <div className={`text-[19px] font-medium tabular-nums ${tone ? 'text-gold-800' : 'text-slate-800'}`}>
+        {value}
+      </div>
+    </div>
+  )
+}

@@ -778,6 +778,85 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     })
   }
 
+  /*
+   * DO THE PAYMENT LINES ADD UP TO WHAT THE SUMMARY SAYS WAS PAID?
+   *
+   * THE FIRM, AFTER THE FIRST TEST IMPORT: "The real Swordfish exports fail one reconciliation
+   * check. APM20070, APM20097 and GPS4/10080: payment lines don't sum to Payments To Date (off by
+   * R400, R500 and R500). Find out why (reversals? different export dates?) before the real
+   * migration."
+   *
+   * THEY FOUND IT BY HAND, BECAUSE NOTHING CHECKED IT. Two exports describe the same money -- the
+   * summary's "Payments To Date" and every line in "All Payments Incl Balances" -- and the import
+   * read both without ever asking whether they agreed. A balance is built from the LINES, so where
+   * they are short the debtor is shown owing more than Swordfish says they do.
+   *
+   * REVERSALS ARE COUNTED IN, which is the first of the firm's own two hypotheses and the one that
+   * can be tested from here: if a reversed payment is the cause, the sum INCLUDING it matches and
+   * the sum excluding it does not. The report says which, so the answer is in the import's own
+   * problems rather than in a spreadsheet somebody builds afterwards.
+   *
+   * THE OTHER HYPOTHESIS CANNOT BE TESTED FROM INSIDE ONE IMPORT. Two exports taken on different
+   * days is a fact about the files, not about their contents -- a payment banked between the two
+   * appears in one and not the other -- so the message names it as the thing to check.
+   *
+   * REPORTED, NEVER CORRECTED. IMPORTED HISTORY IS FROZEN AT WHAT WAS IMPORTED, and which of the
+   * two figures is right is the firm's question for Swordfish.
+   */
+  {
+    const lineTotal = new Map<string, number>()
+    const lineTotalLive = new Map<string, number>()
+    for (const p of payments) {
+      lineTotal.set(p.account_id, (lineTotal.get(p.account_id) ?? 0) + p.amount)
+      if (!p.reversed_at) {
+        lineTotalLive.set(p.account_id, (lineTotalLive.get(p.account_id) ?? 0) + p.amount)
+      }
+    }
+    const off: { ref: string; summary: number; lines: number; reversalsExplain: boolean }[] = []
+    for (const a of debtorAccounts) {
+      if (a.payments_to_date === null) continue
+      const all = Math.round((lineTotal.get(a.id) ?? 0) * 100) / 100
+      const live = Math.round((lineTotalLive.get(a.id) ?? 0) * 100) / 100
+      const summary = Math.round(a.payments_to_date * 100) / 100
+      /* A CENT EITHER WAY IS ROUNDING across two systems, not a missing payment. */
+      if (Math.abs(all - summary) < 0.05) continue
+      off.push({
+        ref: a.swordfish_reference ?? a.account_number ?? '(no reference)',
+        summary, lines: all,
+        reversalsExplain: Math.abs(live - summary) < 0.05,
+      })
+    }
+    if (off.length > 0) {
+      const byReversal = off.filter((o) => o.reversalsExplain)
+      if (byReversal.length > 0) {
+        notes.push(
+          `${byReversal.length} account${byReversal.length === 1 ? '' : 's'} differ from "Payments `
+          + `To Date" by exactly their reversed payments, which is the explanation: the summary `
+          + `counts live payments and the line export carries the reversals too.`,
+        )
+      }
+      const unexplained = off.filter((o) => !o.reversalsExplain)
+      if (unexplained.length > 0) {
+        /*
+         * A PROBLEM, NOT A NOTE. The firm's own rule is that a balance they cannot explain must not
+         * reach a client statement or payover, and this is exactly that -- named account by account
+         * with both figures, because "three accounts disagree" sends somebody hunting for which.
+         */
+        const named = unexplained.slice(0, 10)
+          .map((o) => `${o.ref} (lines ${o.lines.toFixed(2)} against ${o.summary.toFixed(2)})`)
+          .join(', ')
+        problem(
+          `${unexplained.length} account${unexplained.length === 1 ? '' : 's'} where the payment `
+          + `lines do not add up to "Payments To Date", and reversals do not explain it: ${named}`
+          + `${unexplained.length > 10 ? ', and more' : ''}. The usual cause is the two exports `
+          + `being taken on different days, so a payment banked between them is in one and not the `
+          + `other -- check the dates on the files before importing. The balance is built from the `
+          + `LINES, so where they are short the debtor reads as owing more than Swordfish says.`,
+        )
+      }
+    }
+  }
+
   /* ------------------------------------------------------------------- fees */
 
   const fees: FeeRow[] = []
