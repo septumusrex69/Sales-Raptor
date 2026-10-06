@@ -358,6 +358,39 @@ select:autofill {
     border: 1px solid var(--skin-card-border);
     box-shadow: var(--skin-card-shadow);
   }
+
+  /*
+   * THE PRIMARY BUTTON, which three screens named and nothing defined. The Swordfish import's
+   * "Import 20 accounts", the handover import's write button and both of Hold account's actions
+   * all said `btn-primary`, and Tailwind drops a class it does not know without a word -- so the
+   * most consequential button on the import screen drew as plain text beside a link. The firm,
+   * circling it on the iPad: "Make the import more prominent."
+   *
+   * The same gold every other primary action already wears inline (New email, Add client), so a
+   * button that says btn-primary looks like the buttons that say it longhand. In the components
+   * layer, so a caller's own utilities still win.
+   */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--color-gold-500);
+    background-color: var(--color-gold-400);
+    color: var(--color-navy-950);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    transition: background-color 120ms ease-out;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--color-gold-500);
+  }
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 }
 
 /*

@@ -553,17 +553,6 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             This ADDS to whatever is already there. Nothing is removed.
           </p>
 
-          {/*
-            THE DESTRUCTIVE PATH IS A LINK, NOT A TICKBOX BESIDE THE ORDINARY BUTTON. Opening it is
-            a deliberate act; the counts are fetched only once somebody has.
-          */}
-          {!startOver && (
-            <button type="button" onClick={() => setStartOver(true)}
-              className="mt-2 text-[13px] font-medium text-slate-400 underline hover:text-rose-700">
-              Start over instead
-            </button>
-          )}
-
           {startOver && (
             <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50/50 p-4">
               <div className="flex items-start gap-2.5">
@@ -619,16 +608,34 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             </div>
           )}
 
-          <button
-            className="btn-primary mt-5 inline-flex items-center gap-2"
-            disabled={!!phase || (wipe && confirmText.trim().toLowerCase() !== 'delete everything')}
-            onClick={runImport}
-          >
-            <Upload size={15} />
-            {plan.debtorAccounts.length === 0
-              ? `Import ${plan.companies.length.toLocaleString('en-ZA')} ${plan.companies.length === 1 ? 'client' : 'clients'}`
-              : `Import ${plan.debtorAccounts.length.toLocaleString('en-ZA')} accounts`}
-          </button>
+          {/*
+            THE ONE BUTTON THIS WHOLE SCREEN EXISTS FOR, and it now looks it: the firm circled it
+            ("Make the import more prominent") because it drew as plain text against the Start
+            over link. Large, gold, on its own line -- and the destructive link moved BELOW it, in
+            the quiet weight, so the two can no longer be read as one control or hit by one tap.
+          */}
+          <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+            <button
+              className="btn-primary gap-2 px-6 py-3 text-base shadow-sm"
+              disabled={!!phase || (wipe && confirmText.trim().toLowerCase() !== 'delete everything')}
+              onClick={runImport}
+            >
+              <Upload size={18} />
+              {plan.debtorAccounts.length === 0
+                ? `Import ${plan.companies.length.toLocaleString('en-ZA')} ${plan.companies.length === 1 ? 'client' : 'clients'}`
+                : `Import ${plan.debtorAccounts.length.toLocaleString('en-ZA')} ${plan.debtorAccounts.length === 1 ? 'account' : 'accounts'}`}
+            </button>
+          </div>
+
+          {/* THE DESTRUCTIVE PATH IS A LINK, NOT A TICKBOX BESIDE THE ORDINARY BUTTON -- and it sits
+              under the button, never beside it. Opening it is a deliberate act; the counts are
+              fetched only once somebody has. */}
+          {!startOver && (
+            <button type="button" onClick={() => setStartOver(true)}
+              className="mt-4 block text-[13px] font-medium text-slate-400 underline hover:text-rose-700">
+              Start over instead
+            </button>
+          )}
         </Card>
       )}
       </>

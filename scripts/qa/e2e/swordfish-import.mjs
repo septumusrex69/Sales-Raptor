@@ -57,6 +57,7 @@ const INTEREST = csv(['2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01'].ma
 let sent = {}          // table -> rows POSTed, for the run in progress
 let discards = []      // p_batch of every discard_import_batch call
 let refuseInterest = false
+let shotTaken = false
 
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: ADMIN.id, email: ADMIN.email } })],
@@ -98,6 +99,23 @@ async function importWith(page, cutoff) {
   await page.getByRole('button', { name: 'Read the exports' }).click()
   const go = page.getByRole('button', { name: /^Import 1 accounts?$/ })
   await go.waitFor({ timeout: 20000 })
+  /* THE BUTTON IS A BUTTON. It drew as plain text for want of a CSS class that did not exist, and
+     the firm circled it: "Make the import more prominent." Measured, not assumed. */
+  if (!shotTaken) {
+    shotTaken = true
+    await go.scrollIntoViewIfNeeded()
+    const look = await go.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      return { bg: cs.backgroundColor, h: el.getBoundingClientRect().height }
+    })
+    t.ok(`the import button is filled, not plain text (${look.bg})`,
+      look.bg !== 'rgba(0, 0, 0, 0)' && look.bg !== 'transparent')
+    t.ok(`...and big enough to find (${Math.round(look.h)}px tall)`, look.h >= 44)
+    const link = await page.getByRole('button', { name: 'Start over instead' }).boundingBox()
+    const btn = await go.boundingBox()
+    t.ok('...with Start over below it, not beside it', !!link && !!btn && link.y >= btn.y + btn.height)
+    await t.shot(page, 'swordfish-import-button')
+  }
   await go.click()
   /* Wait for the run to END, either way, before reading what it sent. */
   await page.getByText(/Imported [\d  ]+ rows\.|taken back out|Nothing was written/).first()
