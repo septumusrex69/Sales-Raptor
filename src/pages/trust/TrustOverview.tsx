@@ -9,10 +9,9 @@ import {
   type TrustCycle, type TrustPosition, type UnreconciledPayout,
 } from '../../lib/trust'
 import {
-  cycleCollected, cycleLabel, cycleProgress, cycleState, cycleTodo, cycleTotals,
-  overdueCycles, shortDate,
+  cycleCollected, cycleLabel, cycleState, cycleTodo, cycleTotals, overdueCycles,
 } from '../../lib/trustCycles'
-import { trustChecks, trustVerdict, type TrustCheck } from '../../lib/trustBalance'
+import { trustChecks, trustVerdict } from '../../lib/trustBalance'
 
 /**
  * IS THE TRUST ACCOUNT RIGHT, AND WHOSE PAYOVER IS EACH PART OF IT WAITING FOR?
@@ -95,7 +94,6 @@ export function TrustOverview() {
     )
   }
 
-  const short = position.difference < 0
   /*
    * TODAY ON THE FIRM'S CLOCK, because every date on this screen came out of Postgres on
    * Africa/Johannesburg and "how many days until the 11th" compared against a browser in another
@@ -103,7 +101,6 @@ export function TrustOverview() {
    * of Intl; `toISOString` would hand back UTC, which is the bug.
    */
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
-  const totals = cycleTotals(cycles)
   /*
    * THE FOUR CHECKS, BUILT FROM THE FIGURES ALREADY ON THE PAGE. `rand` is handed in rather than
    * reached for inside, so the sentences are formatted by the same money function as every figure
@@ -118,453 +115,330 @@ export function TrustOverview() {
     rand,
   )
 
+  /*
+   * THE RECONCILIATION, ADDED UP HERE FROM THE PARTS -- not read back as one more figure from the
+   * database. `netOwed` is what the ledger says is owed out of the trust; the parts are who it is
+   * owed to. Summed on the screen, the line "unexplained difference" is arithmetic this page
+   * actually did, rather than a nil it was handed.
+   *
+   * IT IS NIL TODAY BY CONSTRUCTION, and that is said here rather than hidden: `trust_position`
+   * builds the ledger balance out of the same parts, so the two can only part company if that
+   * function and this screen stop meaning the same thing by them. The firm drew the panel and it is
+   * drawn as they drew it. What CAN go wrong -- the bank against the ledger, money with no owner, a
+   * client in debit, a payover past its day -- is said underneath it, in the notes the firm's own
+   * design puts there ("Unallocated receipts still need allocation"), because a reconciliation
+   * that only ever reads R 0.00 is worth nothing on the day it should not.
+   */
+  const accounted = r2(position.owedToClients + position.owedToFirm + position.owedToDebtors
+    + position.unidentified - position.owedByClients)
+  const unexplained = r2(position.netOwed - accounted)
+  const verdict = trustVerdict(checks)
+  const totals = cycleTotals(cycles)
+  const open = checks.filter((c) => c.tone !== 'clear')
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-baseline gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Trust overview</h1>
-        <span className="text-xs text-slate-400">
-          Money the firm holds for other people, as at {shortDate(today)}
-        </span>
+    <div className="space-y-8">
+      {/*
+        THE FIRM'S OWN LAYOUT, from the revised design they sent ("Raptor Trust Overview, Revised"):
+        the three figures across a dark band, who owns the money with its reconciliation beside it,
+        then the collections by period as a table. The previous version kept the figures and then
+        put two warning panels and a stack of cycle cards above the ownership table, and the firm's
+        verdict was "It doesn't look nice ... not in the format that I requested."
+      */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-800">Trust overview</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Trust balance, ownership and reconciliation &middot; as at today
+          </p>
+        </div>
+        {/* A STATEMENT, NOT A PICKER. The position is today's; a box that looked like a date
+            input would promise a history this screen cannot read. */}
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
+          As at {longDate(today)}
+        </div>
       </div>
 
-      {/*
-        THE THREE FIGURES, IN THE FIRM'S OWN ACCOUNTING WORDS.
-
-        They were "In the bank / Owed out of it / Difference", which is the same arithmetic said
-        conversationally. The firm's sketch names them BANK BALANCE, TRUST LEDGER BALANCE and BANK /
-        LEDGER DIFFERENCE, and that is better here rather than merely more formal: "owed out of it"
-        describes a consequence, where "trust ledger balance" names the thing being reconciled, and
-        a reconciliation is only legible when both sides are named as the two records they are.
-
-        AND THE VERDICT IS ON THE PANEL, not inferred from a zero. A reader should not have to know
-        that R 0.00 is the good answer.
-      */}
-      <div className="rounded-xl bg-navy-950 text-white px-6 py-5 flex flex-wrap items-end gap-10">
+      {/* ------------------------------ the three figures ------------------------------ */}
+      <div className="rounded-2xl bg-navy-950 text-white px-6 sm:px-8 py-6
+        grid grid-cols-1 sm:grid-cols-3 gap-6">
         <Figure label="Bank balance" value={rand(position.trustCash)} />
         <Figure label="Trust ledger balance" value={rand(position.netOwed)} />
-        <div className="flex items-end gap-3">
+        <div>
           <Figure
             label="Bank / ledger difference"
             value={rand(position.difference)}
-            small
-            tone={position.difference === 0 ? 'text-positive-100' : 'text-negative-300'}
+            tone={position.difference === 0 ? undefined : 'text-negative-300'}
           />
-          <span className={clsx('mb-1 rounded-md px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide',
-            position.difference === 0
-              ? 'bg-positive-100 text-positive-700'
-              : 'bg-negative-100 text-negative-700')}>
+          {/* THE VERDICT IS ON THE PANEL, not inferred from a zero: nobody should have to know
+              that R 0.00 is the good answer. */}
+          <div className={clsx('mt-2 text-xs font-semibold sm:text-right',
+            position.difference === 0 ? 'text-positive-100' : 'text-negative-300')}>
             {position.difference === 0 ? 'Matched' : 'Not matched'}
-          </span>
+          </div>
         </div>
       </div>
 
-      {/*
-        ---------------------------- DOES IT BALANCE? ----------------------------
+      {/* --------------------------- who owns the money --------------------------- */}
+      <section>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">
+          Who owns the money in trust?
+        </h2>
+        <p className="text-sm text-slate-500 mt-1">
+          Current outstanding balances across all periods, after transfers and payovers.
+        </p>
 
-        THE FIRM, on their sketch of this screen: "it shows all the money that's currently in the
-        trust fund and where that money should go. If the trust fund balances in the overview, then
-        everything is fine."
-
-        THE SKETCH'S OWN VERSION OF THIS CANNOT FAIL, and that is why it is not what was built. It
-        read "trust ledger balance LESS amounts accounted for = unexplained difference" over the
-        four owners below -- but `trust_position` derives the ledger balance BY ADDING THOSE FOUR
-        UP, so the difference is 0.00 on every row of data that can ever exist. Checked against
-        staging rather than argued about: net owed R7 873,60, sum of owners R7 873,60, gap R0,00.
-        A green light that cannot go red is worse than none, which is the firm's own rule about
-        warnings applied to the most important screen they have.
-
-        So the panel keeps the shape they liked and fills it with the four things that CAN be wrong.
-        See trustBalance.ts, which is pure so a check can import it.
-      */}
-      <TrustBalancePanel checks={checks} />
-
-      {position.difference !== 0 && (
-        <Card className={clsx('p-4 border', short
-          ? 'bg-negative-50 border-negative-100'
-          : 'bg-gold-50 border-gold-100')}>
-          <div className={clsx('text-sm font-semibold', short ? 'text-negative-700' : 'text-gold-800')}>
-            {short
-              ? `The bank holds ${rand(Math.abs(position.difference))} less than Raptor says is owed.`
-              : `The bank holds ${rand(position.difference)} more than Raptor says is owed.`}
-          </div>
-          <div className="text-[13px] text-slate-500 mt-1">
-            {short
-              ? 'Money has left the trust account that nothing accounts for.'
-              : 'Something has been received that nobody is yet recorded as being owed.'}
-          </div>
-          {payouts.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {payouts.map((p) => (
-                <div key={p.id}
-                  className="bg-white border border-negative-100 rounded-lg px-3 py-2
-                    flex items-baseline gap-3 text-[13px]">
-                  <span className="font-semibold text-negative-700 tabular-nums">
-                    {rand(Math.abs(p.amount))}
-                  </span>
-                  <span className="text-slate-500">{p.description || 'No description'}</span>
-                  {/*
-                    THE CANDIDATE IS A SUGGESTION, AND THE WORD MATTERS. The function matches a
-                    debit to a run by amount and date, which is a guess that happens to be right
-                    most of the time; a screen that said "matched" would have somebody pressing
-                    past it without looking.
-                  */}
-                  <Link to="/trust/payover" className="font-medium text-gold-700 hover:text-gold-800">
-                    {p.candidateRun ? `Match to ${p.candidateInvoice ?? 'the run'}` : 'Find its run'}
-                  </Link>
-                </div>
-              ))}
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <Card className="lg:col-span-7 px-6 py-2">
+            {/*
+              NAMED AS THE FIRM NAMES THEM -- whose it is first, what the money is waiting for
+              beside it. Largest claim first, as their design orders it.
+            */}
+            <Owner who="Clients" what="Awaiting client payover" amount={position.owedToClients} lead />
+            <Owner who="Bredell Ferreira" what="Earned and still held in trust" amount={position.owedToFirm} />
+            <Owner who="Debtors" what="Overpayments / refunds outstanding" amount={position.owedToDebtors} />
+            <Owner who="Unallocated receipts" what="Owner not yet identified" amount={position.unidentified} />
+            {/*
+              THE OTHER DIRECTION, ONLY WHEN THERE IS ONE. A client in debit to the trust (a debtor
+              paid them direct, so the firm's fees on it are owed back) reduces what is accounted
+              for. The firm's design has no row for it because their example has none; leaving it
+              out when it is real would make the total below disagree with the ledger by exactly
+              that amount and nothing on the screen would say why.
+            */}
+            {position.owedByClients > 0 && (
+              <Owner who="Less: owed back by clients" what="Comes off the client's next payover"
+                amount={-position.owedByClients} />
+            )}
+            <div className="flex items-baseline gap-4 py-5 border-t border-slate-200">
+              <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+                Total accounted for
+              </div>
+              <div className="text-2xl font-semibold tabular-nums text-slate-800">{rand(accounted)}</div>
             </div>
-          )}
-        </Card>
-      )}
+          </Card>
 
-      {/* ------------------------------ the cycles ------------------------------ */}
+          <div className={clsx('lg:col-span-5 rounded-xl px-6 py-6 flex flex-col',
+            verdict.tone === 'bad' ? 'bg-negative-50' : 'bg-positive-50')}>
+            <div className={clsx('text-lg font-semibold',
+              verdict.tone === 'bad' ? 'text-negative-700' : 'text-positive-700')}>
+              Ownership reconciliation
+            </div>
+            <Recon label="Trust ledger balance" value={rand(position.netOwed)} />
+            <Recon label="Less: amounts accounted for" value={rand(accounted)} />
+            <div className="mt-4 pt-4 border-t border-slate-200/70 flex items-baseline gap-4">
+              <div className="flex-1 text-[15px] font-semibold text-slate-800">Unexplained difference</div>
+              <div className={clsx('text-2xl font-semibold tabular-nums',
+                unexplained === 0 ? 'text-positive-700' : 'text-negative-700')}>
+                {rand(unexplained)}
+              </div>
+            </div>
 
-      <div>
-        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-          Which payover each part of it is waiting for
+            <div className="mt-5 space-y-2 text-[13px]">
+              {open.length === 0 ? (
+                <p className="text-positive-700">Bank, ledger and ownership totals match.</p>
+              ) : open.map((c) => (
+                <p key={c.id} className={c.tone === 'bad' ? 'text-negative-700 font-medium' : 'text-slate-600'}>
+                  {c.answer}
+                </p>
+              ))}
+              {/*
+                THE SHORTFALL, NAMED. `unreconciled_payouts` already knows which debits nothing
+                accounts for, and each needs a different job -- a payout is matched to its run, a
+                bank charge is funded from the business account -- so they are listed with the
+                action rather than flattened into "investigate".
+
+                THE CANDIDATE IS A SUGGESTION, and the word matters: the match is by amount and
+                date, a guess that is usually right, and "matched" would be pressed past unread.
+              */}
+              {position.difference !== 0 && payouts.length > 0 && (
+                <ul className="pt-1 space-y-1.5">
+                  {payouts.map((p) => (
+                    <li key={p.id} className="text-[12.5px] rounded-lg bg-white/70 px-3 py-2">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="font-semibold tabular-nums text-negative-700">{rand(Math.abs(p.amount))}</span>
+                        <Link to="/trust/payover" className="font-medium text-gold-700 hover:text-gold-800 whitespace-nowrap">
+                          {p.candidateRun ? `Match to ${p.candidateInvoice ?? 'the run'}` : 'Find its run'}
+                        </Link>
+                      </div>
+                      <div className="text-slate-500 truncate" title={p.description || undefined}>
+                        {p.description || 'No description'}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
+        {/*
+          THE FIRM'S DESIGN HAS ONE MORE LINE HERE -- "BF funds held: Commission + Fees + VAT" --
+          and it is deliberately not drawn. That split is not stored: the allocation writes the
+          firm's share as one ledger entry, so a breakdown rebuilt from allocations would miss charge
+          recoveries and drawings and the three parts would not sum to the figure above it. It waits
+          on the firm's decision (HANDOFF §4); a line that did not add up would be worse than none.
+        */}
+      </section>
+
+      {/* --------------------------- collections by period --------------------------- */}
+      <section>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Collections by period</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          Period earnings are shown below. The balances above show what remains in trust today.
+        </p>
         {cycles.length === 0 ? (
-          <Card className="p-6 text-sm text-slate-500 text-center">
+          <Card className="mt-4 p-6 text-sm text-slate-500 text-center">
             Nothing is waiting to be paid over. Every cycle Raptor knows about has been settled.
           </Card>
         ) : (
-          <Card className="overflow-hidden p-0">
-            {/*
-              THE ONE THAT LEAVES SOONEST IS THE ONE AT THE TOP, which is the order the firm said it
-              in -- "what is for this month's payover? And what is for next month's payover" -- and
-              the closed cycle is the one that answers the first half. Newest first read backwards:
-              the cycle still being collected sat above the one going out in five days, and a cycle
-              that has gone PAST its day -- the only thing on this table somebody has to act on --
-              would have been at the bottom. The database orders it; nothing sorts up here.
-            */}
-            {cycles.map((c) => (
-              <CycleRow key={c.periodStart} cycle={c} today={today} />
-            ))}
-            {cycles.length > 1 && (
-              <div className="flex items-center gap-4 px-5 py-3.5 border-t border-slate-200 bg-slate-50">
-                <div className="flex-1 text-[12.5px] font-bold uppercase tracking-wide text-slate-600">
-                  Across every cycle
-                </div>
-                <Money label="Collected" value={totals.collected} muted />
-                <Money label="Clients" value={totals.toClients} />
-                <Money label="Bredell Ferreira" value={totals.firmEarned} />
-              </div>
-            )}
+          /* Scrolls sideways inside its card on a phone, rather than pushing the page wider. */
+          <Card className="mt-4 p-0 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  <th className="text-left font-bold px-6 pt-5 pb-3">Period / client payover</th>
+                  <th className="text-right font-bold px-4 pt-5 pb-3">Collected</th>
+                  <th className="text-right font-bold px-4 pt-5 pb-3">Client portion</th>
+                  <th className="text-right font-bold px-4 pt-5 pb-3">BF earned</th>
+                  <th className="text-right font-bold px-6 pt-5 pb-3">Other held</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/*
+                  THE ONE THAT LEAVES SOONEST IS AT THE TOP -- "what is for this month's payover?
+                  And what is for next month's payover" -- and the database orders it so.
+                */}
+                {cycles.map((c, i) => (
+                  <CycleRow key={c.periodStart} cycle={c} today={today}
+                    previousSeen={cycles.slice(0, i).some((x) => !x.isOpen)} />
+                ))}
+              </tbody>
+              {/*
+                THE TIE-OUT, quietly. Not in the firm's design, which shows two periods and no
+                total -- but the periods and the ownership block are the SAME money read two ways,
+                so the client column here sums to the Clients line above and the BF column to what
+                Bredell Ferreira holds before drawings. Without the row, a reader has to add them
+                up to find out the two halves of the screen agree. Only where there is more than
+                one period, because a total of one row is the row again.
+              */}
+              {cycles.length > 1 && (
+                <tfoot>
+                  <tr className="border-t border-slate-200 bg-slate-50 text-slate-600">
+                    <td className="px-6 py-3 text-[11px] font-bold uppercase tracking-wider">All periods</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{rand(totals.collected)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{rand(totals.toClients)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{rand(totals.firmEarned)}</td>
+                    <td className="px-6 py-3 text-right tabular-nums">
+                      {rand(r2(totals.collected - totals.toClients - totals.firmEarned))}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
           </Card>
         )}
-        <p className="mt-3 text-[12.5px] text-slate-500 leading-relaxed">
-          A cycle runs the 11th to the 10th and is paid over after it closes &mdash; how long after
+        <p className="mt-3 text-xs text-slate-500 leading-relaxed">
+          Collection cycle: 11th&ndash;10th, paid over after it closes &mdash; how long after
           is <Link to="/trust/settings" className="font-medium text-gold-700 hover:text-gold-800">
-          a trust setting</Link>, and Raptor guessed it. The Bredell Ferreira column is what each
-          cycle&rsquo;s receipts <em>earned</em> the firm; what may actually be drawn today is the
-          figure below, because a drawing is made against the whole account rather than against one
-          month.
+          a trust setting</Link>. BF earned is what each period&rsquo;s receipts earned the firm;
+          what remains to be drawn is the Bredell Ferreira line above.
         </p>
-      </div>
-
-      {/* ------------------------------ the control ------------------------------ */}
-
-      <div className="flex flex-wrap gap-5 items-start">
-        <div className="flex-[999_1_28rem] min-w-0">
-          {/*
-            THE FIRM'S OWN HEADING, AND IT IS A QUESTION. Their sketch asks "Who owns the money in
-            trust?" over these four rows, which is better than "Trust control" for the reason the
-            whole screen exists: a control is a procedure somebody performs, and the question is
-            what a person standing in front of it actually wants answered.
-          */}
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-            Who owns the money in trust?
-          </div>
-          {/*
-            THE SAME FOUR PARTIES AS BEFORE, DRAWN AS A SUM THAT HAS TO COME OUT. It used to be a
-            list headed "whose money is in there", which is true and answers nothing: four figures
-            and a total, with the bank balance on a dark panel at the top of the page and no line
-            anywhere connecting the two. A trust control is the one place the firm reads DOWN to a
-            difference, so it ends where the page began.
-          */}
-          <Card className="overflow-hidden p-0">
-            {/*
-              NAMED BY WHAT THE MONEY IS, WITH WHOSE IT IS BESIDE IT -- the firm's sketch does this
-              and it is the better way round. "Clients R 2 557,90" is a fact about a column;
-              "Awaiting client payover" is the same figure saying what will happen to it, which is
-              the second half of the firm's sentence: all the money in the trust fund AND where that
-              money should go.
-
-              THE ORDER IS THE SKETCH'S, largest claim first: clients, then the firm, then debtors,
-              then what has no owner yet. It used to run clients, debtors, firm.
-            */}
-            <Party who="Awaiting client payover" whose="Clients" tone="bg-brand-500"
-              note="Capital recovered less commission, until the payover is paid"
-              amount={position.owedToClients} />
-            <Party who="Earned and still held in trust" whose="Bredell Ferreira" tone="bg-positive"
-              note="Fees, interest and commission earned, not yet drawn"
-              amount={position.owedToFirm} />
-            <Party who="Overpayments and refunds outstanding" whose="Debtors" tone="bg-gold-600"
-              note="Overpaid their account, awaiting a decision"
-              amount={position.owedToDebtors} />
-            <Party who="Owner not yet identified" whose="Unallocated receipts" tone="bg-slate-400"
-              note="Receipts on the statement nobody has placed"
-              amount={position.unidentified} />
-            <div className="flex items-center gap-4 px-5 py-3 border-t border-slate-100 bg-slate-50">
-              <div className="flex-1 text-[12.5px] font-bold uppercase tracking-wide text-slate-600">
-                Total accounted for
-              </div>
-              <div className="text-[17px] font-semibold tabular-nums">{rand(position.netOwed)}</div>
-            </div>
-            <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-t border-slate-100">
-              <div className="flex-1 text-[12.5px] text-slate-500">Bank balance</div>
-              <div className="text-[17px] tabular-nums text-slate-600">{rand(position.trustCash)}</div>
-            </div>
-            <div className={clsx('flex items-center gap-4 px-5 py-3.5 border-t',
-              position.difference === 0
-                ? 'bg-positive-50 border-positive-100'
-                : 'bg-negative-50 border-negative-100')}>
-              <div className="flex-1 text-[12.5px] font-bold uppercase tracking-wide text-slate-600">
-                Bank / ledger difference
-              </div>
-              <div className={clsx('text-lg font-semibold tabular-nums',
-                position.difference === 0 ? 'text-positive-700' : 'text-negative-700')}>
-                {rand(position.difference)}
-              </div>
-            </div>
-          </Card>
-          <p className="mt-3 text-[12.5px] text-slate-500 leading-relaxed">
-            A client nets across their whole book, because that is how they are paid &mdash; one
-            payover run for the company. A debtor nets per account: two files of the same person
-            are two debts.
-          </p>
-        </div>
-
-        <div className="flex-[1_1_20rem] min-w-0 space-y-4">
-          {position.owedByClients > 0 && (
-            /*
-              THE OTHER DIRECTION, AND IT ONLY DRAWS WHEN THERE IS ONE. A trust debtor is unusual
-              enough that a permanent card reading R 0.00 would be noise; absent is the honest
-              resting state, and the firm's own instruction about warnings is that one which fires
-              when nothing is wrong is worse than none.
-            */
-            <Card className="p-5">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                Owed back to the trust
-              </div>
-              <div className="text-2xl font-semibold tabular-nums text-gold-800">
-                {rand(position.owedByClients)}
-              </div>
-              <p className="text-[12.5px] text-slate-500 mt-2 leading-relaxed">
-                A debtor paid the client direct, so the firm&rsquo;s fees on that money are owed
-                back. It comes off the client&rsquo;s next payover.
-              </p>
-            </Card>
-          )}
-
-          <Card className="p-5 bg-navy-950 text-white border-navy-950">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Yours to draw
-            </div>
-            <div className="text-2xl font-semibold tabular-nums">{rand(position.owedToFirm)}</div>
-            <p className="text-[12.5px] text-slate-400 mt-2 leading-relaxed">
-              Fees, interest and commission already earned, sitting in trust until they are moved
-              to the business account.
-            </p>
-            {/*
-              EARNED LESS DRAWN, WRITTEN OUT WHERE ANYTHING HAS BEEN DRAWN. Without the second line
-              the cycle bands above add up to more than this card says, and the only way to find
-              out why is to know that a drawing happened. It is absent where nothing has moved,
-              rather than drawn as a nil.
-            */}
-            {totals.firmMoved !== 0 && (
-              <p className="text-[12px] text-slate-400 mt-3 pt-3 border-t border-white/10 tabular-nums">
-                {rand(totals.firmEarned)} earned across the cycles above,
-                less {rand(Math.abs(totals.firmMoved))} already drawn or corrected.
-              </p>
-            )}
-            {/*
-              NOT A BUTTON YET, AND SAYING SO. `draw_from_trust` exists and refuses an overdrawing,
-              but the screen that decides the amount and records the reference is the business
-              side's, which is not built. A control here that opened nothing would be worse than
-              the sentence.
-            */}
-            <p className="text-[12px] text-slate-500 mt-3 pt-3 border-t border-white/10">
-              Drawing it is done from the business account, which is still being built.
-            </p>
-          </Card>
-        </div>
-      </div>
+      </section>
     </div>
   )
 }
 
+const r2 = (v: number): number => Math.round(v * 100) / 100
+
+const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December']
+/* Written out rather than through Intl: en-ZA abbreviates September to "Sept" (CLAUDE.md). */
+function longDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return `${d} ${LONG_MONTHS[m - 1]} ${y}`
+}
+
 /**
- * ONE CYCLE: WHAT IT HOLDS, AND WHEN IT LEAVES.
+ * ONE PERIOD, ONE ROW, IN THE FIRM'S COLUMNS: COLLECTED, CLIENT PORTION, BF EARNED, OTHER HELD.
  *
- * THE OPEN ONE CARRIES A BAR AND THE CLOSED ONES DO NOT. On the open cycle the bar is how far
- * through the collecting period today is, which says plainly that the figure beside it is not
- * final. Drawn on a closed cycle the same bar would read as progress towards being paid, which is
- * not what the number knows and would be a promise the screen cannot keep.
+ * COLLECTED LEADS, at the firm's asking: the two figures after it are both SHARES of it, and
+ * without the whole a small client column cannot be told from a quiet month. OTHER HELD is what
+ * is neither -- debtor overpayments and receipts not yet placed -- so the four always add up.
+ *
+ * NAMED AS THE FIRM NAMES THEM: Running for the open cycle, Previous for the one waiting for its
+ * payover, and Overdue for one that has gone past its day, which is the only row anybody has to
+ * act on and so the only one that says so in colour.
  */
-function CycleRow({ cycle, today }: { cycle: TrustCycle; today: string }) {
+function CycleRow({ cycle, today, previousSeen }: {
+  cycle: TrustCycle; today: string; previousSeen: boolean
+}) {
   const state = cycleState(cycle, today)
   const todo = cycleTodo(cycle)
-  const progress = cycleProgress(cycle, today)
+  const name = cycle.isOpen ? 'Running' : state.tone === 'late' ? 'Overdue' : previousSeen ? 'Earlier' : 'Previous'
+  const other = r2(cycle.toDebtors + cycle.unplaced)
   return (
-    <div className="px-5 py-4 border-b border-slate-100 last:border-b-0">
-      <div className="flex items-baseline gap-3 flex-wrap">
-        <div className="text-sm font-semibold text-slate-800">
-          {cycleLabel(cycle.periodStart, cycle.periodEnd)}
+    <tr className="border-t border-slate-100 align-top">
+      <td className="px-6 py-4">
+        <div className="font-semibold text-slate-800">
+          {name} &middot; {cycleLabel(cycle.periodStart, cycle.periodEnd)}
         </div>
-        <span className={clsx(
-          'text-[11px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded',
-          state.tone === 'open' && 'bg-brand-50 text-brand-700',
-          state.tone === 'due' && 'bg-slate-100 text-slate-600',
-          state.tone === 'late' && 'bg-gold-50 text-gold-800',
-        )}>
-          {state.word}
-        </span>
-        <span className="text-[12.5px] text-slate-500">{state.detail}</span>
-      </div>
-
-      <div className="mt-2.5 flex items-end gap-8 flex-wrap">
-        {/*
-          COLLECTED LEADS THE ROW, at the firm's asking -- their sketch orders it COLLECTED, CLIENT
-          PORTION, BF EARNED, OTHER HELD. The two figures that follow are both SHARES of it, and
-          without the whole on the row a small client column cannot be told apart from a quiet
-          month. Greyed rather than bold: it is the context for the two that are money owed to
-          somebody, not a third thing owed to anybody.
-        */}
-        <Money label="Collected" value={cycleCollected(cycle)} big muted />
-        <Money label="Due to clients" value={cycle.toClients} big />
-        <Money label="Due to Bredell Ferreira" value={cycle.firmEarned} big />
-        {/* Only where there is one. A permanent R 0.00 for debtor overpayments on every cycle is
-            four rows of noise for a thing that happens to one account in a hundred. */}
-        {cycle.toDebtors !== 0 && <Money label="Held for debtors" value={cycle.toDebtors} />}
-      </div>
-
-      {cycle.isOpen && (
-        <div className="mt-3 h-1 rounded-full bg-slate-100 overflow-hidden">
-          <div className="h-full bg-brand-500 rounded-full"
-            style={{ width: `${Math.round(progress * 100)}%` }} />
+        <div className={clsx('text-[12.5px] mt-1',
+          state.tone === 'late' ? 'text-gold-800 font-medium'
+            : cycle.isOpen ? 'text-positive-700' : 'text-slate-500')}>
+          Payover {longDate(cycle.paysOn)}{cycle.isOpen ? ' · provisional' : ''}
+          {state.tone === 'late' ? ' · past its day' : ''}
         </div>
-      )}
-
-      {todo && (
-        <Link to="/trust/payover"
-          className="mt-2.5 inline-block text-[12.5px] font-medium text-gold-700 hover:text-gold-800">
-          {todo} &rarr;
-        </Link>
-      )}
-    </div>
+        {todo && (
+          <Link to="/trust/payover"
+            className="mt-1.5 inline-block text-[12.5px] font-medium text-gold-700 hover:text-gold-800">
+            {todo} &rarr;
+          </Link>
+        )}
+      </td>
+      <td className="px-4 py-4 text-right tabular-nums font-semibold text-slate-800">{rand(cycleCollected(cycle))}</td>
+      <td className="px-4 py-4 text-right tabular-nums font-semibold text-positive-700">{rand(cycle.toClients)}</td>
+      <td className="px-4 py-4 text-right tabular-nums font-semibold text-slate-800">{rand(cycle.firmEarned)}</td>
+      <td className="px-6 py-4 text-right tabular-nums font-semibold text-slate-800">{rand(other)}</td>
+    </tr>
   )
 }
 
-/**
- * DOES IT BALANCE, AND WHAT IS LEFT TO DO?
- *
- * FOUR ROWS, ALWAYS ALL FOUR, even when they all pass. A panel that listed only problems is one
- * nobody can tell apart from a panel that failed to load, and the firm's sentence is about being
- * told that everything IS fine as much as about being told when it is not.
- *
- * EACH ROW IS A QUESTION WITH AN ANSWER, not a label with a number. "Unallocated receipts R 485,00"
- * is a fact somebody has to already know the significance of; "Does every rand in there have an
- * owner? -- R 485,00 is in the account with nobody's name on it" is the same figure doing the work.
- */
-function TrustBalancePanel({ checks }: { checks: TrustCheck[] }) {
-  const verdict = trustVerdict(checks)
-  return (
-    <Card className="overflow-hidden p-0">
-      <div className={clsx('px-5 py-3.5 border-b flex items-baseline gap-3 flex-wrap',
-        verdict.tone === 'clear' ? 'bg-positive-50 border-positive-100'
-          : verdict.tone === 'warn' ? 'bg-gold-50 border-gold-100'
-            : 'bg-negative-50 border-negative-100')}>
-        <div className={clsx('text-sm font-semibold',
-          verdict.tone === 'clear' ? 'text-positive-700'
-            : verdict.tone === 'warn' ? 'text-gold-800' : 'text-negative-700')}>
-          {verdict.line}
-        </div>
-        {/*
-          THE WORDS THE FIRM USED, kept where they will be read. The panel exists because of this
-          sentence and the sentence is not obvious from the rows.
-        */}
-        <div className="text-[12.5px] text-slate-500">
-          Everything in the trust account, and where it should go.
-        </div>
-      </div>
-      {checks.map((c) => (
-        <div key={c.id} className="flex items-start gap-4 px-5 py-3 border-b border-slate-100 last:border-b-0">
-          <span className={clsx('mt-1.5 h-2 w-2 rounded-full shrink-0',
-            c.tone === 'clear' ? 'bg-positive' : c.tone === 'warn' ? 'bg-gold-500' : 'bg-negative-500')} />
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-semibold text-slate-700">{c.question}</div>
-            <div className="text-[12.5px] text-slate-500 mt-0.5">{c.answer}</div>
-          </div>
-          {/* THE AMOUNT ONLY WHERE THERE IS ONE TO SHOW. R 0,00 against a row that passed is a
-              number somebody has to read and discard; the answer beside it already says nothing
-              is outstanding. */}
-          {c.amount !== null && c.amount !== 0 && (
-            <div className={clsx('text-[15px] font-semibold tabular-nums shrink-0',
-              c.tone === 'bad' ? 'text-negative-700' : 'text-gold-800')}>
-              {rand(Math.abs(c.amount))}
-            </div>
-          )}
-        </div>
-      ))}
-    </Card>
-  )
-}
-
-function Money({ label, value, big, muted }: {
-  label: string; value: number; big?: boolean; muted?: boolean
+function Owner({ who, what, amount, lead }: {
+  who: string; what: string; amount: number; lead?: boolean
 }) {
   return (
-    <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
-        {label}
-      </div>
-      <div className={clsx('tabular-nums font-medium leading-none',
-        big ? 'text-[19px]' : 'text-[15px]',
-        /* Muted is for a figure that is CONTEXT rather than a balance owed to somebody — the gross
-           collected beside the two shares of it. Same size, lighter, so the eye reads the shares. */
-        muted ? 'text-slate-400' : big ? 'text-slate-800' : 'text-slate-600')}>
-        {rand(value)}
+    /* THREE FIXED COLUMNS, so every amount sits on one right edge -- a column of money that
+       wanders with the length of the words beside it cannot be read down. On a phone the
+       description drops under the name. */
+    <div className="grid grid-cols-[1fr_auto] sm:grid-cols-[minmax(9rem,11rem)_1fr_auto] items-baseline
+      gap-x-4 gap-y-0.5 py-4 border-b border-slate-100 last:border-b-0">
+      <div className="text-[15px] font-semibold text-slate-800">{who}</div>
+      <div className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1 text-[13px] text-slate-500">{what}</div>
+      <div className={clsx('col-start-2 row-start-1 sm:col-start-3 text-right text-lg font-semibold tabular-nums whitespace-nowrap',
+        lead ? 'text-positive-700' : amount < 0 ? 'text-gold-800' : 'text-slate-800')}>
+        {rand(amount)}
       </div>
     </div>
   )
 }
 
-function Figure({ label, value, small, tone }: {
-  label: string; value: string; small?: boolean; tone?: string
-}) {
+function Recon({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-4 flex items-baseline gap-4">
+      <div className="flex-1 text-[14px] text-slate-700">{label}</div>
+      <div className="text-[15px] font-semibold tabular-nums text-slate-800">{value}</div>
+    </div>
+  )
+}
+
+function Figure({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-300 mb-2">
         {label}
       </div>
-      <div className={clsx(
-        'font-medium tabular-nums leading-none',
-        small ? 'text-2xl' : 'text-3xl',
-        tone,
-      )}>
+      <div className={clsx('text-3xl lg:text-4xl font-semibold tabular-nums leading-none', tone)}>
         {value}
       </div>
-    </div>
-  )
-}
-
-function Party({ who, whose, note, amount, tone }: {
-  who: string; whose: string; note: string; amount: number; tone: string
-}) {
-  return (
-    <div className="flex items-center gap-4 px-5 py-4 border-b border-slate-100 last:border-b-0">
-      <div className={clsx('w-[3px] h-8 rounded-sm shrink-0', tone)} />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-slate-800">{who}</div>
-        {/* WHOSE IT IS, KEPT. The line above says what the money is waiting for; this says who
-            would be out of pocket if it went missing, which is the whole point of a trust. */}
-        <div className="text-[12.5px] text-slate-500 mt-0.5">
-          <span className="font-medium text-slate-600">{whose}</span> &middot; {note}
-        </div>
-      </div>
-      <div className="text-[17px] font-medium tabular-nums">{rand(amount)}</div>
     </div>
   )
 }

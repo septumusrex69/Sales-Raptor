@@ -207,27 +207,20 @@ try {
     /* AND THE VERDICT IS ON THE PANEL, so nobody has to know that R 0.00 is the good answer. */
     t.ok('...with the match stated rather than implied', /NOT MATCHED/i.test(body))
 
-    /* ---- does it balance? the panel the firm asked for, and it can say no ---- */
+    /* ---- the reconciliation the firm drew, and it does not say "match" over a hole ---- */
     /*
-     * THE FIRM: "if the trust fund balances in the overview, then everything is fine."
-     *
-     * THE RECONCILIATION THEIR SKETCH DREW CANNOT SAY NO -- ledger balance less the four owners is
-     * an algebraic identity, because trust_position derives the balance BY ADDING THEM UP. So the
-     * panel was built from the four things that can actually be wrong, and this fixture has a real
-     * shortfall in it: the assertion that matters is that the page says the account does NOT
-     * balance. Drawn as the sketch had it, this line would read "match" over a R 963,50 hole.
+     * THE FIRM'S REVISED DESIGN puts an "Ownership reconciliation" beside the owners: trust ledger
+     * balance, less amounts accounted for, unexplained difference. That line is nil by
+     * construction (trust_position builds the balance from the same parts), so what the panel has
+     * to get right is everything UNDER it -- and this fixture has a real R 963,50 shortfall. The
+     * assertion that matters is that the panel does not print "totals match" over it.
      */
-    t.ok('the page says whether the trust balances at all',
-      /The trust account does not balance\./.test(body))
-    t.ok('...asking whether every rand has an owner', /Does every rand in there have an owner\?/.test(body))
-    t.ok('...and answering it with the unplaced receipt', /R 485\.00 is in the account with nobody/.test(body))
-    /*
-     * THE CHECKS THAT PASS ARE SHOWN TOO. A panel drawing only problems cannot be told apart from
-     * one that failed to load, and the firm asked to be told that everything IS fine.
-     */
-    t.ok('...and the checks that pass are still drawn',
-      /No client owes the trust/.test(body))
-    t.ok('...including the payovers', /No cycle is holding client money past/.test(body))
+    t.ok('the reconciliation is drawn as the firm drew it',
+      /Ownership reconciliation/.test(body) && /Less: amounts accounted for/.test(body)
+        && /Unexplained difference/.test(body))
+    t.ok('...and it does not claim a match over a shortfall',
+      !/Bank, ledger and ownership totals match/.test(body))
+    t.ok('...it says what is outstanding: the unplaced receipt', /R 485\.00 is in the account with nobody/.test(body))
     /*
      * A TRUST DEBTOR IS NOT A SHORTFALL, and the words have to keep them apart: the cash is all
      * there, so sending somebody to the bank over a collection job is the failure here.
@@ -235,20 +228,14 @@ try {
     t.ok('a client in debit would not be called a shortfall',
       !/owes the trust[\s\S]{0,120}shortfall/.test(body) || /not a shortfall/.test(body))
 
-    /* ---- who owns it, named by what the money IS ---- */
-    /* CASE-INSENSITIVE: the heading carries `uppercase`, so innerText hands back WHO OWNS THE
-       MONEY IN TRUST? while the source says it in sentence case. The same trap as the state badge
-       sixty lines down, which this file already documents. */
+    /* ---- who owns it, whose first and what the money is beside it ---- */
     t.ok('the ownership question is asked', /Who owns the money in trust\?/i.test(body))
     for (const owner of [
       'Awaiting client payover', 'Earned and still held in trust',
-      'Overpayments and refunds outstanding', 'Owner not yet identified',
+      'Overpayments / refunds outstanding', 'Owner not yet identified',
     ]) {
       t.ok(`...and ${owner.toLowerCase()} is one of the answers`, body.includes(owner))
     }
-    /* WHOSE IT IS IS KEPT BESIDE IT. What the money is waiting for and who would be out of pocket
-       are two different facts and the second is the whole point of a trust. */
-    t.ok('...with whose money each one is', /Clients ·/.test(body) && /Bredell Ferreira ·/.test(body))
     t.ok('...summing to a total accounted for', /Total accounted for/i.test(body))
 
     /* ---- and it is EXPLAINED: both debits named, with the right action on each ---- */
@@ -272,7 +259,10 @@ try {
      * -- and an assertion on the source spelling fails on correct code. Everything else here is
      * matched as written because nothing else on this screen is transformed.
      */
-    t.ok('the open one says it is still filling up', /collecting now/i.test(body))
+    /* NAMED AS THE FIRM NAMES THEM: Running for the open period, Previous for the one waiting. */
+    t.ok('the open one is the running period', /Running · 11 Sep – 10 Oct 2026/.test(body))
+    t.ok('...and the closed one the previous', /Previous · 11 Aug – 10 Sep 2026/.test(body))
+    t.ok("...and the running period's payover is provisional", /provisional/.test(body))
 
     /*
      * AND THE ONE THAT LEAVES SOONEST IS DRAWN FIRST. The screen does not sort -- the order is the
@@ -283,8 +273,8 @@ try {
         && body.indexOf('11 Aug – 10 Sep 2026') >= 0, true)
 
     /* THE DAY EACH ONE LEAVES, which is the thing the firm asked for by name. */
-    t.ok('the closed cycle quotes its payover date', body.includes('11 Oct 2026'))
-    t.ok('...and the open one quotes its own', body.includes('11 Nov 2026'))
+    t.ok('the closed cycle quotes its payover date', body.includes('Payover 11 October 2026'))
+    t.ok('...and the open one quotes its own', body.includes('Payover 11 November 2026'))
 
     /* WHAT EACH ONE HOLDS, FOR THE CLIENT AND FOR THE FIRM, SEPARATELY. */
     t.ok("last month's client money is on the page", /R 1 920\.40/.test(body))
@@ -307,14 +297,10 @@ try {
      * assertion passed with the whole cycle table deleted. The client half did fail, which is
      * exactly how an assertion that is half vacuous hides.
      */
-    /* THE ROW, NOT THE LABEL INSIDE IT. `.filter({hasText})` matches every ancestor too, so the
-       innermost match is the <div> holding the words alone -- which carries no figures at all. The
-       row is its parent, and XPath is the one selector that can say so. */
-    const totalsAt = page
-      .locator('xpath=//div[normalize-space(text())="Across every cycle"]/..').first()
+    /* THE ROW, read by its own label: a <tr> holds every cell, so its text is the whole line. */
+    const totalsAt = page.locator('tfoot tr', { hasText: 'All periods' }).first()
     /* COUNTED BEFORE IT IS READ. innerText on a locator that matches nothing waits out the whole
-       timeout and then throws, which fails the run thirty seconds later as a crash rather than
-       here as a named assertion -- the "read defensively" trap CLAUDE.md names. */
+       timeout and then throws -- the "read defensively" trap CLAUDE.md names. */
     const hasTotals = (await totalsAt.count()) > 0
     t.ok('the bands carry a totals row', hasTotals)
     const totalsRow = hasTotals ? plain(await totalsAt.innerText()) : ''
@@ -334,6 +320,14 @@ try {
     for (const who of ['Clients', 'Debtors', 'Bredell Ferreira', 'Unallocated receipts']) {
       t.ok(`${who} has a line`, body.includes(who))
     }
+    /* THE FIRM'S LAYOUT, IN ITS ORDER: figures, then who owns it, then the periods. */
+    t.check('the ownership block comes before the periods',
+      body.indexOf('Who owns the money in trust?') >= 0
+        && body.indexOf('Who owns the money in trust?') < body.indexOf('Collections by period'), true)
+    await t.shot(page, 'trust-overview')
+    /* The app scrolls inside <main>, so a full-page shot is only the top; the periods need their own. */
+    await page.locator('table').first().evaluate((el) => el.scrollIntoView({ block: 'end' }))
+    await t.shot(page, 'trust-overview-periods')
     t.ok('the firm knows what it may draw', /R 4 420\.07/.test(body))
 
     /* ---- the rail folds, and folded it STILL says which book you are in ---- */

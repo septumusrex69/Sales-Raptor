@@ -281,18 +281,39 @@ ok('...and still reads the position', /fetchTrustPosition\(\)/.test(page))
  * as the two RECORDS they are: "in the bank" against "owed out of it" is a comparison between a
  * place and a consequence, and only one of those is a record anybody keeps.
  */
-const from = page.indexOf('\n            Who owns the money in trust?\n')
-const control = from < 0 ? '' : page.slice(from, page.indexOf('Owed back to the trust', from))
-ok('the control block was found', control.length > 500 && control.length < 5000)
-/* PRESENCE BEFORE ORDER, ALWAYS. `indexOf` returns -1, so an order-only assertion passes
-   vacuously the day the line it orders is deleted -- the trap this suite has been caught by. */
+/*
+ * NOW THE FIRM'S REVISED DESIGN: the owners on the left ending on "Total accounted for", and an
+ * "Ownership reconciliation" beside them that reads DOWN to a difference -- trust ledger balance,
+ * less amounts accounted for, unexplained difference. Asserted in that order, presence first.
+ */
+const from = page.indexOf('Who owns the money in trust?')
+const control = from < 0 ? '' : page.slice(from, page.indexOf('Collections by period', from))
+ok('the ownership block was found', control.length > 500 && control.length < 12000)
 let at = -1
-for (const line of ['Total accounted for', 'Bank balance', 'Bank / ledger difference']) {
-  const found = control.search(new RegExp(`(^\\s*|>)${line}(\\n|<)`, 'm'))
-  ok(`the control block carries "${line}"`, found >= 0)
+for (const line of ['Total accounted for', 'Ownership reconciliation', 'Trust ledger balance',
+  'Less: amounts accounted for', 'Unexplained difference']) {
+  const found = control.indexOf(line)
+  ok(`the ownership block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)
   at = found
 }
+/*
+ * THE DIFFERENCE IS ADDED UP ON THE SCREEN, from the parts -- not handed back as one more figure.
+ * And the client in debit is subtracted, or the total would disagree with the ledger by exactly
+ * that amount on the day a client owes the trust.
+ */
+ok('accounted for is summed from the four owners, less clients in debit',
+  /position\.owedToClients \+ position\.owedToFirm \+ position\.owedToDebtors\s*\+ position\.unidentified - position\.owedByClients/
+    .test(page))
+ok('...and the unexplained difference is the ledger less that sum',
+  /const unexplained = r2\(position\.netOwed - accounted\)/.test(page))
+/*
+ * AND IT ONLY SAYS "MATCH" WHEN NOTHING IS OPEN. A reconciliation that read R 0.00 and "totals
+ * match" over a bank shortfall is the failure this whole screen exists to prevent.
+ */
+ok('"totals match" is said only when no check is open',
+  /open\.length === 0 \? \(\s*<p[^>]*>Bank, ledger and ownership totals match\.<\/p>/.test(page))
+
 /*
  * TODAY IS READ ON THE FIRM'S CLOCK. "How many days until the 11th" against a browser in another
  * zone is wrong for a third of every day, and toISOString would hand back UTC.
