@@ -152,9 +152,28 @@ export function decodeQuotedPrintable(input: string): Buffer {
  * Not academic: a good deal of South African business mail still goes out as windows-1252, and
  * reading that as UTF-8 turns every apostrophe and rand sign into a replacement character.
  */
+/*
+ * WINDOWS-1252'S OWN 32 CHARACTERS, 0x80 to 0x9F -- the curly quotes, the dashes, the euro.
+ *
+ * WRITTEN OUT BECAUSE NODE GOT THEM WRONG. Node 22.22's TextDecoder hands back windows-1252 as if
+ * it were Latin-1, so these bytes become invisible C1 control characters: "die firm’s" arrived as
+ * "die firms", and in a debtor's reply the apostrophe is not the only thing that goes -- an en dash
+ * in "R1 200 – R1 500" vanishes too. Every other byte is the same in both, so correcting this one
+ * band is the whole fix, and it is a no-op on a runtime that decodes correctly. The five holes in
+ * the table (0x81, 0x8D, 0x8F, 0x90, 0x9D) stay as they are, which is what the WHATWG table says.
+ */
+const CP1252_HIGH = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f'
+  + '\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178'
+
 export function toText(buf: Buffer, charset?: string): string {
   try {
-    return new TextDecoder(charset || 'utf-8').decode(buf)
+    const decoder = new TextDecoder(charset || 'utf-8')
+    const text = decoder.decode(buf)
+    /* `encoding` is the resolved name, so iso-8859-1 and us-ascii -- which the standard defines as
+       windows-1252 labels -- are corrected too. */
+    return decoder.encoding === 'windows-1252'
+      ? text.replace(/[\u0080-\u009f]/g, (c) => CP1252_HIGH[c.charCodeAt(0) - 0x80])
+      : text
   } catch {
     // An unknown or misspelt charset label. UTF-8 is right far more often than not.
     return buf.toString('utf8')

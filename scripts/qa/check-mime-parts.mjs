@@ -156,6 +156,13 @@ check('7bit is already the bytes', decodeTransfer(Buffer.from('Goeie dag'), '7bi
 check('windows-1252 is decoded as windows-1252',
   toText(Buffer.from([0x64, 0x69, 0x65, 0x20, 0x66, 0x69, 0x72, 0x6d, 0x92, 0x73]), 'windows-1252'),
   'die firm’s')
+/* THE WHOLE BAND, not one apostrophe: Node 22.22 decoded all of 0x80-0x9F as invisible control
+   characters. Euro, en dash, both double quotes and the trade mark, through a label that resolves to
+   windows-1252 (iso-8859-1 does, by the standard), and a hole in the table left alone. */
+check('...every character of its own band, through any label that means it',
+  toText(Buffer.from([0x80, 0x96, 0x93, 0x94, 0x99, 0x81]), 'iso-8859-1'),
+  '\u20ac\u2013\u201c\u201d\u2122\u0081')
+check('...and real Latin-1 letters are untouched', toText(Buffer.from([0xe9, 0xeb]), 'windows-1252'), 'éë')
 check('an unknown charset label falls back rather than throwing',
   toText(Buffer.from('Goeie dag'), 'utf-8879'), 'Goeie dag')
 
