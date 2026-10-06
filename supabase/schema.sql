@@ -25959,3 +25959,142 @@ begin
 
   return p_period_start;
 end $$;
+
+-- ============================================================================================
+-- WHAT IS IN THE TRUST, AND WHOSE PAYOVER IS IT WAITING FOR
+--
+-- THE FIRM, LOOKING AT THE OVERVIEW: "it should reflect everything that is currently in the trust.
+-- How much money is currently in the trust? And what is for this month's payover? And what is for
+-- next month's payover? ... if we're on the 6th of October, the money for last month that was
+-- running from the 10th of August to the 11th of September has not been paid out on the 11th of
+-- October. So that money's in there. Plus, money from the 11th of September to the 6th of October
+-- is in there as well."
+--
+-- Which is the question the overview could not answer. `trust_position` says how much is held and
+-- `trust_balances` says whose it is, and BOTH ARE TIMELESS -- one running total per party with no
+-- sense that the money in there belongs to two different payover runs falling due a month apart.
+-- A client's R8 000 and the firm's R2 000 are one figure each, and nobody can tell from the screen
+-- which of it goes out on the 11th and which is still being collected.
+--
+-- EVERY ENTRY BELONGS TO EXACTLY ONE CYCLE, AND THE RUN DECIDES IT WHERE THERE IS ONE.
+-- The order of the coalesce is the whole correctness of this:
+--   1. the payover run it was paid by -- so the negative entry that pays a cycle out lands in the
+--      SAME bucket as the positive ones it cancels, and a paid cycle nets to nil and disappears
+--      rather than hanging about as a credit in whichever month the EFT happened to clear;
+--   2. the receipt behind it, which is what build_payover_run itself claims on (`p.created_at`
+--      between the cycle's bounds), so a bucket here holds precisely what that run will;
+--   3. the receipt behind its ALLOCATION, which is how a parked credit taken to the firm months
+--      later still lands in the cycle the overpayment arose in;
+--   4. failing all three, the day it was written -- a bank charge, a correction, a drawing.
+--
+-- IT TIES TO `trust_position` COLUMN BY COLUMN, and that is deliberate rather than pleasant: the
+-- client column sums to `owed_to_clients`, the debtor column to `owed_to_debtors`, and the firm's
+-- two columns together to `owed_to_firm`. One of the two arithmetics drifting from the other is
+-- the failure CLAUDE.md names -- the same money described two ways on two halves of one screen --
+-- so check-trust-cycles holds the sums against the position in the database rather than trusting
+-- that they agree.
+--
+-- THE FIRM'S OWN MONEY IS SPLIT IN TWO AND THE SPLIT IS NOT COSMETIC. `firm_earned` is what a
+-- cycle's receipts earned the firm; `firm_moved` is everything else -- above all a DRAWING to the
+-- business account, which is made against the whole pot and not against a month. Added together
+-- in one column, the month somebody drew would read as a month the firm earned nothing, which is
+-- a statement about an EFT dressed up as one about the business.
+-- ============================================================================================
+
+-- WHEN A CLOSED CYCLE IS ACTUALLY PAID OVER, AND IT IS A SETTING BECAUSE THE FIRM HAS NOT
+-- CONFIRMED THE RULE. Their words put the 11 Aug - 10 Sep money out on the 11th of OCTOBER, a
+-- month after the cycle closed rather than the day after -- so one month is the default and the
+-- formula degrades correctly: a lag of 0 pays 11 Sep, which is the other reading of the same
+-- sentence. It is a date about client money, so it is the firm's to name, not a constant to guess.
+alter table public.firm_settings
+  add column if not exists payover_lag_months integer not null default 1;
+
+create or replace function public.payover_pays_on(p_period_end date)
+returns date
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select (p_period_end
+          + make_interval(months => coalesce(
+              (select payover_lag_months from public.firm_settings limit 1), 1))
+          + interval '1 day')::date
+$$;
+-- FROM PUBLIC AS WELL AS anon. Postgres grants EXECUTE on every new function to PUBLIC, and
+-- anon inherits it -- so revoking from anon alone leaves the function callable by a visitor
+-- with no session at all. Proved on staging: this one carried `=X/postgres` in its ACL while
+-- every neighbouring trust function did not.
+revoke execute on function public.payover_pays_on(date) from public, anon;
+grant execute on function public.payover_pays_on(date) to authenticated;
+comment on function public.payover_pays_on(date) is
+  'The day a cycle ending on p_period_end is paid over to clients: firm_settings.payover_lag_months after it closed, plus a day. Lag 1 (the default) puts 10 Sep out on 11 Oct.';
+
+create or replace function public.trust_by_cycle()
+returns table (
+  period_start date, period_end date, pays_on date, is_open boolean,
+  to_clients numeric, firm_earned numeric, firm_moved numeric,
+  to_debtors numeric, unplaced numeric, held numeric,
+  runs integer, runs_paid integer, runs_to_do integer)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with today as (select (now() at time zone 'Africa/Johannesburg')::date as d),
+  placed as (
+    select
+      coalesce(
+        r.period_start,
+        public.payover_cycle_start(p.created_at),
+        public.payover_cycle_start(ap.created_at),
+        public.payover_cycle_start(e.entry_at)) as cyc,
+      e.party,
+      e.amount,
+      -- A FIRM ENTRY WITH A RECEIPT BEHIND IT WAS EARNED. One without is a drawing, a correction
+      -- or a parked credit taken over, and none of those is a month's earnings.
+      (e.payment_id is not null or e.allocation_id is not null) as from_receipt
+      from public.trust_creditor_entries e
+      left join public.account_payments p on p.id = e.payment_id
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.payover_runs r on r.id = e.payover_run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client'), 0) as to_clients,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_moved,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as to_debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unplaced,
+      coalesce(sum(amount), 0) as held
+      from placed
+     group by cyc
+  )
+  select a.cyc,
+         public.payover_cycle_end(a.cyc),
+         public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         t.d <= public.payover_cycle_end(a.cyc),
+         round(a.to_clients, 2), round(a.firm_earned, 2), round(a.firm_moved, 2),
+         round(a.to_debtors, 2), round(a.unplaced, 2), round(a.held, 2),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status <> 'void'), 0),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status = 'paid'), 0),
+         -- WHAT IS LEFT TO DO ON IT, which is the actionable half: a closed cycle with money in it
+         -- and nothing built is a different problem from one where four runs are sitting approved.
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc
+                      and r.status in ('draft', 'approved', 'sent')), 0)
+    from agg a, today t
+   where public.has_capability('finance.view')
+     -- A CYCLE THAT NETS TO NOTHING IS A CYCLE THAT HAS BEEN PAID, and drawing it as a row of
+     -- zeroes would bury the two that have not under a year of settled months.
+     and (round(a.held, 2) <> 0 or round(a.to_clients, 2) <> 0
+          or round(a.firm_earned, 2) <> 0 or round(a.to_debtors, 2) <> 0)
+   order by a.cyc desc
+$$;
+revoke execute on function public.trust_by_cycle() from public, anon;
+grant execute on function public.trust_by_cycle() to authenticated;
+comment on function public.trust_by_cycle() is
+  'The trust balance split by the payover cycle each entry belongs to, newest first. Ties to trust_position: the client column sums to owed_to_clients, the debtor column to owed_to_debtors, and firm_earned + firm_moved to owed_to_firm.';

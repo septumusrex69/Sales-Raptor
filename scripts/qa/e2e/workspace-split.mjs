@@ -100,6 +100,33 @@ const MONTH = {
   expenses: 26000.00, expenses_vat: 3900.00, made: -19624.93,
 }
 
+/*
+ * THE SAME TRUST BALANCE, SPLIT BY THE PAYOVER EACH PART OF IT IS WAITING FOR.
+ *
+ * THE FIRM: "if we're on the 6th of October, the money for last month that was running from the
+ * 10th of August to the 11th of September has not been paid out on the 11th of October. So that
+ * money's in there. Plus, money from the 11th of September to the 6th of October is in there as
+ * well." Two cycles at once, which is the whole reason this exists -- and this fixture is their
+ * example, on their day.
+ *
+ * IT ADDS UP TO `POSITION` ON PURPOSE, TO THE CENT. 1 920.40 + 637.50 is the 2 557.90 owed to
+ * clients and 3 310.07 + 1 110.00 is the 4 420.07 the firm may draw. The bands and the control
+ * block are the same money read twice, so a fixture where they disagreed would let the screen pass
+ * while drawing two different trust accounts one above the other.
+ */
+const CYCLES = [
+  {
+    period_start: '2026-09-11', period_end: '2026-10-10', pays_on: '2026-11-11', is_open: true,
+    to_clients: 637.50, firm_earned: 1110.00, firm_moved: 0, to_debtors: 0, unplaced: 0,
+    held: 1747.50, runs: 0, runs_paid: 0, runs_to_do: 0,
+  },
+  {
+    period_start: '2026-08-11', period_end: '2026-09-10', pays_on: '2026-10-11', is_open: false,
+    to_clients: 1920.40, firm_earned: 3310.07, firm_moved: 0, to_debtors: 410.63, unplaced: 0,
+    held: 5641.10, runs: 1, runs_paid: 0, runs_to_do: 1,
+  },
+]
+
 function handlersFor(profile) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [profile] })],
@@ -108,6 +135,7 @@ function handlersFor(profile) {
     [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
     [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
+    [(u) => /\/rpc\/trust_by_cycle/.test(u), () => ({ body: CYCLES })],
     [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: [MONTH] })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
@@ -170,6 +198,64 @@ try {
     /* A bank charge has no run to match, so it must NOT offer to match it to one. */
     t.ok('the bank charge is named', /Bank charge/.test(body))
     t.ok('...and is offered no run to match', /Find its run/.test(body))
+
+    /* ---- the two cycles in the account at once ---- */
+    /*
+     * THE QUESTION THE OLD SCREEN COULD NOT ANSWER. One running total per party is a true figure
+     * that answers neither "what goes out on the 11th" nor "what have we collected this month",
+     * and those are the two things somebody standing in front of this screen wants.
+     */
+    t.ok('the closed cycle names itself', body.includes('11 Aug – 10 Sep 2026'))
+    t.ok('...and the one still collecting does too', body.includes('11 Sep – 10 Oct 2026'))
+    /*
+     * CASE-INSENSITIVE, BECAUSE `innerText` IS THE RENDERED TEXT. The state badge carries
+     * `uppercase`, so the browser hands back COLLECTING NOW while the source says "Collecting now"
+     * -- and an assertion on the source spelling fails on correct code. Everything else here is
+     * matched as written because nothing else on this screen is transformed.
+     */
+    t.ok('the open one says it is still filling up', /collecting now/i.test(body))
+
+    /* THE DAY EACH ONE LEAVES, which is the thing the firm asked for by name. */
+    t.ok('the closed cycle quotes its payover date', body.includes('11 Oct 2026'))
+    t.ok('...and the open one quotes its own', body.includes('11 Nov 2026'))
+
+    /* WHAT EACH ONE HOLDS, FOR THE CLIENT AND FOR THE FIRM, SEPARATELY. */
+    t.ok("last month's client money is on the page", /R 1 920\.40/.test(body))
+    t.ok('...and what it earned the firm', /R 3 310\.07/.test(body))
+    t.ok("this month's so far is on the page", /R 637\.50/.test(body))
+    t.ok('...and what that has earned the firm', /R 1 110\.00/.test(body))
+
+    /* A CLOSED CYCLE WITH CLIENT MONEY AND A RUN NOT YET PAID SAYS WHAT IS LEFT TO DO ON IT. */
+    t.ok('the closed cycle says what is outstanding on it',
+      body.includes('1 run still to be approved and paid'))
+
+    /*
+     * THE TIE-OUT, AND IT IS THE POINT OF DRAWING BOTH. The bands and the control block are the
+     * same money read twice, so the totals row under the bands has to carry the SAME two figures
+     * the control block does.
+     *
+     * READ OUT OF THE TOTALS ROW ITSELF, not counted across the page. Counting occurrences looked
+     * like a tie-out and was not: R 4 420.07 already appears twice without the bands existing at
+     * all -- once in the control block and once on "Yours to draw" -- so the firm's half of that
+     * assertion passed with the whole cycle table deleted. The client half did fail, which is
+     * exactly how an assertion that is half vacuous hides.
+     */
+    /* THE ROW, NOT THE LABEL INSIDE IT. `.filter({hasText})` matches every ancestor too, so the
+       innermost match is the <div> holding the words alone -- which carries no figures at all. The
+       row is its parent, and XPath is the one selector that can say so. */
+    const totalsAt = page
+      .locator('xpath=//div[normalize-space(text())="Across every cycle"]/..').first()
+    /* COUNTED BEFORE IT IS READ. innerText on a locator that matches nothing waits out the whole
+       timeout and then throws, which fails the run thirty seconds later as a crash rather than
+       here as a named assertion -- the "read defensively" trap CLAUDE.md names. */
+    const hasTotals = (await totalsAt.count()) > 0
+    t.ok('the bands carry a totals row', hasTotals)
+    const totalsRow = hasTotals ? plain(await totalsAt.innerText()) : ''
+    t.ok('the client bands total to the control block', /R 2 557\.90/.test(totalsRow))
+    t.ok("the firm's bands total to what it may draw", /R 4 420\.07/.test(totalsRow))
+
+    /* AND THE SCREEN SAYS WHERE THE DATE IT QUOTES COMES FROM, because Raptor guessed it. */
+    t.ok('the guessed payover date points at its setting', body.includes('a trust setting'))
 
     /* ---- the four parties ---- */
     for (const who of ['Clients', 'Debtors', 'Bredell Ferreira', 'Not yet identified']) {

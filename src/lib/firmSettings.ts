@@ -131,6 +131,7 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     vat_rate: next.vatRate,
     time_zone: next.timeZone,
     parked_credit_months: next.parkedCreditMonths,
+    payover_lag_months: next.payoverLagMonths,
     /*
      * WRITTEN BACK LIKE EVERY OTHER FIELD, AND THE DATABASE IS WHAT KEEPS IT SAFE.
      *

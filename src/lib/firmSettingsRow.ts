@@ -34,6 +34,7 @@ export const COLUMNS = 'firm_name, registration_number, vat_number, council_numb
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
   + 'email_font, email_size_pt, vat_rate, time_zone, finance_cutover_at, parked_credit_months, '
+  + 'payover_lag_months, '
   + 'updated_at'
 
 export interface Row {
@@ -66,6 +67,7 @@ export interface Row {
   vat_rate: number | string
   time_zone: string
   parked_credit_months: number | null
+  payover_lag_months: number | null
   finance_cutover_at: string | null
   updated_at: string
 }
@@ -141,6 +143,17 @@ export interface FirmSettings {
    */
   parkedCreditMonths: number
   /**
+   * HOW LONG AFTER A CYCLE CLOSES IT IS ACTUALLY PAID OVER, IN MONTHS.
+   *
+   * ALSO NOT YET THE FIRM'S DECISION. Describing the trust on the 6th of October they put the
+   * 11 Aug - 10 Sep money out "on the 11th of October" -- a month after that cycle closed, not the
+   * day after -- so one is the default. A lag of 0 pays 11 September instead, which is the other
+   * reading of the same sentence, and the formula handles both: `payover_pays_on` adds the lag to
+   * the cycle end and then a day. It is the date the firm promises a client their money, so it is
+   * theirs to name rather than a constant to guess at.
+   */
+  payoverLagMonths: number
+  /**
    * WHEN THE ALLOCATION ENGINE STARTS SPLITTING PAYMENTS, AND NULL UNTIL THE FIRM SAYS SO.
    *
    * Payments CAPTURED on or after this are split by Raptor; everything earlier keeps the outcome
@@ -194,6 +207,7 @@ export const FIRM_UNSET: FirmSettings = {
   /* The zone every date in this codebase already names literally, in one place for once. */
   timeZone: 'Africa/Johannesburg',
   parkedCreditMonths: 6,
+  payoverLagMonths: 1,
   /* Off. An engine that switched itself on across the whole book would not be undoable. */
   financeCutoverAt: null,
   updatedAt: '',
@@ -238,6 +252,7 @@ export function toSettings(r: Row): FirmSettings {
        calendar that stops placing floating invitations -- the state this column exists to end. */
     timeZone: r.time_zone || 'Africa/Johannesburg',
     parkedCreditMonths: r.parked_credit_months ?? 6,
+    payoverLagMonths: r.payover_lag_months ?? 1,
     financeCutoverAt: r.finance_cutover_at ?? null,
     updatedAt: r.updated_at,
   }

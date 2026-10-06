@@ -46,6 +46,7 @@ export function FinanceSettings() {
   const [tariffs, setTariffs] = useState<Tariff[]>([])
   const [vatRate, setVatRate] = useState<number | null>(null)
   const [cutover, setCutover] = useState<string | null>(null)
+  const [lag, setLag] = useState<number>(1)
   const [allocations, setAllocations] = useState(0)
   const [changes, setChanges] = useState<SettingChange[]>([])
   const [rates, setRates] = useState<{ id: string; name: string; code: string | null; rate: number | null; banded: boolean; accounts: number }[]>([])
@@ -59,15 +60,16 @@ export function FinanceSettings() {
     try {
       const [t, f, a, c] = await Promise.all([
         supabase.from('annexure_b_tariffs').select('*').order('item').order('effective_from', { ascending: false }),
-        supabase.from('firm_settings').select('vat_rate, finance_cutover_at').limit(1).maybeSingle(),
+        supabase.from('firm_settings').select('vat_rate, finance_cutover_at, payover_lag_months').limit(1).maybeSingle(),
         supabase.from('payment_allocations').select('id', { count: 'exact', head: true }),
         supabase.from('companies').select('id, name, code, commission_rate, commission_bands'),
       ])
       if (t.error) throw new Error(t.error.message)
       setTariffs((t.data ?? []) as unknown as Tariff[])
-      const fs = f.data as { vat_rate: number | string; finance_cutover_at: string | null } | null
+      const fs = f.data as { vat_rate: number | string; finance_cutover_at: string | null; payover_lag_months: number | null } | null
       setVatRate(fs ? Number(fs.vat_rate) : null)
       setCutover(fs?.finance_cutover_at ?? null)
+      setLag(fs?.payover_lag_months ?? 1)
       setAllocations(a.count ?? 0)
       /* HOW MANY ACCOUNTS A RATE WOULD MOVE, counted in the database rather than by loading the
          book: this screen must not become the thing that pulls 23 000 rows into a browser. */
@@ -93,6 +95,25 @@ export function FinanceSettings() {
 
   useEffect(() => { void load() }, [load])
 
+  /*
+   * WRITTEN STRAIGHT, NOT THROUGH saveFirmSettings. That one writes the WHOLE row back, and this
+   * screen never loaded the other twenty-eight columns -- saving from here would blank the firm's
+   * address on a letterhead because somebody changed a payover date.
+   */
+  const saveLag = useCallback(async (months: number) => {
+    const before = lag
+    setLag(months)
+    const { error: e } = await supabase.from('firm_settings')
+      .update({ payover_lag_months: months }).eq('id', true)
+    if (e) { setLag(before); setError(e.message); return }
+    await logSettingChange({
+      setting: 'payover_lag_months',
+      oldValue: payoverLagLabel(before), newValue: payoverLagLabel(months),
+      reason: 'Changed on the trust settings screen',
+    })
+    await load()
+  }, [lag, load])
+
   const frozen = allocations > 0
 
   return (
@@ -107,7 +128,7 @@ export function FinanceSettings() {
 
       {!loading && (
         <>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <Card>
               <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">VAT rate</div>
               <div className="mt-1 flex items-baseline gap-3">
@@ -139,6 +160,44 @@ export function FinanceSettings() {
                   change which payments were ever in scope without changing a row that says so.
                 </p>
               )}
+            </Card>
+
+            {/*
+              WHEN A CLOSED CYCLE IS ACTUALLY PAID OVER -- AND THIS IS THE ONE SETTING ON THE SCREEN
+              RAPTOR GUESSED. The firm, describing the trust on the 6th of October: the 11 Aug -
+              10 Sep money "has not been paid out on the 11th of October". That is a month after
+              the cycle closed rather than the day after, so one month is the default -- but it is
+              a guess at a date the firm promises a client their money, and the trust overview now
+              prints it beside every cycle. A box that says so is cheaper than a wrong date on a
+              screen about client money.
+
+              NO REASON ASKED, UNLIKE THE OTHER TWO. The VAT rate and a commission rate restate
+              money already moved; this moves no figure at all -- it names a day, and every amount
+              on either side of it is unchanged. An audit line is still written, because "who
+              decided we pay on the 11th of the next month" is a question somebody will ask.
+            */}
+            <Card>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
+                When a payover is paid
+              </div>
+              <div className="mt-1 flex items-baseline gap-3">
+                <span className="text-[22px] font-medium tabular-nums text-slate-800">
+                  {payoverLagLabel(lag)}
+                </span>
+                <select
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12.5px] font-medium text-slate-700"
+                  value={lag}
+                  onChange={(e) => { void saveLag(Number(e.target.value)) }}>
+                  {[0, 1, 2].map((m) => (
+                    <option key={m} value={m}>{payoverLagLabel(m)}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                A cycle closing on 10 September is paid over on {payoverLagExample(lag)}. Raptor
+                guessed this one &mdash; it is the date the trust overview quotes beside every
+                cycle still holding money.
+              </p>
             </Card>
           </div>
 
@@ -372,4 +431,23 @@ function ChangeModal({ title, label, current, note, onClose, onSave }: {
       </div>
     </Modal>
   )
+}
+
+/**
+ * THE LAG IN THE FIRM'S WORDS, NOT IN MONTHS.
+ *
+ * "1" on its own is meaningless on a settings card: a month after WHAT. Both halves of the
+ * sentence are drawn, here and in the note under it, because the only way somebody can tell this
+ * box is set wrongly is by reading the date it produces.
+ */
+function payoverLagLabel(months: number): string {
+  if (months === 0) return 'The day after it closes'
+  if (months === 1) return 'A month later'
+  return `${months} months later`
+}
+
+/** The same rule as a date somebody can check against their own bank statement. */
+function payoverLagExample(months: number): string {
+  const month = ['Sep', 'Oct', 'Nov', 'Dec'][Math.min(Math.max(months, 0), 3)]
+  return `11 ${month}`
 }

@@ -1,4 +1,7 @@
 import { supabase } from './supabase'
+import type { TrustCycle } from './trustCycles.ts'
+
+export type { TrustCycle } from './trustCycles.ts'
 
 /**
  * THE TRUST ACCOUNT, READ BACK.
@@ -135,5 +138,37 @@ export async function fetchTrustBalances(): Promise<TrustBalance[]> {
     balance: n(r.balance),
     entries: Number(r.entries ?? 0),
     lastAt: (r.last_at as string | null) ?? null,
+  }))
+}
+
+/**
+ * THE SAME MONEY, SPLIT BY THE PAYOVER IT IS WAITING FOR.
+ *
+ * `trust_position` is timeless -- one running total per party -- and the firm asked the question it
+ * cannot answer: "what is for this month's payover? And what is for next month's payover?" On the
+ * 6th of October the trust holds two of them at once, a closed cycle due out on the 11th and an
+ * open one four days from closing, and the position adds them together.
+ *
+ * ONE RPC AND NO SUMMING UP HERE, for the reason every other figure on this screen is read rather
+ * than computed: the bucket sums ARE `trust_position`'s party totals, and a browser that re-derived
+ * them would be a second arithmetic for one trust balance.
+ */
+export async function fetchTrustCycles(): Promise<TrustCycle[]> {
+  const { data, error } = await supabase.rpc('trust_by_cycle')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    periodStart: String(r.period_start),
+    periodEnd: String(r.period_end),
+    paysOn: String(r.pays_on),
+    isOpen: Boolean(r.is_open),
+    toClients: n(r.to_clients),
+    firmEarned: n(r.firm_earned),
+    firmMoved: n(r.firm_moved),
+    toDebtors: n(r.to_debtors),
+    unplaced: n(r.unplaced),
+    held: n(r.held),
+    runs: Number(r.runs ?? 0),
+    runsPaid: Number(r.runs_paid ?? 0),
+    runsToDo: Number(r.runs_to_do ?? 0),
   }))
 }
