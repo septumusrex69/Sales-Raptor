@@ -51,6 +51,12 @@ const remote = []
  * including a message read a minute before. A message Raptor already holds must cost none.
  */
 const bodyCalls = []
+/*
+ * ROWS THAT ARE PAST THE FIRST PAGE: answered by id, never by a list. A message a week old is not
+ * in the fifty a tab loads, and that is the case a link to it has to survive -- see "a link that
+ * names a message" below.
+ */
+const offPage = new Set()
 
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
@@ -122,7 +128,7 @@ const handlers = [
          SIGNED-IN PERSON as the message being asked for, so every list came back empty. */
       const oneId = /[?&]id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
       if (oneId) return { body: MAIL.filter((m) => m.id === oneId) }
-      let rows = MAIL
+      let rows = MAIL.filter((m) => !offPage.has(m.id))
       if (has('is_sent=eq.true')) rows = rows.filter((m) => m.is_sent)
       else if (has('is_filed=eq.true')) rows = rows.filter((m) => m.is_filed)
       else if (has('no_record_at=not.is.null')) rows = rows.filter((m) => m.no_record_at)
@@ -1041,6 +1047,62 @@ try {
   t.check('...and the offer is gone, because it has been taken',
     await page.getByText('Pictures in this message were not downloaded').count(), 0)
   await t.shot(page, '28-mail-newsletter-pictures')
+
+  /* ---------- a link that names a message opens THAT message ---------- */
+
+  /*
+   * THE CALENDAR'S "Open the invitation". The firm: "If I open an invitation from the calendar, it
+   * just takes me [to the mailbox]. It should just take me to ... Actual email." The page looked for
+   * the id only in the list the All tab loaded, so a message anywhere else never matched and the
+   * pane said "Pick a message on the left".
+   *
+   * A JUNK MESSAGE, because it is the hardest case and the one only a browser can see: All is
+   * loaded first, the row is not in it, so the page has to fetch it by id, move to Junk, and wait
+   * for JUNK'S list before putting it there -- a row added a render early is thrown away by the
+   * load that follows, and the pane empties a moment after it opened. Hence the second look.
+   */
+  const junkMail = MAIL.find((m) => m.is_junk && !m.is_sent)
+  const openByLink = async () => {
+    await page.goto(`http://localhost:${PORT}/mail?message=${junkMail.id}`)
+    await page.getByRole('heading', { name: 'Raptor Mail', exact: true }).waitFor({ timeout: 20000 })
+  }
+  const junkTab = () => page.getByRole('button', { name: /^Junk/ }).first()
+
+  /* IN THE LIST, where an open message is the one row expanded with its own actions under it. */
+  await openByLink()
+  await page.getByRole('button', { name: 'Mark unread' }).first().waitFor({ timeout: 10000 })
+  t.check('list: the link moves to the tab that holds the message', await junkTab().getAttribute('aria-pressed'), 'true')
+  await page.waitForTimeout(1200)
+  t.check('list: ...and exactly one message is open once Junk\'s own list has landed',
+    await page.getByRole('button', { name: 'Mark unread' }).count(), 1)
+  t.ok('list: ...and it is the one asked for', await page.getByText(junkMail.snippet).first().isVisible())
+  t.ok('list: ...and the ask is cleared from the address', !page.url().includes('message='))
+
+  /*
+   * IN THE READING PANE, which is the layout in the firm's screenshot: "Pick a message on the left".
+   * AND PAST THE FIRST PAGE OF JUNK, which is the order bug: the row has to be put into Junk's list
+   * after that list lands, or the load throws it away and the pane empties a moment after opening.
+   */
+  await page.getByRole('button', { name: 'Reading pane' }).click()
+  offPage.add(junkMail.id)
+  await openByLink()
+  const opened = page.locator('[aria-current="true"]', { hasText: junkMail.subject })
+  await opened.first().waitFor({ timeout: 10000 })
+  t.ok('pane: the named message is open from cold, though it is not in All', await opened.first().isVisible())
+  t.check('pane: ...on the tab that holds it', await junkTab().getAttribute('aria-pressed'), 'true')
+  await page.waitForTimeout(1200)
+  t.check('pane: ...and still open once the tab\'s own list has landed', await opened.count(), 1)
+  t.check('pane: ...with nothing else selected', await page.locator('[aria-current="true"]').count(), 1)
+  t.check('pane: ...and not the empty pane', await page.getByText('Pick a message on the left to read it.').count(), 0)
+  await t.shot(page, '28b-mail-opened-by-link')
+  offPage.clear()
+
+  /* AND ONE THAT IS GONE SAYS SO rather than leaving an empty pane to be puzzled over. */
+  await page.goto(`http://localhost:${PORT}/mail?message=aaaaaaa1-0000-4000-8000-0000000000ff`)
+  await page.getByRole('heading', { name: 'Raptor Mail', exact: true }).waitFor({ timeout: 20000 })
+  await page.getByText('That message is no longer in your mailbox').first().waitFor({ timeout: 10000 })
+  t.ok('a message that is gone is said, not swallowed',
+    await page.getByText('That message is no longer in your mailbox').first().isVisible())
 
   /* ---------- nothing broke on the way ---------- */
 

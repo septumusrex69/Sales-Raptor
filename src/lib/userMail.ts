@@ -282,6 +282,7 @@ function toItem(r: MailRow): MailItem {
 /* Declared with the rules rather than here, so bumpUnread can be imported and exercised without
    dragging a database client in with it. Re-exported because this is where callers look for it. */
 export type { MailFilter } from './emailRules'
+export { tabOf } from './emailRules'
 
 /**
  * A page of the mailbox.
@@ -472,6 +473,27 @@ export async function fetchMail(input: MailScope & {
   const rows = (data ?? []) as unknown as MailRow[]
   return { items: rows.slice(0, limit).map(toItem), more: rows.length > limit }
 }
+
+/**
+ * One message by its id, wherever in the mailbox it lives.
+ *
+ * FOR A LINK THAT NAMES A MESSAGE -- the calendar's "Open the invitation". The firm, after the
+ * first fix: "If I open an invitation from the calendar, it just takes me [to the mailbox]. It
+ * should just take me to ... Actual email." The page used to look for the id only in the page
+ * of the tab it happened to load, so an invitation older than the first fifty, or one the server
+ * had put in Junk, never matched and the person was left looking at "Pick a message".
+ *
+ * THROUGH THE SAME COLUMNS AND MAPPER AS THE LIST, so the row it returns is indistinguishable
+ * from one the list loaded -- a hand-built item here is a second mapper, and that is how a column
+ * goes quietly undefined. Null where the row is gone or is not this person's.
+ */
+export async function fetchMailItem(userId: string, id: string): Promise<MailItem | null> {
+  const { data, error } = await supabase
+    .from('user_emails').select(COLUMNS).eq('user_id', userId).eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  return data ? toItem(data as unknown as MailRow) : null
+}
+
 
 /*
  * THE "NEEDS NO RECORD" FUNCTIONS WENT WITH THE QUEUE.

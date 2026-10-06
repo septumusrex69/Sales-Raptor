@@ -25,7 +25,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-mail-folders.mjs
  */
 import { readFileSync } from 'node:fs'
-import { bumpUnread } from '../../src/lib/emailRules.ts'
+import { bumpUnread, tabOf } from '../../src/lib/emailRules.ts'
 import { looksLikeJunk, otherFolders } from '../../api/_lib/emailSync.ts'
 
 let pass = 0
@@ -129,6 +129,16 @@ check('and nothing goes below zero', bumpUnread(zero, mail({}), -1).all, 0)
 const before = { ...zero }
 bumpUnread(before, mail({}), 1)
 check('the counts it was given are not mutated', before.all, 0)
+
+/*
+ * AND tabOf IS THE SAME RULE, because a link that names a message now trusts it to pick the tab
+ * the message is on (MailPage, the calendar's "Open the invitation"). Wrong here, and the link
+ * opens Junk for a message that is in All and lands on an empty pane again.
+ */
+check('tabOf: an ordinary message is in All', tabOf(mail({})), 'all')
+check('tabOf: junk is in Junk', tabOf(mail({ isJunk: true })), 'junk')
+check('tabOf: sent is in Sent', tabOf(mail({ isSent: true })), 'sent')
+check('tabOf: flagged sent mail is still Sent', tabOf(mail({ isSent: true, isJunk: true })), 'sent')
 
 /* ---------- 2. the folders the sync could not see ---------- */
 

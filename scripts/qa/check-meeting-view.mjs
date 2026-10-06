@@ -131,9 +131,30 @@ ok('...and opens it the way a click does', /void toggleTo\(found\)/.test(mail))
  */
 ok('...and clears the ask once used', /next\.delete\('message'\)/.test(mail))
 ok('...without adding a history entry', /\{ replace: true \}/.test(mail))
-/* AND GIVES UP QUIETLY where the message is in another tab: no error about a message the person
-   can plainly see is there. */
-ok('a message not in this tab is not an error', /if \(!found\) return/.test(mail))
+/*
+ * AND IT FINDS THE MESSAGE WHEREVER IT IS. It used to give up quietly when the row was not on the
+ * page in hand -- and the firm hit exactly that: "If I open an invitation from the calendar, it just
+ * takes me [to the mailbox]." An invitation is days old by the time the meeting is opened, so it is
+ * past the first fifty, or the server put it in Junk.
+ */
+ok('a miss is no longer where it stops', !/if \(!found\) return/.test(mail))
+ok('...it fetches that one row by id', /fetchMailItem\(currentUser\.id, id\)/.test(mail))
+ok('...once, not on every render', /if \(lookedUp\.current\) return\n\s*lookedUp\.current = true/.test(mail))
+ok('...moves to the tab that holds it', /const tab = tabOf\(wantedRow\)\n\s*if \(filter !== tab\) \{ setFilter\(tab\); return \}/.test(mail))
+/* ORDER, and it is the whole bug in miniature: `filter` changes a render before the list does, so a
+   row put into the list in hand is thrown away by the load that follows and the pane empties. */
+ok('...and waits for THAT tab\'s list before adding the row', /if \(loadedTab !== tab\) return\n\s*setItems\(\(list\) => \[wantedRow, /.test(mail))
+ok('...which the load records as it lands', /setItems\(res\.items\)\n\s*setLoadedTab\(filter\)/.test(mail))
+ok('a message that is gone is said, not swallowed', /if \(row\) \{ setWantedRow\(row\); return \}[\s\S]{0,300}no longer in your mailbox/.test(mail))
+
+/* THE ROW IS THE LIST'S OWN SHAPE: same columns, same mapper, and only this person's. A hand-built
+   item here would be a second mapper, which is how a column goes quietly undefined. */
+const userMail = code('src/lib/userMail.ts')
+const one = userMail.slice(userMail.indexOf('export async function fetchMailItem('))
+ok('fetchMailItem exists', userMail.includes('export async function fetchMailItem('))
+ok('...reads the list\'s columns', /\.select\(COLUMNS\)/.test(one.slice(0, 400)))
+ok('...only this person\'s mail', /\.eq\('user_id', userId\)\.eq\('id', id\)/.test(one.slice(0, 400)))
+ok('...through the list\'s mapper', /toItem\(data as unknown as MailRow\)/.test(one.slice(0, 600)))
 
 console.log(`\ncheck-meeting-view: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

@@ -541,19 +541,24 @@ export interface TabFacts {
   isJunk: boolean
 }
 
+/**
+ * The one tab a message lives on.
+ *
+ * Sent, junk, or the mailbox -- and exactly one of the three, which is what scope() says too.
+ * A message on a record is still in All: being matched is a fact about it, not a place it goes.
+ * Read by the badges below and by a link that names a message (MailPage), which has to open the
+ * tab holding it or it lands on a list the message is not in.
+ */
+export function tabOf(mail: TabFacts): MailFilter {
+  if (mail.isSent) return 'sent'
+  if (mail.isJunk) return 'junk'
+  return 'all'
+}
+
 export function bumpUnread(
   counts: Record<MailFilter, number>, mail: TabFacts, by: number,
 ): Record<MailFilter, number> {
-  const on: MailFilter[] = []
-  /* Sent, junk, or the mailbox -- and exactly one of the three, which is what scope() says too.
-     A message on a record is still in All: being matched is a fact about it, not a place it
-     goes. */
-  if (mail.isSent) on.push('sent')
-  else if (mail.isJunk) on.push('junk')
-  else on.push('all')
-
-  const next = { ...counts }
-  for (const tab of on) next[tab] = Math.max(0, next[tab] + by)
-  return next
+  const tab = tabOf(mail)
+  return { ...counts, [tab]: Math.max(0, counts[tab] + by) }
 }
 

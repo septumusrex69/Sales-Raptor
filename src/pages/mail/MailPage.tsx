@@ -40,7 +40,7 @@ import { ReadingPane } from '../../components/email/ReadingPane'
 import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
   blockedBy, blockSender,
-  countUnreadByTab, debtorFileFor, deleteMail, fetchSenderRules,
+  countUnreadByTab, debtorFileFor, deleteMail, fetchMailItem, fetchSenderRules, tabOf,
   domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
   isSharedDomain,
   fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
@@ -350,6 +350,12 @@ export function MailPage() {
    */
   const [searchParams, setSearchParams] = useSearchParams()
   const [wanted, setWanted] = useState<string | null>(() => searchParams.get('message'))
+  /* The asked-for row, fetched by id when the page the tab loaded does not hold it. See below. */
+  const [wantedRow, setWantedRow] = useState<MailItem | null>(null)
+  const lookedUp = useRef(false)
+  /* Which tab the list in hand was loaded for -- not `filter`, which changes a render before the
+     list does, and a row put into the old list is thrown away by the load that follows. */
+  const [loadedTab, setLoadedTab] = useState<Pane | null>(null)
   /*
    * Bodies, once fetched, kept for as long as the page is up.
    *
@@ -499,6 +505,7 @@ export function MailPage() {
         offset: at * pageSize, limit: pageSize,
       })
       setItems(res.items)
+      setLoadedTab(filter)
       setMore(res.more)
       setPage(at)
       setChosen(new Set())
@@ -683,31 +690,67 @@ export function MailPage() {
   const allChosen = items.length > 0 && chosen.size === items.length
 
   /*
-   * OPEN THE ONE THE CALENDAR ASKED FOR, once the list holding it has arrived.
+   * OPEN THE ONE THE CALENDAR ASKED FOR, wherever in the mailbox it is.
    *
    * IN AN EFFECT RATHER THAN ON MOUNT, because the list is fetched and the message is not there to
-   * open on the first render. It waits for the row, opens it through the same path a click uses --
-   * so it is marked read and its body is fetched exactly as it would have been -- and then clears
-   * the ask so a refresh does not re-open it and a click elsewhere is not fought.
+   * open on the first render. It opens through the same path a click uses -- so it is marked read
+   * and its body is fetched exactly as it would have been -- and then clears the ask so a refresh
+   * does not re-open it and a click elsewhere is not fought.
    *
-   * AND IT GIVES UP QUIETLY. A message that is not in the current tab (filed, junk, an older page)
-   * simply never matches, and the person is left in their mailbox rather than staring at an error
-   * about a message they can see is there. The id is cleared either way the moment it is used.
+   * AND IT DOES NOT GIVE UP when the row is not on the page in hand, which it used to. The firm:
+   * "If I open an invitation from the calendar, it just takes me [to the mailbox]. It should just
+   * take me to ... Actual email." An invitation is usually days old by the time somebody opens the
+   * meeting, so it is past the first fifty; or the server called it junk. Either way the old effect
+   * never matched and left "Pick a message on the left" -- the fault this link exists to fix.
+   * So a miss fetches the ONE row by id, moves to the tab that holds it (tabOf, the rule the tabs
+   * themselves are built on), puts it at the top of that list and opens it. Put there only once
+   * that tab's own list has arrived: earlier, and the load that follows throws it away.
+   *
+   * A MESSAGE THAT IS GONE IS SAID, not swallowed: deleted from Raptor, or not this person's.
    */
   useEffect(() => {
     if (!wanted) return
     const found = items.find((m) => m.id === wanted)
-    if (!found) return
-    setWanted(null)
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.delete('message')
-      return next
-    }, { replace: true })
-    void toggleTo(found)
-    // toggleTo is redeclared each render; the guard above is the thing that stops a loop.
+    if (found) {
+      setWanted(null)
+      setWantedRow(null)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('message')
+        return next
+      }, { replace: true })
+      void toggleTo(found)
+      return
+    }
+    if (loading || !currentUser) return
+
+    if (wantedRow) {
+      const tab = tabOf(wantedRow)
+      if (filter !== tab) { setFilter(tab); return }
+      if (loadedTab !== tab) return
+      setItems((list) => [wantedRow, ...list.filter((m) => m.id !== wantedRow.id)])
+      return
+    }
+
+    if (lookedUp.current) return
+    lookedUp.current = true
+    const id = wanted
+    fetchMailItem(currentUser.id, id).then((row) => {
+      if (row) { setWantedRow(row); return }
+      setWanted(null)
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('message')
+        return next
+      }, { replace: true })
+      setStatus('That message is no longer in your mailbox \u2014 it may have been deleted from Raptor.')
+    }).catch((e) => {
+      setWanted(null)
+      setError(e instanceof Error ? e.message : String(e))
+    })
+    // toggleTo is redeclared each render; the guards above are what stop a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wanted, items])
+  }, [wanted, items, loading, wantedRow, filter, loadedTab, currentUser])
 
   /**
    * Open a message and read it.
@@ -1219,7 +1262,7 @@ export function MailPage() {
         <div className="border-b border-slate-200 flex items-center gap-2 pr-5">
           <div className="px-5 flex items-center gap-1 overflow-x-auto -mb-px min-w-0 flex-1">
             {TABS.map((t) => (
-              <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint}
+              <button key={t.id} onClick={() => setFilter(t.id)} title={t.hint} aria-pressed={filter === t.id}
                 className={`shrink-0 px-3.5 py-2 text-sm font-medium border-b-2 inline-flex items-center gap-1.5 ${
                   filter === t.id ? 'border-gold-500 text-navy-950' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                 {t.label}
