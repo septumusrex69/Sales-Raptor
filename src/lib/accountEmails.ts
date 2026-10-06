@@ -63,6 +63,16 @@ export interface AccountEmail {
    * one_open_dispute_per_account -- after the first has already charged item 3.
    */
   queryId: string | null
+  /**
+   * WHO IS ON THE OTHER END: the debtor, or the client the account belongs to.
+   *
+   * Decided by the database on insert (account_email_correspondent). The firm: "This email came
+   * from the client and then it came to the debtor account. Should go to the ticket if there was
+   * one and or go to the client profile." The account's Emails tab is the record of what passed
+   * between the firm and the DEBTOR -- what a section 129 proof of communication rests on -- so it
+   * reads only 'debtor'; a ticket reads both, because a dispute is a conversation with both.
+   */
+  correspondent: 'debtor' | 'client'
   /** Null means NOBODY has opened it yet — the account's read state, not a mailbox's. */
   readAt: string | null
   /** Who cleared it for the account. Null on an old row read before the column existed. */
@@ -83,6 +93,7 @@ interface EmailRow {
   in_reply_to: string | null
   attachment_names: string[] | null
   query_id: string | null
+  correspondent: 'debtor' | 'client'
   to_recipients: Recipient[] | null
   cc_recipients: Recipient[] | null
   sent_by_name: string | null
@@ -105,6 +116,7 @@ function toEmail(r: EmailRow): AccountEmail {
     inReplyTo: r.in_reply_to,
     attachmentNames: r.attachment_names ?? [],
     queryId: r.query_id ?? null,
+    correspondent: r.correspondent === 'client' ? 'client' : 'debtor',
     /* Named by hand like every other field here -- see the warning in CLAUDE.md. A column that
        is in the table, in the type and in the select but missing from this mapper reads as
        undefined for ever and nothing fails. */
@@ -121,12 +133,20 @@ function toEmail(r: EmailRow): AccountEmail {
   }
 }
 
-/** Every message either way on this account, newest first. */
+/**
+ * Every message either way between the firm and THIS DEBTOR, newest first.
+ *
+ * NOT THE CLIENT'S. A liaison forwarding a dispute to the client, and the client's answer, are
+ * filed against the account and its ticket -- and drew in this list beside the demands until the
+ * firm saw one there. This list is what proves what the debtor was told; the client's half of a
+ * dispute is on the ticket (fetchQueryEmails), which reads both.
+ */
 export async function fetchAccountEmails(accountId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id, correspondent')
     .eq('account_id', accountId)
+    .eq('correspondent', 'debtor')
     .order('occurred_at', { ascending: false })
   if (error) throw new Error(error.message)
   return ((data ?? []) as EmailRow[]).map(toEmail)
@@ -151,7 +171,7 @@ export async function fetchAccountEmails(accountId: string): Promise<AccountEmai
 export async function fetchQueryEmails(queryId: string): Promise<AccountEmail[]> {
   const { data, error } = await supabase
     .from('account_emails')
-    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id')
+    .select('id, direction, debtor_address, our_address, subject, body, message_id, in_reply_to, attachment_names, to_recipients, cc_recipients, sent_by_name, charged_excl_vat, read_at, read_by, received_by, occurred_at, query_id, correspondent')
     .eq('query_id', queryId)
     .order('occurred_at', { ascending: true })
   if (error) throw new Error(error.message)
@@ -177,6 +197,12 @@ export interface DebtorReply {
   subject: string | null
   body: string | null
   occurredAt: string
+  /**
+   * THE CLIENT, ANSWERING ON A TICKET -- see AccountEmail.correspondent. Its place is the ticket,
+   * not the debtor's Emails tab, so the menu sends it there and names it as the client's.
+   */
+  fromClient: boolean
+  queryId: string | null
 }
 
 interface ReplyRow {
@@ -187,6 +213,8 @@ interface ReplyRow {
   subject: string | null
   body: string | null
   occurred_at: string
+  query_id: string | null
+  correspondent: 'debtor' | 'client'
   debtor_accounts: {
     account_number: string | null
     debtor_first_name: string | null
@@ -207,10 +235,17 @@ export async function fetchUnreadReplies(userId: string): Promise<DebtorReply[]>
   const { data, error } = await supabase
     .from('account_emails')
     .select(`
-      id, account_id, debtor_address, sent_by_name, subject, body, occurred_at,
+      id, account_id, debtor_address, sent_by_name, subject, body, occurred_at, query_id, correspondent,
       debtor_accounts ( account_number, debtor_first_name, debtor_surname )
     `)
     .eq('direction', 'in')
+    /*
+     * THE DEBTOR'S, AND THE CLIENT'S ONLY WHERE IT ANSWERS A TICKET. Client mail with no ticket is
+     * put on the client's own record by the sync, as an email activity, and the menu already lists
+     * those -- so listing this copy too would announce one message twice. And it could never be
+     * cleared from here: the account's Emails tab, where a reply is read, no longer draws it.
+     */
+    .or('correspondent.eq.debtor,query_id.not.is.null')
     .eq('received_by', userId)
     .is('read_at', null)
     .order('occurred_at', { ascending: false })
@@ -226,6 +261,8 @@ export async function fetchUnreadReplies(userId: string): Promise<DebtorReply[]>
     subject: r.subject,
     body: r.body,
     occurredAt: r.occurred_at,
+    fromClient: r.correspondent === 'client',
+    queryId: r.query_id ?? null,
   }))
 }
 

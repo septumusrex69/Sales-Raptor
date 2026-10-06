@@ -4,7 +4,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **6 October 2026**, end of the session on `claude/sales-raptor-review-p1pzx2`.
+Last updated: **6 October 2026**, second session on `claude/sales-raptor-review-p1pzx2`.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -21,13 +21,23 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run: **all green, 17 652 checks across 271 files.**
+At the last full run: see §2 — the run at the end of the second session.
 
 ---
 
 ## 2. What shipped this session
 
 Newest first. Each commit message carries the full reasoning; this is the index.
+
+**Second session (6 October, later):**
+
+| Commit | What it is |
+|---|---|
+| *(this one)* | **The client's email is not the debtor's correspondence.** `account_emails.correspondent` ('debtor' / 'client'), decided on INSERT by `account_email_correspondent` for all three writers: the account's own debtor contact wins; otherwise the client company's address (or a contact's at it or its parent), or a reply to a client row, is the client. The debtor's Emails tab reads only 'debtor'; a ticket reads both. The Messages menu sends a client's answer to its ticket (read on follow); a client email with **no** ticket gets an email activity on the client's own record from the sync, and is left out of the menu's account list so it is not announced twice. `protect_account_mail_fields` now locks the column too. **Fees untouched** — the user confirmed the firm's ruling stands. `check-client-correspondence` (37). Staging: three rows marked, all on tickets; the rule's dry run touched nothing else. |
+| `e2d87c0` | **Node 22.22 decodes windows-1252 as Latin-1**, so 0x80–0x9F (curly quotes, dashes, €) became invisible control characters in every mail body `toText` read. Corrected from the WHATWG table. `check-mime-parts` had been red on a clean tree because of it. |
+| `5e6c4d5` | **A calendar invitation opens the email**, wherever it is. `?message=` used to look only in the first page of All and give up quietly. A miss now fetches the row by id (`fetchMailItem`), moves to the tab holding it (`tabOf`, now the one statement of the rule `bumpUnread` used), waits for THAT tab's list, then opens it. e2e/mail covers both layouts and a message past the first page of Junk; the original page fails it. |
+
+**First session:**
 
 | Commit | What it is |
 |---|---|
@@ -44,36 +54,15 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 ### Uncommitted at handoff
 
-The **Client column** on the Accounts list and on Payments in (Awaiting approval), at the firm's
-request: *"Please add the client names to these places."* Code is written and green; two break
-tests were interrupted mid-run and one of them left a sabotage in the tree, which
-`check-row-mappers` then caught — the mapper was reading `r.company_name` instead of the embed
-`r.companies?.name`. Restored and re-verified. **If the tree is dirty when you pick this up, read
-§6 first.**
+Nothing.
 
 ---
 
 ## 3. Open requests the firm has made and nobody has started
 
-Both arrived at the very end of the session. Quoted so the next session does not re-interpret them.
-
-1. **A calendar invitation should open the email, not the mailbox.**
-   *"If I open an invitation from the calendar, it just takes me \[to the mailbox]. It should just
-   take me to the other place. Actual email."*
-   The screenshot shows Raptor Mail with nothing selected — "Pick a message on the left to read
-   it." So the link lands on the list without resolving to the message. Note the precedent already
-   in CLAUDE.md: *"A meeting opens the meeting, not the mailbox."* This is the same fault one step
-   further along.
-
-2. **Client correspondence is being filed onto the debtor's account.**
-   *"This email came from the client and then it came to the debtor account. Should go to the
-   ticket if there was one and or go to the client profile."*
-   An email from a client contact appeared in the Emails tab of a debtor's account (the row already
-   showed "Already on a ticket"). The account's Emails tab is evidence of what passed between the
-   firm and the DEBTOR — it is what a Section 129 proof-of-communication rests on — so client
-   correspondence in it is not merely untidy. Where mail lands should follow who the correspondent
-   is. Watch `protect_filed_mail_target`, which reverts link changes on `user_emails` for
-   non-Administrators.
+None. Both requests from the end of the first session were done in the second (§2):
+the calendar invitation now opens the email, and client correspondence leaves the debtor's
+Emails tab for the ticket or the client's record.
 
 ---
 
@@ -101,7 +90,14 @@ Do not guess these. Each one changes money.
    charge recoveries and drawings, so the parts would not sum to the whole. The alternative is
    changing a financial ledger. **Ask.**
 
-5. **The trust overview's "unexplained difference" was deliberately not built as drawn.** The
+5. **Should client correspondence on a dispute be charged to the debtor?** Today it is: item 1(a),
+   R25, on the liaison's forward to the client (the firm's explicit ruling), and item 6, R13, on the
+   client's reply. The second session moved where client mail is SHOWN and, on the user's
+   instruction, left the fees alone. But item 6 is "correspondence received and attended to", and
+   the client is not the debtor. `check-client-correspondence` §5 asserts the charge is NOT gated on
+   `correspondent`, so changing this is a deliberate edit to that check, not an accident. **Ask.**
+
+6. **The trust overview's "unexplained difference" was deliberately not built as drawn.** The
    firm's sketch reconciles the ledger balance against the four owners — but `trust_position`
    derives the balance BY ADDING THEM UP, so that difference is 0.00 on every row of data that can
    exist (verified on staging: 7 873,60 / 7 873,60 / 0,00). It was replaced with four checks that
@@ -119,6 +115,16 @@ Do not guess these. Each one changes money.
 - **Settlement store** (approved amount, expiry, saving) — task #69, not started.
 - **The R22,77 settlement shortfall on RRC00002** is unexplained.
 - **Business workspace** still has no Income and no Drawings-from-trust screens.
+- **`account_emails.correspondent` is on staging only.** Production needs the migration (end of
+  `schema.sql`, "WHO IS ON THE OTHER END") and then a decision on its existing client rows: on
+  staging they were marked by re-running the rule, and the user chose to leave production's to the
+  firm, case by case. Until then production behaves exactly as before.
+- **Client mail filed by hand from the mailbox** onto an account with no ticket is classified by the
+  same trigger and leaves the debtor's tab — but only the SYNC writes the client-record activity, so
+  that one is on nobody's screen except the person's own mailbox. Small; not yet handled.
+- **The debtor's Activity timeline still carries a note for client correspondence** (the sync's and
+  `recordSentEmail`'s `account_notes` rows). The firm's complaint was the Emails tab, which is the
+  evidence; the timeline was left alone. Raise it if they mention it.
 - **Imported accounts were given handover runs before the guard landed** — 20 on staging, 8 closed
   and 3 on hold. Not swept: a correction is the firm's decision, case by case.
 
@@ -163,6 +169,14 @@ assertions in one session failed on perfectly correct screens because of this.
 **Playwright's locators race React.** The URL changes before the row it decides is drawn, so
 reading a locator on the next line can return an empty list and then count correctly a millisecond
 later — a check that reports the wrong number and passes. Wait for the element.
+
+**Node 22.22's `TextDecoder('windows-1252')` is Latin-1.** The C1 band 0x80–0x9F comes back as
+control characters, not curly quotes and dashes. `toText` in `api/_lib/mime.ts` corrects it; any new
+decode of mail bytes should go through `toText`, not a bare `TextDecoder`.
+
+**The e2e stubs answer `account_emails` with `[]`**, so no browser test sees the Emails tab filter.
+The filter is a PostgREST clause; its proof is on staging (a query for the account the firm saw) and
+in `check-client-correspondence`, not in a stub that would only test itself.
 
 **`en-ZA` groups thousands with U+00A0** and renders September as "Sept". Build the separator as
 `String.fromCharCode(0xa0)`; never type it. In an SMS it costs real money — see CLAUDE.md.

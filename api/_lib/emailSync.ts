@@ -740,7 +740,10 @@ async function fileAccountEmail(
       },
       { onConflict: 'message_id', ignoreDuplicates: true },
     )
-    .select('id')
+    /* `correspondent` is not written here: the database decides it on insert, from the account's
+       contacts and the client's (account_email_correspondent). Read back so the client's own
+       record can be given the message below. */
+    .select('id, correspondent')
   if (error) {
     console.error(`[emailSync] account ${accountId}: filing inbound email failed: ${error.message}`)
     return false
@@ -780,6 +783,47 @@ async function fileAccountEmail(
       .eq('id', inserted[0].id)
   } catch (err) {
     console.error(`[emailSync] account ${accountId}: item 6 not raised on inbound email:`, err)
+  }
+
+  /*
+   * THE CLIENT, WRITING ABOUT THIS ACCOUNT WITH NO TICKET TO ANSWER, GOES ON THE CLIENT'S RECORD.
+   *
+   * The firm: "This email came from the client and then it came to the debtor account. Should go
+   * to the ticket if there was one and or go to the client profile." On a ticket it is already
+   * where it belongs -- query_id above, and the ticket reads both sides. Without one, the row stays
+   * on the account (it is ABOUT this debtor, and the fee is the firm's ruling, unchanged) but the
+   * debtor's Emails tab no longer draws it, so without this it would be on nobody's screen at all.
+   *
+   * AN EMAIL ACTIVITY, the shape the client page's Emails tab and the Messages menu already read --
+   * the same row the sync writes for a client's reply on a CRM thread. Idempotent on the same
+   * (user_id, email_message_id) index, so a resync cannot put it there twice.
+   */
+  if (inserted[0].correspondent === 'client' && !message.queryId) {
+    const { data: acc } = await admin
+      .from('debtor_accounts').select('company_id').eq('id', accountId).maybeSingle()
+    if (acc?.company_id) {
+      const { error: actError } = await admin.from('activities').upsert(
+        {
+          type: 'Email',
+          user_id: message.mailbox.userId,
+          company_id: acc.company_id,
+          subject: `Email received: ${message.subject}`,
+          notes: message.body,
+          activity_date: message.at,
+          email_message_id: message.messageId,
+          is_read: false,
+          attachment_names: message.attachmentNames,
+          email_to_recipients: message.toRecipients,
+          email_cc_recipients: message.ccRecipients,
+          email_folder: message.folder,
+          email_uid: message.uid,
+        },
+        { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
+      )
+      if (actError) {
+        console.error(`[emailSync] account ${accountId}: client email not put on the client: ${actError.message}`)
+      }
+    }
   }
 
   /*

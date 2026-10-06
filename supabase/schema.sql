@@ -27294,3 +27294,120 @@ begin
   end loop;
   return v_count;
 end $$;
+
+-- ============================================================================
+-- WHO IS ON THE OTHER END OF AN ACCOUNT'S EMAIL: THE DEBTOR, OR THE CLIENT.
+--
+-- THE FIRM, looking at a debtor's Emails tab: "This email came from the client and then it came
+-- to the debtor account. Should go to the ticket if there was one and or go to the client
+-- profile." The row was a client's reply to a dispute the liaison had forwarded them -- threaded
+-- back by Message-ID, filed on the account with the ticket's query_id, and drawn in the debtor's
+-- Emails tab beside the demands.
+--
+-- THAT TAB IS EVIDENCE OF WHAT PASSED BETWEEN THE FIRM AND THE DEBTOR, which is what a section 129
+-- proof of communication rests on. A client's email in it is not untidy, it is a false entry in the
+-- record a court would be shown. So the row keeps its account and its ticket -- the ticket's
+-- correspondence is exactly where it belongs -- and says who wrote it; the Emails tab reads only
+-- the debtor's.
+--
+-- DECIDED IN THE DATABASE, ON INSERT, because three writers file here (the sync, recordSentEmail,
+-- filing by hand from the mailbox) and three copies of "is this the client" would drift.
+--
+--   1. The account's own debtor contact is the DEBTOR, whatever else is true. A debtor who also
+--      happens to be in the client's contacts is still the person the demand is addressed to.
+--   2. The client's address -- the company record's, or a contact's at the company or its parent
+--      -- is the CLIENT.
+--   3. A reply to a client message is the CLIENT, because a client answers from whichever of four
+--      people opened the mail and most of them are in nobody's contacts.
+--   Anything else stays DEBTOR, which is what every row was before this column existed.
+--
+-- FEES ARE NOT TOUCHED. The firm has ruled that dispute correspondence is charged (item 1(a) on
+-- the forward, item 6 on the reply), and the user confirmed it stays so: this column moves where
+-- a message is SHOWN and nothing about what it costs.
+--
+-- EXISTING ROWS: marked on staging only (three, all on tickets). Production rows are the firm's
+-- decision, case by case -- see HANDOFF.md.
+-- ============================================================================
+alter table public.account_emails
+  add column if not exists correspondent text not null default 'debtor'
+  check (correspondent in ('debtor', 'client'));
+
+/* SECURITY DEFINER, deliberately: the answer must not depend on which contacts the person filing
+   happens to be allowed to read, or the same message is "client" for a liaison and "debtor" for a
+   collector. It reads four tables and returns one word. */
+create or replace function public.account_email_correspondent(
+  p_account uuid, p_address text, p_in_reply_to text
+) returns text
+language sql stable security definer set search_path to 'public'
+as $$
+  with a as (select lower(trim(coalesce(p_address, ''))) as addr),
+  co as (
+    select da.company_id, c.parent_company_id
+    from debtor_accounts da left join companies c on c.id = da.company_id
+    where da.id = p_account
+  )
+  select case
+    when exists (
+      select 1 from account_contacts ac, a
+      where ac.account_id = p_account and ac.kind = 'email' and lower(trim(ac.value)) = a.addr
+    ) then 'debtor'
+    when exists (
+      select 1 from companies k, co, a
+      where a.addr <> '' and k.id in (co.company_id, co.parent_company_id) and lower(trim(k.email)) = a.addr
+    ) or exists (
+      select 1 from contacts p, co, a
+      where a.addr <> '' and p.company_id in (co.company_id, co.parent_company_id) and lower(trim(p.email)) = a.addr
+    ) or exists (
+      select 1 from account_emails r
+      where p_in_reply_to is not null and r.message_id = p_in_reply_to
+        and r.account_id = p_account and r.correspondent = 'client'
+    ) then 'client'
+    else 'debtor'
+  end
+$$;
+
+revoke execute on function public.account_email_correspondent(uuid, text, text) from public, anon;
+grant execute on function public.account_email_correspondent(uuid, text, text) to authenticated, service_role;
+
+create or replace function public.account_email_set_correspondent() returns trigger
+language plpgsql security invoker set search_path to 'public'
+as $$
+begin
+  new.correspondent := public.account_email_correspondent(new.account_id, new.debtor_address, new.in_reply_to);
+  return new;
+end $$;
+
+revoke execute on function public.account_email_set_correspondent() from public, anon;
+
+create or replace trigger account_email_correspondent
+  before insert on public.account_emails
+  for each row execute function public.account_email_set_correspondent();
+
+/* AND IT CANNOT BE EDITED BACK by anybody but the server and an Administrator, like every other
+   field on the record. Otherwise "move it off the client" is one PATCH from a browser. */
+create or replace function public.protect_account_mail_fields() returns trigger
+language plpgsql security invoker set search_path to 'public'
+as $$
+begin
+  -- The server (service key, no auth.uid()) and an Administrator may write the record.
+  if auth.uid() is null or public.current_user_role() = 'Administrator' then
+    return new;
+  end if;
+  -- Everybody else may change only read_at / read_by. Reverted silently, in the manner of
+  -- protect_closed_diary_entries and protect_filed_mail_target: a browser has no business
+  -- editing correspondence, so there is nothing to report.
+  new.account_id := old.account_id;
+  new.query_id := old.query_id;
+  new.direction := old.direction;
+  new.subject := old.subject;
+  new.body := old.body;
+  new.debtor_address := old.debtor_address;
+  new.message_id := old.message_id;
+  new.received_by := old.received_by;
+  new.occurred_at := old.occurred_at;
+  new.attachment_names := old.attachment_names;
+  new.email_folder := old.email_folder;
+  new.email_uid := old.email_uid;
+  new.correspondent := old.correspondent;
+  return new;
+end $$;

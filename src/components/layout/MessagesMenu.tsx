@@ -151,9 +151,17 @@ export function MessagesMenu() {
       at: r.occurredAt,
       // Says which debtor before you click, which is the whole difference between a useful
       // count and a list of twenty identical "Re: Account ..." lines.
-      about: [r.debtorName, r.accountNumber].filter(Boolean).join(' · ') || r.from,
-      // Straight to the Emails tab with this message open — see AccountDetail's `email` param.
-      to: `/accounts/${r.accountId}?email=${encodeURIComponent(r.id)}`,
+      about: [r.fromClient ? 'From the client' : null, r.debtorName, r.accountNumber]
+        .filter(Boolean).join(' · ') || r.from,
+      /*
+       * Straight to the Emails tab with this message open -- see AccountDetail's `email` param.
+       * EXCEPT THE CLIENT'S, which goes to the ticket it answers: the debtor's Emails tab is the
+       * record of what passed between the firm and the debtor and no longer draws it, so a link
+       * there would open a list the message is not in.
+       */
+      to: r.fromClient && r.queryId
+        ? `/queries/${r.queryId}`
+        : `/accounts/${r.accountId}?email=${encodeURIComponent(r.id)}`,
       // Reading it is opening it on the account, not clicking it here. See handleSelect.
       markRead: () => {
         setReplies((list) => list.filter((x) => x.id !== r.id))
@@ -167,8 +175,12 @@ export function MessagesMenu() {
        * read one — so the count holds until somebody actually opens it on the account, and the
        * reply is visibly unread when they land. "Mark all read" is still there for a deliberate
        * clear-down.
+       *
+       * THE CLIENT'S IS, because there is nowhere else it is ever read: the ticket shows a
+       * conversation, not an unread state, and leaving it bold until a button nobody would think
+       * to press is a count that never comes down.
        */
-      readOnFollow: false,
+      readOnFollow: r.fromClient,
     }))
 
     return [...crm, ...debtor].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())

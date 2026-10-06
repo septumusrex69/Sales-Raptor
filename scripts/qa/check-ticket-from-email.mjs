@@ -132,7 +132,7 @@ ok('...and the screen does not offer one either', /email\.queryId\s*\n?\s*\?/.te
    the type and the select but missing from the hand-written mapper reads as undefined for ever and
    nothing fails -- here that is a button that reappears after it has been used. */
 ok('the mapper carries the ticket back', /queryId: r\.query_id \?\? null/.test(mailLib))
-ok('...and the select asks for it', /occurred_at, query_id'/.test(mailLib))
+ok('...and the select asks for it', /occurred_at, query_id[,']/.test(mailLib))
 
 /* ---------------- inbound only ---------------- */
 
