@@ -12,6 +12,7 @@
  * ledger.
  */
 import { supabase } from './supabase'
+import { fetchAllRows } from './fetchAll.ts'
 /* The firm's own day, not the server's. A dispute taken at one in the morning in Johannesburg is
    eleven the previous night in UTC, and a date filed under yesterday is what a notice quotes. */
 const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
@@ -904,10 +905,13 @@ export async function moveClientTicketsToLiaison(input: {
      the same name again -- and the last of those is the common one on a form with a Save button. */
   if (!from || !to || from === to) return { moved: 0 }
 
-  const { data: accounts, error: accErr } = await supabase
-    .from('debtor_accounts').select('id').eq('company_id', companyId)
-  if (accErr) throw new Error(accErr.message)
-  const ids = (accounts ?? []).map((a) => (a as { id: string }).id)
+  /* PAGED: PostgREST stops at a thousand rows without saying so, and the tail of a big client's
+     book would have kept its tickets pointed at a liaison who has left. */
+  const accounts = await fetchAllRows<{ id: string }>(
+    () => supabase.from('debtor_accounts').select('id').eq('company_id', companyId).order('id'),
+    { table: 'the client\u2019s accounts' },
+  )
+  const ids = accounts.map((a) => a.id)
   if (ids.length === 0) return { moved: 0 }
 
   const { data, error } = await supabase

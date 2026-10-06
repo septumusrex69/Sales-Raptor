@@ -19,6 +19,7 @@ import type { PractitionerKind } from './accountStanding.ts'
 import type { ExistingAccount } from './handoverImport.ts'
 import { debtorKey, type OtherAccount } from './sameDebtor.ts'
 import { isWrittenOff } from './accountStatus.ts'
+import { fetchAllRows } from './fetchAll.ts'
 
 export interface DebtorAccount {
   id: string
@@ -599,21 +600,34 @@ export async function fetchLedgersForAccounts(
 
   /* THE SAME COLUMNS fetchLedgers ASKS FOR, because the same function reads them. A shorter list
      here would be a balance computed from less than the account page had. */
+  /*
+   * PAGED, BECAUSE POSTGREST STOPS AT A THOUSAND ROWS AND SAYS NOTHING.
+   *
+   * This asked for all three ledgers of all fifty accounts in one request each and computed every
+   * balance from what came back. `db-max-rows` is a thousand on Supabase: the request succeeds, the
+   * thousand-and-first row is dropped, and there is no error and no flag. On the twenty-eight test
+   * accounts, 2 281 fee rows went in and a thousand came out -- BPM0113 got 1 of its 52, BPM20038
+   * 1 of 64, MSH4/20014 and MSH3/10107 none of their 136 and 139. Their fees drew as R 0.00 and
+   * their balances were short by the whole fee ledger, on the screen the firm reads the book from.
+   *
+   * It is exactly the failure the comment above says this function exists to avoid: the account
+   * page fetches ONE account, stays under the cap and was right, while the list beside it was
+   * wrong. `fetchAllRows` reads until a short page comes back, and refuses rather than truncating.
+   */
   const [payments, fees, accruals] = await Promise.all([
-    supabase.from('account_payments')
+    fetchAllRows(() => supabase.from('account_payments')
       .select('account_id,id,received_at,amount,paid_to_client,reversed_at,receipt_fee_legacy')
-      .in('account_id', ids),
-    supabase.from('account_fees')
+      .in('account_id', ids).order('id'), { table: 'payments' }),
+    fetchAllRows(() => supabase.from('account_fees')
       .select('account_id,incurred_at,description,amount_excl_vat,vat_amount,billed,segments,cancelled_at,annexure_item,payment_id,legacy_name')
-      .in('account_id', ids),
-    supabase.from('account_interest_accruals')
+      .in('account_id', ids).order('id'), { table: 'fees' }),
+    fetchAllRows(() => supabase.from('account_interest_accruals')
       .select('account_id,accrued_on,days,amount_accrued')
-      .in('account_id', ids),
+      .in('account_id', ids).order('id'), { table: 'interest' }),
   ])
-  for (const r of [payments, fees, accruals]) if (r.error) throw new Error(r.error.message)
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  for (const r of (payments.data ?? []) as any[]) {
+  for (const r of (payments ?? []) as any[]) {
     out.get(r.account_id)?.payments.push({
       id: r.id,
       receivedAt: r.received_at,
@@ -624,7 +638,7 @@ export async function fetchLedgersForAccounts(
         ? null : Number(r.receipt_fee_legacy),
     })
   }
-  for (const r of (fees.data ?? []) as any[]) {
+  for (const r of (fees ?? []) as any[]) {
     out.get(r.account_id)?.fees.push({
       incurredAt: r.incurred_at,
       description: r.description ?? '',
@@ -638,7 +652,7 @@ export async function fetchLedgersForAccounts(
       legacyName: r.legacy_name ?? null,
     })
   }
-  for (const r of (accruals.data ?? []) as any[]) {
+  for (const r of (accruals ?? []) as any[]) {
     out.get(r.account_id)?.accruals.push({
       accruedOn: r.accrued_on,
       days: Number(r.days ?? 1),
@@ -669,23 +683,31 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
    * ten the balance and the timeline actually read. The rest — created_at, legacy_name, vat_rate,
    * destination — is carried across the Atlantic on every page open and then thrown away.
    */
+  /*
+   * PAGED HERE TOO, for the same reason as fetchLedgersForAccounts. One account stays under the
+   * thousand-row cap today -- the busiest on the inherited book has 822 fee rows -- which means
+   * this is the half of the pair that happened to be right, not the half that was safe. 822 is
+   * four fifths of the way to a silent wrong balance on a debtor's own statement.
+   */
   const [payments, fees, accruals] = await Promise.all([
-    supabase.from('account_payments')
+    fetchAllRows(() => supabase.from('account_payments')
       .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,receipt_fee_legacy')
-      .eq('account_id', accountId).order('received_at', { ascending: false }),
-    supabase.from('account_fees')
+      .eq('account_id', accountId).order('received_at', { ascending: false }).order('id'),
+      { table: 'payments' }),
+    fetchAllRows(() => supabase.from('account_fees')
       .select('id,incurred_at,description,amount_excl_vat,vat_amount,billed,action_code,segments,cancelled_at,performed_by,annexure_item,payment_id,legacy_name,source')
-      .eq('account_id', accountId).order('incurred_at', { ascending: false }),
-    supabase.from('account_interest_accruals')
+      .eq('account_id', accountId).order('incurred_at', { ascending: false }).order('id'),
+      { table: 'fees' }),
+    fetchAllRows(() => supabase.from('account_interest_accruals')
       .select('id,accrued_on,days,amount_accrued,amount_recoverable')
-      .eq('account_id', accountId).order('accrued_on', { ascending: false }),
+      .eq('account_id', accountId).order('accrued_on', { ascending: false }).order('id'),
+      { table: 'interest' }),
   ])
-  for (const r of [payments, fees, accruals]) if (r.error) throw new Error(r.error.message)
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  const feeRows = (fees.data ?? []) as any[]
+  const feeRows = (fees ?? []) as any[]
   return {
-    payments: (payments.data ?? []).map((r: any) => ({
+    payments: (payments ?? []).map((r: any) => ({
       id: r.id,
       receivedAt: r.received_at,
       amount: Number(r.amount),
@@ -697,7 +719,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       receiptFeeLegacy: r.receipt_fee_legacy === null || r.receipt_fee_legacy === undefined
         ? null : Number(r.receipt_fee_legacy),
     })),
-    fees: (fees.data ?? []).map((r: any) => ({
+    fees: (fees ?? []).map((r: any) => ({
       id: r.id,
       incurredAt: r.incurred_at,
       description: r.description,
@@ -722,7 +744,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
          `imported()` says false for everything, and 26 028 inherited findings are filed as ours. */
       source: r.source ?? null,
     })),
-    accruals: (accruals.data ?? []).map((r: any) => ({
+    accruals: (accruals ?? []).map((r: any) => ({
       id: r.id,
       accruedOn: r.accrued_on,
       days: Number(r.days ?? 1),
@@ -730,10 +752,10 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       amountRecoverable: Number(r.amount_recoverable ?? 0),
     })),
     totals: {
-      paid: (payments.data ?? []).reduce((t: number, r: any) => t + Number(r.amount), 0),
+      paid: (payments ?? []).reduce((t: number, r: any) => t + Number(r.amount), 0),
       feesExclVat: feeRows.reduce((t, r) => t + Number(r.amount_excl_vat ?? 0), 0),
       feesInclVat: feeRows.reduce((t, r) => t + Number(r.amount_excl_vat ?? 0) + Number(r.vat_amount ?? 0), 0),
-      interest: (accruals.data ?? []).reduce((t: number, r: any) => t + Number(r.amount_accrued ?? 0), 0),
+      interest: (accruals ?? []).reduce((t: number, r: any) => t + Number(r.amount_accrued ?? 0), 0),
       feeCount: feeRows.length,
     },
   }
@@ -785,12 +807,21 @@ export async function createDebtorAccount(
   return account
 }
 
-/** Every account number already on a client, so the next in their series can be proposed. */
+/**
+ * Every account number already on a client, so the next in their series can be proposed.
+ *
+ * PAGED, NOT `.limit(2000)`. A client limit above PostgREST's own `db-max-rows` does not raise it:
+ * the request came back with a thousand rows and no complaint, so a client with more accounts than
+ * that had the tail of their own series invisible -- and `suggestReference` would then propose a
+ * number already in use, on the field CLAUDE.md calls the creditor's own reference.
+ */
 export async function fetchAccountReferences(companyId: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('debtor_accounts').select('account_number').eq('company_id', companyId).limit(2000)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r: { account_number: string | null }) => r.account_number).filter((r): r is string => !!r)
+  const data = await fetchAllRows<{ account_number: string | null }>(
+    () => supabase.from('debtor_accounts').select('account_number')
+      .eq('company_id', companyId).order('id'),
+    { table: 'account numbers' },
+  )
+  return data.map((r) => r.account_number).filter((r): r is string => !!r)
 }
 
 /**
@@ -819,15 +850,33 @@ export async function fetchExistingAccounts(companyId: string): Promise<Existing
    * reference. The holder's name is joined rather than looked up per row: forty rows each
    * resolving one profile is forty requests for a handful of distinct people.
    */
-  const { data, error } = await supabase
-    .from('debtor_accounts')
-    /* One literal, not a concatenation: supabase-js infers the row type FROM the select string,
-       and a joined one infers nothing and lands on GenericStringError. */
-    .select('account_number, client_reference, debtor_id_number, debtor_surname, capital_handed_over, status, sub_status, assigned_to, assigned:profiles!debtor_accounts_assigned_to_fkey(name)')
-    .eq('company_id', companyId)
-    .limit(5000)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r: {
+  /*
+   * PAGED, NOT `.limit(5000)`. This is what an import checks a handover sheet against, and a
+   * client limit above PostgREST's `db-max-rows` is not a limit at all -- a thousand rows came back
+   * and the rest of the client's book was invisible to the duplicate check. The failure is an
+   * account imported a second time under a new case number, which is two files on one debt.
+   */
+  const data = await fetchAllRows<{
+    account_number: string | null
+    client_reference: string | null
+    debtor_id_number: string | null
+    debtor_surname: string | null
+    capital_handed_over: number | string | null
+    status: string | null
+    sub_status: string | null
+    assigned_to: string | null
+    assigned?: { name: string | null } | { name: string | null }[] | null
+  }>(
+    () => supabase
+      .from('debtor_accounts')
+      /* One literal, not a concatenation: supabase-js infers the row type FROM the select string,
+         and a joined one infers nothing and lands on GenericStringError. */
+      .select('account_number, client_reference, debtor_id_number, debtor_surname, capital_handed_over, status, sub_status, assigned_to, assigned:profiles!debtor_accounts_assigned_to_fkey(name)')
+      .eq('company_id', companyId)
+      .order('id'),
+    { table: 'the client\u2019s accounts' },
+  )
+  return data.map((r: {
     account_number: string | null
     client_reference: string | null
     debtor_id_number: string | null
