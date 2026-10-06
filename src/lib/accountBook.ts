@@ -46,6 +46,14 @@ export interface DebtorAccount {
    * this is never the thing that decides, only the thing that explains.
    */
   importedAt: string | null
+  /**
+   * The client whose book this account is on, where the read embedded it.
+   *
+   * NULL MEANS NOT ASKED FOR, NOT "no client" -- every account has one, and the column is not
+   * null in the database. Only the list embeds it; a single-account read does not, because the
+   * account page already has the client from its own query.
+   */
+  companyName: string | null
   clientReference: string | null
   debtorFirstName: string | null
   debtorSurname: string | null
@@ -203,6 +211,10 @@ const toAccount = (r: any): DebtorAccount => ({
   accountNumber: r.account_number,
   swordfishReference: r.swordfish_reference,
   importedAt: r.imported_at ?? null,
+  /* THE EMBEDDED CLIENT, or null where the read did not ask for it. A single-account fetch does
+     not embed, so this is absent rather than wrong there -- and the account page has the client
+     from its own query. */
+  companyName: (r.companies?.name as string | undefined) ?? null,
   clientReference: r.client_reference,
   debtorFirstName: r.debtor_first_name,
   debtorSurname: r.debtor_surname,
@@ -527,7 +539,19 @@ export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> 
   const query = applyAccountFilters(
     supabase
       .from('debtor_accounts')
-      .select('*', counted ? { count: 'exact' } : undefined)
+      /*
+       * THE CLIENT'S NAME COMES WITH THE ROW, at the firm's asking: the book is read across every
+       * client and a row that does not say whose it is cannot be acted on.
+       *
+       * A JOIN RATHER THAN A SECOND READ. The alternative is holding a map of companies in the
+       * browser and looking each row up, which is a second copy of the client list that goes stale
+       * the moment one is renamed -- and the book is paged in the database precisely so a list
+       * never loads something to look something else up in.
+       *
+       * `*` STAYS. PostgREST takes the embed alongside it, so no column is lost from the row
+       * itself -- and losing one here would be silent, because toAccount names every field by hand.
+       */
+      .select('*, companies(name)', counted ? { count: 'exact' } : undefined)
       .order('account_number')
       .range(page * pageSize, page * pageSize + pageSize - 1),
     q,

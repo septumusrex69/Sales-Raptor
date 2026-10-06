@@ -331,6 +331,38 @@ try {
    * fixture to do it. Asserted below, where the view is actually clicked.
    */
 
+  /*
+   * ---------- WHOSE BOOK EACH ROW IS ON ----------
+   *
+   * THE FIRM, pointing at the accounts table: "please add the client names to these places."
+   *
+   * The book is read across every client, and the client is the one party to the debt the table did
+   * not name -- the debtor was there, the creditor was not. Asserted in a browser rather than only
+   * in the source because it arrives through a PostgREST EMBED (`*, companies(name)`), and an embed
+   * that the mapper reads wrongly draws a dash in every row rather than throwing: exactly the silent
+   * mapper drift CLAUDE.md names, with nothing to see but a column of em-dashes.
+   */
+  /*
+   * THE COLUMN IS FOUND BY ITS HEADING, not counted. A fixed nth-child is right until somebody
+   * inserts a column to its left, and then it silently asserts about the neighbour -- which on this
+   * table would be the debtor's name, a string that passes a "not a dash" check perfectly well.
+   *
+   * CASE-INSENSITIVE, because `innerText` is the RENDERED text and the headings carry `uppercase`:
+   * the browser hands back CLIENT where the source says Client. This file already documents the
+   * same trap on the state badge.
+   */
+  const headings = (await page.locator('table thead th').allInnerTexts()).map((h) => h.trim())
+  const clientCol = headings.findIndex((h) => /^client$/i.test(h))
+  t.ok(`there is a Client heading (${JSON.stringify(headings)})`, clientCol >= 0)
+  const clientCells = page.locator(`table tbody tr td:nth-child(${clientCol + 1})`)
+  t.check('every row says whose book it is on',
+    (await clientCells.first().innerText()).trim(), 'Northbank Properties')
+  /* AND NOT A DASH, which is what a mis-read embed looks like and what a reader would skim past:
+     PostgREST returns a to-one embed as a NESTED OBJECT, so a mapper reading it as a flat column
+     draws an em-dash in every row and throws nothing. */
+  const dashes = (await clientCells.allInnerTexts()).filter((x) => x.trim() === '\u2014').length
+  t.check('...with no row left unnamed', dashes, 0)
+
   /* ---------- the scope line ---------- */
 
   const scope = page.locator('text=/Showing .* of /').first()

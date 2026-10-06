@@ -181,6 +181,13 @@ export function accountsPage(n, offset = 0) {
     return {
       id: `acc-${String(k).padStart(4, '0')}`,
       company_id: COMPANY_ID,
+      /*
+       * THE EMBEDDED CLIENT, because the list now asks PostgREST for `*, companies(name)` -- the
+       * book is read across every client and a row that does not say whose it is cannot be acted
+       * on. Shaped as PostgREST returns a to-one embed: a nested object on the row, not a flat
+       * column, which is the half a fixture gets wrong and the screen then shows as a dash.
+       */
+      companies: { name: COMPANY.name },
       handover_id: null,
       account_number: `NB${String(10000 + k)}`,
       swordfish_reference: null,

@@ -402,7 +402,20 @@ ok('the ceiling is one of them', /label: 'ceiling refuses'/.test(sections))
 
 /* AND BOTH SCREENS DRAW IT RATHER THAN THEIR OWN. A screen that kept a local copy would pass every
    assertion above while showing something else. */
-for (const [name, screen] of [['the approval queue', queueScreen], ['the check screen', checkScreen]]) {
+/*
+ * THE TWO SCREENS NO LONGER CARRY THE SAME NUMBER OF FIXED COLUMNS, so the count is stated per
+ * screen rather than once. The approval queue gained a CLIENT column at the firm's asking -- the
+ * queue mixes every client and every figure to the right of the payment is about one the row did
+ * not name. The Check screen is about one receipt somebody has already chosen, so it does not.
+ *
+ * THE INVARIANT THAT MATTERS IS UNCHANGED AND IS THE NEXT ASSERTION: whatever the count, the three
+ * fixed group spans must add up to it. That is what catches a heading shifted one column left, and
+ * it is what caught the stale `colSpan={5}` when the client column went in.
+ */
+for (const [name, screen, fixedExpected] of [
+  ['the approval queue', queueScreen, 15],
+  ['the check screen', checkScreen, 14],
+]) {
   ok(`${name} draws the shared sections`,
     /FeeHeadCells opened=/.test(screen) && /FeeBodyCells a=/.test(screen))
   ok(`${name} keeps no copy of its own`,
@@ -426,7 +439,7 @@ for (const [name, screen] of [['the approval queue', queueScreen], ['the check s
   /* FOURTEEN FIXED COLUMNS either side of the three sections, and the body must have a cell for
      each: one added to the head and not the row is the same shift read from the other end. */
   const fixedCells = (headRow.match(/<th\b/g) ?? []).length
-  check(`${name}: the fixed columns are all there`, fixedCells, 14)
+  check(`${name}: the fixed columns are all there`, fixedCells, fixedExpected)
   check(`${name}: the lead, the capital side and the tail cover every fixed column`,
     spans[0] + spans[1] + spans[2], fixedCells)
 }

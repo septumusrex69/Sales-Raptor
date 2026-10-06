@@ -283,7 +283,15 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
           */}
           <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
             <tr className="border-b border-slate-100 text-slate-400">
-              <th colSpan={5} />
+              {/*
+                SIX: the tick box, Received, Account, Debtor, Client and Payment. It was five until
+                the client name went in, and a span left behind shifts every heading after it by one
+                column -- so the figure under "Commission" is the VAT. Nothing warns; the screen
+                looks right and the firm reads the wrong number off it. check-allocation-rules adds
+                the three fixed spans up against the number of fixed columns for exactly this, and
+                it is what caught the stale five.
+              */}
+              <th colSpan={6} />
               <th colSpan={feeColumns(opened)}
                 className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
                 The fees side — half the payment
@@ -307,6 +315,12 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
               <th className="px-2 py-2 text-left font-medium">Received</th>
               <th className="px-2 py-2 text-left font-medium">Account</th>
               <th className="px-2 py-2 text-left font-medium">Debtor</th>
+              {/* THE FIRM ASKED FOR THIS ONE. The queue mixes every client, and every column to the
+                  right of the payment -- commission, VAT, what goes to the client -- is about a
+                  client the row did not name. The rows reading "no rate" are the sharpest case: the
+                  question that answers is "which client has no mandate rate here", and the screen
+                  could not say. */}
+              <th className="px-2 py-2 text-left font-medium">Client</th>
               <th className="px-2 py-2 text-right font-medium">Payment</th>
               <FeeHeadCells opened={opened} onToggle={toggleSection} />
               {/*
@@ -393,6 +407,21 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
                   </button>
                 </td>
                 <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
+                {/*
+                  WHOSE BOOK THIS RECEIPT IS ON, at the firm's asking.
+                  
+                  The queue mixes every client, and the columns to the right -- commission, VAT,
+                  what goes to the client -- are all ABOUT a client this row never named. The rows
+                  reading "no rate" are the sharpest case: the question that answers is "which
+                  client has no mandate rate on this account", and the screen could not say.
+                  
+                  TRUNCATED LIKE THE DEBTOR BESIDE IT. "Highveld Glass & Aluminium (Pty) Ltd" is a
+                  real client name and wrapping it doubles the height of a row in a hundred-row
+                  morning; the full name is on the title.
+                */}
+                <td className="px-2 py-1.5 text-slate-500 max-w-[11rem] truncate" title={r.client ?? undefined}>
+                  {r.client || '—'}
+                </td>
                 <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
                 {/*
                   NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of the interest here is the

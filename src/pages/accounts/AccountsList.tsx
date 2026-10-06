@@ -716,6 +716,16 @@ export function AccountsList() {
                   )}
                   <th className="px-4 py-2.5 font-medium">Account</th>
                   <th className="px-4 py-2.5 font-medium">Debtor</th>
+                  {/*
+                    WHOSE BOOK THE ACCOUNT IS ON, at the firm's asking, and beside the debtor
+                    because the two names are the two parties to the debt.
+
+                    ONLY WHEN THE LIST IS MIXED. Scoped to one client the column is the same name
+                    repeated down the page -- and the screen already says which client it is, in the
+                    tile and in the scope line. A column of one repeated value is the "warning that
+                    fires when nothing is wrong" in table form.
+                  */}
+                  {!companyId && <th className="px-4 py-2.5 font-medium">Client</th>}
                   {/* THE FIRM: "something on there that can be added is the hand-over date as
                       well." It is how old the matter is, which is the first thing asked of a row
                       nobody has worked -- and it is what prescription runs from. */}
@@ -762,6 +772,15 @@ export function AccountsList() {
                       <td className="px-4 py-2.5 text-slate-700">
                         {[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || '—'}
                       </td>
+                      {/* TRUNCATED, WITH THE WHOLE NAME ON THE TITLE. Client names run long --
+                          "Highveld Glass & Aluminium (Pty) Ltd" -- and a wrapped one doubles the
+                          height of its row on a page of a hundred. */}
+                      {!companyId && (
+                        <td className="px-4 py-2.5 text-slate-500 max-w-[11rem] truncate"
+                          title={a.companyName ?? undefined}>
+                          {a.companyName ?? '—'}
+                        </td>
+                      )}
                       <td className="px-4 py-2.5 text-slate-500">
                         {a.handoverDate ? formatDate(a.handoverDate) : '—'}
                       </td>

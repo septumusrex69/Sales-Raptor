@@ -7,6 +7,11 @@ one app.
 Read this before changing anything. Most of it is here because getting it wrong once cost real
 time, and a few items are here because getting them wrong would cost the firm money or a client.
 
+**Then read `HANDOFF.md`.** This file is the law and moves slowly; HANDOFF.md is where the work
+stands today — what shipped last, what the firm has asked for and nobody has started, what they
+have not yet decided, and which tools in this repo fail in ways that look like success. It exists
+so a new session does not have to read the last one's transcript. Update it before you finish.
+
 ---
 
 ## The vocabulary is the firm's, not the database's
