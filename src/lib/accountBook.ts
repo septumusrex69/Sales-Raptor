@@ -38,6 +38,14 @@ export interface DebtorAccount {
   caseNumber: string
   accountNumber: string | null
   swordfishReference: string | null
+  /*
+   * WHEN THIS FILE CAME ACROSS FROM SWORDFISH, OR NULL IF IT IS A REAL HANDOVER.
+   *
+   * Carried into the browser because the screen has to be able to SAY why the handover sequence
+   * did not run on it. The rule itself lives in the database -- workflow_start_on_allocation -- so
+   * this is never the thing that decides, only the thing that explains.
+   */
+  importedAt: string | null
   clientReference: string | null
   debtorFirstName: string | null
   debtorSurname: string | null
@@ -194,6 +202,7 @@ const toAccount = (r: any): DebtorAccount => ({
   caseNumber: r.case_number,
   accountNumber: r.account_number,
   swordfishReference: r.swordfish_reference,
+  importedAt: r.imported_at ?? null,
   clientReference: r.client_reference,
   debtorFirstName: r.debtor_first_name,
   debtorSurname: r.debtor_surname,

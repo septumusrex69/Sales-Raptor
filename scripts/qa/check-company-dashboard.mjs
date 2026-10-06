@@ -136,7 +136,10 @@ ok('there is a way out of it into your own department',
 /* ---------- the book's figures are counted in the database ---------- */
 
 const sql = read('../../supabase/schema.sql')
-const fn = sql.slice(sql.indexOf('create or replace function public.company_snapshot'))
+/* THE LAST DEFINITION. schema.sql is append-only, so the day this function is replaced `indexOf`
+   silently starts asserting against the superseded copy — see CLAUDE.md, and check-allocation-start,
+   where it had already happened. There is one definition today; this is what keeps that irrelevant. */
+const fn = sql.slice(sql.lastIndexOf('create or replace function public.company_snapshot'))
 ok('there is a company_snapshot function to read', fn.length > 500)
 /*
  * NOT A ROW OF THE BOOK CROSSES THE WIRE. CLAUDE.md: a list that loads the book to count it stops

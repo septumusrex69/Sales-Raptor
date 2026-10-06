@@ -1845,7 +1845,7 @@ export function AccountDetail() {
          * cannot drift apart again.
          */
         <WorkflowRunPanel accountId={account.id} runs={runs} offers={startable}
-          error={runsError} onChanged={reload}
+          error={runsError} onChanged={reload} importedAt={account.importedAt}
           askingFor={askStart} onAsked={() => setAskStart(null)} />
       )}
 

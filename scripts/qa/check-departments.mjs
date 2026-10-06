@@ -257,7 +257,9 @@ check('an administrator is offered all of them', teamsForRole('Administrator', T
  * below read an empty body and reported red on correct SQL. The same bounded-slice trap this
  * suite has hit before.
  */
-const fnAt = schema.indexOf('create or replace function public.refuse_team_outside_department')
+/* THE LAST DEFINITION, for the append-only reason CLAUDE.md gives: one definition today, and
+   `indexOf` would quietly read the old one the day a migration replaces it. */
+const fnAt = schema.lastIndexOf('create or replace function public.refuse_team_outside_department')
 const body = fnAt < 0 ? '' : schema.slice(fnAt, schema.indexOf('end $fn$;', fnAt))
 ok('the database refuses a mismatch at all', body.length > 0)
 ok('...knowing which kind each department needs', /then 'Call centre'/.test(body) && /then 'Communications'/.test(body))

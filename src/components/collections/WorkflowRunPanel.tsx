@@ -54,9 +54,20 @@ import { followerOf } from '../../lib/stepPairs.ts'
  * panel that fetched its own runs could not put a mark on the tab that opens it. The account
  * page reads them once, for the badge and for this.
  */
-export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, askingFor, onAsked }: {
+export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, askingFor, onAsked,
+  importedAt }: {
   accountId: string
   runs: AccountRun[]
+  /**
+   * WHEN THIS FILE CAME ACROSS FROM SWORDFISH, SO THE PANE CAN SAY WHY NOTHING STARTED.
+   *
+   * THE FIRM: "if it's imported from Swordfish, no handover SMSs. New handovers, SMSs and letters,
+   * handover." The rule is enforced in the database, in workflow_start_on_allocation -- this prop
+   * never decides anything, it only explains. A collector who allocates an imported account and
+   * finds an empty Workflows pane will otherwise read it as the system having failed, and the next
+   * thing they do is start one by hand.
+   */
+  importedAt?: string | null
   /** The workflows a person may start here. Empty is the ordinary case. */
   offers: StartableWorkflow[]
   error: string | null
@@ -138,10 +149,26 @@ export function WorkflowRunPanel({ accountId, runs, offers, error, onChanged, as
         there was no run -- an empty card on every account pushed the figures down in order to say
         nothing. A TAB somebody opened cannot do that: a blank pane reads as a screen that failed.
       */}
-      {runs.length === 0 && offers.length === 0 && !error && (
+      {runs.length === 0 && offers.length === 0 && !error && !importedAt && (
         <p className="text-sm text-slate-500">
           No workflow has been started on this account, and there is none published for a person
           to start. Sequences are written in the Library.
+        </p>
+      )}
+
+      {/*
+        AND WHY, ON AN IMPORTED FILE. Shown whenever nothing has run, offers or no offers: the
+        question "where is the handover?" is asked the moment the pane is empty, and an account
+        that came across from Swordfish can still have a section 129 on offer beside it.
+
+        IT SAYS WHAT DID NOT HAPPEN AND WHY, not "no workflow". The firm's own reason -- the debtor
+        has been dealt with on this file for years and is not being introduced to the firm today.
+      */}
+      {runs.length === 0 && !error && importedAt && (
+        <p className="text-sm text-slate-500">
+          This account came across from Swordfish, so the handover sequence does not run on it —
+          the debtor has already been written to about this file and is not being introduced to
+          the firm today. Anything else is started by hand.
         </p>
       )}
 

@@ -26751,3 +26751,97 @@ revoke execute on function public.record_account_status_event() from public, ano
 revoke execute on function public.book_summary(uuid, text) from public, anon;
 revoke execute on function public.book_facets(uuid, text) from public, anon;
 revoke execute on function public.account_view_counts(uuid, uuid, integer) from public, anon;
+
+-- ---------------------------------------------------------------------------------------------
+-- AN IMPORTED ACCOUNT IS NOT A NEW HANDOVER.
+--
+-- THE FIRM, looking at BPM0109 on the day of the first test import -- an account frozen since 19
+-- July 2026 that had just been sent a Handover email and a Handover SMS: "files imported from
+-- Swordfish shouldn't receive handover SMSs and stuff ... if it's imported from Swordfish, no
+-- handover SMSs. New handovers, SMSs and letters, handover."
+--
+-- Two guards, because BPM0109 was wrong for two separate reasons and either alone would have let
+-- the other through. Proved on staging in a transaction that rolled back, all four cases: a new
+-- active handover STARTS; a new frozen one, an imported frozen one and an imported ACTIVE one do
+-- not. Then proved the other way, with the guard removed inside another rolled-back transaction:
+-- all four started, which is the bug the firm photographed.
+create or replace function public.workflow_start_on_allocation()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- Nothing to start: the account is being unallocated, or was never allocated.
+  if new.assigned_to is null then
+    return new;
+  end if;
+  -- Already had somebody. This is a reallocation, which the firm says must not restart it.
+  if tg_op = 'UPDATE' and old.assigned_to is not null then
+    return new;
+  end if;
+
+  /*
+   * AN IMPORTED ACCOUNT IS NOT A NEW HANDOVER, AND THE FIRM SAW THIS HAPPEN.
+   *
+   * THE FIRM, looking at BPM0109: "files imported from Swordfish shouldn't receive handover SMSs
+   * and stuff ... if it's imported from Swordfish, no handover SMSs. New handovers, SMSs and
+   * letters, handover."
+   *
+   * A handover notice tells a debtor their account has just been placed with this firm. On an
+   * account that came across from Swordfish that is simply untrue -- the firm has had the file for
+   * years, and the debtor has already been written to about it -- so the notice is both wrong and,
+   * on an SMS, charged to the debtor under item 1(c) for a fact that is not a fact.
+   *
+   * `imported_at` is the marker because it is written in exactly one place, swordfishImport.ts, and
+   * the ordinary handover path never sets it: on staging it is present on all 20 imported accounts
+   * and absent on all 28 of the others. A new handover is therefore untouched by this, which is the
+   * half of the firm's sentence that must keep working.
+   */
+  if new.imported_at is not null then
+    return new;
+  end if;
+
+  /*
+   * AND NOT ON AN ACCOUNT NOBODY MAY CHASE. BPM0109 is Frozen, so it is in the On hold book, and it
+   * was sent a handover email and a handover SMS anyway: an imported freeze never went through
+   * hold_account, so there was no workflow_run_holds row to pause anything that started afterwards.
+   *
+   * This is the firm's own rule about queues -- "a frozen or closed account must never appear in a
+   * collector's queue or a dialler campaign" -- applied to the thing that actually leaves the
+   * building. Reading `book` rather than the status keeps it the one derivation: an AFTER trigger
+   * sees the stored generated column on NEW, which was probed before this was written.
+   */
+  if new.book <> 'active' then
+    return new;
+  end if;
+
+  /*
+   * EVERY ACTIVE VERSION THAT WAITS FOR THIS EVENT, not "the" one. Two workflows may both start
+   * on allocation the day the firm writes a second, and picking one of them arbitrarily is how a
+   * workflow silently never runs. Draft versions are excluded: a draft is being argued about.
+   *
+   * ONCE PER ACCOUNT AND VERSION, EVER -- in any state, not only while one is running. The
+   * partial unique index on workflow_runs stops a second LIVE run; it would happily allow a
+   * second after the first finished, which on a reallocation is exactly the case the firm ruled
+   * out.
+   *
+   * THE FIRM'S DAY, not the server's. The database is in UTC and the firm is two hours ahead in
+   * winter; around midnight the two disagree about the date, and started_on is what every step's
+   * date is counted from.
+   */
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.id, v.id, (now() at time zone 'Africa/Johannesburg')::date, new.assigned_to
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'allocated'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.id and r.version_id = v.id
+     );
+
+  return new;
+end $$;
+
+comment on function public.workflow_start_on_allocation() is
+  'Starts every active workflow that waits for an allocation, once per account, on first allocation only. Never on an account imported from Swordfish (it is not a new handover) and never on one outside the Active book. The run is created without steps; the runner dates them, because the working-day calendar lives in the app.';

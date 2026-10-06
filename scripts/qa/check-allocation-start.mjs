@@ -52,9 +52,23 @@ const runner = read('api/_lib/workflow/run.ts')
 const handOut = code('src/lib/handOutWrite.ts')
 const store = read('src/lib/accountRun.ts')
 
-/** One function's text, bounded at its own `end $$;` — a lazy match runs on into the next one. */
+/**
+ * One function's text, bounded at its own `end $$;` — a lazy match runs on into the next one.
+ *
+ * THE LAST DEFINITION, NOT THE FIRST, and this check was reading the first. schema.sql is
+ * APPEND-ONLY, so a function a later migration replaced appears in the file twice and `indexOf`
+ * lands on the copy that is no longer live — which is how a guard can be added, applied to the
+ * database, mirrored into the file, and asserted against the superseded body that never had it.
+ * CLAUDE.md names this exact failure; it caught it once on removing `tracing` from the exit list
+ * and it was sitting here unfixed.
+ *
+ * ANCHORED ON `create or replace function`, not on the bare name: the name also appears in the
+ * function's own `comment on function`, in grants and in revokes, so a plain lastIndexOf lands on
+ * a one-line statement and returns nothing — which fails OPEN, because every regex below would
+ * then be tested against an empty string.
+ */
 function fnText(name) {
-  const at = schema.indexOf(`function public.${name}(`)
+  const at = schema.lastIndexOf(`create or replace function public.${name}(`)
   if (at < 0) return ''
   const end = schema.indexOf('end $$;', at)
   return end < 0 ? schema.slice(at) : schema.slice(at, end)
@@ -101,6 +115,72 @@ ok('...and neither does a run that has already finished',
   /not exists \([\s\S]{0,200}?from public\.workflow_runs r[\s\S]{0,120}?r\.account_id = new\.id and r\.version_id = v\.id/.test(startFn))
 ok('...which is asked without a state, so a finished run still counts',
   !/not exists \([\s\S]{0,300}?r\.state/.test(startFn))
+
+/* ------------------------------------------------ and not on an account it would lie to */
+
+/*
+ * AN IMPORTED ACCOUNT IS NOT A NEW HANDOVER.
+ *
+ * THE FIRM, looking at BPM0109 after the first test import -- an account frozen since 19 July that
+ * had just been sent a Handover email and a Handover SMS: "files imported from Swordfish shouldn't
+ * receive handover SMSs and stuff ... if it's imported from Swordfish, no handover SMSs. New
+ * handovers, SMSs and letters, handover."
+ *
+ * A handover notice tells a debtor their account has just been placed with this firm, which on a
+ * file the firm has had for years is not true -- and on an SMS the debtor is charged for it under
+ * item 1(c). On the real book this would have fired on every account that came across.
+ */
+ok('an imported account starts nothing', /if new\.imported_at is not null then\s*\n\s*return new;/.test(startFn))
+/*
+ * AND NOT ON ONE NOBODY MAY CHASE. BPM0109 was frozen as well as imported, and an imported freeze
+ * never went through hold_account -- so there was no workflow_run_holds row to pause what started
+ * afterwards. The firm's own rule about queues, applied to the thing that leaves the building.
+ */
+ok('an account outside the Active book starts nothing',
+  /if new\.book <> 'active' then\s*\n\s*return new;/.test(startFn))
+/*
+ * READ OFF THE DERIVED COLUMN, not re-derived here. `book` is the one generated column; a second
+ * copy of the case expression in this trigger is the drift CLAUDE.md names, and the failure would
+ * be a notice going out to an account the list shows as frozen.
+ */
+ok('...reading the derived book rather than the status', !/new\.status ~~\*/.test(startFn))
+
+/*
+ * BOTH BEFORE THE INSERT, which is the half an assertion on presence alone does not get: a guard
+ * written after the run has already been created stops nothing.
+ *
+ * PRESENCE FIRST, THEN ORDER -- asserted above, compared here. `indexOf` returns -1 for something
+ * absent, and -1 is less than every real index, so an order-only assertion passes vacuously the
+ * moment the guard it orders is deleted. The house has been caught by exactly this.
+ */
+const insertAt = startFn.indexOf('insert into public.workflow_runs')
+const importGuardAt = startFn.indexOf('new.imported_at is not null')
+const bookGuardAt = startFn.indexOf("new.book <> 'active'")
+ok('the run is actually created somewhere in here', insertAt > 0)
+ok('the imported guard runs before the run is created',
+  importGuardAt > 0 && importGuardAt < insertAt)
+ok('...and so does the book guard', bookGuardAt > 0 && bookGuardAt < insertAt)
+
+/*
+ * AND THE SCREEN SAYS SO. A guard that silently does nothing is a screen somebody reads as broken:
+ * a collector allocates an imported account, opens Workflows, finds it empty, and starts one by
+ * hand -- which sends the debtor the notice the guard exists to prevent.
+ *
+ * THE WHOLE CHAIN, because the middle of it fails silently. `imported_at` has to be in the mapper
+ * (a column in the table, in the type and in `select('*')` but missing from the hand-written mapper
+ * reads as undefined for ever and nothing throws -- diary_capacity sat in that state for months),
+ * then passed to the pane, then drawn.
+ */
+const book = read('src/lib/accountBook.ts')
+const panel = read('src/components/collections/WorkflowRunPanel.tsx')
+const detail = read('src/pages/accounts/AccountDetail.tsx')
+ok('the mapper carries imported_at', /importedAt: r\.imported_at/.test(book))
+ok('...and the account type declares it', /importedAt: string \| null/.test(book))
+ok('...the account page hands it to the pane', /importedAt=\{account\.importedAt\}/.test(detail))
+ok('...and the pane says why nothing ran', /came across from Swordfish/.test(panel))
+/* NOT THE DECIDER. The rule is the database's; a browser that could suppress a handover itself
+   would be a second place the rule lives, and the two would drift. */
+ok('...without the browser deciding anything', !/importedAt[\s\S]{0,200}?startWorkflow|importedAt && .{0,40}offers =/.test(panel))
 
 /* Drafts are being argued about; only a published version runs on a real account. */
 ok('only an active version starts', /v\.state = 'active'/.test(startFn))
