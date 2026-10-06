@@ -193,7 +193,63 @@ try {
      * under it tells somebody they have a problem and nothing about where to start.
      */
     t.ok('and the shortfall is said out loud',
-      /bank holds R 963\.50 less than Raptor says is owed/.test(body))
+      /bank holds R 963\.50 less than is owed/.test(body))
+    /*
+     * THE THREE FIGURES ARE NAMED AS THE TWO RECORDS BEING RECONCILED. The firm's own sketch calls
+     * them BANK BALANCE and TRUST LEDGER BALANCE, and that is better here rather than merely more
+     * formal: "owed out of it" describes a consequence, where "trust ledger balance" names the
+     * thing being compared, and a reconciliation only reads when both sides are named.
+     */
+    /* CASE-INSENSITIVE for the same reason as the heading above: the dark panel's labels are drawn
+       `uppercase`, so innerText returns TRUST LEDGER BALANCE. */
+    t.ok('the two records are named as records',
+      /Bank balance/i.test(body) && /Trust ledger balance/i.test(body))
+    /* AND THE VERDICT IS ON THE PANEL, so nobody has to know that R 0.00 is the good answer. */
+    t.ok('...with the match stated rather than implied', /NOT MATCHED/i.test(body))
+
+    /* ---- does it balance? the panel the firm asked for, and it can say no ---- */
+    /*
+     * THE FIRM: "if the trust fund balances in the overview, then everything is fine."
+     *
+     * THE RECONCILIATION THEIR SKETCH DREW CANNOT SAY NO -- ledger balance less the four owners is
+     * an algebraic identity, because trust_position derives the balance BY ADDING THEM UP. So the
+     * panel was built from the four things that can actually be wrong, and this fixture has a real
+     * shortfall in it: the assertion that matters is that the page says the account does NOT
+     * balance. Drawn as the sketch had it, this line would read "match" over a R 963,50 hole.
+     */
+    t.ok('the page says whether the trust balances at all',
+      /The trust account does not balance\./.test(body))
+    t.ok('...asking whether every rand has an owner', /Does every rand in there have an owner\?/.test(body))
+    t.ok('...and answering it with the unplaced receipt', /R 485\.00 is in the account with nobody/.test(body))
+    /*
+     * THE CHECKS THAT PASS ARE SHOWN TOO. A panel drawing only problems cannot be told apart from
+     * one that failed to load, and the firm asked to be told that everything IS fine.
+     */
+    t.ok('...and the checks that pass are still drawn',
+      /No client owes the trust/.test(body))
+    t.ok('...including the payovers', /No cycle is holding client money past/.test(body))
+    /*
+     * A TRUST DEBTOR IS NOT A SHORTFALL, and the words have to keep them apart: the cash is all
+     * there, so sending somebody to the bank over a collection job is the failure here.
+     */
+    t.ok('a client in debit would not be called a shortfall',
+      !/owes the trust[\s\S]{0,120}shortfall/.test(body) || /not a shortfall/.test(body))
+
+    /* ---- who owns it, named by what the money IS ---- */
+    /* CASE-INSENSITIVE: the heading carries `uppercase`, so innerText hands back WHO OWNS THE
+       MONEY IN TRUST? while the source says it in sentence case. The same trap as the state badge
+       sixty lines down, which this file already documents. */
+    t.ok('the ownership question is asked', /Who owns the money in trust\?/i.test(body))
+    for (const owner of [
+      'Awaiting client payover', 'Earned and still held in trust',
+      'Overpayments and refunds outstanding', 'Owner not yet identified',
+    ]) {
+      t.ok(`...and ${owner.toLowerCase()} is one of the answers`, body.includes(owner))
+    }
+    /* WHOSE IT IS IS KEPT BESIDE IT. What the money is waiting for and who would be out of pocket
+       are two different facts and the second is the whole point of a trust. */
+    t.ok('...with whose money each one is', /Clients ·/.test(body) && /Bredell Ferreira ·/.test(body))
+    t.ok('...summing to a total accounted for', /Total accounted for/i.test(body))
 
     /* ---- and it is EXPLAINED: both debits named, with the right action on each ---- */
     t.ok('the unmatched payout is named', /R 962\.50/.test(body))
@@ -268,8 +324,14 @@ try {
     /* AND THE SCREEN SAYS WHERE THE DATE IT QUOTES COMES FROM, because Raptor guessed it. */
     t.ok('the guessed payover date points at its setting', body.includes('a trust setting'))
 
-    /* ---- the four parties ---- */
-    for (const who of ['Clients', 'Debtors', 'Bredell Ferreira', 'Not yet identified']) {
+    /* ---- the four parties, each named by WHOSE the money is ---- */
+    /*
+     * THE ROWS WERE RENAMED TO SAY WHAT THE MONEY IS -- "Awaiting client payover" rather than
+     * "Clients" -- at the firm's asking, and whose it is was kept on the line beneath. This loop
+     * asserts the second half: the label a reader uses to find their own money. "Not yet
+     * identified" became "Unallocated receipts", which is what the firm calls it.
+     */
+    for (const who of ['Clients', 'Debtors', 'Bredell Ferreira', 'Unallocated receipts']) {
       t.ok(`${who} has a line`, body.includes(who))
     }
     t.ok('the firm knows what it may draw', /R 4 420\.07/.test(body))

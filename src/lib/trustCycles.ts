@@ -151,11 +151,30 @@ export function cycleProgress(c: TrustCycle, today: string): number {
 }
 
 export interface CycleTotals {
+  collected: number
   toClients: number
   firmEarned: number
   firmMoved: number
   toDebtors: number
   held: number
+}
+
+/**
+ * WHAT THE CYCLE ACTUALLY COLLECTED, gross, before it was split between the people it belongs to.
+ *
+ * THE FIRM PUT THIS COLUMN FIRST on their own sketch -- "COLLECTED, CLIENT PORTION, BF EARNED,
+ * OTHER HELD" -- and they are right that it leads: the client portion and the firm's share are
+ * both shares OF something, and without the something on the row you cannot see whether a small
+ * client column is a quiet month or a fat commission.
+ *
+ * THE FIRM'S DRAWINGS ARE NOT COLLECTIONS, which is the whole reason this is a function rather
+ * than a sum of the row. `firmMoved` is the firm's own column for entries with no receipt behind
+ * them -- a drawing to the business account, a correction, a parked credit taken over -- and
+ * adding it in would make a month look bigger the more the firm took out of it. `trust_by_cycle`
+ * already separates earned from moved for exactly this reason; this is the half that uses it.
+ */
+export function cycleCollected(c: TrustCycle): number {
+  return Math.round((c.toClients + c.firmEarned + c.toDebtors + c.unplaced) * 100) / 100
 }
 
 /**
@@ -170,6 +189,7 @@ export interface CycleTotals {
 export function cycleTotals(cycles: TrustCycle[]): CycleTotals {
   const r = (v: number): number => Math.round(v * 100) / 100
   return {
+    collected: r(cycles.reduce((s, c) => s + cycleCollected(c), 0)),
     toClients: r(cycles.reduce((s, c) => s + c.toClients, 0)),
     firmEarned: r(cycles.reduce((s, c) => s + c.firmEarned, 0)),
     firmMoved: r(cycles.reduce((s, c) => s + c.firmMoved, 0)),
@@ -186,6 +206,27 @@ export function cycleTotals(cycles: TrustCycle[]): CycleTotals {
  * into one shrug. An open cycle is never behind on anything -- its runs are not built until it
  * closes -- so it is asked nothing.
  */
+/**
+ * The closed cycles still holding client money after the day they were due out.
+ *
+ * PAST ITS DAY, NOT MERELY CLOSED. A cycle closes on the 10th and is paid over later -- how much
+ * later is a trust setting -- so between those two dates it is holding client money entirely
+ * properly. Only once `paysOn` has gone by is the firm holding somebody else's money longer than
+ * it said it would, and that is the one of the four checks that is about a promise rather than a
+ * sum.
+ *
+ * `toClients > 0` because a cycle that nets to nothing for clients has nothing to be late with.
+ *
+ * LATE IS ASKED OF `cycleState`, NOT RE-DERIVED. The first draft wrote the comparison out again as
+ * `!c.isOpen && c.paysOn < today`, which is the same rule in a second place -- and the rule is not
+ * as obvious as it looks, because a closed cycle is NOT late until `paysOn` has gone by, and there
+ * is a settable lag between those two dates. Two copies of that drift the day the lag changes, and
+ * the symptom would be the overview's own panel disagreeing with the band drawn beside it.
+ */
+export function overdueCycles(cycles: TrustCycle[], today: string): TrustCycle[] {
+  return cycles.filter((c) => c.toClients > 0 && cycleState(c, today).tone === 'late')
+}
+
 export function cycleTodo(c: TrustCycle): string | null {
   if (c.isOpen) return null
   if (c.toClients <= 0) return null

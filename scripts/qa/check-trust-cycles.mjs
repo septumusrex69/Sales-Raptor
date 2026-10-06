@@ -258,13 +258,22 @@ ok('...and still reads the position', /fetchTrustPosition\(\)/.test(page))
  * with the bank balance on a separate panel and no line connecting the two; a trust control is the
  * one place the firm reads DOWN to a difference.
  */
-const from = page.indexOf('\n            Trust control\n')
+/*
+ * THE HEADING AND THE LAST THREE ROWS WERE RENAMED, at the firm's asking, and the names are the
+ * point rather than decoration. The block is headed with their question -- "Who owns the money in
+ * trust?" -- because a control is a procedure somebody performs and the question is what a person
+ * standing in front of it actually wants answered. The rows below it became "Total accounted for",
+ * "Bank balance" and "Bank / ledger difference", so that the two things being reconciled are named
+ * as the two RECORDS they are: "in the bank" against "owed out of it" is a comparison between a
+ * place and a consequence, and only one of those is a record anybody keeps.
+ */
+const from = page.indexOf('\n            Who owns the money in trust?\n')
 const control = from < 0 ? '' : page.slice(from, page.indexOf('Owed back to the trust', from))
-ok('the control block was found', control.length > 500 && control.length < 4000)
+ok('the control block was found', control.length > 500 && control.length < 5000)
 /* PRESENCE BEFORE ORDER, ALWAYS. `indexOf` returns -1, so an order-only assertion passes
    vacuously the day the line it orders is deleted -- the trap this suite has been caught by. */
 let at = -1
-for (const line of ['Owed out of trust', 'In the bank', 'Difference']) {
+for (const line of ['Total accounted for', 'Bank balance', 'Bank / ledger difference']) {
   const found = control.search(new RegExp(`(^\\s*|>)${line}(\\n|<)`, 'm'))
   ok(`the control block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)
