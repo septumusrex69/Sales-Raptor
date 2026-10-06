@@ -55,6 +55,12 @@ account, and imported nothing at all.
   R3.50/segment capped at 10 a month, consultation R60, disputes R25, receiving email R13.
   Fees are raised on the action and only become billable once money is recovered.
 - **Fees are charged on ACCOUNTS ONLY** — never on leads or deals. The sales side raises nothing.
+- **Correspondence with the CLIENT about an account is still charged to the debtor** — R25 under
+  item 1(a) on what the liaison sends, R13 under item 6 on the client's reply. Asked whether the
+  R13 should go once client mail left the debtor's Emails tab, the firm: *"No, you can just keep it
+  there. Because it's correspondence regarding the [debtor's account]."* Where a message is SHOWN
+  (`account_emails.correspondent`) and what it COSTS are separate questions; `check-client-
+  correspondence` holds the charge ungated on who wrote it.
 - **Financial records are immutable** once remittance has run or a payment is processed.
 - **IMPORTED HISTORY IS FROZEN AT WHAT WAS IMPORTED.** The firm's own instruction: "what we
   import, the data has to stay exactly like that, because we can't change the remittances that

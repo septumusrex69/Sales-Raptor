@@ -16,8 +16,9 @@
  *   3. The debtor's Emails tab reads only the debtor's; a ticket reads both.
  *   4. The Messages menu sends a client's answer to its ticket, and leaves out a client's email
  *      with no ticket -- the sync puts that one on the client's own record instead.
- *   5. THE FEE IS UNTOUCHED. The user confirmed the firm's ruling stands (item 1(a) on the forward,
- *      item 6 on the reply): this moves where a message is shown, never what it costs.
+ *   5. THE FEE IS UNTOUCHED, by the firm's ruling: item 1(a) on the forward, item 6 on the reply.
+ *      Asked whether the R13 should go, they said keep it -- "it's correspondence regarding the
+ *      [debtor's account]". This moves where a message is shown, never what it costs.
  *
  * Run: node scripts/qa/check-client-correspondence.mjs
  */
@@ -130,9 +131,9 @@ ok('...once, however often a mailbox is resynced',
 /* ---------- 5. the fee is not touched ---------- */
 
 /*
- * THE CHARGE RUNS FOR EVERY FILED MESSAGE, before any question of who wrote it. A future change
- * that wraps it in `correspondent === 'debtor'` would stop billing dispute correspondence -- which
- * may well be what the firm one day decides, but it is THEIR decision (HANDOFF §4), not a refactor.
+ * THE CHARGE RUNS FOR EVERY FILED MESSAGE, before any question of who wrote it. The firm was asked
+ * outright whether a client's reply should still cost the debtor R13, and ruled that it should
+ * (CLAUDE.md). A change that wraps the charge in `correspondent === 'debtor'` reverses that ruling.
  */
 const chargeAt = file.indexOf('charge = await chargeItemWith(admin, {')
 ok('the item 6 charge is still raised', chargeAt > 0)

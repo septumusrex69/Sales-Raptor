@@ -27322,8 +27322,9 @@ end $$;
 --   Anything else stays DEBTOR, which is what every row was before this column existed.
 --
 -- FEES ARE NOT TOUCHED. The firm has ruled that dispute correspondence is charged (item 1(a) on
--- the forward, item 6 on the reply), and the user confirmed it stays so: this column moves where
--- a message is SHOWN and nothing about what it costs.
+-- the forward, item 6 on the reply), and asked again once this column existed, kept the R13: "it's
+-- correspondence regarding the [debtor's account]". This column moves where a message is SHOWN
+-- and nothing about what it costs.
 --
 -- EXISTING ROWS: marked on staging only (three, all on tickets). Production rows are the firm's
 -- decision, case by case -- see HANDOFF.md.

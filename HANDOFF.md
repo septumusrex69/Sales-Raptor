@@ -33,7 +33,7 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| `f001783` | **The client's email is not the debtor's correspondence.** `account_emails.correspondent` ('debtor' / 'client'), decided on INSERT by `account_email_correspondent` for all three writers: the account's own debtor contact wins; otherwise the client company's address (or a contact's at it or its parent), or a reply to a client row, is the client. The debtor's Emails tab reads only 'debtor'; a ticket reads both. The Messages menu sends a client's answer to its ticket (read on follow); a client email with **no** ticket gets an email activity on the client's own record from the sync, and is left out of the menu's account list so it is not announced twice. `protect_account_mail_fields` now locks the column too. **Fees untouched** — the user confirmed the firm's ruling stands. `check-client-correspondence` (37). Staging: three rows marked, all on tickets; the rule's dry run touched nothing else. |
+| `f001783` | **The client's email is not the debtor's correspondence.** `account_emails.correspondent` ('debtor' / 'client'), decided on INSERT by `account_email_correspondent` for all three writers: the account's own debtor contact wins; otherwise the client company's address (or a contact's at it or its parent), or a reply to a client row, is the client. The debtor's Emails tab reads only 'debtor'; a ticket reads both. The Messages menu sends a client's answer to its ticket (read on follow); a client email with **no** ticket gets an email activity on the client's own record from the sync, and is left out of the menu's account list so it is not announced twice. `protect_account_mail_fields` now locks the column too. **Fees untouched** — and since ruled on: client correspondence about an account is still charged to the debtor (CLAUDE.md, Annexure B rules). `check-client-correspondence` (37). Staging: three rows marked, all on tickets; the rule's dry run touched nothing else. |
 | `e2d87c0` | **Node 22.22 decodes windows-1252 as Latin-1**, so 0x80–0x9F (curly quotes, dashes, €) became invisible control characters in every mail body `toText` read. Corrected from the WHATWG table. `check-mime-parts` had been red on a clean tree because of it. |
 | `5e6c4d5` | **A calendar invitation opens the email**, wherever it is. `?message=` used to look only in the first page of All and give up quietly. A miss now fetches the row by id (`fetchMailItem`), moves to the tab holding it (`tabOf`, now the one statement of the rule `bumpUnread` used), waits for THAT tab's list, then opens it. e2e/mail covers both layouts and a message past the first page of Junk; the original page fails it. |
 
@@ -90,14 +90,7 @@ Do not guess these. Each one changes money.
    charge recoveries and drawings, so the parts would not sum to the whole. The alternative is
    changing a financial ledger. **Ask.**
 
-5. **Should client correspondence on a dispute be charged to the debtor?** Today it is: item 1(a),
-   R25, on the liaison's forward to the client (the firm's explicit ruling), and item 6, R13, on the
-   client's reply. The second session moved where client mail is SHOWN and, on the user's
-   instruction, left the fees alone. But item 6 is "correspondence received and attended to", and
-   the client is not the debtor. `check-client-correspondence` §5 asserts the charge is NOT gated on
-   `correspondent`, so changing this is a deliberate edit to that check, not an accident. **Ask.**
-
-6. **The trust overview's "unexplained difference" was deliberately not built as drawn.** The
+5. **The trust overview's "unexplained difference" was deliberately not built as drawn.** The
    firm's sketch reconciles the ledger balance against the four owners — but `trust_position`
    derives the balance BY ADDING THEM UP, so that difference is 0.00 on every row of data that can
    exist (verified on staging: 7 873,60 / 7 873,60 / 0,00). It was replaced with four checks that
