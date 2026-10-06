@@ -172,6 +172,11 @@ which fails OPEN because every regex then tests an empty string.
   the payload stays small and the file and the database match by construction.
 - Verify every mirror by md5: strip `/*…*/` and `--`, collapse whitespace, hash both sides.
 
+**Run the checks and the commit as SEPARATE steps.** In this environment's shell, `set -e` and
+`grep -q` on the QA summary did not stop a chained command: twice a commit was pushed with the fast
+suite red (`5779bac`, `eb7c973`, each fixed in the next commit). Read "All green" with your own
+eyes, then commit.
+
 **`apply_migration` hangs on the word `delete` too**, not only `execute_sql` — a function with a
 `delete from` in its body timed out and applied nothing (prompt 8). Build the text with
 `replace($f$ ... DEL_ETE ... $f$, 'DEL_ETE', 'del' || 'ete')` inside a `do` block and `execute` it;
