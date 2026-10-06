@@ -26845,3 +26845,452 @@ end $$;
 
 comment on function public.workflow_start_on_allocation() is
   'Starts every active workflow that waits for an allocation, once per account, on first allocation only. Never on an account imported from Swordfish (it is not a new handover) and never on one outside the Active book. The run is created without steps; the runner dates them, because the working-day calendar lives in the app.';
+
+-- ---------------------------------------------------------------------------------------------
+-- TWO DATES ON A PAYMENT, AND IMPORTED MONEY IS NOT WAITING FOR APPROVAL.
+--
+-- THE FIRM, looking at ninety imported receipts in the approval queue with "Approve all 90" over
+-- R297 506,84 on it: "I imported some stuff from Swordfish and it shows me payment schedules to
+-- approve. It shouldn't do that. If the payments come from Swordfish, they're already in there and
+-- they've already been approved... except for the ones that doesn't fall in the next payment run.
+-- If we import, for example, today, the entire Swordfish book, then from the 11th September until
+-- today would not have been processed. It should go into a state of needing to be approved."
+--
+-- AND THE SECOND HALF, which is the deeper one: "it's important to capture the payment date and
+-- basically the allocation date of a payment. For example, if a payment was made a PTC, let's say
+-- on the 5th of September and only processed today, it will only be processed with this import
+-- date... or if a payment was in suspense, it was made on the 5th of September, it missed the first
+-- payment run in which it was supposed to be. So it should be running in the payment run."
+--
+-- WHAT PRESSING THAT BUTTON WOULD HAVE DONE. approve_payment splits a receipt, and the split
+-- raises a trust creditor for the client and makes the allocation claimable by a payover run --
+-- and build_payover_run claimed on created_at, which for an imported book is the day of the import
+-- for every receipt in it. So all ninety would have landed in the current cycle and the clients
+-- would have been paid a second time for money Swordfish remitted to them months ago.
+alter table public.account_payments
+  add column if not exists allocated_on date,
+  add column if not exists paid_over_in_swordfish boolean not null default false;
+
+-- Already-approved receipts get an allocation date from when they were approved, so the column is
+-- true of the whole table from the day it exists rather than only of what happens next.
+update public.account_payments
+   set allocated_on = (coalesce(approved_at, created_at) at time zone 'Africa/Johannesburg')::date
+ where allocated_on is null and approved_at is not null;
+
+create index if not exists account_payments_allocated_on_idx
+  on public.account_payments (allocated_on) where allocated_on is not null;
+
+comment on column public.account_payments.allocated_on is
+  'The day the payment was processed into a payover cycle, which is what decides WHICH run it goes in. Distinct from received_at, the day the debtor actually paid: a PTC paid on 5 September and captured today is allocated today, and so is one released from suspense after missing its run. Null until approved.';
+comment on column public.account_payments.paid_over_in_swordfish is
+  'This receipt was already remitted to the client by Swordfish before the migration. It is history: it never enters the approval queue, is never allocated, and can never be claimed by a Raptor payover run.';
+create or replace function public.build_payover_run(p_company uuid, p_period_start date)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_end date := public.payover_cycle_end(p_period_start);
+  v_run uuid;
+  v_status text;
+  v_prev record;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select id, status into v_run, v_status
+    from public.payover_runs where company_id = p_company and period_start = p_period_start;
+
+  -- A VOIDED RUN IS NOT AN ISSUED ONE, SO IT DOES NOT HOLD THE CYCLE.
+  -- Voiding threw the working document away: it released every allocation, dropped every line and
+  -- went out to nobody. But UNIQUE (company_id, period_start) means the row still occupies the
+  -- slot, and this used to refuse it alongside approved and sent -- so a client whose run was
+  -- voided could never be paid over for that cycle again, and protect_payover_run refuses to
+  -- remove the row as well. Pressing Void was irreversible and nobody was warned.
+  -- The number goes with it, or payover_invoice_number hands out the next one and leaves a gap
+  -- in a sequence the client reads.
+  if v_run is not null and v_status = 'void' then
+    delete from public.payover_runs where id = v_run;
+    v_run := null;
+  end if;
+
+  if v_run is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'The % run for this client is already %; a correction belongs in the next run.',
+      to_char(p_period_start, 'DD Mon YYYY'), v_status;
+  end if;
+
+  if v_run is null then
+    insert into public.payover_runs (company_id, period_start, period_end, invoice_number)
+    values (p_company, p_period_start, v_end, public.payover_invoice_number(p_company, v_end))
+    returning id into v_run;
+  else
+    /* Let go of everything it was holding before it claims again, so a rebuild is not an append. */
+    update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
+    update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
+    update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    /* AND THE CLIENT CHARGES IT WAS CARRYING, or a rebuild leaves them pointing at a run whose
+       lines have gone and they are never set off against anything. */
+    update public.client_charges set payover_run_id = null where payover_run_id = v_run;
+    delete from public.payover_run_lines where run_id = v_run;
+  end if;
+
+  /* 1. THIS CYCLE'S OWN ALLOCATIONS. Claimed and drawn in one statement so an allocation cannot be
+        claimed by a run that then fails to list it. Demo money is excluded here as well as in the
+        engine -- R23,6m nobody paid, sitting in the same table as money somebody did. */
+  with claimed as (
+    update public.payment_allocations a
+       set payover_run_id = v_run
+      from public.account_payments p, public.debtor_accounts d
+     where p.id = a.payment_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       /* MONEY SWORDFISH ALREADY PAID OVER IS NEVER CLAIMED. It has no allocation, so the
+          join already excludes it -- this is the rule said out loud beside the dates, because
+          the day somebody allocates an imported receipt by hand is the day the client is
+          paid twice for money they were remitted years ago. */
+       and not p.paid_over_in_swordfish
+       /* CLAIMED ON THE ALLOCATION DATE, NOT ON created_at.
+          THE FIRM: "it's important to capture the payment date and basically the allocation
+          date of a payment. For example, if a payment was made a PTC, let's say on the 5th of
+          September and only processed today, it will only be processed with this import
+          date... or if a payment was in suspense... it missed the first payment run in which
+          it was supposed to be. So it should be running in the payment run."
+          created_at was standing in for this and is not it: it is when the ROW was written,
+          which for an imported book is the day of the import for every receipt in it, and
+          which nothing may move because it is the audit trail. allocated_on is set at
+          approval -- the moment a payment is processed -- so a receipt released from suspense
+          in October goes out in October's run however long it sat, and the day the debtor
+          paid stays on received_at where it belongs.
+          A DATE against the cycle's own dates, so no timezone can push a receipt into the
+          neighbouring cycle at midnight. */
+       and p.allocated_on >= p_period_start
+       and p.allocated_on <= v_end
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat,
+    excess_credit, needs_rate
+  )
+  select v_run, c.id, c.account_id,
+         case when c.paid_to_client then 'ptc' else 'trust' end,
+         c.paid_to_client,
+         coalesce(c.payment_amount, 0), c.to_interest, coalesce(c.to_costs, 0), c.to_capital,
+         c.commission, c.commission_vat, c.excess_credit, c.status = 'needs_rate'
+    from claimed c;
+
+  /* 2. REVERSALS OF PAYMENTS ALREADY INVOICED. The firm's decision 6: never edited in the run that
+        went out -- it becomes a negative line in the next one. */
+  with carried as (
+    update public.payment_allocations a
+       set reversal_carried_run_id = v_run
+      from public.payover_runs r, public.debtor_accounts d
+     where r.id = a.payover_run_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat, excess_credit
+  )
+  select v_run, c.id, c.account_id, 'reversal', c.paid_to_client,
+         -coalesce(c.payment_amount, 0), -c.to_interest, -coalesce(c.to_costs, 0), -c.to_capital,
+         -c.commission, -c.commission_vat, -c.excess_credit
+    from carried c;
+
+  /* 3. LAST RUN'S SHORTFALL, from the most recent INVOICED run rather than merely last month. */
+  select r.id, r.net_payover, r.invoice_number into v_prev
+    from public.payover_runs r
+   where r.company_id = p_company
+     and r.period_start < p_period_start
+     and r.status in ('approved', 'sent', 'paid')
+     and r.net_payover < 0
+     and r.carried_out_run_id is null
+   order by r.period_start desc limit 1;
+
+  if v_prev.id is not null then
+    insert into public.payover_run_lines (run_id, line_kind, carried_amount)
+    values (v_run, 'carried', v_prev.net_payover);
+    update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
+  end if;
+
+  /* 4. WHAT THE CLIENT OWES THE FIRM, taken off this payover. The firm, on withdrawing an
+        account: "withdrawal fee subtracted from payover". A charge is claimed by the first run
+        built after it was raised -- not by the cycle it falls in -- because it is not a receipt
+        and has no cycle of its own; what matters is that it comes off the next money that goes
+        out. `settlement = 'invoice'` is the other half of the firm's example and is deliberately
+        NOT claimed: that one the client pays directly. */
+  with taken as (
+    update public.client_charges c
+       set payover_run_id = v_run
+     where c.company_id = p_company
+       and c.settlement = 'set_off'
+       and c.payover_run_id is null
+       and c.cancelled_at is null
+       and c.paid_at is null
+       and c.raised_on <= v_end
+    returning c.*
+  )
+  insert into public.payover_run_lines (
+    run_id, account_id, line_kind, client_charge_id, charge_amount)
+  select v_run, t.account_id, 'charge', t.id, t.amount + t.vat from taken t;
+
+  perform public.recompute_payover_run(v_run);
+  return v_run;
+end $$;
+
+create or replace function public.move_payment_to_cycle(p_payment uuid, p_period_start date)
+returns date
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_at timestamptz;
+  v_run record;
+begin
+  if not public.has_capability('payment.move') then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  -- STAGING ONLY, ASKED IN THE DATABASE, for the same reason reset_payover_run is: this moves
+  -- money between two invoices, and a browser guard is a courtesy rather than a boundary.
+  if not public.is_staging_database() then
+    raise exception 'Moving a payment between cycles is a testing control and this is not the staging database.'
+      using errcode = '42501';
+  end if;
+  if p_period_start is distinct from public.payover_cycle_start(
+       (p_period_start::timestamp at time zone 'Africa/Johannesburg')) then
+    raise exception 'A cycle starts on the 11th; % does not.', to_char(p_period_start, 'DD Mon YYYY')
+      using errcode = '22023';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+
+  -- AN INVOICED PAYMENT DOES NOT MOVE. Its figures are on a remittance a client has had, and
+  -- taking it out from under them is exactly what the reversal-as-a-negative-line rule exists to
+  -- prevent. Reset the run first if that is really what is wanted.
+  select r.invoice_number, r.status into v_run
+    from public.payment_allocations a
+    join public.payover_runs r on r.id = a.payover_run_id
+   where a.payment_id = p_payment and r.status in ('approved', 'sent', 'paid')
+   limit 1;
+  if v_run.invoice_number is not null then
+    raise exception 'That payment is on %, which is %. Reset that run first.',
+      v_run.invoice_number, v_run.status using errcode = '22023';
+  end if;
+
+  -- THE CYCLE IS DECIDED BY created_at, NOT BY THE RECEIVED DATE SOMEBODY TYPED. build_payover_run
+  -- claims on `p.created_at between the cycle's bounds`, so a backdated receipt still lands in the
+  -- cycle it was captured in -- which is right for an audit trail and is exactly what makes a
+  -- carry-forward or a negative payover untestable without this. Noon, so no timezone edge can
+  -- push it into the neighbouring cycle.
+  v_at := ((p_period_start + 15)::timestamp + time '12:00') at time zone 'Africa/Johannesburg';
+
+  /* THE ALLOCATION DATE MOVES; created_at DOES NOT.
+     This used to rewrite created_at, and said so honestly because created_at was what
+     build_payover_run claimed on. It was always the wrong column to move: created_at is when
+     the ROW was written and is the audit trail, and a testing control that edits the audit
+     trail leaves no way to tell a moved receipt from one captured that day. allocated_on is
+     the column that actually means "which payover cycle this was processed into", so moving a
+     payment between cycles is now one honest write of the field that decides it. */
+  update public.account_payments set allocated_on = v_at::date where id = p_payment;
+  -- AND IT LETS GO OF ANY OPEN RUN, or the next build finds it already claimed and silently
+  -- produces a run with the payment missing from both cycles.
+  update public.payment_allocations set payover_run_id = null where payment_id = p_payment;
+
+  return p_period_start;
+end $$;
+
+create or replace function public.trust_by_cycle()
+returns table (
+  period_start date, period_end date, pays_on date, is_open boolean,
+  to_clients numeric, firm_earned numeric, firm_moved numeric,
+  to_debtors numeric, unplaced numeric, held numeric,
+  runs integer, runs_paid integer, runs_to_do integer)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with today as (select (now() at time zone 'Africa/Johannesburg')::date as d),
+  placed as (
+    select
+      coalesce(
+        r.period_start,
+        public.payover_cycle_start(coalesce(p.allocated_on::timestamptz, p.created_at)),
+        public.payover_cycle_start(coalesce(ap.allocated_on::timestamptz, ap.created_at)),
+        public.payover_cycle_start(e.entry_at)) as cyc,
+      e.party,
+      e.amount,
+      -- A FIRM ENTRY WITH A RECEIPT BEHIND IT WAS EARNED. One without is a drawing, a correction
+      -- or a parked credit taken over, and none of those is a month's earnings.
+      (e.payment_id is not null or e.allocation_id is not null) as from_receipt
+      from public.trust_creditor_entries e
+      left join public.account_payments p on p.id = e.payment_id
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.payover_runs r on r.id = e.payover_run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client'), 0) as to_clients,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_moved,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as to_debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unplaced,
+      coalesce(sum(amount), 0) as held
+      from placed
+     group by cyc
+  )
+  select a.cyc,
+         public.payover_cycle_end(a.cyc),
+         public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         t.d <= public.payover_cycle_end(a.cyc),
+         round(a.to_clients, 2), round(a.firm_earned, 2), round(a.firm_moved, 2),
+         round(a.to_debtors, 2), round(a.unplaced, 2), round(a.held, 2),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status <> 'void'), 0),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status = 'paid'), 0),
+         -- WHAT IS LEFT TO DO ON IT, which is the actionable half: a closed cycle with money in it
+         -- and nothing built is a different problem from one where four runs are sitting approved.
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc
+                      and r.status in ('draft', 'approved', 'sent')), 0)
+    from agg a, today t
+   where public.has_capability('finance.view')
+     -- A CYCLE THAT NETS TO NOTHING IS A CYCLE THAT HAS BEEN PAID, and drawing it as a row of
+     -- zeroes would bury the two that have not under a year of settled months.
+     and (round(a.held, 2) <> 0 or round(a.to_clients, 2) <> 0
+          or round(a.firm_earned, 2) <> 0 or round(a.to_debtors, 2) <> 0)
+   -- OLDEST FIRST: THE ONE THAT LEAVES SOONEST IS THE ONE AT THE TOP. Newest first put the cycle
+   -- still being collected above the one going out in five days, which is backwards twice over --
+   -- it is the wrong end of the firm's own sentence ("what is for this month's payover? And what is
+   -- for next month's payover?"), and a cycle that has gone PAST its day is the one thing on this
+   -- table somebody has to act on, which newest-first buries at the bottom.
+   order by a.cyc asc
+$$;
+revoke execute on function public.trust_by_cycle() from public, anon;
+grant execute on function public.trust_by_cycle() to authenticated;
+
+create or replace function public.approve_payment(p_payment uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to approve payments.' using errcode = '42501';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then raise exception 'That payment no longer exists.'; end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed. It cannot be approved.';
+  end if;
+  if v_pay.rejected_at is not null then
+    raise exception 'That receipt was rejected. Put it back first if it should be approved.'
+      using errcode = '22023';
+  end if;
+  /* MONEY SWORDFISH HAS ALREADY PAID OVER IS NOT APPROVABLE, EVER.
+     Approving it would split it, raise a trust creditor for the client, and put it in a Raptor
+     payover run -- paying the client a second time for money they were remitted years ago. It is
+     refused here as well as being kept out of the queue, because the queue is a list and this is
+     the rule. */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It is history and cannot be approved again.'
+      using errcode = '22023';
+  end if;
+  /* ALREADY APPROVED IS A NO-OP, NOT A FAILURE: two people pressing Approve all at the same
+     moment is the ordinary case on a morning's list, and the second must not see an error. */
+  if v_pay.approved_at is not null then return p_payment; end if;
+
+  /* THE ALLOCATION DATE IS SET HERE, AND ONLY HERE.
+     THE FIRM: "if a payment was made a PTC, let's say on the 5th of September and only processed
+     today, it will only be processed with this import date... or if a payment was in suspense, it
+     was made on the 5th of September, it missed the first payment run in which it was supposed to
+     be. So it should be running in the payment run."
+     Both are the same rule: the day the money is PROCESSED decides which payover it goes out on,
+     and the day the debtor paid is a different fact that stays on received_at. Approval is the
+     single moment a payment is processed, so one place sets it and a released-from-suspense
+     receipt needs no special case -- it comes back to this queue and is approved like any other.
+     THE FIRM'S DAY, not the server's: the database is UTC and Johannesburg is ahead of it, so
+     around midnight the two disagree about which cycle a receipt falls in. */
+  update public.account_payments
+     set approved_at = now(), approved_by = auth.uid(),
+         allocated_on = (now() at time zone 'Africa/Johannesburg')::date
+   where id = p_payment;
+
+  /* AND THE SPLIT HAPPENS NOW, which is the whole point of the gate. */
+  perform public.allocate_payment(p_payment);
+  return p_payment;
+end $$;
+
+create or replace function public.close_payover_cycle(p_period_start date default null)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_start date := coalesce(p_period_start, public.payover_cycle_start(now() - interval '1 day'));
+  v_end date := public.payover_cycle_end(v_start);
+  v_company uuid;
+  v_count integer := 0;
+begin
+  for v_company in
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.account_payments p on p.id = a.payment_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       /* THE SAME COLUMN THE BUILD CLAIMS ON, and check-payover-runs holds the two together
+          in one loop for exactly this reason: written on different columns, a month's money
+          moves between the close and the build and every total still reconciles, so nothing
+          anywhere reports it. See build_payover_run for why created_at was never this. */
+       and not p.paid_over_in_swordfish
+       and p.allocated_on >= v_start
+       and p.allocated_on <= v_end
+    union
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.payover_runs r on r.id = a.payover_run_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    union
+    select r.company_id
+      from public.payover_runs r
+     where r.status in ('approved', 'sent', 'paid')
+       and r.net_payover < 0
+       and r.carried_out_run_id is null
+       and r.period_start < v_start
+  loop
+    if exists (select 1 from public.payover_runs
+                where company_id = v_company and period_start = v_start
+                  and not public.payover_run_is_open(status)) then
+      continue;
+    end if;
+    perform public.build_payover_run(v_company, v_start);
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end $$;

@@ -59,6 +59,53 @@ export interface TrustCycle {
   runsToDo: number
 }
 
+/**
+ * THE DAY A PAYOVER CYCLE OPENS. The firm's cycle runs the 11th to the 10th.
+ *
+ * Written out here because the database has `payover_cycle_start` and the browser had nothing, so
+ * anything that needed to know which cycle a date falls in either asked the server or guessed. The
+ * two must agree, which is why this is one exported function rather than a `getDate() >= 11` in
+ * whichever file needed it first.
+ */
+export const CYCLE_FIRST_DAY = 11
+
+/** The start of the cycle containing `iso`. UTC arithmetic only, so no local clock can move it. */
+export function cycleStartOn(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  /*
+   * Before the 11th the open cycle began LAST month, and `Date.UTC` normalises a month index of -1
+   * into December of the previous year -- so January needs no special case and the year steps back
+   * on its own. Written with string surgery on the month instead (`${y}-${m - 1}-11`), January is
+   * month 0 and the answer is a date that does not exist; check-payment-dates asserts that case.
+   */
+  const month = d >= CYCLE_FIRST_DAY ? m - 1 : m - 2
+  return new Date(Date.UTC(y, month, CYCLE_FIRST_DAY)).toISOString().slice(0, 10)
+}
+
+/**
+ * THE DAY THE OLD SYSTEM'S BOOKS STOP AND RAPTOR'S BEGIN, by default.
+ *
+ * THE FIRM, looking at ninety imported receipts sitting in the approval queue: "if the payments
+ * come from Swordfish, they're already in there and they've already been approved... except for the
+ * ones that doesn't fall in the next payment run. If we import, for example, today, the entire
+ * Swordfish book, then from the 11th September until today would not have been processed. It should
+ * go into a state of needing to be approved."
+ *
+ * So the line falls at the end of the last CLOSED cycle: import on 6 October and everything up to
+ * 10 September is history, everything from the 11th needs a decision. That is the firm's own
+ * example, arrived at from their own words.
+ *
+ * IT IS A DEFAULT AND NOTHING MORE. Raptor cannot know when Swordfish last paid its clients -- the
+ * firm does -- and the firm said in the same breath "I don't know. We'll have to figure that out."
+ * So the import takes this as a date somebody can change, and getting it wrong in one direction
+ * leaves money unremitted while the other remits it twice. It is never inferred from the data.
+ */
+export function settledThroughDefault(today: string): string {
+  const start = cycleStartOn(today)
+  const [y, m, d] = start.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+}
+
 /** '2026-09-10' as a day count, in UTC, so no local clock can move it. */
 function dayOf(iso: string): number {
   const [y, m, d] = iso.split('-').map(Number)

@@ -90,15 +90,24 @@ ok('a run starts on an 11th', /extract\(day from period_start\) = 11/.test(runs)
 ok('...and ends the day before the next one', /period_end = \(period_start \+ interval '1 month - 1 day'\)::date/.test(runs))
 
 /*
- * MEMBERSHIP IS BY CAPTURE DATE. The firm: a payment dated 27 December but imported on 12 January
- * belongs to the January cycle, because the import date is the only one that cannot move
- * afterwards. Both the build and the close have to agree, and both are checked -- written once
- * each on `received_at` instead, a month's money moves and every total still reconciles.
+ * MEMBERSHIP IS BY THE DATE THE PAYMENT WAS ALLOCATED. The firm: a payment dated 27 December but
+ * processed on 12 January belongs to the January cycle, because the day it was PROCESSED is the one
+ * that decides where the money goes out. Both the build and the close have to agree, and both are
+ * checked in one loop -- written on different columns, a month's money moves between them and every
+ * total still reconciles, so nothing anywhere reports it.
+ *
+ * IT USED TO BE created_at, WHICH BROKE ON THE FIRST IMPORT: created_at is when the ROW was
+ * written, which for an imported book is the day of the import for every receipt in it. THE FIRM:
+ * "it's important to capture the payment date and basically the allocation date of a payment...
+ * if a payment was in suspense, it was made on the 5th of September, it missed the first payment
+ * run in which it was supposed to be. So it should be running in the payment run."
  */
 for (const [name, body] of Object.entries({ build, close })) {
-  ok(`${name} selects by when the payment was captured`,
-    /p\.created_at >= v_from/.test(body) && /p\.created_at < v_to/.test(body))
+  ok(`${name} selects by the date the payment was allocated`,
+    /p\.allocated_on >=/.test(body) && /p\.allocated_on <=/.test(body))
+  ok(`...and never money Swordfish already paid over`, /not p\.paid_over_in_swordfish/.test(body))
   check(`...and never by when it was received`, (body.match(/p\.received_at/g) ?? []), [])
+  check(`...nor by when the row happened to be written`, (body.match(/p\.created_at/g) ?? []), [])
   /* R23,6m of invented money sits in the same table as money somebody paid. */
   ok(`...and leaves the demo money out`, /not p\.is_demo/.test(body))
 }

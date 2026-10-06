@@ -75,8 +75,15 @@ ok('trust_by_cycle is in schema.sql', !!byCycle)
  * the run before the receipt, the receipt before its allocation's receipt, and the entry date
  * last.
  */
+/*
+ * THE RECEIPT'S OWN DATE IS NOW THE ALLOCATION DATE, not created_at, which is the same change the
+ * payover run took: the bands and the runs are the same money read twice, and while one reads
+ * created_at and the other allocated_on they disagree about which month a receipt is in -- the
+ * firm's own screen contradicting their own invoice. created_at stays behind a coalesce so nothing
+ * vanishes from the bands for a receipt that predates the column.
+ */
 ok('the run decides the cycle before anything else does',
-  /coalesce\(\s*r\.period_start,\s*public\.payover_cycle_start\(p\.created_at\),\s*public\.payover_cycle_start\(ap\.created_at\),\s*public\.payover_cycle_start\(e\.entry_at\)\)/
+  /coalesce\(\s*r\.period_start,\s*public\.payover_cycle_start\(coalesce\(p\.allocated_on::timestamptz, p\.created_at\)\),\s*public\.payover_cycle_start\(coalesce\(ap\.allocated_on::timestamptz, ap\.created_at\)\),\s*public\.payover_cycle_start\(e\.entry_at\)\)/
     .test(byCycle ?? ''))
 
 /* AND THE THREE JOINS THAT MAKE THOSE REACHABLE. A coalesce naming a column no join brings in is
@@ -154,11 +161,18 @@ const lib = read('src/lib/trustCycles.ts')
 /*
  * `new Date('2026-10-11')` IS UTC MIDNIGHT. Two in the morning in Johannesburg, and the 10th in
  * Honolulu -- and these strings are nothing but cycle boundaries, which is precisely where a day
- * either way is a payover in the wrong month. Date.UTC is the one use that is correct, so the
- * assertion is on the constructor.
+ * either way is a payover in the wrong month.
+ *
+ * THE BAN IS ON PARSING, NOT ON THE CONSTRUCTOR, and this used to be written as the constructor
+ * because nothing in the file had yet needed the other use. `new Date(Date.UTC(...))` does not
+ * parse anything -- it builds a timestamp from numbers already in UTC, which is how cycleStartOn
+ * steps back a month without a timezone anywhere near it. Exempted BY SHAPE rather than loosened:
+ * anything else handed to the constructor, a string above all, still fails.
  */
 no('no Postgres date is parsed with new Date',
-  /new Date\(/.test(lib.replace(/\/\*[\s\S]*?\*\//g, '')))
+  /new Date\(/.test(
+    lib.replace(/\/\*[\s\S]*?\*\//g, '').replace(/new Date\(Date\.UTC\(/g, ''),
+  ))
 
 check('a day is a day', daysBetween('2026-10-06', '2026-10-11'), 5)
 check('...backwards too', daysBetween('2026-10-11', '2026-10-06'), -5)

@@ -12,6 +12,7 @@ import {
   buildImportPlan, countWhatAWipeWouldDelete, planRows, tollIsUnknown, wipeTollLine,
   IMPORT_TABLES, WIPE_TABLES, type ImportPlan, type WipeToll,
 } from '../../lib/swordfishImport'
+import { settledThroughDefault } from '../../lib/trustCycles'
 import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
 } from '../../lib/accountEnrich'
@@ -130,6 +131,23 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
   const [files, setFiles] = useState<Files>({})
   const [ownerId, setOwnerId] = useState(currentUser?.id ?? '')
   const [only, setOnly] = useState('')
+  /*
+   * WHERE SWORDFISH'S BOOKS STOP AND RAPTOR'S BEGIN.
+   *
+   * THE FIRM: "if the payments come from Swordfish, they're already in there and they've already
+   * been approved... except for the ones that doesn't fall in the next payment run. If we import,
+   * for example, today, the entire Swordfish book, then from the 11th September until today would
+   * not have been processed. It should go into a state of needing to be approved."
+   *
+   * ASKED RATHER THAN WORKED OUT, and they said why in the same breath -- "I don't know. We'll have
+   * to figure that out." Only the firm knows when the old system last paid its clients, and this is
+   * the most consequential number in the migration: too early and every client is paid a second
+   * time for money they already have, too late and a month of collections is never remitted.
+   * settledThroughDefault offers their own worked example; this box is where they correct it.
+   */
+  const [settledThrough, setSettledThrough] = useState(
+    () => settledThroughDefault(new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })),
+  )
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [reading, setReading] = useState(false)
   const [phase, setPhase] = useState<Phase>(null)
@@ -208,14 +226,14 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           clients: parsed.clients,
           debtors: parsed.debtors,
         },
-        { ownerId, only: only.trim() || undefined },
+        { ownerId, only: only.trim() || undefined, settledThrough },
       ))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setReading(false); setPhase(null)
     }
-  }, [files, ownerId, only])
+  }, [files, ownerId, only, settledThrough])
 
   const runImport = useCallback(async () => {
     if (!plan) return
@@ -377,6 +395,27 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             <span className="block text-[11px] text-slate-400 mt-1">
               Not client allocation &mdash; a placeholder so no client arrives ownerless. Who looks
               after a client is set on the client itself, one at a time.
+            </span>
+          </label>
+          {/*
+            THE DATE SITS BESIDE THE OTHER TWO ANSWERS THE IMPORT NEEDS, not behind an "advanced"
+            fold: it is not a tuning knob, it is the question "what has Swordfish already paid your
+            clients?", and the firm has to answer it every time.
+          */}
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-500 mb-1">
+              Swordfish has paid clients over up to and including
+            </span>
+            <input
+              type="date"
+              className={inputClass}
+              value={settledThrough}
+              onChange={(e) => { setSettledThrough(e.target.value); setPlan(null) }}
+            />
+            <span className="block text-[11px] text-slate-400 mt-1">
+              Receipts up to this day are history: they stay out of the approval queue and no payover
+              run can claim them. Everything after it arrives needing approval. Raptor cannot work
+              this out &mdash; set it to the last day the old system actually remitted.
             </span>
           </label>
           <label className="block">

@@ -188,16 +188,33 @@ check('...which it does exactly once, in that one function',
 /* ---------------- the trap that fails quietly ---------------- */
 
 /*
- * A RUN CLAIMS ON created_at, NOT ON THE RECEIVED DATE. This is the one a reader will get wrong,
- * and the reason move_payment_to_cycle exists at all: backdating a receipt looks like it worked
- * and changes nothing about which invoice it lands on.
+ * A RUN CLAIMS ON THE ALLOCATION DATE, NOT ON THE RECEIVED DATE AND NO LONGER ON created_at.
+ * This is the one a reader will get wrong, and the reason move_payment_to_cycle exists at all:
+ * backdating a receipt looks like it worked and changes nothing about which invoice it lands on.
+ *
+ * IT USED TO BE created_at, AND THAT WAS A STAND-IN THAT BROKE ON THE FIRST IMPORT. created_at is
+ * when the ROW was written, which for an imported book is the day of the import for every receipt
+ * in it -- so the whole of Swordfish's payment history would have been claimed by the current
+ * cycle and every client paid a second time. THE FIRM: "it's important to capture the payment date
+ * and basically the allocation date of a payment... if a payment was in suspense, it was made on
+ * the 5th of September, it missed the first payment run in which it was supposed to be. So it
+ * should be running in the payment run."
  */
-ok('a run claims a cycle by when the payment was captured',
-  /and p\.created_at >= v_from\s*\n\s*and p\.created_at < v_to/.test(build ?? ''))
+ok('a run claims a cycle by the date the payment was allocated',
+  /and p\.allocated_on >= p_period_start\s*\n\s*and p\.allocated_on <= v_end/.test(build ?? ''))
 no('...not by the date somebody typed on it',
-  /received_at >= v_from/.test(build ?? ''))
+  /received_at >= p_period_start/.test(build ?? ''))
+no('...and not by when the row happened to be written',
+  /p\.created_at >= v_from/.test(build ?? ''))
+/* MONEY SWORDFISH ALREADY REMITTED IS NEVER CLAIMED, which is the other half of the same fix. */
+ok('...and never money Swordfish already paid over',
+  /and not p\.paid_over_in_swordfish/.test(build ?? ''))
 ok('moving a payment moves that, which is the only thing that works',
-  /update public\.account_payments set created_at = v_at where id = p_payment/.test(move ?? ''))
+  /update public\.account_payments set allocated_on = v_at::date where id = p_payment/.test(move ?? ''))
+/* AND LEAVES created_at ALONE. It is the audit trail; a testing control that edits it leaves no
+   way to tell a moved receipt from one captured that day. */
+no('...without editing the audit trail',
+  /set created_at = v_at/.test(move ?? ''))
 /* NOON, so no timezone edge pushes it into the neighbouring cycle. */
 ok('...landing mid-cycle at noon rather than on a boundary',
   /\(p_period_start \+ 15\)::timestamp \+ time '12:00'/.test(move ?? ''))

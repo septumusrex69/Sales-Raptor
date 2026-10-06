@@ -27,6 +27,7 @@ import { kindFromIdentity, normaliseRegistrationNumber } from './debtorIdentity.
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
 import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
+import { settledThroughDefault } from './trustCycles.ts'
 import { readDebtorsPerClient, type ContactRow, type NoteRow, type PromiseRow } from './swordfishDebtors.ts'
 
 export interface SwordfishExports {
@@ -161,6 +162,22 @@ export interface PaymentRow {
   swordfish_payment_id: string | null
   /** The receipt fee Swordfish actually charged, excluding VAT. Null on the older export. */
   receipt_fee_legacy: number | null
+  /**
+   * ALREADY REMITTED TO THE CLIENT BY SWORDFISH, so Raptor must never remit it again.
+   *
+   * THE FIRM: "if the payments come from Swordfish, they're already in there and they've already
+   * been approved." A receipt carrying this never enters the approval queue, is never split, and
+   * can never be claimed by a payover run -- approve_payment refuses it outright.
+   */
+  paid_over_in_swordfish: boolean
+  /**
+   * When it was approved, or null for one that still needs a decision.
+   *
+   * THE DAY IT WAS RECEIVED, for a settled one, rather than the moment of the import: the firm DID
+   * approve these, in the old system, around then. Stamping them with the import time would say a
+   * person sat and approved ninety years of history in one second.
+   */
+  approved_at: string | null
 }
 
 export interface FeeRow {
@@ -257,6 +274,17 @@ export interface BuildOptions {
   /** Restrict to clients whose Swordfish name contains this. For a trial run on real data. */
   only?: string
   now?: Date
+  /**
+   * THE LAST DAY SWORDFISH PAID ITS CLIENTS OVER. Receipts up to and including it are history;
+   * everything after it lands in Raptor's approval queue.
+   *
+   * ASKED, NOT INFERRED. Raptor has no way to know when the old system last remitted -- only the
+   * firm does -- and it is the single most consequential number in the migration: too early and
+   * clients are paid twice for money they already had, too late and a month of collections is
+   * never remitted at all. `settledThroughDefault` offers the firm's own example as a starting
+   * point and the import screen lets them change it.
+   */
+  settledThrough?: string
 }
 
 const newId = () =>
@@ -274,6 +302,12 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
   const only = onlyRaw?.toLowerCase()
   const nowIso = now.toISOString()
   const today = nowIso.slice(0, 10)
+  /*
+   * WHERE THE OLD SYSTEM'S BOOKS STOP. Everything received up to and including this date was
+   * already paid over by Swordfish and is history; everything after it needs a decision in Raptor.
+   * See settledThroughDefault for why this is a date somebody states rather than one we work out.
+   */
+  const settledThrough = options.settledThrough ?? settledThroughDefault(today)
 
   const problems: string[] = []
   const notes: string[] = []
@@ -775,6 +809,20 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       reversed_at: reversed ? `${reversed}T00:00:00Z` : null,
       reversal_reason: text(p['Reversal Reason']),
       source: 'swordfish',
+      /*
+       * THE LINE THE FIRM DREW, applied one receipt at a time.
+       *
+       * "If the payments come from Swordfish, they're already in there and they've already been
+       * approved... except for the ones that doesn't fall in the next payment run."
+       *
+       * ON OR BEFORE the cut-off, because the cut-off is the last day of a cycle Swordfish paid:
+       * a receipt dated that very day is inside it. Off by one here is a day of collections either
+       * remitted twice or never.
+       */
+      paid_over_in_swordfish: when <= settledThrough,
+      /* A settled receipt is approved as at the day it came in -- see PaymentRow. One after the
+         cut-off is left for a person, which is the queue the firm expects to find. */
+      approved_at: when <= settledThrough ? `${when}T00:00:00Z` : null,
     })
   }
 
@@ -854,6 +902,43 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
           + `LINES, so where they are short the debtor reads as owing more than Swordfish says.`,
         )
       }
+    }
+  }
+
+  /*
+   * SAY WHERE THE LINE FELL, BEFORE ANYBODY PRESSES IMPORT.
+   *
+   * This is the one number in the migration that cannot be checked afterwards by looking at the
+   * data: both answers import cleanly, and the difference only shows up as a client paid twice or
+   * a month never remitted. So the import states it in the firm's own terms -- how many receipts
+   * it is treating as history and how many it is putting in front of a person -- rather than
+   * leaving it to be discovered from a queue that is the wrong length.
+   */
+  const settledCount = payments.filter((p) => p.paid_over_in_swordfish).length
+  const toApprove = payments.length - settledCount
+  if (payments.length > 0) {
+    const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
+    notes.push(
+      `${settledCount} receipts received up to ${settledThrough} (R${sum(payments.filter((p) => p.paid_over_in_swordfish)).toFixed(2)}) `
+      + 'are treated as already paid over in Swordfish: they stay out of the approval queue and no '
+      + `payover run can claim them. ${toApprove} received after it `
+      + `(R${sum(payments.filter((p) => !p.paid_over_in_swordfish)).toFixed(2)}) need approving in Raptor.`,
+    )
+    /*
+     * AND IT IS A WARNING WHEN NOTHING LANDS ON ONE SIDE, because both shapes are plausible and
+     * both are usually wrong. Nothing to approve means the cut-off is later than the firm's last
+     * payover and a month of collections will never be remitted; everything to approve means it is
+     * earlier than the book goes back and the queue is about to offer years of settled history.
+     */
+    if (toApprove === 0) {
+      problem(`Nothing was left to approve: every receipt is dated on or before ${settledThrough}. `
+        + 'If Swordfish has not in fact paid over up to that day, this would leave those '
+        + 'collections unremitted. Check the date before importing.')
+    }
+    if (settledCount === 0) {
+      problem(`Every receipt is dated after ${settledThrough}, so the whole payment history will `
+        + 'land in the approval queue. Approving it would pay the clients again for money '
+        + 'Swordfish has already remitted. Check the date before importing.')
     }
   }
 
