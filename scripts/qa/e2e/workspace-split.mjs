@@ -115,15 +115,18 @@ const MONTH = {
  * while drawing two different trust accounts one above the other.
  */
 const CYCLES = [
-  {
-    period_start: '2026-09-11', period_end: '2026-10-10', pays_on: '2026-11-11', is_open: true,
-    to_clients: 637.50, firm_earned: 1110.00, firm_moved: 0, to_debtors: 0, unplaced: 0,
-    held: 1747.50, runs: 0, runs_paid: 0, runs_to_do: 0,
-  },
+  /* OLDEST FIRST, WHICH IS THE ORDER THE DATABASE RETURNS THEM IN. The screen does not sort, so a
+     fixture in the other order would prove the rows draw and say nothing about which comes first --
+     and the row that leaves soonest being on top is the point of the ordering. */
   {
     period_start: '2026-08-11', period_end: '2026-09-10', pays_on: '2026-10-11', is_open: false,
     to_clients: 1920.40, firm_earned: 3310.07, firm_moved: 0, to_debtors: 410.63, unplaced: 0,
     held: 5641.10, runs: 1, runs_paid: 0, runs_to_do: 1,
+  },
+  {
+    period_start: '2026-09-11', period_end: '2026-10-10', pays_on: '2026-11-11', is_open: true,
+    to_clients: 637.50, firm_earned: 1110.00, firm_moved: 0, to_debtors: 0, unplaced: 0,
+    held: 1747.50, runs: 0, runs_paid: 0, runs_to_do: 0,
   },
 ]
 
@@ -214,6 +217,14 @@ try {
      * matched as written because nothing else on this screen is transformed.
      */
     t.ok('the open one says it is still filling up', /collecting now/i.test(body))
+
+    /*
+     * AND THE ONE THAT LEAVES SOONEST IS DRAWN FIRST. The screen does not sort -- the order is the
+     * database's -- so this is really asserting that nothing up here reverses it.
+     */
+    t.check('the cycle going out first is the top row',
+      body.indexOf('11 Aug – 10 Sep 2026') < body.indexOf('11 Sep – 10 Oct 2026')
+        && body.indexOf('11 Aug – 10 Sep 2026') >= 0, true)
 
     /* THE DAY EACH ONE LEAVES, which is the thing the firm asked for by name. */
     t.ok('the closed cycle quotes its payover date', body.includes('11 Oct 2026'))

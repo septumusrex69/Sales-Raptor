@@ -177,9 +177,12 @@ export function TrustOverview() {
         ) : (
           <Card className="overflow-hidden p-0">
             {/*
-              NEWEST FIRST, WHICH IS THE ORDER THE FIRM SAID IT IN -- "what is for this month's
-              payover? And what is for next month's payover" -- and it is the open cycle that
-              everybody is adding to, so it goes where the eye lands.
+              THE ONE THAT LEAVES SOONEST IS THE ONE AT THE TOP, which is the order the firm said it
+              in -- "what is for this month's payover? And what is for next month's payover" -- and
+              the closed cycle is the one that answers the first half. Newest first read backwards:
+              the cycle still being collected sat above the one going out in five days, and a cycle
+              that has gone PAST its day -- the only thing on this table somebody has to act on --
+              would have been at the bottom. The database orders it; nothing sorts up here.
             */}
             {cycles.map((c) => (
               <CycleRow key={c.periodStart} cycle={c} today={today} />

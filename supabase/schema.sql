@@ -26092,9 +26092,14 @@ as $$
      -- zeroes would bury the two that have not under a year of settled months.
      and (round(a.held, 2) <> 0 or round(a.to_clients, 2) <> 0
           or round(a.firm_earned, 2) <> 0 or round(a.to_debtors, 2) <> 0)
-   order by a.cyc desc
+   -- OLDEST FIRST: THE ONE THAT LEAVES SOONEST IS THE ONE AT THE TOP. Newest first put the cycle
+   -- still being collected above the one going out in five days, which is backwards twice over --
+   -- it is the wrong end of the firm's own sentence ("what is for this month's payover? And what is
+   -- for next month's payover?"), and a cycle that has gone PAST its day is the one thing on this
+   -- table somebody has to act on, which newest-first buries at the bottom.
+   order by a.cyc asc
 $$;
 revoke execute on function public.trust_by_cycle() from public, anon;
 grant execute on function public.trust_by_cycle() to authenticated;
 comment on function public.trust_by_cycle() is
-  'The trust balance split by the payover cycle each entry belongs to, newest first. Ties to trust_position: the client column sums to owed_to_clients, the debtor column to owed_to_debtors, and firm_earned + firm_moved to owed_to_firm.';
+  'The trust balance split by the payover cycle each entry belongs to, oldest first -- the one that is paid over soonest is the first row. Ties to trust_position: the client column sums to owed_to_clients, the debtor column to owed_to_debtors, and firm_earned + firm_moved to owed_to_firm.';

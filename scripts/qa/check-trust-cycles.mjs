@@ -97,6 +97,14 @@ ok('every creditor entry is bucketed',
 ok('a cycle that nets to nothing is not listed',
   /and \(round\(a\.held, 2\) <> 0/.test(byCycle ?? ''))
 
+/*
+ * OLDEST FIRST, AND IT IS A DECISION RATHER THAN A DEFAULT. Newest first put the cycle still being
+ * collected above the one going out in five days -- the wrong end of the firm's own sentence, and
+ * it buried a cycle PAST its pay-over day, which is the one row on this table somebody must act on.
+ */
+ok('the cycle paid over soonest is the first row', /order by a\.cyc asc/.test(byCycle ?? ''))
+no('...not the one still being collected', /order by a\.cyc desc/.test(byCycle ?? ''))
+
 /* AND IT IS GATED LIKE EVERY OTHER TRUST FUNCTION -- the capability, not the role name. */
 ok('it asks the finance capability', /has_capability\('finance\.view'\)/.test(byCycle ?? ''))
 no('...and does not test a role name instead', /current_user_role\(\) = 'Administrator'/.test(byCycle ?? ''))
