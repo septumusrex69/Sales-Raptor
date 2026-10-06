@@ -23,6 +23,7 @@
  *      client not in the configuration still imports, under its own name, loudly.
  */
 import { num, isoDate, text, type CsvRow } from './csv.ts'
+import { kindFromIdentity, normaliseRegistrationNumber } from './debtorIdentity.ts'
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
 import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
@@ -98,6 +99,13 @@ export interface DebtorAccountRow {
   debtor_first_name: string | null
   debtor_surname: string | null
   debtor_id_number: string | null
+  /*
+   * ONE COLUMN, TWO MEANINGS: an ID number on a person, a registration number on a company, and
+   * this says which. The merge fields read it -- {{debtor_reg_no}} resolves only on a company and
+   * {{debtor_id_masked}} only on an individual -- so an unset kind is a letter of demand to a
+   * company with a blank where its registration number belongs.
+   */
+  debtor_kind: 'individual' | 'company'
   capital_handed_over: number
   capital_outstanding: number
   in_duplum_ceiling: number
@@ -619,7 +627,26 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
 
       debtor_first_name: text(r['First Name']),
       debtor_surname: text(r['Surname']),
-      debtor_id_number: text(r['ID Number']),
+      /*
+       * ONE COLUMN, TWO MEANINGS, AND THE KIND SAYS WHICH.
+       *
+       * THE FIRM, AFTER THE FIRST TEST IMPORT: "The Swordfish summary has no person/business
+       * field, so a registration number in 'ID Number' (e.g. 2016/482913/07) is dropped as 'not 13
+       * digits'. On import: if the value matches ^\d{4}/\d{6}/\d{2}$, store it as the company
+       * registration number and mark the debtor as a business. The letter of demand needs
+       * {{debtor_reg_no}}."
+       *
+       * The VALUE was in fact being stored -- three of the twenty test accounts carry one. What was
+       * not was the KIND, and that is what the merge fields read: `{{debtor_reg_no}}` resolves only
+       * where debtor_kind is 'company', so a letter of demand to a company printed nothing, and
+       * `{{debtor_id_masked}}` masked a registration number as though it were somebody's identity.
+       *
+       * NORMALISED ON THE WAY IN, because a bureau writes K2016/482913/07 and the firm does not;
+       * two spellings of one company must be one string or a lookup keyed on it misses.
+       */
+      debtor_id_number: normaliseRegistrationNumber(text(r['ID Number']))
+        ?? text(r['ID Number']),
+      debtor_kind: kindFromIdentity(text(r['ID Number'])) ?? 'individual',
 
       capital_handed_over: capital ?? 0,
       // At the opening position — the handover — capital outstanding is the capital handed over,
@@ -1002,4 +1029,70 @@ export function planRows(plan: ImportPlan): Record<(typeof IMPORT_TABLES)[number
     account_notes: plan.accountNotes,
     diary_entries: plan.diaryEntries,
   }
+}
+
+/**
+ * WHAT "DELETE EVERYTHING FIRST" WOULD ACTUALLY DELETE, COUNTED BEFORE ANYBODY TICKS IT.
+ *
+ * THE FIRM, AFTER THE FIRST TEST IMPORT: "The 'Delete everything first' tickbox sits next to a
+ * normal import. One wrong tick wipes every client, lead, deal, contact, task, activity and
+ * account. Move it behind a 'Start over' link, say exactly what will be deleted ('1 client and 8
+ * accounts')."
+ *
+ * A LIST OF TABLE NAMES IS NOT A WARNING. "every client, lead, deal, contact, task, activity and
+ * account" is true of an empty database and of a live one, so it reads the same the day it costs
+ * nothing and the day it costs the firm its book. Four real numbers do not.
+ *
+ * HEAD COUNTS, so this is four cheap round trips rather than four tables pulled into a browser --
+ * and the only four the firm named, rather than all nineteen, because a reader counting rows in
+ * `account_interest_accruals` has stopped reading.
+ */
+export interface WipeToll {
+  clients: number
+  accounts: number
+  leads: number
+  deals: number
+}
+
+/*
+ * THE CLIENT IS PASSED IN rather than imported: this file is read by the QA layer, which cannot
+ * resolve the browser's Supabase client at all -- the same split emailStyle and firmSettingsRow are
+ * already in, for the same reason.
+ */
+export interface CountableDb {
+  from(table: string): {
+    select(columns: string, options: { count: 'exact'; head: true }):
+      PromiseLike<{ count: number | null; error: unknown }>
+  }
+}
+
+export async function countWhatAWipeWouldDelete(db: CountableDb): Promise<WipeToll> {
+  const one = async (table: string): Promise<number> => {
+    const { count, error } = await db.from(table).select('id', { count: 'exact', head: true })
+    /* A COUNT THAT FAILED IS NOT A ZERO. Zero reads as "nothing to lose", which is the one thing
+       this must never say wrongly, so an unreadable count comes back as -1 and the screen refuses
+       to offer the wipe at all. */
+    return error ? -1 : (count ?? 0)
+  }
+  const [clients, accounts, leads, deals] = await Promise.all([
+    one('companies'), one('debtor_accounts'), one('leads'), one('deals'),
+  ])
+  return { clients, accounts, leads, deals }
+}
+
+/** The toll in the firm's own words: "1 client and 8 accounts". */
+export function wipeTollLine(toll: WipeToll): string {
+  const n = (count: number, one: string, many: string) =>
+    `${count.toLocaleString('en-ZA')} ${count === 1 ? one : many}`
+  const parts = [n(toll.clients, 'client', 'clients'), n(toll.accounts, 'account', 'accounts')]
+  if (toll.leads > 0) parts.push(n(toll.leads, 'lead', 'leads'))
+  if (toll.deals > 0) parts.push(n(toll.deals, 'deal', 'deals'))
+  return parts.length === 2
+    ? parts.join(' and ')
+    : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
+/** True where any count failed to come back. The screen must not offer a wipe it cannot describe. */
+export function tollIsUnknown(toll: WipeToll): boolean {
+  return toll.clients < 0 || toll.accounts < 0 || toll.leads < 0 || toll.deals < 0
 }

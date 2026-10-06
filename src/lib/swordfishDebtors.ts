@@ -12,6 +12,7 @@
  * number is how a balance starts disagreeing with itself.
  */
 import { num, isoDate, text, type CsvRow } from './csv.ts'
+import { normaliseRegistrationNumber } from './debtorIdentity.ts'
 
 export interface ContactRow {
   account_id: string
@@ -48,6 +49,7 @@ export interface DebtorPatch {
   debtor_second_name?: string | null
   debtor_surname?: string | null
   debtor_id_number?: string | null
+  debtor_kind?: 'individual' | 'company'
   debtor_title?: string | null
   debtor_initials?: string | null
   main_comment?: string | null
@@ -81,6 +83,8 @@ export interface DebtorImport {
     idsBlank: number
     /** Rows holding twelve digits — an ID whose leading zero a spreadsheet ate. */
     idsTwelveDigit: number
+    /** Rows whose "ID Number" is a company registration number. Not a reject: a different kind. */
+    registrationNumbers: number
     /** True where the sheet has an ID Number column at all. */
     idColumnPresent: boolean
   }
@@ -130,7 +134,7 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     stats: {
       rows: 0, contacts: 0, mobiles: 0, emails: 0, addresses: 0,
       promises: 0, mainComments: 0, importedNotes: 0, idsRejected: 0,
-      idsBlank: 0, idsTwelveDigit: 0,
+      idsBlank: 0, idsTwelveDigit: 0, registrationNumbers: 0,
       /*
        * IS THE COLUMN EVEN THERE?
        *
@@ -160,8 +164,22 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
 
     const rawId = (text(r['ID Number']) ?? '').replace(/\s/g, '')
     const idNumber = isIdNumber(rawId) ? rawId : null
+    /*
+     * A REGISTRATION NUMBER IS NOT A REJECT. THE FIRM: "The Swordfish summary has no
+     * person/business field, so a registration number in 'ID Number' (e.g. 2016/482913/07) is
+     * dropped as 'not 13 digits'... The letter of demand needs {{debtor_reg_no}}."
+     *
+     * It is the same column holding a different kind of number, which is how debtor_accounts was
+     * always designed -- debtor_id_number plus debtor_kind, "cheaper and less error-prone than two
+     * columns of which one is always null". So it is kept, normalised (a bureau writes
+     * K2016/482913/07 and the firm does not), and the KIND is set, which is the half that was
+     * missing: without it {{debtor_reg_no}} prints nothing and {{debtor_id_masked}} masks a
+     * company's registration number as though it were somebody's identity.
+     */
+    const regNumber = idNumber ? null : normaliseRegistrationNumber(rawId)
     if (!rawId) out.stats.idsBlank++
-    if (rawId && !idNumber) out.stats.idsRejected++
+    if (regNumber) out.stats.registrationNumbers++
+    if (rawId && !idNumber && !regNumber) out.stats.idsRejected++
     /*
      * TWELVE DIGITS IS THE ONE REJECTION WITH A KNOWN CAUSE, and it is worth counting apart.
      * A spreadsheet reading an ID column as a NUMBER eats the leading zero, so every debtor born
@@ -188,6 +206,10 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     // right: the summary export's ID column is the one we have been using, and overwriting it
     // with something we have just rejected would be worse than not touching it.
     if (idNumber) patch.debtor_id_number = idNumber
+    if (regNumber) {
+      patch.debtor_id_number = regNumber
+      patch.debtor_kind = 'company'
+    }
     if (patch.main_comment) out.stats.mainComments++
     out.patches.set(ref, patch)
 
@@ -332,6 +354,14 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     else out.notes.push(line)
     if (out.stats.idsBlank) {
       out.notes.push(`${out.stats.idsBlank} had the ID Number cell empty in Swordfish.`)
+    }
+    /* COUNTED APART FROM BOTH, because a company has no identity number to be missing and
+       reporting it as a gap would send somebody looking for one. */
+    if (out.stats.registrationNumbers) {
+      out.notes.push(
+        `${out.stats.registrationNumbers} are companies: the ID Number cell held a registration `
+        + `number, which is stored as one and the debtor marked a business.`,
+      )
     }
   }
   if (out.stats.idsRejected) {

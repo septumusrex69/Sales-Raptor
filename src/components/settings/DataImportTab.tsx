@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, Database, FileUp, Info, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
@@ -9,7 +9,8 @@ import { parseCsv, type CsvRow } from '../../lib/csv'
 import { readSingleCsvFromZip } from '../../lib/zip'
 import { readXlsx } from '../../lib/xlsx'
 import {
-  buildImportPlan, planRows, IMPORT_TABLES, WIPE_TABLES, type ImportPlan,
+  buildImportPlan, countWhatAWipeWouldDelete, planRows, tollIsUnknown, wipeTollLine,
+  IMPORT_TABLES, WIPE_TABLES, type ImportPlan, type WipeToll,
 } from '../../lib/swordfishImport'
 import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
@@ -136,12 +137,52 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
   const [done, setDone] = useState<string | null>(null)
   const [wipe, setWipe] = useState(false)
   const [confirmText, setConfirmText] = useState('')
+  /*
+   * THE WIPE IS BEHIND A LINK NOW, AND IT COUNTS WHAT IT WOULD TAKE.
+   *
+   * THE FIRM: "The 'Delete everything first' tickbox sits next to a normal import. One wrong tick
+   * wipes every client, lead, deal, contact, task, activity and account. Move it behind a 'Start
+   * over' link, say exactly what will be deleted ('1 client and 8 accounts')."
+   *
+   * Both halves matter. A tickbox beside the ordinary button is one slip away from the worst thing
+   * this screen can do, and a list of table names reads identically on an empty database and on a
+   * live one -- so it says the same the day it costs nothing and the day it costs the firm its book.
+   */
+  const [startOver, setStartOver] = useState(false)
+  const [toll, setToll] = useState<WipeToll | null>(null)
   const abort = useRef(false)
 
   const isAdmin = currentUser?.role === 'Administrator'
+
+  /* COUNTED WHEN THE LINK IS OPENED, not on every render: four head counts, and nobody pays for
+     them unless they are about to be shown the thing they describe. */
+  useEffect(() => {
+    if (!startOver || toll) return
+    let cancelled = false
+    void countWhatAWipeWouldDelete(supabase).then((t) => { if (!cancelled) setToll(t) })
+    return () => { cancelled = true }
+  }, [startOver, toll])
   // The register is optional: without it the clients come from the configuration in the repo,
   // which is how this worked before the register existed.
-  const ready = SOURCES.filter((s) => s.required).every((s) => files[s.key])
+  const haveAccounts = SOURCES.filter((s) => s.required).every((s) => files[s.key])
+  /*
+   * THE CLIENT REGISTER CAN BE READ ON ITS OWN.
+   *
+   * THE FIRM, AFTER THE FIRST TEST IMPORT: "The client register can't be imported on its own.
+   * 'Read the exports' stays disabled until the four account files are chosen. Add a client-only
+   * import using the same register reader, so clients can be loaded before any handover."
+   *
+   * Which is the order the work actually happens in: a client is signed, the mandate is filed, and
+   * the first handover arrives weeks later. Requiring four account exports to load one client meant
+   * the client could not exist until it had a book, so a liaison had nothing to attach a mandate or
+   * a contact to.
+   *
+   * THE SAME READER, NOT A SECOND ONE. `buildImportPlan` with no account rows produces a plan of
+   * companies and nothing else -- `buildFromRegister` is the same function either way, so a client
+   * loaded alone and a client loaded with its book are built identically.
+   */
+  const clientsOnly = !haveAccounts && !!files.clients
+  const ready = haveAccounts || clientsOnly
 
   const readPlan = useCallback(async () => {
     setError(null); setDone(null); setPlan(null); setReading(true)
@@ -358,13 +399,26 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           onClick={readPlan}
         >
           {reading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
-          {reading ? 'Reading…' : 'Read the exports'}
+          {reading ? 'Reading…' : clientsOnly ? 'Read the client register' : 'Read the exports'}
         </button>
+        {/*
+          WHAT THIS READ WILL ACTUALLY DO, said before it is pressed rather than discovered after.
+          The register alone loads clients and no book, which is the normal order of things: a
+          client is signed and the first handover arrives weeks later.
+        */}
+        {clientsOnly && (
+          <p className="text-xs text-slate-500 mt-2">
+            The client register on its own: this loads the <strong>clients</strong> and their
+            commission scales, and no accounts. Add the four account exports to bring a book across
+            as well.
+          </p>
+        )}
         {!ready && (
           <p className="text-xs text-slate-400 mt-2">
-            The four account exports are needed — balances cannot be checked without them. Without the
-            client register the clients are worked out from their names instead, which is a guess where
-            the register is a record. Without Debtors Per Client there are no phone numbers, no email
+            Choose the client register to load clients on their own, or all four account exports to
+            bring a book across — balances cannot be checked without them. Without the client
+            register the clients are worked out from their names instead, which is a guess where the
+            register is a record. Without Debtors Per Client there are no phone numbers, no email
             addresses and no main comments: the book imports, but nobody can be phoned.
           </p>
         )}
@@ -424,25 +478,73 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
       {plan && !done && (
         <Card>
           <CardHeader title="Write it" subtitle="Nothing above has touched the database yet." />
-          <label className="flex items-start gap-2.5 text-sm text-slate-700">
-            <input type="checkbox" className="mt-0.5" checked={wipe} onChange={(e) => { setWipe(e.target.checked); setConfirmText('') }} />
-            <span>
-              Delete everything first — every client, lead, deal, contact, task, activity and account.
-              <span className="block text-[11px] text-slate-400 mt-0.5">
-                People, teams and targets are kept. Without this, the import adds to whatever is already there.
-              </span>
-              <span className="block text-[11px] text-slate-500 mt-1">
-                On <span className="font-mono font-medium">{DATABASE_HOST}</span>.
-              </span>
-            </span>
-          </label>
+          <p className="text-sm text-slate-600">
+            This ADDS to whatever is already there. Nothing is removed.
+          </p>
 
-          {wipe && (
-            <div className="mt-3 pl-6">
-              <p className="text-xs text-slate-500 mb-1.5">
-                Type <span className="font-mono font-semibold text-slate-700">delete everything</span> to confirm.
-              </p>
-              <input className={`${inputClass} max-w-xs`} value={confirmText} onChange={(e) => setConfirmText(e.target.value)} />
+          {/*
+            THE DESTRUCTIVE PATH IS A LINK, NOT A TICKBOX BESIDE THE ORDINARY BUTTON. Opening it is
+            a deliberate act; the counts are fetched only once somebody has.
+          */}
+          {!startOver && (
+            <button type="button" onClick={() => setStartOver(true)}
+              className="mt-2 text-[13px] font-medium text-slate-400 underline hover:text-rose-700">
+              Start over instead
+            </button>
+          )}
+
+          {startOver && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50/50 p-4">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-rose-800">
+                    Start over: delete what is in Raptor first
+                  </p>
+                  {/*
+                    THE REAL NUMBERS, OR NOTHING. A count that failed to come back reads as -1 and
+                    the wipe is not offered at all: zero would read as "nothing to lose", which is
+                    the one thing this must never say wrongly.
+                  */}
+                  {toll === null && <p className="text-[13px] text-slate-500 mt-1">Counting what is there…</p>}
+                  {toll !== null && tollIsUnknown(toll) && (
+                    <p className="text-[13px] text-rose-700 mt-1">
+                      Raptor could not count what is in the database, so this is not offered. Try again.
+                    </p>
+                  )}
+                  {toll !== null && !tollIsUnknown(toll) && (
+                    <>
+                      <p className="text-[13px] text-rose-800 mt-1">
+                        This deletes <span className="font-semibold">{wipeTollLine(toll)}</span>,
+                        with every payment, fee, note, diary entry and document on them,
+                        on <span className="font-mono font-medium">{DATABASE_HOST}</span>.
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        People, teams and targets are kept. Nothing else is.
+                      </p>
+                      <label className="flex items-start gap-2.5 text-sm text-slate-700 mt-3">
+                        <input type="checkbox" className="mt-0.5" checked={wipe}
+                          onChange={(e) => { setWipe(e.target.checked); setConfirmText('') }} />
+                        <span>Yes, delete it and import from scratch</span>
+                      </label>
+                      {wipe && (
+                        <div className="mt-3 pl-6">
+                          <p className="text-xs text-slate-500 mb-1.5">
+                            Type <span className="font-mono font-semibold text-slate-700">delete everything</span> to confirm.
+                          </p>
+                          <input className={`${inputClass} max-w-xs`} value={confirmText}
+                            onChange={(e) => setConfirmText(e.target.value)} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button type="button"
+                    onClick={() => { setStartOver(false); setWipe(false); setConfirmText('') }}
+                    className="mt-3 text-[13px] font-medium text-slate-500 underline hover:text-slate-700">
+                    Never mind
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -452,7 +554,9 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             onClick={runImport}
           >
             <Upload size={15} />
-            Import {plan.debtorAccounts.length.toLocaleString('en-ZA')} accounts
+            {plan.debtorAccounts.length === 0
+              ? `Import ${plan.companies.length.toLocaleString('en-ZA')} ${plan.companies.length === 1 ? 'client' : 'clients'}`
+              : `Import ${plan.debtorAccounts.length.toLocaleString('en-ZA')} accounts`}
           </button>
         </Card>
       )}
