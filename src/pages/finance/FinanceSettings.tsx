@@ -3,6 +3,9 @@ import { AlertTriangle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
+import { CommissionScaleEditor } from '../../components/companies/CommissionScaleEditor'
+import { bandsToTiers, scaleTerms, tiersToBands, type Tier } from '../../lib/commissionTiers'
+import { scheduleProblems } from '../../lib/commission'
 import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
 import {
@@ -49,10 +52,10 @@ export function FinanceSettings() {
   const [lag, setLag] = useState<number>(1)
   const [allocations, setAllocations] = useState(0)
   const [changes, setChanges] = useState<SettingChange[]>([])
-  const [rates, setRates] = useState<{ id: string; name: string; code: string | null; rate: number | null; banded: boolean; accounts: number }[]>([])
+  const [rates, setRates] = useState<RateRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [editing, setEditing] = useState<{ id: string; name: string; rate: number | null } | null>(null)
+  const [editing, setEditing] = useState<RateRow | null>(null)
   const [vatModal, setVatModal] = useState(false)
 
   const load = useCallback(async () => {
@@ -62,7 +65,7 @@ export function FinanceSettings() {
         supabase.from('annexure_b_tariffs').select('*').order('item').order('effective_from', { ascending: false }),
         supabase.from('firm_settings').select('vat_rate, finance_cutover_at, payover_lag_months').limit(1).maybeSingle(),
         supabase.from('payment_allocations').select('id', { count: 'exact', head: true }),
-        supabase.from('companies').select('id, name, code, commission_rate, commission_bands'),
+        supabase.from('companies').select('id, name, code, commission_rate, commission_bands, commission_bands_source'),
       ])
       if (t.error) throw new Error(t.error.message)
       setTariffs((t.data ?? []) as unknown as Tariff[])
@@ -78,11 +81,16 @@ export function FinanceSettings() {
       for (const r of ((counts.data ?? []) as { company_id: string }[])) {
         byCompany.set(r.company_id, (byCompany.get(r.company_id) ?? 0) + 1)
       }
-      setRates(((c.data ?? []) as { id: string; name: string; code: string | null; commission_rate: number | null; commission_bands: unknown }[])
+      setRates(((c.data ?? []) as {
+        id: string; name: string; code: string | null; commission_rate: number | null
+        commission_bands: { upTo: number | null; rate: number }[] | null; commission_bands_source: string | null
+      }[])
         .map((x) => ({
           id: x.id, name: x.name, code: x.code,
           rate: x.commission_rate === null ? null : Number(x.commission_rate),
           banded: x.commission_bands !== null,
+          bands: x.commission_bands,
+          bandsSource: x.commission_bands_source,
           accounts: byCompany.get(x.id) ?? 0,
         }))
         .filter((x) => x.accounts > 0 || x.rate !== null || x.banded)
@@ -278,12 +286,12 @@ export function FinanceSettings() {
                             : <span className="tabular-nums">{ratePercent(c.rate)}</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        {!c.banded && (
-                          <button type="button" onClick={() => setEditing({ id: c.id, name: c.name, rate: c.rate })}
-                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100">
-                            {c.rate === null ? 'Set' : 'Change'}
-                          </button>
-                        )}
+                        {/* A SCALE CAN BE CHANGED HERE TOO. It had no button at all, which left a
+                            banded client's mandate editable from nowhere in the app. */}
+                        <button type="button" onClick={() => setEditing(c)}
+                          className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100">
+                          {c.rate === null && !c.banded ? 'Set' : 'Change'}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -291,9 +299,9 @@ export function FinanceSettings() {
               </table>
             </div>
             <p className="px-4 py-3 text-xs text-slate-400">
-              A rate is a fraction everywhere in Raptor — 0.30 is thirty per cent. Sliding bands are
-              marginal, on the client&rsquo;s cumulative capital since the mandate date, and are set
-              from the client record rather than here.
+              A rate is a fraction everywhere in Raptor — 0.30 is thirty per cent. A sliding scale
+              is marginal, on the client&rsquo;s cumulative capital since the mandate date: each
+              tier&rsquo;s rate applies to the slice of capital inside it.
             </p>
           </Card>
 
@@ -342,21 +350,29 @@ export function FinanceSettings() {
       )}
 
       {editing && (
-        <ChangeModal
-          title={`Commission for ${editing.name}`}
-          label="Rate"
-          current={editing.rate ?? 0}
-          note="Every account under this client is re-split against the new rate, and any payover still being worked is rebuilt. Anything already inside an approved invoice is left exactly as it was."
+        <CommissionModal
+          client={editing}
           onClose={() => setEditing(null)}
-          onSave={async (fraction, reason) => {
-            const before = editing.rate
-            const { error: e } = await supabase.from('companies')
-              .update({ commission_rate: fraction }).eq('id', editing.id)
+          onSave={async (next, reason) => {
+            /*
+             * ONE OR THE OTHER, NEVER BOTH. finance_commission prices from the bands whenever there
+             * are any and ignores the rate, so a scale left behind under a new flat rate would go
+             * on pricing every receipt while the screen said 30%. Choosing one clears the other.
+             */
+            const patch = next.kind === 'rate'
+              ? { commission_rate: next.rate, commission_bands: null, commission_bands_source: null }
+              : { commission_rate: null, commission_bands: next.bands, commission_bands_source: next.source }
+            const { error: e } = await supabase.from('companies').update(patch).eq('id', editing.id)
             if (e) throw new Error(e.message)
+            const describe = (r: RateRow | { kind: 'rate'; rate: number } | { kind: 'scale'; bands: Band[] }) => {
+              if ('kind' in r) return r.kind === 'rate' ? ratePercent(r.rate) : bandsWords(r.bands)
+              if (r.bands) return bandsWords(r.bands)
+              return r.rate === null ? 'none' : ratePercent(r.rate)
+            }
             await logSettingChange({
-              setting: 'commission_rate', companyId: editing.id, scope: editing.name,
-              oldValue: before === null ? 'none' : ratePercent(before),
-              newValue: ratePercent(fraction), reason,
+              setting: next.kind === 'rate' ? 'commission_rate' : 'commission_bands',
+              companyId: editing.id, scope: editing.name,
+              oldValue: describe(editing), newValue: describe(next), reason,
             })
             /*
              * AND THE ACCOUNTS ARE REPLAYED. Setting the rate alone changes nothing: the
@@ -376,6 +392,146 @@ export function FinanceSettings() {
         />
       )}
     </div>
+  )
+}
+
+type Band = { upTo: number | null; rate: number }
+interface RateRow {
+  id: string; name: string; code: string | null; rate: number | null; banded: boolean
+  bands: Band[] | null; bandsSource: string | null; accounts: number
+}
+
+/** A scale in one line, for the audit trail: "≤R100 000 30% · above 25%". */
+function bandsWords(bands: Band[]): string {
+  return bands.map((b) => `${b.upTo === null ? 'above' : `≤R${b.upTo.toLocaleString('en-ZA')}`} ${ratePercent(b.rate)}`)
+    .join(' · ')
+}
+
+/**
+ * A CLIENT'S COMMISSION: ONE RATE, OR A SLIDING SCALE.
+ *
+ * THE FIRM, on this dialog when it only took a number: "Here I can't choose a sliding scale." The
+ * note under the table said scales were set "from the client record" -- where the card only shows
+ * one, and the only editor was in Add client, for a client that does not exist yet. So a mandate
+ * signed on a scale after the client was loaded had nowhere to go.
+ *
+ * THE SAME CHOICE AND THE SAME EDITOR AS ADD CLIENT (CommissionScaleEditor), the same validation
+ * (scheduleProblems), and it opens on what the client has now -- a scale opens as a scale, with
+ * its tiers filled in, because changing one tier of five should not mean retyping four.
+ *
+ * AND IT READS THE NEW TERMS BACK before saving, in words, as Add client does: "you're about to
+ * sign this client on this sliding scale ... confirm." Every account the client has is re-split on
+ * it, and 3 typed for 30 is invisible in a box and obvious in a sentence.
+ */
+function CommissionModal({ client, onClose, onSave }: {
+  client: RateRow
+  onClose: () => void
+  onSave: (next: { kind: 'rate'; rate: number } | { kind: 'scale'; bands: Band[]; source: string }, reason: string) => Promise<void>
+}) {
+  const [kind, setKind] = useState<'rate' | 'scale'>(client.banded ? 'scale' : 'rate')
+  const [percent, setPercent] = useState(client.rate === null ? '' : String(Math.round(client.rate * 10000) / 100))
+  const [tiers, setTiers] = useState<Tier[]>(() => bandsToTiers(client.bands))
+  const [source, setSource] = useState(client.bandsSource ?? '')
+  const [reason, setReason] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const fraction = Number(percent) / 100
+  const bands = tiersToBands(tiers)
+  const problems: string[] = []
+  if (kind === 'rate') {
+    if (!(Number.isFinite(fraction) && percent.trim() !== '' && fraction > 0)) problems.push('Type the rate as a percentage, like 30.')
+    else if (fraction >= 1) problems.push('A commission rate of 100% or more would bill more than the debt.')
+  } else {
+    problems.push(...scheduleProblems(bands))
+  }
+  if (!reason.trim()) problems.push('Say why — a new mandate, a gazette, a correction.')
+  const terms = kind === 'rate' ? [`${percent}% of everything collected, on every account.`] : scaleTerms(tiers)
+
+  function save() {
+    setBusy(true); setError(null)
+    void onSave(
+      kind === 'rate' ? { kind: 'rate', rate: fraction } : { kind: 'scale', bands, source: source.trim() || 'Signed mandate' },
+      reason.trim(),
+    )
+      .catch((e: unknown) => { setError(e instanceof Error ? e.message : 'That did not save.'); setConfirming(false) })
+      .finally(() => setBusy(false))
+  }
+
+  if (confirming) {
+    return (
+      <Modal title={`Commission for ${client.name}`} onClose={onClose} width={520}>
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            {client.name} will be on {kind === 'rate' ? 'this rate' : 'this sliding scale'}:
+          </p>
+          <ul className="rounded-lg bg-gold-50 px-4 py-3 text-sm text-slate-800 space-y-1">
+            {terms.map((t) => <li key={t}>{t}</li>)}
+          </ul>
+          <p className="text-xs text-slate-500">
+            {client.accounts.toLocaleString('en-ZA')} {client.accounts === 1 ? 'account is' : 'accounts are'} re-split
+            on it, and any payover still being worked is rebuilt. Anything already inside an approved
+            invoice is left exactly as it was.
+          </p>
+          {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+            <button type="button" onClick={() => setConfirming(false)} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Back</button>
+            <button type="button" disabled={busy} onClick={save} className="btn-primary">
+              {busy ? 'Saving…' : 'Confirm and save'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title={`Commission for ${client.name}`} onClose={onClose} width={560}>
+      <div className="space-y-3">
+        <div className="flex gap-2">
+          {(['rate', 'scale'] as const).map((k) => (
+            <button key={k} type="button" onClick={() => setKind(k)} aria-pressed={kind === k}
+              className={clsx('text-xs px-3 py-1.5 rounded-lg border', kind === k
+                ? 'border-gold-500 bg-gold-100 text-navy-950 font-medium'
+                : 'border-slate-200 text-slate-500')}>
+              {k === 'rate' ? 'One rate' : 'A sliding scale'}
+            </button>
+          ))}
+        </div>
+
+        {kind === 'rate' ? (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Rate</label>
+            <div className="flex items-center gap-2">
+              <input value={percent} onChange={(e) => setPercent(e.target.value)} inputMode="decimal"
+                placeholder="30" className={clsx(inputClass, 'w-24')} />
+              <span className="text-sm text-slate-500">% of what is collected</span>
+            </div>
+          </div>
+        ) : (
+          <CommissionScaleEditor tiers={tiers} onTiers={setTiers} source={source} onSource={setSource} />
+        )}
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Why</label>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}
+            placeholder="A new mandate, a gazette, a correction…" />
+          <p className="mt-1 text-xs text-slate-400">Required. Only you know why, and in a month nobody will.</p>
+        </div>
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+          {/* WHAT STOPS IT, said -- rather than a Save that is grey for a reason nobody is told. */}
+          {problems.length > 0 && (percent.trim() || kind === 'scale' || reason.trim()) && (
+            <span className="mr-auto text-xs text-slate-500">{problems[0]}</span>
+          )}
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" disabled={problems.length > 0} onClick={() => setConfirming(true)} className="btn-primary">
+            Continue
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

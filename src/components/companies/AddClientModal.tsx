@@ -1,27 +1,15 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { codeProblem, proposeClientCode } from '../../lib/clientCode.ts'
-import { scheduleProblems, tierStart } from '../../lib/commission.ts'
+import { scheduleProblems } from '../../lib/commission.ts'
+import { CommissionScaleEditor } from './CommissionScaleEditor'
+import { asFraction, scaleTerms, tiersToBands, type Tier } from '../../lib/commissionTiers.ts'
 import type { Company, ID, ProductService, User } from '../../types'
 
 const SERVICES: ProductService[] = [
   'Debt Collection', 'Litigation', 'Executive Listing', 'iCollect', 'Contract Drafting',
   'In-Person Debt Collection', 'Credit Check', 'Tracing', 'NovaCall', 'Labour Law', 'Other',
 ]
-
-interface Tier { upTo: string; rate: string }
-
-const money = (n: number) => n.toLocaleString('en-ZA', {
-  style: 'currency', currency: 'ZAR', minimumFractionDigits: 2,
-})
-
-/** The label under a tier's row: where it starts, worked out by tierStart. */
-function startOf(tiers: Tier[], i: number): string {
-  const previous = i === 0 ? null : Number((tiers[i - 1]?.upTo ?? '').replace(/[\s,]/g, ''))
-  const from = tierStart(i === 0 ? null : previous)
-  return from === null ? 'From \u2014' : `From ${money(from)}`
-}
 
 /**
  * A client loaded straight in, rather than converted from a lead.
@@ -87,17 +75,9 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
 
-  /* A fraction, not a percentage: the firm types 30 and means 0.3. Converted at the boundary
-     rather than stored either way, because CompanyDetail already carries the comment about an
-     account that read as 2300%. */
-  const asFraction = (v: string) => {
-    const n = Number(v)
-    return Number.isFinite(n) && n > 0 ? n / 100 : NaN
-  }
-  const bands = useMemo(() => tiers.map((t) => ({
-    upTo: t.upTo.trim() === '' ? null : Number(t.upTo.replace(/[\s,]/g, '')),
-    rate: asFraction(t.rate),
-  })), [tiers])
+  /* A fraction, not a percentage: the firm types 30 and means 0.3 -- see CommissionScaleEditor,
+     which converts at the boundary for both this form and Trust settings. */
+  const bands = useMemo(() => tiersToBands(tiers), [tiers])
 
   function problems(): string[] {
     const out: string[] = []
@@ -164,11 +144,7 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
   /** The commission in words, which is the half of this worth reading twice. */
   const terms = kind === 'fixed'
     ? [`${rate}% of everything collected, on every account.`]
-    : tiers.map((t, i) => {
-      const from = startOf(tiers, i).replace('From ', '')
-      const to = t.upTo.trim() === '' ? 'and above' : `up to ${money(Number(t.upTo.replace(/[\s,]/g, '')))}`
-      return `${from} ${to} — ${t.rate}%`
-    })
+    : scaleTerms(tiers)
 
   if (confirming) {
     return (
@@ -396,53 +372,8 @@ export function AddClientModal({ takenCodes, liaisons, busy, error, onClose, onS
               </div>
             </FormField>
           ) : (
-            <div className="space-y-2">
-              {tiers.map((t, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  {/*
-                    WHERE EACH TIER STARTS IS SHOWN, NOT TYPED, at the firm's instruction: "if it's
-                    up to 100,000 for one tier, the next tier should start from 100,001
-                    automatically." Two numbers to keep in step is two numbers that drift, and the
-                    one nobody re-reads is the start.
-
-                    IT IS A CENT ABOVE, NOT A RAND. rateForCapital is `capital <= upTo`, so the
-                    boundary rand belongs to the LOWER band -- commission.ts says so in its own
-                    words, "an account handed over at exactly R25,000.00 is 25%, not 22.5%". An
-                    account at R100 000.50 is real and has to belong somewhere, and a label saying
-                    "From R100 001" would put it in neither tier.
-                  */}
-                  <span className="text-xs text-slate-400 w-28 shrink-0 tabular-nums">
-                    {startOf(tiers, i)}
-                  </span>
-                  <input className={`${inputClass} max-w-[9rem]`} value={t.upTo}
-                    placeholder={i === tiers.length - 1 ? 'and above' : '100000'}
-                    onChange={(e) => setTiers((prev) =>
-                      prev.map((x, j) => (j === i ? { ...x, upTo: e.target.value } : x)))} />
-                  <input className={`${inputClass} max-w-[5rem]`} value={t.rate} placeholder="30"
-                    onChange={(e) => setTiers((prev) =>
-                      prev.map((x, j) => (j === i ? { ...x, rate: e.target.value } : x)))} />
-                  <span className="text-sm text-slate-500">%</span>
-                  {tiers.length > 2 && (
-                    <button type="button" className="text-slate-300 hover:text-negative-600"
-                      onClick={() => setTiers((prev) => prev.filter((_, j) => j !== i))}>
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {/* The new tier goes in ABOVE the last one, because the last is "and above" and has
-                  to stay there -- see scheduleProblems. */}
-              <button type="button"
-                onClick={() => setTiers((prev) =>
-                  [...prev.slice(0, -1), { upTo: '', rate: '' }, prev[prev.length - 1]])}
-                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600">
-                <Plus size={12} /> Another tier
-              </button>
-              <FormField label="Where the scale comes from">
-                <input className={inputClass} value={source} onChange={(e) => setSource(e.target.value)}
-                  placeholder="Signed mandate, 30 April 2024" />
-              </FormField>
-            </div>
+            /* ONE EDITOR, shared with Trust settings -- see CommissionScaleEditor. */
+            <CommissionScaleEditor tiers={tiers} onTiers={setTiers} source={source} onSource={setSource} />
           )}
         </Section>
 

@@ -31,6 +31,13 @@ const src = (p) => readFileSync(new URL(p, import.meta.url), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
 const modal = src('../../src/components/companies/AddClientModal.tsx')
+/*
+ * THE SCALE EDITOR IS SHARED NOW, with Trust settings ("Here I can't choose a sliding scale"), so
+ * its rules live in CommissionScaleEditor and commissionTiers rather than in this form. The form is
+ * held to USING it below; the rules are held where they are written.
+ */
+const scale = src('../../src/components/companies/CommissionScaleEditor.tsx')
+  + src('../../src/lib/commissionTiers.ts')
 const list = src('../../src/pages/companies/CompaniesList.tsx')
 const importCard = src('../../src/components/settings/HandoverImportCard.tsx')
 
@@ -87,7 +94,8 @@ ok('...and refused where it would collide', /codeProblem\(/.test(modal))
  * or a sliding scale ... then the next tier, and then above the last tier would be another one."
  */
 ok('one rate or a scale', /'fixed' \| 'scale'/.test(modal))
-ok('...with tiers that can be added to', /Another tier/.test(modal))
+ok('...drawn by the shared scale editor', /<CommissionScaleEditor tiers=\{tiers\} onTiers=\{setTiers\}/.test(modal))
+ok('...with tiers that can be added to', /Another tier/.test(scale))
 ok('...and the scale checked before it saves', /scheduleProblems\(/.test(modal))
 /*
  * A NEW TIER GOES IN ABOVE THE LAST ONE, because the last is the "and above" band and has to stay
@@ -95,14 +103,14 @@ ok('...and the scale checked before it saves', /scheduleProblems\(/.test(modal))
  * be arguing with its own validation.
  */
 ok('a new tier is inserted before the "and above" one',
-  /prev\.slice\(0, -1\), \{ upTo: '', rate: '' \}, prev\[prev\.length - 1\]/.test(modal))
+  /prev\.slice\(0, -1\), \{ upTo: '', rate: '' \}, prev\[prev\.length - 1\]/.test(scale))
 
 /*
  * TYPED AS A PERCENTAGE, STORED AS A FRACTION. Everything in Raptor holds commission as 0.3 for
  * thirty percent and a person types 30. Converting at this boundary is the whole guard:
  * CompanyDetail already carries a comment about the account that read as 2300%.
  */
-ok('a percentage is converted to a fraction', /n \/ 100/.test(modal))
+ok('a percentage is converted to a fraction', /n \/ 100/.test(scale) && /tiersToBands\(tiers\)/.test(modal))
 ok('...and the screen says it is a percentage', /% of what is collected/.test(modal))
 
 /* ---------- 4. no mandate, no handover ---------- */
@@ -166,8 +174,8 @@ check('an unfilled boundary has no start to show', tierStart(NaN), null)
 check('...nor a boundary of nought', tierStart(0), null)
 
 /* And the screen shows it rather than asking for it. */
-ok('the form shows where each tier starts', /startOf\(tiers, i\)/.test(modal))
-ok('...through the rule rather than its own arithmetic', /tierStart\(/.test(modal))
+ok('the form shows where each tier starts', /startOf\(tiers, i\)/.test(scale))
+ok('...through the rule rather than its own arithmetic', /tierStart\(/.test(scale))
 
 /*
  * AND A CONFIRMATION BEFORE IT IS SIGNED, at the firm's instruction: "when you click accept,
