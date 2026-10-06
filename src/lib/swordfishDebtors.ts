@@ -58,6 +58,8 @@ export interface DebtorPatch {
   account_rating?: number | null
   last_contact_method?: string | null
   ptp_success_ratio?: number | null
+  /** Swordfish's filing. Set here only to file a promise brought in broken -- see pastDue. */
+  bucket?: string | null
 }
 
 export interface DebtorImport {
@@ -76,6 +78,8 @@ export interface DebtorImport {
     emails: number
     addresses: number
     promises: number
+    /** Open in Swordfish but already past their date when they came across -- brought in as broken. */
+    promisesPastDue: number
     mainComments: number
     importedNotes: number
     idsRejected: number
@@ -124,6 +128,8 @@ function promiseStatus(raw: string): PromiseRow['status'] | null {
 
 export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorImport {
   const nowIso = now.toISOString()
+  /* The firm's day, not UTC's: a promise due "today" in Johannesburg is still live at 01:00. */
+  const today = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
   const out: DebtorImport = {
     patches: new Map(),
     contactsByRef: new Map(),
@@ -133,7 +139,7 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     notes: [],
     stats: {
       rows: 0, contacts: 0, mobiles: 0, emails: 0, addresses: 0,
-      promises: 0, mainComments: 0, importedNotes: 0, idsRejected: 0,
+      promises: 0, promisesPastDue: 0, mainComments: 0, importedNotes: 0, idsRejected: 0,
       idsBlank: 0, idsTwelveDigit: 0, registrationNumbers: 0,
       /*
        * IS THE COLUMN EVEN THERE?
@@ -275,9 +281,37 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
 
     /* ---------- the promise they are on ---------- */
 
-    const status = promiseStatus(String(r['PTP Status'] ?? ''))
+    const swordfishStatus = promiseStatus(String(r['PTP Status'] ?? ''))
     const amount = num(r['PTP Amount'])
     const dueOn = dateOnly(r['PTP Due Date'])
+    /*
+     * "OPEN" IN SWORDFISH BUT ALREADY PAST ITS DATE COMES IN BROKEN -- the firm's decision.
+     *
+     * The test book had four: due 4 Sep, 30 Sep, 30 Sep and 4 Oct, all still "open" in the export
+     * on 6 Oct. Brought in open, each started the promise workflow and the debtor was sent a
+     * confirmation of an arrangement made weeks earlier whose payment day had already gone. The
+     * firm, asked whether such a promise should land in the collector's diary instead: "I'm just
+     * scared about ... how many broken promises there are actually going to be. So maybe it might
+     * fill up the collector's diary ... it should just change the status to a broken promise ...
+     * and then that person can filter it and allocate it themselves."
+     *
+     * BROKEN, NOT DEFAULTED, and the difference is what keeps this quiet. `defaulted` is a live
+     * promise somebody missed: it starts the broken-promise workflow, which writes to the debtor.
+     * `broken` is a promise recorded as history, which starts nothing (workflow_start_on_promise
+     * and workflow_start_on_promise_broken both say so). So these reach the Broken promises list
+     * and nobody's inbox, and nobody's diary until a collector puts them there.
+     *
+     * Due TODAY stays open: it has not been missed yet, and the workflow's due-today message is
+     * still true.
+     */
+    const pastDue = swordfishStatus === 'open' && !!dueOn && dueOn < today
+    const status = pastDue ? 'broken' : swordfishStatus
+    /*
+     * AND FILED WHERE THE FIRM WILL LOOK FOR IT. The Broken promises list reads Swordfish's bucket
+     * ('Failed PTPs'), not the promise's status -- see accountViews -- and Swordfish still has
+     * these filed as live promises. Without this they would be broken and on no list at all.
+     */
+    if (pastDue) patch.bucket = 'Failed PTPs'
     if (status && amount && amount > 0 && dueOn) {
       const origin = text(r['PTP Origin'])
       out.promisesByRef.set(ref, [{
@@ -286,11 +320,15 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
         method: null,
         origin: origin === 'N/A' ? null : origin,
         status,
-        notes: null,
+        notes: pastDue
+          ? `Still open in Swordfish, but due on ${dueOn} -- before it came across on ${today} -- so `
+            + 'brought in as a broken promise rather than chased.'
+          : null,
         source: 'swordfish',
         created_at: dateOnly(r['PTP Creation Date']) ? `${dateOnly(r['PTP Creation Date'])}T00:00:00Z` : nowIso,
       }])
       out.stats.promises++
+      if (pastDue) out.stats.promisesPastDue++
     }
 
     /* ---------- what was last said ---------- */
@@ -388,6 +426,11 @@ export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorIm
     + `${out.stats.addresses} addresses across ${out.stats.rows} debtors.`,
   )
   if (out.stats.promises) out.notes.push(`${out.stats.promises} promises to pay were still open or broken in Swordfish.`)
+  if (out.stats.promisesPastDue) {
+    out.notes.push(`${out.stats.promisesPastDue} of them were still open in Swordfish but already past their date, `
+      + 'so they come in as broken promises: on the Broken promises list, not in anybody\'s diary, '
+      + 'and nothing is sent to the debtor.')
+  }
 
   return out
 }

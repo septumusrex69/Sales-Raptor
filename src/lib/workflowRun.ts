@@ -80,8 +80,20 @@ export function planRun(input: {
    */
   instalments?: Instalment[]
   holidays?: Record<string, string>
+  /**
+   * THE ARRANGEMENT WAS MADE IN SWORDFISH, NOT HERE -- so its confirmation has already happened.
+   *
+   * The firm, after the test import sent four debtors a confirmation of arrangements made weeks
+   * before: the workflow "should continue with the workflow. But it's not necessary to send the
+   * emails and the SMSs ... It should not [confirm] that arrangement that's been made. It's like
+   * the arrangement that was." So on an imported arrangement the run's own day-0 steps -- the
+   * confirmation -- are recorded as not sent, and the instalment reminders carry on for the dates
+   * still ahead. Set by the planner only for a promise workflow (plan.ts), so a section 129
+   * started on the same account still sends its day 1.
+   */
+  arrangementFromImport?: boolean
 }): PlannedStep[] {
-  const { nodes, dayUnit, startedOn, instalments = [], holidays = {} } = input
+  const { nodes, dayUnit, startedOn, instalments = [], holidays = {}, arrangementFromImport = false } = input
   /*
    * ONE STEP PER INSTALMENT, FLATTENED BEFORE ANYTHING IS SORTED.
    *
@@ -174,7 +186,19 @@ export function planRun(input: {
        * the confirmation itself is never caught by this; an instalment date is the debtor's and
        * was set before we were asked.
        */
-      ...(instalmentNo > 0 && dueOn <= startedOn
+      ...(arrangementFromImport && instalmentNo === 0 && dueOn <= startedOn
+        ? {
+          state: 'cancelled' as RunStepState,
+          note: 'Not sent: the arrangement was made in Swordfish and confirmed to the debtor then.',
+        }
+        /* IMPORTED, A DAY ALREADY GONE IS STILL NOT SENT -- but the import day itself is. Nothing
+           confirmed the arrangement today, so "your payment is due today" is news, not repetition. */
+        : arrangementFromImport && instalmentNo > 0 && dueOn < startedOn
+        ? {
+          state: 'cancelled' as RunStepState,
+          note: 'This date had already passed when the arrangement came across from Swordfish, so it was not sent.',
+        }
+        : !arrangementFromImport && instalmentNo > 0 && dueOn <= startedOn
         ? {
           state: 'cancelled' as RunStepState,
           note: dueOn < startedOn

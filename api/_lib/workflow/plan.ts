@@ -175,7 +175,7 @@ interface RunRow { id: string; account_id: string; version_id: string; started_o
 
 async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> {
   const [{ data: version }, { data: nodes }] = await Promise.all([
-    admin.from('workflow_versions').select('id, day_unit').eq('id', run.version_id).maybeSingle(),
+    admin.from('workflow_versions').select('id, day_unit, trigger_kind').eq('id', run.version_id).maybeSingle(),
     admin.from('workflow_nodes')
       .select('id, day, ordinal, needs_release, statutory, anchor, anchor_offset, anchor_unit')
       .eq('version_id', run.version_id),
@@ -218,11 +218,19 @@ async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> 
    * that has since been rewritten.
    */
   let instalments: Instalment[] = []
-  if (nodes.some((n) => n.anchor === 'instalment')) {
+  /* See planRun's arrangementFromImport: a promise workflow on an arrangement Swordfish made. */
+  let arrangementFromImport = false
+  const isPromiseRun = version.trigger_kind === 'promise_due'
+  if (isPromiseRun || nodes.some((n) => n.anchor === 'instalment')) {
     const { data: promises } = await admin.from('promises_to_pay')
       .select('amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, '
-        + 'instalments_kept, total_promised, status, created_at')
+        + 'instalments_kept, total_promised, status, created_at, source')
       .eq('account_id', run.account_id)
+    /* THE SAME LIVE ARRANGEMENT liveArrangement picks: the newest open-or-defaulted one. */
+    const live = ((promises ?? []) as unknown as { status: string; created_at: string; source: string | null }[])
+      .filter((p) => p.status === 'open' || p.status === 'defaulted')
+      .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))[0]
+    arrangementFromImport = isPromiseRun && live?.source === 'swordfish'
     instalments = instalmentSchedule(liveArrangement(
       /* CAST BECAUSE THE SELECT IS BUILT FROM TWO STRING PIECES and PostgREST's types can only
          infer a row from a literal one. Every field is read through the coercions below anyway,
@@ -258,6 +266,7 @@ async function planOne(admin: SupabaseClient, run: RunRow): Promise<PlannedRun> 
     dayUnit: unit,
     startedOn: run.started_on,
     instalments,
+    arrangementFromImport,
   })
 
   /*
