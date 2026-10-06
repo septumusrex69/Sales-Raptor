@@ -21,6 +21,8 @@ import { debtorKey, type OtherAccount } from './sameDebtor.ts'
 import { isWrittenOff } from './accountStatus.ts'
 import { fetchAllRows } from './fetchAll.ts'
 import type { Book, BookChoice, ClosureKind, HoldReason } from './accountBooks.ts'
+import type { ClientCommission } from './commissionRule.ts'
+import type { CommissionBand } from './commission.ts'
 
 export interface DebtorAccount {
   id: string
@@ -1064,20 +1066,28 @@ export async function fetchOtherAccounts(
 }
 
 /**
- * The client's own commission rate, as a fraction.
+ * THE CLIENT'S COMMISSION RULE, read at the moment accounts are opened (prompt 9).
  *
- * Read at the moment an account is opened rather than carried on the Company the app already
- * holds, because that object does not carry it and widening it for one form would mean touching
- * every screen that loads a client. Null where the client has bands instead of a flat rate: a
- * banded rate depends on the capital and resolving it belongs with the import that knows the
- * bands, not with a person typing one account.
+ * Read fresh rather than off the Company the app holds: commission is the client's, and a stale
+ * copy is an account invoiced at the wrong rate for the rest of its life. It returns the RULE, not
+ * a rate -- the old version returned the flat rate and null for a scale, and a null priced every
+ * new account on a banded client at nothing. toAccountRow decides the rate per account, on that
+ * account's capital, and handoverRateBlock refuses a client whose scale has no boundaries.
  */
-export async function fetchClientCommissionRate(companyId: string): Promise<number | null> {
+export async function fetchClientCommission(companyId: string): Promise<ClientCommission & { name: string }> {
   const { data, error } = await supabase
-    .from('companies').select('commission_rate').eq('id', companyId).maybeSingle()
+    .from('companies').select('name, commission_rate, commission_bands, commission_tiers').eq('id', companyId).maybeSingle()
   if (error) throw new Error(error.message)
-  const rate = data?.commission_rate
-  return rate === null || rate === undefined ? null : Number(rate)
+  const r = (data ?? {}) as {
+    name?: string; commission_rate?: number | string | null
+    commission_bands?: CommissionBand[] | null; commission_tiers?: { prefix: string; rate: number }[] | null
+  }
+  return {
+    name: r.name ?? 'This client',
+    commissionRate: r.commission_rate === null || r.commission_rate === undefined ? null : Number(r.commission_rate),
+    commissionBands: r.commission_bands ?? null,
+    commissionTiers: r.commission_tiers ?? null,
+  }
 }
 
 export interface BookFacets {

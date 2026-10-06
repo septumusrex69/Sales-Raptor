@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { handoverRateBlock } from '../../lib/commissionRule'
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, FileUp, Loader2, Paperclip, Upload, X,
 } from 'lucide-react'
@@ -31,7 +32,7 @@ import { suggestedDesk } from '../../lib/linkedAccount.ts'
 import { suggestedNote } from '../../lib/noteSuggestion.ts'
 import { downloadBytes } from '../../lib/xlsxWrite.ts'
 import {
-  fetchClientCommissionRate, fetchExistingAccounts, fetchUnallocatedBatches,
+  fetchClientCommission, fetchExistingAccounts, fetchUnallocatedBatches,
   type UnallocatedBatch,
 } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
@@ -212,6 +213,18 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
   const [openDrafts, setOpenDrafts] = useState<HandoverDraft[]>([])
   const [draftId, setDraftId] = useState<string | null>(null)
   const [judged, setJudged] = useState<JudgedDraft | null>(null)
+  /* WHETHER THIS CLIENT'S ACCOUNTS CAN BE PRICED AT ALL, read when the draft opens -- a scale with no
+     boundaries is a reason to stop that no amount of row-fixing will clear, so it is said up front. */
+  const [rateBlock, setRateBlock] = useState<string | null>(null)
+  const draftCompany = judged?.draft.companyId ?? null
+  useEffect(() => {
+    if (!draftCompany) { setRateBlock(null); return }
+    let live = true
+    void fetchClientCommission(draftCompany)
+      .then((c) => { if (live) setRateBlock(handoverRateBlock(c.name, c)) })
+      .catch(() => { /* approveDraft reads it again and refuses on its own */ })
+    return () => { live = false }
+  }, [draftCompany])
   const [done, setDone] = useState<string | null>(null)
   /*
    * WHAT HAPPENS NEXT, and it is a link rather than a sentence. THE FIRM: "the moment after that,
@@ -386,13 +399,14 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     if (!judged) return
     setBusy({ job: 'approve', message: 'Opening the accounts' }); setError(null); setAllocate(null)
     try {
+      const commission = await fetchClientCommission(judged.draft.companyId).catch(() => null)
       const result = await approveDraft({
         draftId: judged.draft.id,
         today: today(),
         /* THE CLIENT'S RATE, INHERITED RATHER THAN TYPED, and read fresh rather than off a
            company row in the store -- commission is the client's and a stale copy of it is an
            account invoiced at the wrong rate for the rest of its life. */
-        commissionRate: await fetchClientCommissionRate(judged.draft.companyId).catch(() => null),
+        commission,
         onProgress: (n, total) => setBusy({ job: 'approve', message: `Opening the accounts — ${n} of ${total}` }),
         /* So the corrections can be emailed to the liaison through this person's own mailbox.
            Missing, the import still runs and says the email did not go. */
@@ -474,7 +488,7 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
     <DraftTable
       judged={judged} busy={busyMessage} error={error}
       approving={busy?.job === 'approve' ? busy.message : null}
-      onEdit={edit} onExclude={exclude} onApprove={approve} onDecide={decide}
+      onEdit={edit} onExclude={exclude} onApprove={approve} onDecide={decide} rateBlock={rateBlock}
       onBack={() => { setJudged(null); setDraftId(null) }}
       onDiscard={() => discard(judged.draft.id)} />
   )
@@ -1110,9 +1124,15 @@ function PlanSummary({ plan, docs }: { plan: HandoverPlan; docs: MatchPlan | nul
  */
 export function DraftTable({
   judged, busy, approving, error, onEdit, onExclude, onApprove, onBack, onDiscard, onDecide,
-  backLabel,
+  backLabel, rateBlock,
 }: {
   judged: JudgedDraft
+  /**
+   * Why this client's accounts cannot be priced, where they cannot (prompt 9): a scale on the
+   * register with no rand boundaries. Said beside the button rather than discovered after pressing
+   * it -- approveDraft refuses the same thing, so the two agree.
+   */
+  rateBlock?: string | null
   /** Anything running, which disables the whole table. */
   busy: string | null
   /**
@@ -1214,16 +1234,16 @@ export function DraftTable({
           disagreeing with itself.
         */}
         <button type="button" onClick={() => void onApprove()}
-          disabled={!!busy || !judged.gate.ready}
-          title={judged.gate.why ?? undefined}
+          disabled={!!busy || !judged.gate.ready || !!rateBlock}
+          title={rateBlock ?? judged.gate.why ?? undefined}
           className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg
             bg-gold-400 text-navy-950 border border-gold-500 disabled:opacity-40">
           {approving ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
           {approving ?? `Approve ${judged.gate.importing} `
             + `${judged.gate.importing === 1 ? 'handover' : 'handovers'}`}
         </button>
-        {judged.gate.why && !busy && (
-          <span className="text-xs text-negative-700">{judged.gate.why}</span>
+        {(rateBlock ?? judged.gate.why) && !busy && (
+          <span className="text-xs text-negative-700">{rateBlock ?? judged.gate.why}</span>
         )}
         <button type="button" onClick={() => void onDiscard()} disabled={!!busy}
           className="ml-auto text-xs font-medium text-negative-700 hover:underline">

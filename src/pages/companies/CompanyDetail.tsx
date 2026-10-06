@@ -41,8 +41,9 @@ import { NoteActivityList } from '../../components/NoteActivityRow'
 import { AddDebtorModal } from '../../components/companies/AddDebtorModal'
 import { ClientPicker } from '../../components/ui/ClientPicker'
 import { CommissionCard } from '../../components/companies/CommissionCard'
+import { handoverRateBlock } from '../../lib/commissionRule'
 import { MandateCard } from '../../components/companies/MandateCard'
-import { createDebtorAccount, fetchAccountReferences, fetchClientCommissionRate } from '../../lib/accountBook'
+import { createDebtorAccount, fetchAccountReferences, fetchClientCommission } from '../../lib/accountBook'
 import { uploadDocument } from '../../lib/accountWorkspace'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
@@ -999,8 +1000,14 @@ export function CompanyDetail() {
               // typed. It is stored as a fraction everywhere in the system — 0.3 is thirty
               // percent — and passing a percentage through here is what made one account read
               // as 2300% on the accounts list.
+              //
+              // On a scale it is priced on THIS account's capital (prompt 9), and a scale with no
+              // boundaries refuses, as a handover does -- one account is the same question.
+              const rule = await fetchClientCommission(company.id).catch(() => null)
+              const rateBlock = rule ? handoverRateBlock(rule.name, rule) : null
+              if (rateBlock) throw new Error(rateBlock)
               const account = await createDebtorAccount(
-                toAccountRow(input, company.id, null, await fetchClientCommissionRate(company.id).catch(() => null)),
+                toAccountRow(input, company.id, null, rule),
                 (id) => toContactRows(input, id),
               )
               /*

@@ -14,6 +14,7 @@ import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 import { StatusPill } from './AccountsList'
 import { fetchAccount, fetchLedgers, hasCommissionDrift, type AccountLedgers, type DebtorAccount } from '../../lib/accountBook'
+import { accountRate } from '../../lib/commissionRule'
 import { buildStatement, type BalanceInput, type BalanceBreakdown, type StatementLine } from '../../lib/accountBalance'
 import { chargeMessage } from '../../lib/accountCharges'
 import { promiseProblem, recordPromise, PROMISE_ITEM_ID } from '../../lib/accountPromises'
@@ -987,6 +988,14 @@ export function AccountDetail() {
 
   const b = statement?.breakdown
   const drift = hasCommissionDrift(account)
+  /* THE RATE AND WHERE IT CAME FROM, in one line (prompt 9): "21% — as billed in Swordfish (KIS
+     tier)", "25% — band R0–R25 000". A bare 21% beside a client card saying a scale left the reader
+     to work out which of the two was wrong. */
+  const commission = accountRate({
+    accountRate: account.commissionRate, capitalHandedOver: account.capitalHandedOver,
+    imported: !!account.importedAt || !!account.swordfishReference,
+    reference: account.swordfishReference, client: client ?? {},
+  })
   /*
    * THE CLERK THE ACCOUNT IS ACTUALLY ON, resolved from `assignedTo` -- the column allocating,
    * the diary, the workflow and every desk list already turn on. `users` is the profiles AppStore
@@ -1448,7 +1457,7 @@ export function AccountDetail() {
     />
   )
   const positionPanel = (
-    <PositionPanel account={account} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
+    <PositionPanel account={account} commission={commission.label} ceiling={ceiling} chargedExclVat={ledgers?.totals.feesExclVat ?? 0}
       clientLiaisonName={clientLiaison?.name ?? null}
       onFreeze={canFreezeAccounts(currentUser) ? () => setFreezing(true) : null}
       /* Closing an account is not freezing it: a freeze is reversible and an ending is not. Both
@@ -4425,9 +4434,10 @@ function Directorships({ companies }: { companies: DirectorCompany[] }) {
 }
 
 function PositionPanel({
-  account, ceiling, chargedExclVat, clientLiaisonName, onFreeze, onEnd, onHold, onRelease,
+  account, commission, ceiling, chargedExclVat, clientLiaisonName, onFreeze, onEnd, onHold, onRelease,
 }: {
   account: DebtorAccount
+  commission: string
   ceiling: { limit: number } | null
   chargedExclVat: number
   clientLiaisonName: string | null
@@ -4466,7 +4476,7 @@ function PositionPanel({
         </div>
       )}
       <div className="space-y-1.5">
-        <Field label="Commission" value={account.commissionRate === null ? 'not resolved' : pct(account.commissionRate)} />
+        <Field label="Commission" value={commission} />
         {/*
           THE STATUS IS WHERE WORK IS STOPPED, not the action row.
 

@@ -24,6 +24,11 @@ const FLAT = { id: 'c0000001-0000-4000-8000-000000000001', name: 'Kestrel Indust
 const BANDED = { id: 'c0000002-0000-4000-8000-000000000002', name: 'Meridian Student Housing (RF) Ltd', code: 'MSH',
   commission_rate: null, commission_bands: [{ upTo: 25000, rate: 0.25 }, { upTo: null, rate: 0.225 }],
   commission_bands_source: 'Signed mandate, 1 March 2026' }
+/* ON THE REGISTER'S TIERS WITH NO BOUNDARIES, and a leftover flat rate -- which is how Kestrel came
+   out of the import: its last tier, 10%, sitting where the scale should be (prompt 9). */
+const TIERED = { id: 'c0000003-0000-4000-8000-000000000003', name: 'Osprey Hardware (Pty) Ltd', code: 'OSP',
+  commission_rate: 0.1, commission_bands: null, commission_bands_source: null,
+  commission_tiers: [{ prefix: 'OSP', rate: 0.21 }, { prefix: 'OSP2', rate: 0.15 }, { prefix: 'OSP3', rate: 0.12 }, { prefix: 'OSP4', rate: 0.1 }] }
 
 let patches = []
 let logged = []
@@ -34,13 +39,13 @@ const handlers = [
     patches.push({ url: decodeURIComponent(u), body: req.postDataJSON() })
     return { status: 204, body: null }
   }],
-  [(u) => u.includes('/rest/v1/companies'), () => ({ body: [FLAT, BANDED] })],
+  [(u) => u.includes('/rest/v1/companies'), () => ({ body: [FLAT, BANDED, TIERED] })],
   [(u, req) => req.method() === 'POST' && u.includes('/rest/v1/finance_setting_changes'), (u, req) => {
     logged.push(req.postDataJSON()); return { status: 201, body: [] }
   }],
   [(u) => u.includes('/rest/v1/firm_settings'), () => ({ body: { vat_rate: 0.15, finance_cutover_at: '2026-01-01T00:00:00Z', payover_lag_months: 1 } })],
   [(u) => u.includes('/rpc/money_position'), () => ({ body: [
-    { company_id: FLAT.id }, { company_id: FLAT.id }, { company_id: FLAT.id }, { company_id: BANDED.id },
+    { company_id: FLAT.id }, { company_id: FLAT.id }, { company_id: FLAT.id }, { company_id: BANDED.id }, { company_id: TIERED.id },
   ] })],
   /* No accounts handed back, so the replay after saving is not what is under test here. */
   [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [] })],
@@ -56,8 +61,31 @@ try {
   const flatRow = page.locator('tr', { hasText: 'Kestrel Industrial' })
   await flatRow.waitFor({ timeout: 20000 })
 
-  /* ---------- 2 first: a scale client can be changed, and opens on its own tiers ---------- */
+  /* ---------- 3: the states the table shows ---------- */
   const bandedRow = page.locator('tr', { hasText: 'Meridian Student' })
+  const tieredRow = page.locator('tr', { hasText: 'Osprey Hardware' })
+  t.ok('a client with bands reads "Sliding scale", with its bands', await bandedRow.getByText('Sliding scale').isVisible()
+    && await bandedRow.getByText(/R25[\s,]000\+ · 22\.5%/).isVisible())
+  /* AMBER, AND NOT "No rate" -- and not 10% either, which is the leftover the scale was lost to. */
+  t.ok('a client on tiers with no bands reads "Scale, boundaries missing"', await tieredRow.getByText('Scale, boundaries missing').isVisible())
+  t.ok('...with the register\'s tiers', await tieredRow.getByText('OSP 21% · OSP2 15% · OSP3 12% · OSP4 10%').isVisible())
+  await tieredRow.getByRole('button', { name: 'Change' }).click()
+  const tdialog = page.getByRole('dialog')
+  await tdialog.waitFor({ timeout: 5000 })
+  t.check('...whose dialog opens as a scale', await tdialog.getByRole('button', { name: 'A sliding scale' }).getAttribute('aria-pressed'), 'true')
+  t.check('...with the tiers\' rates filled in', await tdialog.getByLabel('Tier 2 rate').inputValue(), '15')
+  t.check('...and the boundaries left to type, from the mandate', await tdialog.getByLabel('Tier 1 up to').inputValue(), '')
+  /* A FLAT RATE OVER A SCALE IS CONFIRMED, not merely saved. */
+  await tdialog.getByRole('button', { name: 'One rate' }).click()
+  await tdialog.getByPlaceholder('A new mandate, a gazette, a correction…').fill('Testing')
+  t.ok('a flat rate over a scale names what it replaces', await tdialog.getByText(/This replaces a 4-tier scale with a flat rate/).isVisible())
+  t.check('...and will not go on until that is ticked', await tdialog.getByRole('button', { name: 'Continue' }).isDisabled(), true)
+  await tdialog.getByRole('checkbox').check()
+  t.check('...and will once it is', await tdialog.getByRole('button', { name: 'Continue' }).isDisabled(), false)
+  await tdialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), null, { timeout: 5000 })
+
+  /* ---------- 2: a scale client can be changed, and opens on its own tiers ---------- */
   t.ok('a client on a sliding scale has a Change button', await bandedRow.getByRole('button', { name: 'Change' }).isVisible())
   await bandedRow.getByRole('button', { name: 'Change' }).click()
   const dialog = page.getByRole('dialog')

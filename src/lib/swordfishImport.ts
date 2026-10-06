@@ -59,6 +59,8 @@ export interface CompanyRow {
   commission_bands: { upTo: number | null; rate: number }[] | null
   commission_bands_source: string | null
   commission_rate: number | null
+  /** The register's tiers, where a client is filed as several records at different rates. */
+  commission_tiers: { prefix: string; rate: number }[] | null
   registration_number: string | null
   vat_number: string | null
   banking_details: string | null
@@ -348,6 +350,10 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       // A single rate only where there is genuinely one. A client on a scale has no flat rate,
       // and writing the first band's rate here would read as a fact when it is a guess.
       commission_rate: uniqueRate(spec.commissionByPrefix),
+      /* THE TIERS, KEPT where they differ -- see the register's copy of this below. */
+      commission_tiers: uniqueRate(spec.commissionByPrefix) === null && spec.commissionByPrefix
+        ? Object.entries(spec.commissionByPrefix).map(([prefix, rate]) => ({ prefix, rate }))
+        : null,
       registration_number: null,
       vat_number: null,
       banking_details: null,
@@ -488,6 +494,15 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
         commission_bands: null,
         commission_bands_source: null,
         commission_rate: rates.length === 1 ? rates[0] : null,
+        /*
+         * AND THE TIERS ARE KEPT, rather than thrown away (prompt 9). Kestrel is KIS 21%, KIS2 15%,
+         * KIS3 12%, KIS4 10% in the register, and with only `commission_rate` to hold it the client
+         * read "No rate" -- the scale survived only as each imported account's own rate, and any
+         * new handover got whatever single rate somebody typed. Kept in the register's order,
+         * highest rate first, which is the smallest debt. Prices nothing on its own: the rand
+         * boundaries are in the mandate, and are captured as commission_bands.
+         */
+        commission_tiers: rates.length > 1 ? tiers : null,
         registration_number: text(first['COMPANY REG/ID']),
         vat_number: text(first['VAT NO']),
         banking_details: text(first['BANKING DETAILS']),

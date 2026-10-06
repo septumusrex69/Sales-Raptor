@@ -9,6 +9,7 @@
  * one. What it guards is narrow but it is the part that matters: an account opens a ledger, and a
  * ledger opened on a wrong capital or a wrong date is wrong in every figure it ever produces.
  */
+import { ruleRateFor, type ClientCommission } from './commissionRule.ts'
 
 export interface NewDebtorInput {
   /** Our reference. Optional — suggestReference proposes the next in the client's series. */
@@ -291,9 +292,21 @@ export function toAccountRow(
   input: NewDebtorInput,
   companyId: string,
   handoverId: string | null,
-  clientCommissionRate: number | null = null,
+  /*
+   * THE CLIENT'S RULE, NOT A RATE (prompt 9). A number still means a flat rate, which is what this
+   * took before; the rule is what it should be given, because on a sliding scale the rate depends on
+   * THIS account's capital and the caller did not know it. Passing one number for a whole handover is
+   * how a client on a scale had every new account priced at a single rate whatever its size.
+   */
+  client: ClientCommission | number | null = null,
 ) {
   const capital = num(input.capital) ?? 0
+  const rule: ClientCommission | null = typeof client === 'number' ? { commissionRate: client } : client
+  /* DECIDED ONCE, HERE, on the capital handed over -- the band this debt falls in at handover, as
+     the mandates state it. Stamped on the account so the engine never re-decides it, and stamped as
+     the expectation too, so a fresh account is never "off its mandate rate" on the day it opens. */
+  const rate = rule ? (ruleRateFor(rule, capital) ?? null) : null
+  const banded = !!rule?.commissionBands && rule.commissionBands.length > 0
   return {
     company_id: companyId,
     handover_id: handoverId,
@@ -320,7 +333,9 @@ export function toAccountRow(
     // Interest runs from the handover, which is what the date is for.
     interest_rate_annual: num(input.interestRateAnnual) ?? 0,
     interest_from: input.handoverDate,
-    commission_rate: clientCommissionRate,
+    commission_rate: rate,
+    commission_rate_expected: rate,
+    commission_rate_source: rate === null ? null : banded ? 'Band on capital at handover' : 'Client flat rate',
     status: 'Active: Activated',
     source: 'manual',
   }

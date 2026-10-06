@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { useAppStore } from '../../store/AppStore'
+import { fetchAccount } from '../../lib/accountBook'
+import { accountRate } from '../../lib/commissionRule'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import {
@@ -337,6 +340,25 @@ function Opened({ r, a, problems }: {
 }) {
   const side = feesSideTaking(a)
   const half = Math.round((r.amount / 2) * 100) / 100
+  /*
+   * WHERE THE RATE CAME FROM (prompt 9). Read when the row is opened, not for the whole list: a
+   * month of receipts is hundreds of accounts, and this is a question asked of one of them.
+   */
+  const { companies } = useAppStore()
+  const [rateLabel, setRateLabel] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    void fetchAccount(r.accountId).then((acct) => {
+      if (!live || !acct) return
+      const client = companies.find((c) => c.id === acct.companyId)
+      setRateLabel(accountRate({
+        accountRate: acct.commissionRate, capitalHandedOver: acct.capitalHandedOver,
+        imported: !!acct.importedAt || !!acct.swordfishReference,
+        reference: acct.swordfishReference, client: client ?? {},
+      }).label)
+    }).catch(() => { /* the line is a courtesy; the figures above it stand without it */ })
+    return () => { live = false }
+  }, [r.accountId, companies])
   return (
     <div className="grid gap-4 md:grid-cols-3 text-[12.5px]">
       {/* ---------------------------------------------------------------- where it came from */}
@@ -374,7 +396,8 @@ function Opened({ r, a, problems }: {
           ['Capital taken', rand(r.toCapital)],
           ['Held as a credit', rand(r.excess)],
           ['Commission', `${rand(r.commission)}${r.commissionRate !== null
-            ? ` (${(r.commissionRate * 100).toFixed(2)}% of capital)` : ' (sliding bands)'}`],
+            ? ` (${(r.commissionRate * 100).toFixed(2)}% of capital)` : ''}`],
+          ['The account\'s rate', rateLabel ?? '…'],
           ['VAT on it', rand(r.commissionVat)],
           [r.paidToClient ? 'Owed to BF by the client' : 'Paid over to the client',
             rand(r.paidToClient ? r.dueToBf : r.toClient)],

@@ -35,6 +35,7 @@ import { buildXlsx, toBase64, XLSX_MIME } from './xlsxWrite.ts'
 import { rejectedSheetName, rejectedSheetRows } from './rejectedSheet.ts'
 import { importNoteBody, importNoteSubject } from './importNote.ts'
 import { formatCurrency } from '../data/mockData'
+import { handoverRateBlock, type ClientCommission } from './commissionRule.ts'
 
 /* ONE LITERAL, not a concatenation: supabase-js types the result off this string, and split
    across a `+` every field comes back as GenericStringError. Learned on ROW_COLUMNS below. */
@@ -467,7 +468,8 @@ const STOPS_A_WRITE = new Set(['handoverDate', 'capital', 'interestRateAnnual'])
 export async function approveDraft(input: {
   draftId: string
   today: string
-  commissionRate: number | null
+  /** The client's rule, from fetchClientCommission. Each account is priced on its own capital. */
+  commission: (ClientCommission & { name?: string }) | null
   onProgress?: (done: number, total: number) => void
   /**
    * The signed-in session's token, so the corrections can be emailed to the liaison through the
@@ -508,6 +510,17 @@ export async function approveDraft(input: {
   if (!judged.gate.ready) {
     throw new Error(judged.gate.why ?? 'This handover is not ready to approve.')
   }
+
+  /*
+   * AND A CLIENT ON A SCALE WITH NO BOUNDARIES IS REFUSED, before anything is written (prompt 9).
+   * Pricing it anyway would put every account on one rate whatever its size -- how the scale was
+   * being lost for new business. Checked here and not only on the screen, for the same reason as
+   * the gate above. The rule is required, not optional: a caller that forgot to read it would
+   * otherwise open accounts at no rate and say nothing.
+   */
+  if (!input.commission) throw new Error('The client\'s commission could not be read, so nothing was opened. Try again.')
+  const rateBlock = handoverRateBlock(input.commission.name ?? 'This client', input.commission)
+  if (rateBlock) throw new Error(rateBlock)
 
   const going = judged.rows.filter((r) => !r.excluded && !r.planned?.refused)
   if (going.length === 0) throw new Error('Nothing on this handover can be imported yet.')
@@ -677,7 +690,7 @@ export async function approveDraft(input: {
      * vanishing again reads as somebody taking work off them.
      */
     const opening: Record<string, unknown> = {
-      ...toAccountRow(debtor, judged.draft.companyId, handoverId, input.commissionRate),
+      ...toAccountRow(debtor, judged.draft.companyId, handoverId, input.commission),
       ...(row.allocateTo ? { assigned_to: row.allocateTo } : {}),
     }
     const account = await createDebtorAccount(opening, (id) => toContactRows(debtor, id))

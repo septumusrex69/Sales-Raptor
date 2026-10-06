@@ -21,7 +21,7 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run (end of the second session): **all green, 17 762 checks across 272 files.**
+At the last full run (end of the second session, after prompt 9): **all green, 17 962 checks across 278 files.**
 
 ---
 
@@ -33,6 +33,7 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
+| *Prompt 9* (this commit, "Prompt 9 — a sliding commission scale…") | **A sliding scale can be seen, set, and prices each account once.** The band rule is settled: ONE rate per account, from the band its capital handed over falls in, decided at handover, boundary rand in the lower band (mandates, model §3a, `rateForCapital`). The engine had been reading the client's bands marginally on cumulative capital; `account_commission_rate` (account's own → band on capital → flat) is now what `allocate_payment`, `preview_allocation`, `expected_from_promises` and `payments_awaiting_approval` charge. `companies.commission_tiers` holds the register's prefix/rate pairs (written by the import from now on) and `commission_bands_dated` the mandate date. **One dialog** (`CommissionModal`, saved by `saveCommission`) opened from Trust settings and the client page's Commission card (Edit, behind `finance.view`); a flat rate over a scale must be ticked to confirm. Trust settings shows "Sliding scale" with bands, or amber **"Scale, boundaries missing"** with the tiers. Account page and payment detail say the rate **and where it came from** ("21% — as billed in Swordfish (KIS tier)"). A handover — and a single account added by hand — is priced on each account's own capital and **refused** for a client on tiers with no boundaries (`handoverRateBlock`, checked in `approveDraft` before any write). The trigger `companies_commission_expected` moves `commission_rate_expected` (never `commission_rate`) when a client's rule changes, so "off their mandate rate" counts accounts off the CURRENT rule. `check-commission-rule` (42), `e2e/commission-scale` (25). |
 | `eb7c973` | **A promise from Swordfish is history, not a new arrangement.** An "open" Swordfish promise already past its date (incl. Swordfish's own "Late") comes in **broken** — not defaulted, which would start the broken-promise workflow and write to the debtor — with a note, and its account filed under 'Failed PTPs' so the Broken promises list finds it; nobody's diary (the firm: "it might fill up the collector's diary"). On a live imported arrangement the promise workflow records its confirmation as **not sent** and sends only dates still ahead, today included. Staging: the 8 confirmation charges cancelled with a reason, the 4 overdue promises marked broken, their accounts filed. `check-imported-promises` (27). |
 | `5779bac` | **Accounts list columns: drag to resize, double-click the edge to fit** (iPad double-tap too); widths per device; reset link. |
 | `e6f7cf5` | **The import button is a button** — `btn-primary` was never defined; three screens drew it as plain text. |
@@ -108,9 +109,37 @@ Do not guess these. Each one changes money.
    "All periods" totals row (the tie-out between the two halves) and a "Less: owed back by
    clients" owner row that appears only when one exists.
 
+6. **A bank statement for an account that is not the trust account.** On staging, 14 pending
+   payments came from a statement for account 9999999999 rather than the trust account
+   (62700201255), so the trust overview shows nothing for them — `trust_position` reads only the
+   trust account's lines. Asked: refuse such a statement outright, or allow it after an
+   Administrator confirms? Also proposed: an "Awaiting approval" row in the overview's ownership
+   table for money banked but not yet approved. **Not answered; nothing built.**
+
+7. **Kestrel's rand boundaries.** Staging now carries Kestrel's four register tiers (KIS 21%, KIS2
+   15%, KIS3 12%, KIS4 10%, typed from prompt 9 — the register file is not in this repo) and NO
+   bands, so its client page and Trust settings say the boundaries are missing and a new handover
+   for it is refused. That is correct until somebody types the boundaries from the signed mandate.
+   Proved in a rolled-back transaction with test boundaries 100k / 250k / 1m: R10 000 → 21%,
+   R600 000 → 12%, R100 000 → 21%, R100 000.01 → 15%, KIS0012 still 21% and not flagged. **The
+   real boundaries are the firm's to enter**; the 10% flat rate the import left on Kestrel is
+   cleared the moment they do.
+
 ---
 
 ## 5. Known gaps and things still outstanding
+
+- **PROMPT 9 IS ON STAGING ONLY.** Production needs, from the end of `schema.sql`: "A CLIENT'S
+  SLIDING SCALE PRICES EACH ACCOUNT ONCE" (`commission_band_rate`, `account_commission_rate`, the
+  four engine functions), the `commission_tiers` / `commission_bands_dated` columns, and "THE
+  MANDATE RATE AN ACCOUNT IS COMPARED AGAINST FOLLOWS THE CLIENT'S CURRENT RULE". The checked-in
+  `preview_allocation` had drifted from staging; `schema.sql` now carries the live one, so read the
+  LAST definition when porting.
+- **Only Kestrel has `commission_tiers` on staging.** Other clients get theirs from the next
+  Swordfish import (`swordfishImport.ts` writes them where a client's prefixes carry more than one
+  rate). Until then a multi-tier client with no bands is not caught by the handover block.
+- **Saving a client's commission re-splits at most 200 accounts from the browser** (as before);
+  the rest are picked up account by account through the exception queue.
 
 - **Item 8 of prompt 7 could not be investigated.** APM20070, APM20097 and GPS4/10080 fail a
   payments reconciliation; the files are not in this repo. A reconciliation was built into the

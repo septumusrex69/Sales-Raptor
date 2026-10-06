@@ -361,6 +361,14 @@ export interface Company {
   /** The sliding scale, where the mandate has one. Ordered ascending, ending in an "and above". */
   commissionBands?: { upTo: number | null; rate: number }[]
   commissionBandsSource?: string
+  /** The date of the mandate the bands come from. */
+  commissionBandsDated?: string
+  /**
+   * THE REGISTER'S SCALE AS SWORDFISH FILED IT: one rate per client record (KIS 21%, KIS2 15% ...),
+   * without the rand boundaries between them. Present only where the rates differ. The scale is
+   * visible from this before anybody has captured the bands; it does not price anything itself.
+   */
+  commissionTiers?: { prefix: string; rate: number }[]
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
   /**

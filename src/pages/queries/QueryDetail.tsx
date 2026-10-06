@@ -22,7 +22,7 @@ import {
   type JudgedDraft,
 } from '../../lib/handoverDraft'
 import { DraftTable } from '../../components/settings/HandoverImportCard'
-import { fetchClientCommissionRate } from '../../lib/accountBook'
+import { fetchClientCommission } from '../../lib/accountBook'
 import { HANDOVER_COLUMNS } from '../../lib/handoverSheet.ts'
 import { givenFor } from '../../lib/importCorrections.ts'
 import { ReplyAnswers } from '../../components/queries/ReplyAnswers'
@@ -207,12 +207,13 @@ export function QueryDetail() {
     if (!followUp) return
     setBusy(true); setError(null)
     try {
+      const commission = await fetchClientCommission(followUp.draft.companyId).catch(() => null)
       const result = await approveDraft({
         draftId: followUp.draft.id,
         today: TODAY(),
         /* THE CLIENT'S RATE, read fresh rather than off a row in memory: commission is the
            client's, and a stale copy of it is an account invoiced at the wrong rate for life. */
-        commissionRate: await fetchClientCommissionRate(followUp.draft.companyId).catch(() => null),
+        commission,
         accessToken: session?.access_token ?? null,
       })
       setImported(`${result.created} accounts opened.`
