@@ -131,8 +131,10 @@ for (const offer of [300, 400, 500, 600, 750, 900, 1100, 1500, 2000, 3000]) {
   ok(`no payment at R${offer} exceeds what was agreed`,
     p.rows.every((r) => r.amount <= offer + 0.001))
 }
+/* ON THE PLAN'S OWN HORIZON. The fee is required to carry a date now -- a cap reached with none is
+   today's cap applied to a receipt from another year -- and this arrangement runs through 2026. */
 near('...being the balance plus the fee for settling it',
-  last.receiptFee, receiptFeeInclVat(last.amount - last.receiptFee, 0.15), 0.05)
+  last.receiptFee, receiptFeeInclVat(last.amount - last.receiptFee, 0.15, '2026-10-05'), 0.05)
 
 /* ---------- a payment that does not cover the interest ---------- */
 

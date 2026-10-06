@@ -26,7 +26,7 @@
  * flagged rather than silently absorbed: in duplum, where accrual stops at the ceiling, and
  * write-off, where the account stopped and accrual stopped with it.
  */
-import { receiptFeeInclVat, settlementReceiptFee, roundToCents, scheduleFor, type AnnexureBSchedule } from './annexureB.js'
+import { receiptFeeInclVat, settlementReceiptFee, roundToCents, type AnnexureBSchedule } from './annexureB.js'
 import { accrueToDate, accrualEnd, coveredTo as lastCoveredDay, dayBefore } from './interestAccrual.js'
 import { feeLabel } from './feeLabel.js'
 
@@ -457,7 +457,11 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
    * charged.
    */
   const headroom = Math.max(0, roundToCents(capital - recoverableNonCapital))
-  const settlementFee = balance > 0 ? Math.min(settlementReceiptFee(balance, vatRate), headroom) : 0
+  /* QUOTED ON THE DAY THE SETTLEMENT IS QUOTED, which is where the balance is being read to.
+     `accrueTo` is that day; on a written-off account it is the day the account stopped. */
+  const settlementOn = input.writtenOffAt ?? input.accrueTo ?? input.handoverDate ?? '2000-01-01'
+  const settlementFee = balance > 0
+    ? Math.min(settlementReceiptFee(balance, vatRate, settlementOn), headroom) : 0
 
   // The VAT already inside `fees` and `receiptFees`. A receipt fee is charged VAT-inclusive, so
   // its tax is the inclusive amount less the amount it grossed up from — not the amount times
@@ -555,7 +559,7 @@ function openAccrual(
 /**
  * The receipt fee on one payment, VAT included.
  *
- * Two sources, and the recorded one wins. Item 9 is 10% of the instalment capped by the schedule
+ * Two sources, and the recorded one wins. Item 9 is 10% of the instalment capped on its own date
  * in force the day it arrived — a payment taken in 2024 carries the R509 maximum, not today's
  * R610 — and that is what Raptor charges on anything it takes in itself.
  *
@@ -569,14 +573,16 @@ function openAccrual(
 function receiptFeeOn(
   p: { date: string; amount: number; receiptFeeExclVat?: number | null },
   vatRate: number,
-  schedule?: AnnexureBSchedule,
 ): number {
   // A recorded commission is already exact to the cent excluding VAT, so grossing it up rounds
   // once. The computed branch goes through receiptFeeInclVat for the same reason: rounding the
   // exclusive figure first and charging VAT on the rounded number costs a cent on any payment
   // whose ten percent lands on a fraction.
   if (p.receiptFeeExclVat != null) return roundToCents(p.receiptFeeExclVat * (1 + vatRate))
-  return receiptFeeInclVat(p.amount, vatRate, schedule ?? scheduleFor(p.date))
+  /* THE PAYMENT'S OWN DAY decides the cap, which is the whole of CLAUDE.md's rule about reading a
+     fee on the ACTION's date. It used to take an optional schedule and fall back to the payment's
+     date; the cap now moves on its own dates, so there is nothing left to pass. */
+  return receiptFeeInclVat(p.amount, vatRate, p.date)
 }
 
 export type StatementKind =
@@ -635,7 +641,9 @@ export interface Statement {
  * because they are different transactions with different payers, and netting them would hide a
  * fee the debtor is entitled to see charged.
  */
-export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule): Statement {
+/* The schedule parameter is kept so callers need not change, and is no longer used for the receipt
+   fee: that is read on each payment's own date now, which is what it should always have been. */
+export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedule): Statement {
   const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
   const breakdown = computeBalance(input)
   const stopAt = input.writtenOffAt ?? null
@@ -762,7 +770,7 @@ export function buildStatement(input: BalanceInput, schedule?: AnnexureBSchedule
     /* ONLY WHERE NO ROW COVERS IT -- see splitFeeLedger. A payment whose fee is already a row
        above would otherwise be charged for it twice on one page. */
     if (p.id && covered.has(p.id)) continue
-    const fee = receiptFeeOn(p, vatRate, schedule)
+    const fee = receiptFeeOn(p, vatRate)
     if (fee > 0) {
       pending.push({
         date: p.date,

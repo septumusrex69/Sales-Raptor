@@ -1,11 +1,14 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Search, ChevronRight, ChevronDown, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { Card } from '../../components/ui/Card'
 import { UserAvatar } from '../../components/ui/Avatar'
 import { formatCurrency } from '../../data/mockData'
-import { topLevelClients, rollupClient } from '../../lib/companyRollup'
+import {
+  topLevelClients, rollupClient, rollupBookTotals, registerGap, type ClientBookTotals,
+} from '../../lib/companyRollup'
+import { fetchClientBookTotals } from '../../lib/clientTotals'
 import { AddClientModal } from '../../components/companies/AddClientModal'
 import { useAuth } from '../../store/AuthContext'
 import type { ID } from '../../types'
@@ -20,6 +23,17 @@ export function CompaniesList() {
   const [addError, setAddError] = useState<string | null>(null)
   // Sub-accounts start collapsed — only expand the ones someone actually opens.
   const [expanded, setExpanded] = useState<Set<ID>>(new Set())
+  /*
+   * THE REAL FIGURES, COUNTED OFF THE ACCOUNTS. Its own request and failing quietly: a clients list
+   * that refused to draw because a count did not come back would trade the thing people came for
+   * against a decoration. Until it lands the columns read as a dash, which is what they already did.
+   */
+  const [totals, setTotals] = useState<Map<string, ClientBookTotals>>(new Map())
+  useEffect(() => {
+    let cancelled = false
+    void fetchClientBookTotals().then((t) => { if (!cancelled) setTotals(t) })
+    return () => { cancelled = true }
+  }, [])
 
   const wonDealsFor = (companyId: string) => deals.filter((d) => d.companyId === companyId && d.stage === 'Won')
   const childrenOf = (companyId: ID) => companies.filter((c) => c.parentCompanyId === companyId)
@@ -76,8 +90,8 @@ export function CompaniesList() {
                 <th className="font-medium px-3 py-3">Code</th>
                 <th className="font-medium px-3 py-3">Client Liaison</th>
                 <th className="font-medium px-3 py-3 text-right">Accounts</th>
-                <th className="font-medium px-3 py-3 text-right">Handover Amount</th>
-                <th className="font-medium px-3 py-3 text-right">Payments to Date</th>
+                <th className="font-medium px-3 py-3 text-right">Capital handed over</th>
+                <th className="font-medium px-3 py-3 text-right">Paid to date</th>
                 <th className="font-medium px-3 py-3 text-center">Active Deals</th>
               </tr>
             </thead>
@@ -85,7 +99,10 @@ export function CompaniesList() {
               {filtered.map((c) => {
                 const kids = childrenOf(c.id)
                 const isExpanded = expanded.has(c.id)
-                const totals = rollupClient(c, companies)
+                /* WHAT SWORDFISH SAID AT IMPORT, kept and labelled as that -- see the gap below. */
+                const register = rollupClient(c, companies)
+                const book = rollupBookTotals(c, companies, totals)
+                const gap = registerGap(register, book)
                 return (
                   <Fragment key={c.id}>
                     <tr onClick={() => navigate(`/companies/${c.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
@@ -115,15 +132,45 @@ export function CompaniesList() {
                       <td className="px-3 py-3.5">
                         {c.code ? <span className="font-mono text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{c.code}</span> : <span className="text-slate-300">—</span>}
                       </td>
+                      {/*
+                        THE CLIENT'S OWN LIAISON, NOT THE ACCOUNT OWNER.
+                        THE FIRM: "Client Liaison column shows 'Nicole' for every client.
+                        companies.liaison is correct in the database (Ryno for Baobab, Karoo and
+                        Meridian; Rinda for Kestrel; Nicole for Summit). Even Rinda Roo Company,
+                        whose liaison is null, shows Nicole."
+
+                        It was reading `accountOwnerId`, which is the same value on every row the
+                        import created -- so the column was true of nothing and looked true of
+                        everything. `liaison` is a NAME, the way Swordfish holds it, so the avatar
+                        is drawn only where that name resolves to somebody with a login; a liaison
+                        who has not been invited yet is still their liaison and is still named.
+
+                        AND NULL DRAWS AS A DASH. A client with nobody looking after them is a fact
+                        worth seeing, and the old column could not show it at all.
+                      */}
                       <td className="px-3 py-3.5">
-                        <div className="flex items-center gap-1.5">
-                          <UserAvatar userId={c.accountOwnerId} size={22} />
-                          <span className="text-slate-500 text-xs">{users.find((u) => u.id === c.accountOwnerId)?.name.split(' ')[0]}</span>
-                        </div>
+                        <LiaisonCell name={c.liaison} users={users} />
                       </td>
-                      <td className="px-3 py-3.5 text-right text-slate-600 tabular-nums">{totals.accountCount ?? '—'}</td>
-                      <td className="px-3 py-3.5 text-right text-slate-600 tabular-nums">{totals.handoverAmount !== undefined ? formatCurrency(totals.handoverAmount) : '—'}</td>
-                      <td className="px-3 py-3.5 text-right text-slate-600 tabular-nums">{totals.paymentsToDate !== undefined ? formatCurrency(totals.paymentsToDate) : '—'}</td>
+                      {/*
+                        COUNTED OFF THE ACCOUNTS, NOT READ OFF THE REGISTER.
+                        THE FIRM: "The real Meridian test client showed 277 accounts while it held
+                        6. Summit Fitness showed '—' while it had 5."
+
+                        Where the register disagrees it is drawn UNDER the real figure rather than
+                        instead of it: a client who was told they handed over 277 and whose file
+                        holds 6 is a conversation somebody needs to have, and which of the two is
+                        right is the firm's question to ask the client, not Raptor's to decide.
+                      */}
+                      <td className="px-3 py-3.5 text-right text-slate-600 tabular-nums">
+                        {book.accounts.toLocaleString('en-ZA')}
+                        {gap !== null && gap !== 0 && (
+                          <div className="text-[11px] text-gold-700" title="What Swordfish's summary said when this client was imported.">
+                            {register.accountCount?.toLocaleString('en-ZA')} per Swordfish
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3.5 text-right text-slate-600 tabular-nums">{formatCurrency(book.capital)}</td>
+                      <td className="px-3 py-3.5 text-right text-slate-600 tabular-nums">{formatCurrency(book.paid)}</td>
                       <td className="px-3 py-3.5 text-center text-slate-600 font-medium">{activeDealsFor(c.id).length}</td>
                     </tr>
                     {isExpanded &&
@@ -137,10 +184,12 @@ export function CompaniesList() {
                           <td className="px-3 py-2.5">
                             {k.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{k.code}</span> : <span className="text-slate-300">—</span>}
                           </td>
-                          <td className="px-3 py-2.5"></td>
-                          <td className="px-3 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">{k.accountCount ?? '—'}</td>
-                          <td className="px-3 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">{k.handoverAmount !== undefined ? formatCurrency(k.handoverAmount) : '—'}</td>
-                          <td className="px-3 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">{k.paymentsToDate !== undefined ? formatCurrency(k.paymentsToDate) : '—'}</td>
+                          <td className="px-3 py-2.5"><LiaisonCell name={k.liaison} users={users} small /></td>
+                          <td className="px-3 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">
+                            {(totals.get(k.id)?.accounts ?? 0).toLocaleString('en-ZA')}
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">{formatCurrency(totals.get(k.id)?.capital ?? 0)}</td>
+                          <td className="px-3 py-2.5 text-right text-[13px] text-slate-500 tabular-nums">{formatCurrency(totals.get(k.id)?.paid ?? 0)}</td>
                           <td className="px-3 py-2.5"></td>
                         </tr>
                       ))}
@@ -190,6 +239,37 @@ export function CompaniesList() {
             }
           }} />
       )}
+    </div>
+  )
+}
+
+/**
+ * The liaison, by the name the firm recorded.
+ *
+ * THE AVATAR ONLY WHERE THE NAME IS SOMEBODY WITH A LOGIN. `companies.liaison` is a name, not a
+ * foreign key -- Swordfish holds it that way and the import keeps it that way -- so a liaison who
+ * has not been invited to Raptor yet is still the client's liaison and is still named here. An
+ * avatar for a person the app has never heard of would be a circle with the wrong initials in it.
+ *
+ * AND NOBODY IS DRAWN AS NOBODY. A client with no liaison is a fact worth seeing; the column this
+ * replaced could not show it, because it read a field that is set on every row.
+ */
+function LiaisonCell({ name, users, small }: {
+  name?: string
+  users: { id: ID; name: string }[]
+  small?: boolean
+}) {
+  const trimmed = (name ?? '').trim()
+  if (!trimmed) return <span className="text-slate-300">—</span>
+  /* First name or full name, case-insensitively: the register says "Ryno" and the profile says
+     "Ryno Bredell". */
+  const match = users.find((u) =>
+    u.name.toLowerCase() === trimmed.toLowerCase()
+    || u.name.toLowerCase().split(' ')[0] === trimmed.toLowerCase())
+  return (
+    <div className="flex items-center gap-1.5">
+      {match && <UserAvatar userId={match.id} size={small ? 18 : 22} />}
+      <span className={`text-slate-500 ${small ? 'text-[11px]' : 'text-xs'}`}>{trimmed}</span>
     </div>
   )
 }

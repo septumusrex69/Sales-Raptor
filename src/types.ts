@@ -315,6 +315,15 @@ export interface Company {
   parentCompanyId?: ID
   /** Short reference code — either the real Swordfish client prefix (e.g. "MPY"), or an internal-only code we invent for a parent that has no Swordfish code of its own (e.g. "MARARA"). */
   code?: string
+  /**
+   * The client's liaison, AS A NAME, because that is how Swordfish holds it and how it came across.
+   *
+   * NOT THE SAME FIELD AS `accountOwnerId`, and the Clients list read the wrong one: every client
+   * shows the same owner id, so the column read "Nicole" for all of them -- including Rinda Roo
+   * Company, whose liaison is null. The firm's own data has Ryno on Baobab, Karoo and Meridian and
+   * Rinda on Kestrel.
+   */
+  liaison?: string
   /** Debt-collection servicing totals, synced from Swordfish per sub-account. A parent with children has no totals of its own — sum its children instead. */
   accountCount?: number
   handoverAmount?: number

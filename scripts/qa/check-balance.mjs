@@ -33,17 +33,21 @@ const empty = { payments: [], fees: [], interest: [] }
 }
 
 /*
- * The receipt fee is priced on the schedule in force the DAY THE PAYMENT ARRIVED, not today.
- * A R6,100 instalment is exactly at the 2026 maximum of R610 and well past the 2020 one of R509,
- * so the same payment costs different amounts either side of 6 March 2026. Getting this wrong
- * would be invisible on small payments and wrong on every large one.
+ * The receipt fee is priced on the cap in force the DAY THE PAYMENT ARRIVED, not today.
+ * A R6,100 instalment is exactly at the 2026 maximum of R610 and well past the earlier R502, so
+ * the same payment costs different amounts either side of the day the firm raised it. Getting this
+ * wrong would be invisible on small payments and wrong on every large one.
+ *
+ * AND THE DAY IS THE 7th OF APRIL 2026, NOT THE 6th OF MARCH. The gazette is dated 6 March; the
+ * firm applied the new cap from 7 April, and `annexure_b_tariffs` -- what allocate_payment actually
+ * charges on -- says so. For that month the app said R610 while the engine said R502.
  */
 {
   const before = computeBalance({
     capitalHandedOver: 0, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-11-29', amount: 6100 }] },
   })
-  check('payment in 2025 caps at the R509 maximum', before.receiptFees, 585.35)
+  check('payment in 2025 caps at the R502 the firm charged', before.receiptFees, 577.30)
 
   const after = computeBalance({
     capitalHandedOver: 0, handoverDate: '2026-01-01',
@@ -402,7 +406,9 @@ const empty = { payments: [], fees: [], interest: [] }
   })
   check('a commission under the cap matches the computed figure', under.receiptFees, 92.35)
 
-  /* R15,000 paid. Swordfish charged R502; the 2020 gazette says R509. The charged figure wins. */
+  /* R15,000 paid, with the charged figure recorded. It wins over the computed one wherever it is
+     present -- which is the belt to the braces now that the computed cap is the as-charged R502
+     too: a payment billed at some other figure still reads back as that figure. */
   const charged = computeBalance({
     capitalHandedOver: 0, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000, receiptFeeExclVat: 502 }] },
@@ -414,8 +420,14 @@ const empty = { payments: [], fees: [], interest: [] }
     capitalHandedOver: 0, handoverDate: '2025-01-01',
     ledgers: { ...empty, payments: [{ date: '2025-03-01', amount: 15000 }] },
   })
-  check('with no recorded commission the gazette applies', computed.receiptFees, 585.35)
-  check('and the two differ by the seven rand plus VAT', computed.receiptFees - charged.receiptFees, 8.05)
+  /*
+   * AND WITH NOTHING RECORDED, THE COMPUTED FIGURE IS NOW THE SAME ONE. It used to be the gazette's
+   * R509 -- R8.05 more than every statement the firm had actually sent -- and the two only agreed
+   * because the recorded figure covered it up on the 79 payments that carried one. A payment with
+   * no recorded commission got a fee no debtor was ever billed.
+   */
+  check('with nothing recorded, the computed figure is the same cap', computed.receiptFees, 577.30)
+  check('and the two no longer differ', computed.receiptFees - charged.receiptFees, 0)
 
   /* An explicit zero is a real instruction — a waived fee — not a missing value. */
   const waived = computeBalance({

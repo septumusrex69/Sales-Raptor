@@ -11,6 +11,7 @@ import {
   ANNEXURE_B_2015, ANNEXURE_B_2017, ANNEXURE_B_2020, ANNEXURE_B_2026,
   ENFORCE_ITEM_TOTALS, ENFORCE_MONTHLY_LIMITS, feeCeiling, itemTotalRemaining, monthlyLimit,
   monthlyRoom, receiptFeeInclVat, recoverableFee, scheduleFor,
+  receiptFeeCapOn,
 } from '../../src/lib/annexureB.ts'
 
 let failed = 0
@@ -162,19 +163,19 @@ function check(name, ok, detail) {
  */
 const SCHEDULES = [
   {
-    schedule: ANNEXURE_B_2026, year: '2026', ceiling: 1225, receiptMax: 610, rate: 0.1,
+    schedule: ANNEXURE_B_2026, year: '2026', ceiling: 1225, on: '2026-09-09', cap: 610, rate: 0.1,
     items: { '1a': 25, '1c': 3.5, 2: 25, 3: 25, '4b': 250, '4c': 16, 5: 50, 6: 13, 7: 60, 8: 98 },
   },
   {
-    schedule: ANNEXURE_B_2020, year: '2020', ceiling: 1023, receiptMax: 509, rate: 0.1,
+    schedule: ANNEXURE_B_2020, year: '2020', ceiling: 1023, on: '2021-06-01', cap: 502, rate: 0.1,
     items: { '1a': 21, '1c': 3, 2: 21, 3: 21, '4b': 210, '4c': 14, 5: 41, 6: 11, 7: 52, 8: 82 },
   },
   {
-    schedule: ANNEXURE_B_2017, year: '2017', ceiling: 965, receiptMax: 480, rate: 0.1,
+    schedule: ANNEXURE_B_2017, year: '2017', ceiling: 965, on: '2018-06-01', cap: 502, rate: 0.1,
     items: { '1a': 20, '1c': 2.8, 2: 20, 3: 20, '4b': 198, '4c': 13, 5: 39, 6: 10, 7: 49, 8: 78 },
   },
   {
-    schedule: ANNEXURE_B_2015, year: '2015', ceiling: 870, receiptMax: 435, rate: 0.1,
+    schedule: ANNEXURE_B_2015, year: '2015', ceiling: 870, on: '2016-06-01', cap: 502, rate: 0.1,
     items: { '1a': 18, '1c': 2.5, 2: 18, 3: 18, '4b': 178, '4c': 12, 5: 35, 6: 9, 7: 44, 8: 70 },
   },
 ]
@@ -183,12 +184,18 @@ const SCHEDULES = [
    communications, four credit bureau searches. */
 const MONTHLY = { '1c': 10, '4c': 4 }
 
-for (const { schedule, year, ceiling, receiptMax, rate, items } of SCHEDULES) {
+for (const { schedule, year, ceiling, on, cap, rate, items } of SCHEDULES) {
   check(`the items 1-7 ceiling is R${ceiling} on the ${year} gazette`,
     schedule.itemsOneToSevenCeiling === ceiling,
     `got ${schedule.itemsOneToSevenCeiling}`)
-  check(`the receipt fee is capped at R${receiptMax} on the ${year} gazette`,
-    schedule.receiptFeeMaximum === receiptMax, `got ${schedule.receiptFeeMaximum}`)
+  /*
+   * THE CAP IS NOT ON THE SCHEDULE ANY MORE, AND THAT IS THE FIX. It moves on its own dates -- the
+   * 2026 gazette is dated 6 March and the firm applied the new cap from 7 April -- so one
+   * `effectiveFrom` could not say both, and the one it said put R610 on a month of receipts the
+   * engine capped at R502. RECEIPT_FEE_CAPS mirrors `annexure_b_tariffs` row for row.
+   */
+  check(`the receipt fee is capped at R${cap} in ${year}'s period`,
+    receiptFeeCapOn(on) === cap, `got ${receiptFeeCapOn(on)}`)
   check(`the receipt fee rate is ${rate * 100}% on the ${year} gazette`,
     schedule.receiptFeeRate === rate, `got ${schedule.receiptFeeRate}`)
 
@@ -198,12 +205,12 @@ for (const { schedule, year, ceiling, receiptMax, rate, items } of SCHEDULES) {
    * current one -- the arithmetic could have been any number at all. R1 000 is below every cap
    * in the table, so this is the multiplication and not the minimum.
    */
-  const belowCap = receiptFeeInclVat(1000, 0.15, schedule)
+  const belowCap = receiptFeeInclVat(1000, 0.15, on)
   check(`10% of R1 000 plus VAT is R115 on the ${year} gazette`,
     near(belowCap, 115), `got ${belowCap}`)
-  const aboveCap = receiptFeeInclVat(receiptMax * 20, 0.15, schedule)
-  check(`a large instalment is capped at R${receiptMax} plus VAT on the ${year} gazette`,
-    near(aboveCap, receiptMax * 1.15), `got ${aboveCap}`)
+  const aboveCap = receiptFeeInclVat(cap * 20, 0.15, on)
+  check(`a large instalment is capped at R${cap} plus VAT in ${year}'s period`,
+    near(aboveCap, cap * 1.15), `got ${aboveCap}`)
 
   /* EVERY PRICED ITEM, not the two or three that happened to be on somebody's mind. */
   for (const [id, amount] of Object.entries(items)) {
