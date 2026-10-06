@@ -375,8 +375,11 @@ ok('the planner asks for the three columns',
   /select\('id, day, ordinal, needs_release, statutory, anchor, anchor_offset, anchor_unit'\)/.test(plan))
 ok('...and passes them through', /anchorOffset: \(n\.anchor_offset as number \| null\) \?\? null/.test(plan))
 /* ONLY WHERE A NODE ASKS. A section 129 has no business querying the promises table to be dated. */
-ok('...reading the arrangement only where a node is anchored to one',
-  /if \(nodes\.some\(\(n\) => n\.anchor === 'instalment'\)\)/.test(plan))
+/* OR WHERE THE RUN IS A PROMISE RUN, which needs to know whether its arrangement came from
+   Swordfish (check-imported-promises). Still never a section 129: it is neither. */
+ok('...reading the arrangement only for a promise run or where a node is anchored to one',
+  /if \(isPromiseRun \|\| nodes\.some\(\(n\) => n\.anchor === 'instalment'\)\)/.test(plan)
+    && /const isPromiseRun = version\.trigger_kind === 'promise_due'/.test(plan))
 ok('...and it is the LIVE arrangement', /instalmentSchedule\(liveArrangement\(/.test(plan))
 /* AND HANDED TO THE PLANNER. Working the schedule out and then not passing it is the one
    break of this that left every other assertion here true: the dates are computed, thrown
