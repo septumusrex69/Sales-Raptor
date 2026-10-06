@@ -111,6 +111,35 @@ ok('the import marks a receipt on or before the cut-off as remitted',
   /paid_over_in_swordfish: when <= settledThrough/.test(imp))
 ok('...and approves only those', /approved_at: when <= settledThrough \?/.test(imp))
 
+/* ---------- 4b. an import is all or nothing ---------- */
+
+/*
+ * "A HALF-IMPORTED BOOK IS WORSE THAN NONE." The run stamps its id on the three parents and a
+ * failure takes the batch back out; everything else goes with its account by cascade.
+ */
+for (const tb of ['companies', 'handovers', 'debtor_accounts']) {
+  ok(`${tb} carries the import's batch id`,
+    new RegExp(`alter table public\\.${tb} add column if not exists import_batch_id uuid`).test(schema))
+}
+const discard = lastFn('discard_import_batch')
+ok('discard_import_batch is defined', discard.length > 0)
+ok('...Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(discard))
+const delAcc = discard.indexOf('delete from public.debtor_accounts where import_batch_id = p_batch')
+const delCo = discard.indexOf('delete from public.companies where import_batch_id = p_batch')
+const stop = discard.indexOf('from public.payment_allocations')
+ok('...it takes accounts out before clients (companies -> accounts is RESTRICT)', delAcc > 0 && delCo > 0 && delAcc < delCo)
+/* A run whose money has been split or put in trust is not a half-import any more: those ledgers
+   are never deleted from, so it stops and asks for a person. */
+ok('...and refuses once money on it has been split or put in trust', stop > 0 && delAcc > 0 && stop < delAcc
+  && /trust_creditor_entries/.test(discard.slice(0, delAcc)))
+
+const tab = strip(read('src/components/settings/DataImportTab.tsx'))
+ok('the import stamps one id on the run', /const batch = crypto\.randomUUID\(\)/.test(tab)
+  && /new Set<string>\(\['companies', 'handovers', 'debtor_accounts'\]\)/.test(tab)
+  && /import_batch_id: batch/.test(tab))
+ok('...and on a failure takes that run back out', /supabase\.rpc\('discard_import_batch', \{ p_batch: batch \}\)/.test(tab))
+ok('...and says so loudly if that fails too', /ALSO failed[\s\S]{0,200}discard_import_batch\('\$\{batch\}'\)/.test(tab))
+
 /* ---------- 5. and the live proofs exist to be run ---------- */
 
 ok('the cut-off probe is in the repository', existsSync(new URL('../../scripts/qa/live/swordfish-cutoff-probe.sql', import.meta.url)))

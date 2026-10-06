@@ -267,17 +267,49 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           if (e) throw new Error(`Clearing ${table}: ${e.message}`)
         }
       }
+      /*
+       * ALL OR NOTHING, keyed on this run (prompt 8). The firm's test import died part-way and left
+       * 7 clients, 20 accounts, 90 payments and 2 202 fees behind with no interest -- "a half-imported
+       * book is worse than none". One transaction cannot carry the real book (tens of thousands of
+       * rows, past what one request may hold), so every client, batch and account this run writes
+       * carries its id, and on ANY failure -- an insert refused, a network that dropped -- the run is taken
+       * back out by `discard_import_batch`, everything else going with its account by cascade.
+       */
+      const batch = crypto.randomUUID()
+      const STAMPED = new Set<string>(['companies', 'handovers', 'debtor_accounts'])
       let written = 0
-      for (const table of IMPORT_TABLES) {
-        const all = rows[table]
-        for (let i = 0; i < all.length; i += 500) {
-          if (abort.current) throw new Error('Stopped. The import is partial — run it again with "delete everything" ticked.')
-          const chunk = all.slice(i, i + 500)
-          const { error: e } = await supabase.from(table).insert(chunk)
-          if (e) throw new Error(explain(table, i, e.message))
-          written += chunk.length
-          setPhase({ step: `Writing ${table.replace(/_/g, ' ')}`, done: written, total: totalRows })
+      try {
+        for (const table of IMPORT_TABLES) {
+          const all = STAMPED.has(table)
+            ? rows[table].map((r) => ({ ...r, import_batch_id: batch }))
+            : rows[table]
+          for (let i = 0; i < all.length; i += 500) {
+            if (abort.current) throw new Error('Stopped.')
+            const chunk = all.slice(i, i + 500)
+            const { error: e } = await supabase.from(table).insert(chunk)
+            if (e) throw new Error(explain(table, i, e.message))
+            written += chunk.length
+            setPhase({ step: `Writing ${table.replace(/_/g, ' ')}`, done: written, total: totalRows })
+          }
         }
+      } catch (failure) {
+        const why = failure instanceof Error ? failure.message : String(failure)
+        /* Nothing written yet is nothing to take back -- and saying "taken back out" over a run
+           that never wrote a row would be a claim about the book that is not true. */
+        if (written === 0) throw new Error(`${why} Nothing was written.`)
+        setPhase({ step: 'Taking this import back out', done: 0, total: 0 })
+        const { data: undone, error: undoError } = await supabase.rpc('discard_import_batch', { p_batch: batch })
+        if (undoError) {
+          /* THE ONE CASE WORTH SHOUTING ABOUT: half a book is in the database. Say exactly how to
+             finish the job, with the id that does it. */
+          throw new Error(`${why} Taking the partial import back out ALSO failed (${undoError.message}). `
+            + `Half of this import is still in the database. An administrator can remove it with `
+            + `discard_import_batch('${batch}').`)
+        }
+        const n = undone as { accounts?: number; clients?: number } | null
+        throw new Error(`${why} Everything this run had written has been taken back out `
+          + `(${n?.accounts ?? 0} accounts, ${n?.clients ?? 0} clients), so the book is `
+          + `${wipe ? 'empty, as the wipe left it' : 'as it was before you pressed Import'}.`)
       }
       setDone(`Imported ${totalRows.toLocaleString('en-ZA')} rows.`)
     } catch (e) {

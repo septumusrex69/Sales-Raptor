@@ -27810,3 +27810,75 @@ $$;
 
 revoke execute on function public.swordfish_remitted_leaks() from public, anon, authenticated;
 grant execute on function public.swordfish_remitted_leaks() to service_role;
+
+-- ============================================================================
+-- AN IMPORT IS ALL OR NOTHING (prompt 8).
+--
+-- The Swordfish import writes from the browser, table by table, 500 rows at a time. When it failed
+-- part-way on staging it left 7 clients, 20 accounts, 90 payments and 2 202 fees behind with no
+-- interest -- "a half-imported book is worse than none". One transaction is not available to it:
+-- the real book is tens of thousands of rows, past what one request may carry or one statement may
+-- take. So every run carries an id, and a failure takes back everything that id wrote.
+--
+-- THREE TABLES CARRY IT, AND THAT IS ALL OF IT. Every other table the import writes -- payments,
+-- fees, interest, contacts, promises, notes, diary entries -- hangs off an imported account and
+-- goes with it by cascade; batches go with their client. Stamping all ten would be seven more
+-- columns saying what a foreign key already says.
+-- ============================================================================
+alter table public.companies add column if not exists import_batch_id uuid;
+alter table public.handovers add column if not exists import_batch_id uuid;
+alter table public.debtor_accounts add column if not exists import_batch_id uuid;
+create index if not exists companies_import_batch_idx on public.companies (import_batch_id) where import_batch_id is not null;
+create index if not exists handovers_import_batch_idx on public.handovers (import_batch_id) where import_batch_id is not null;
+create index if not exists debtor_accounts_import_batch_idx on public.debtor_accounts (import_batch_id) where import_batch_id is not null;
+
+/*
+ * TAKE ONE IMPORT RUN BACK OUT.
+ *
+ * SECURITY DEFINER because the browser cannot delete a payment, a fee or an interest row -- the
+ * ledgers have no delete policy, deliberately -- and those are exactly what a failed run leaves.
+ * So the guard is the function's own: Administrator only, the same person the import screen
+ * allows, and only rows stamped with the id given.
+ *
+ * ACCOUNTS FIRST: companies -> debtor_accounts is RESTRICT. And it stops, rather than forcing,
+ * where anything has been done to the money since -- a split, a trust entry -- because those are
+ * the ledgers that must never be deleted from, and a run that got that far is not a half-import
+ * any more but a question for a person.
+ */
+create or replace function public.discard_import_batch(p_batch uuid)
+returns jsonb
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_accounts int;
+  v_batches int;
+  v_clients int;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator can take an import back out.' using errcode = '42501';
+  end if;
+  if p_batch is null then
+    raise exception 'Which import? No batch id was given.' using errcode = '22023';
+  end if;
+  if exists (select 1 from public.payment_allocations a
+               join public.debtor_accounts d on d.id = a.account_id
+              where d.import_batch_id = p_batch)
+     or exists (select 1 from public.trust_creditor_entries t
+                  join public.debtor_accounts d on d.id = t.account_id
+                 where d.import_batch_id = p_batch) then
+    raise exception 'Money on this import has already been split or put in trust, so it cannot simply be taken out. Ask an administrator.'
+      using errcode = '22023';
+  end if;
+
+  delete from public.debtor_accounts where import_batch_id = p_batch;
+  get diagnostics v_accounts = row_count;
+  delete from public.handovers where import_batch_id = p_batch;
+  get diagnostics v_batches = row_count;
+  delete from public.companies where import_batch_id = p_batch;
+  get diagnostics v_clients = row_count;
+
+  return jsonb_build_object('accounts', v_accounts, 'batches', v_batches, 'clients', v_clients);
+end $$;
+
+revoke execute on function public.discard_import_batch(uuid) from public, anon;
+grant execute on function public.discard_import_batch(uuid) to authenticated, service_role;
