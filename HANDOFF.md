@@ -33,6 +33,8 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
+| `aaca1ff` | **Prompt 8 — a Swordfish import is all or nothing.** `import_batch_id` on companies, handovers and debtor_accounts (everything else cascades from an account); on any failure the screen calls `discard_import_batch(id)` and says the run was taken back out. The RPC is Administrator-only and refuses once money on the batch has been split or put in trust. `e2e/swordfish-import` uploads real CSVs at both cut-offs and makes the interest insert fail. |
+| `e98f814` | **Prompt 8 — URGENT: a receipt Swordfish already paid over is never split.** `allocate_payment` never asked `paid_over_in_swordfish` (its own comment named the reason; the code did not), so the insert trigger split every imported receipt. Now the FIRST gate, before the open-period interest. `reverse_payment` and `move_payment_to_cycle` refuse one. `swordfish_remitted_leaks()` counts anything that got through. Proved on staging by `scripts/qa/live/swordfish-cutoff-probe.sql`; `scripts/qa/live/check-swordfish-leaks.mjs` fails on any leak. |
 | `d336a64` | **The trust overview in the firm's revised layout**, and **a narrowed Trust/Business menu keeps its icons** (`b108da2`). See §4.5. |
 | `f001783` | **The client's email is not the debtor's correspondence.** `account_emails.correspondent` ('debtor' / 'client'), decided on INSERT by `account_email_correspondent` for all three writers: the account's own debtor contact wins; otherwise the client company's address (or a contact's at it or its parent), or a reply to a client row, is the client. The debtor's Emails tab reads only 'debtor'; a ticket reads both. The Messages menu sends a client's answer to its ticket (read on follow); a client email with **no** ticket gets an email activity on the client's own record from the sync, and is left out of the menu's account list so it is not announced twice. `protect_account_mail_fields` now locks the column too. **Fees untouched** — and since ruled on: client correspondence about an account is still charged to the debtor (CLAUDE.md, Annexure B rules). `check-client-correspondence` (37). Staging: three rows marked, all on tickets; the rule's dry run touched nothing else. |
 | `e2d87c0` | **Node 22.22 decodes windows-1252 as Latin-1**, so 0x80–0x9F (curly quotes, dashes, €) became invisible control characters in every mail body `toText` read. Corrected from the WHATWG table. `check-mime-parts` had been red on a clean tree because of it. |
@@ -115,6 +117,19 @@ Do not guess these. Each one changes money.
 - **Settlement store** (approved amount, expiry, saving) — task #69, not started.
 - **The R22,77 settlement shortfall on RRC00002** is unexplained.
 - **Business workspace** still has no Income and no Drawings-from-trust screens.
+- **PROMPT 8 IS ON STAGING ONLY, AND PRODUCTION MUST HAVE IT BEFORE ANY REAL IMPORT.** The
+  `allocate_payment` gate, the `reverse_payment` / `move_payment_to_cycle` refusals,
+  `swordfish_remitted_leaks()`, `import_batch_id` and `discard_import_batch` — all at the end of
+  `schema.sql` under "A RECEIPT SWORDFISH ALREADY PAID OVER" and "AN IMPORT IS ALL OR NOTHING".
+  Without the gate, the real migration (12 078 interest rows) would split every remitted receipt
+  into trust exactly as the test book did. After any import, run
+  `scripts/qa/live/check-swordfish-leaks.mjs` against that database.
+- **Staging was found already cleared** (book + finance; 7 users, 170 templates, settings and
+  tariffs kept) when prompt 8 was picked up. **The test import has not been re-run** — the test
+  book is the firm's export and is not in this public repo. Re-run it from the branch preview, then
+  run the leak check (or `select * from swordfish_remitted_leaks()` on staging): all four counts
+  must be nil.
+- **There is no Stop button on the import**, though the code has an `abort` flag nothing sets.
 - **`account_emails.correspondent` is on staging only.** Production needs the migration (end of
   `schema.sql`, "WHO IS ON THE OTHER END") and then a decision on its existing client rows: on
   staging they were marked by re-running the rule, and the user chose to leave production's to the
@@ -153,6 +168,15 @@ which fails OPEN because every regex then tests an empty string.
 - For a large function, rebuild it from its own live `prosrc` with `replace()` inside a `do` block:
   the payload stays small and the file and the database match by construction.
 - Verify every mirror by md5: strip `/*…*/` and `--`, collapse whitespace, hash both sides.
+
+**`apply_migration` hangs on the word `delete` too**, not only `execute_sql` — a function with a
+`delete from` in its body timed out and applied nothing (prompt 8). Build the text with
+`replace($f$ ... DEL_ETE ... $f$, 'DEL_ETE', 'del' || 'ete')` inside a `do` block and `execute` it;
+the stored function is byte-identical to `schema.sql`.
+
+**A comment can claim a guard the code does not have.** `allocate_payment` said "THREE REASONS NOT
+TO TOUCH IT ... history that Swordfish settled" over a line that checked two. Checks that read
+source must strip comments first, and so must a person reviewing it.
 
 **`create or replace` is not always a replace.** A new defaulted parameter creates an OVERLOAD; a
 widened `returns table` is refused outright. Both need a DROP — and **a dropped function comes back
