@@ -258,6 +258,58 @@ ok('...only where something was listed', /if coalesce\(btrim\(v_a\.bureaus_liste
 ok('...and never on a write-off',
   /if p_ending not in \('paid_up', 'settled', 'withdrawn'\) then\s*\n?\s*return null;/.test(bureauFn))
 
+/* ------------------- nobody anonymous may reach any of it ------------------- */
+
+/*
+ * `from public, anon`, NOT `from anon`, AND THE REASON IS WHY THIS BLOCK EXISTS AT ALL.
+ *
+ * Postgres grants EXECUTE to PUBLIC on every new function and anon inherits it, so a revoke naming
+ * only anon leaves the function wide open while reading as if it had been shut. The house found that
+ * once already on the payover functions; it found it again here, from the other side.
+ *
+ * THREE OF THESE FOUR WERE LOCKED AND CAME BACK OPEN. A widened `returns table` and a new defaulted
+ * parameter both force a DROP rather than a replace -- `create or replace` with a new default makes
+ * an OVERLOAD -- and a recreated function is granted to PUBLIC again however carefully the old one
+ * was revoked. That is the trap this asserts against: not a revoke somebody forgot to write, but one
+ * that was written, worked, and was silently undone by a later migration dropping the function.
+ *
+ * `record_account_status_event` is the trigger behind every move between books. It returns `trigger`
+ * so PostgREST cannot usefully call it -- which is an argument for closing it cheaply, not for
+ * leaving it open.
+ */
+for (const fn of [
+  'record_account_status_event()',
+  'book_summary(uuid, text)',
+  'book_facets(uuid, text)',
+  'account_view_counts(uuid, uuid, integer)',
+]) {
+  const name = fn.slice(0, fn.indexOf('('))
+  const args = fn.slice(fn.indexOf('(')).replace(/[()]/g, (c) => `\\${c}`)
+  ok(`${name} is revoked from public and anon`,
+    new RegExp(`revoke execute on function public\\.${name}${args} from public, anon;`).test(sql))
+}
+
+/*
+ * AND THE EVENT TRAIL HAS NO WRITE POLICY AT ALL, which is what makes it a record rather than a log.
+ *
+ * The firm's rule 4 is that "moving between books always records who, when and why". A trail the
+ * client can INSERT into is a trail somebody can write a move into that never happened; one it can
+ * UPDATE is a reason somebody can change after the fact. So the only writer is the security definer
+ * trigger, and Postgres refuses everything else -- the same shape as the four financial ledgers, for
+ * the same reason, and asserted here because a policy added later to "make the page work" would undo
+ * it without failing anything else.
+ */
+/*
+ * COMMENTS STRIPPED FIRST, which this check learned the hard way: a note added to schema.sql saying
+ * what a later migration must NOT add contained the words `create policy ... for insert`, and the
+ * check counted the warning as the thing it warns about. The house already names this trap on
+ * check-company-dashboard; it is the same one from the other direction.
+ */
+const sqlCode = sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ')
+const eventsPolicies = sqlCode.match(/create policy [a-z_]+ on public\.account_status_events\s+for (\w+)/g) ?? []
+check('the event trail has exactly one policy', eventsPolicies.length, 1)
+ok('...and it is select', /for select/.test(eventsPolicies[0] ?? ''))
+
 /* ------------------- the review queue ------------------- */
 
 check('a date in the past is due', reviewState({ holdReviewOn: '2026-10-01' }, '2026-10-06'), 'due')

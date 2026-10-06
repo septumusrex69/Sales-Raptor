@@ -26729,3 +26729,25 @@ do $$ begin
   execute 'dr' || 'op function if exists public.book_summary(uuid)';
   execute 'dr' || 'op function if exists public.book_facets(uuid)';
 end $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- NO PUBLIC, NO ANON, ON THE FOUR THAT WERE REBUILT.
+--
+-- `revoke ... from anon` ALONE IS NOT ENOUGH, and this file already says why once: Postgres grants
+-- EXECUTE to PUBLIC on every new function, and anon INHERITS it. So the house pattern is
+-- `from public, anon` and the evidence is pg_proc.proacl -- a leading `=X/postgres` in the ACL is
+-- the leak, visible nowhere else.
+--
+-- These four needed it for two different reasons. `account_view_counts` and the two book readers
+-- had to be DROPPED rather than replaced (a widened `returns table`, and a new defaulted parameter
+-- that makes an overload instead of a replacement), and a dropped-and-recreated function comes back
+-- with the default PUBLIC grant however carefully the old one was locked down -- which is what left
+-- three of the four book readers open while client_book_totals, written fresh beside them, was shut.
+-- `record_account_status_event` is the trigger behind every move between books: it returns
+-- `trigger`, so PostgREST cannot usefully call it, but a security definer function anon may execute
+-- is exactly the shape of the payover hole that was closed here once already, and the argument
+-- "it would not work anyway" is not a security boundary.
+revoke execute on function public.record_account_status_event() from public, anon;
+revoke execute on function public.book_summary(uuid, text) from public, anon;
+revoke execute on function public.book_facets(uuid, text) from public, anon;
+revoke execute on function public.account_view_counts(uuid, uuid, integer) from public, anon;
