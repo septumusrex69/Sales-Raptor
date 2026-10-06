@@ -235,7 +235,9 @@ ok('the selection survives loading more',
  */
 ok('the page size is a choice', /const PAGE_SIZES = \[100, 500, 1000, 2000\] as const/.test(list))
 ok('...that the list actually uses', /pageSize \}\)/.test(list))
-ok('...offered beside the count it changes', /ml-auto flex items-center gap-1/.test(list))
+/* The class is chosen now, so the size control can step aside for "Reset column widths" when that
+   link is showing -- it still sits at the right of the count line either way. */
+ok('...offered beside the count it changes', /'ml-auto'\} flex items-center gap-1/.test(list))
 /*
  * And only where it would do something. A "2 000" button on a client with 310 accounts does
  * nothing when pressed, and a control that does nothing is one people stop trusting the rest of.

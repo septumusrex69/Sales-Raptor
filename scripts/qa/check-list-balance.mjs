@@ -156,7 +156,8 @@ ok('...with the rate after them', headings[5] === 'Rate')
  * well." It is how old the matter is -- the first thing asked of a row nobody has worked -- and it
  * is what prescription runs from.
  */
-ok('the book says when each account was handed over', /font-medium">Handed over<\/th>/.test(list))
+/* A resizable heading now (columnWidths.ts) -- the column is the same, its edge can be dragged. */
+ok('the book says when each account was handed over', /font-medium">Handed over<\/ResizableTh>/.test(list))
 ok('...off the account’s own handover date', /a\.handoverDate \? formatDate\(a\.handoverDate\)/.test(list))
 /* A DASH WHERE THERE IS NONE, not a blank: half the inherited book arrived without one, and a
    column that quietly shows nothing reads as a rendering fault. */
