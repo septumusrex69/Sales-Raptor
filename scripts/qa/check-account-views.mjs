@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import {
   ACCOUNT_VIEWS, QUIET_VIEW_DAYS, activeView, landingParams, landingView, viewParams, viewsFor,
 } from '../../src/lib/accountViews.ts'
+import { parseBook } from '../../src/lib/accountBooks.ts'
 import { ROLE_DEPARTMENTS, departmentOf } from '../../src/lib/departments.ts'
 import { filterChips, hasAccountFilters, queryFromParams } from '../../src/lib/accountFilters.ts'
 
@@ -38,17 +39,36 @@ ok('every view explains itself', ACCOUNT_VIEWS.every((v) => v.hint.length > 20))
  * A badge is what turns a link into a queue: "No diary date" gets clicked once, "No diary date
  * 355" gets worked. A view whose count key is not in the RPC's result silently shows no number.
  */
-const rpcKeys = ['whole_book', 'my_desk', 'unallocated', 'adrift', 'broken_promises', 'promises_due', 'gone_quiet']
+const rpcKeys = ['whole_book', 'active', 'on_hold', 'closed',
+  'my_desk', 'unallocated', 'adrift', 'broken_promises', 'promises_due', 'gone_quiet']
 ok('every view has a count the database returns', ACCOUNT_VIEWS.every((v) => rpcKeys.includes(v.countKey)))
 
 /* ---------- each view asks for what it says ---------- */
 
-check('the whole book narrows nothing', paramsOf('whole_book'), '')
-check('my desk is my id', paramsOf('my_desk'), `who=${ME}`)
-check('unallocated is nobody', paramsOf('unallocated'), 'who=nobody')
-check('no diary date', paramsOf('adrift'), 'adrift=1')
-check('promises due', paramsOf('promises_due'), 'sub=Promise+To+Pay')
-check('gone quiet', paramsOf('gone_quiet'), `quiet=${QUIET_VIEW_DAYS}`)
+/*
+ * EVERY SHORTCUT CARRIES `book=active`, AND WHOLE BOOK IS THE ONE THAT DOES NOT.
+ *
+ * THE FIRM: "A frozen or closed account must never appear in a collector's queue or a dialler
+ * campaign." These used to narrow the whole table, so "Gone quiet 19" counted accounts that were
+ * paid up, written off or frozen -- work nobody may do, drawn as work waiting.
+ *
+ * IN THE URL RATHER THAN FORCED IN THE QUERY, because the URL is the state: a shortcut somebody
+ * pastes to a colleague has to land on the same list, and a book applied invisibly would not
+ * travel with it.
+ */
+check('the whole book narrows nothing, not even to a book', paramsOf('whole_book'), '')
+check('my desk is my id, on the active book', paramsOf('my_desk'), `book=active&who=${ME}`)
+check('unallocated is nobody', paramsOf('unallocated'), 'book=active&who=nobody')
+check('no diary date', paramsOf('adrift'), 'book=active&adrift=1')
+check('promises due', paramsOf('promises_due'), 'book=active&sub=Promise+To+Pay')
+check('gone quiet', paramsOf('gone_quiet'), `book=active&quiet=${QUIET_VIEW_DAYS}`)
+/* NO SHORTCUT REACHES ANOTHER BOOK, asserted over the list rather than one at a time -- a ninth
+   view added without the book is this rule broken again. */
+for (const v of ACCOUNT_VIEWS) {
+  if (v.id === 'whole_book') continue
+  check(`${v.id} stays on the active book`,
+    new URLSearchParams(paramsOf(v.id)).get('book'), 'active')
+}
 
 /*
  * BROKEN PROMISES READS THE BUCKET, NOT THE SUB-STATUS, and the difference is the whole point of
@@ -57,7 +77,7 @@ check('gone quiet', paramsOf('gone_quiet'), `quiet=${QUIET_VIEW_DAYS}`)
  * had already flagged as broken. Reading the sub-status would find three of the forty and the
  * other thirty-seven would go unworked with nothing on screen to say so.
  */
-check('broken promises reads the bucket', paramsOf('broken_promises'), 'bucket=Failed+PTPs')
+check('broken promises reads the bucket', paramsOf('broken_promises'), 'book=active&bucket=Failed+PTPs')
 check('...and reaches the query as one', q('bucket=Failed+PTPs').bucket, 'Failed PTPs')
 
 /*
@@ -65,7 +85,8 @@ check('...and reaches the query as one', q('bucket=Failed+PTPs').bucket, 'Failed
  * depending on who opens it cannot be sent to anybody, which is most of what a link is for.
  */
 ok('my desk carries no "me" token', !paramsOf('my_desk').includes('me'))
-check('a person with no account gets no desk filter', viewParams('my_desk', null).toString(), '')
+check('a person with no account gets no desk filter, only the book',
+  viewParams('my_desk', null).toString(), 'book=active')
 
 /* ---------- every view is a real query ---------- */
 
@@ -77,7 +98,17 @@ for (const v of ACCOUNT_VIEWS) {
 
 /* ---------- which view is lit ---------- */
 
-check('an empty URL is the whole book', activeView(new URLSearchParams(''), ME), 'whole_book')
+/*
+ * AN EMPTY URL IS THE ACTIVE BOOK AND NO SHORTCUT, which is what the screen now opens on. It used
+ * to light "Whole book"; the firm's instruction was that the whole book is not where the screen
+ * opens, and lighting it over a list of active accounts would be the tab asserting something
+ * untrue about the list under it.
+ */
+check('an empty URL lights no shortcut', activeView(new URLSearchParams(''), ME), null)
+/* AND IT IS STILL THE ACTIVE BOOK, which is the half that matters. */
+check('...because an absent book means Active', parseBook(null), 'active')
+check('whole book is still reachable, and lights',
+  activeView(new URLSearchParams('book=whole'), ME), 'whole_book')
 check('my desk is recognised', activeView(new URLSearchParams(`who=${ME}`), ME), 'my_desk')
 check('somebody else’s desk is not a view', activeView(new URLSearchParams('who=other'), ME), null)
 
@@ -98,7 +129,7 @@ check('a view plus a search is not the view',
 check('a client does not unset the view',
   activeView(new URLSearchParams('adrift=1&client=abc'), ME), 'adrift')
 check('a client alone is still the whole book',
-  activeView(new URLSearchParams('client=abc'), ME), 'whole_book')
+  activeView(new URLSearchParams('book=whole&client=abc'), ME), 'whole_book')
 // An emptied control writes '' rather than deleting the key; that must not read as a filter.
 check('a cleared control does not unset the view',
   activeView(new URLSearchParams('adrift=1&sub='), ME), 'adrift')
@@ -246,7 +277,7 @@ for (const role of Object.keys(ROLE_DEPARTMENTS)) {
 const land = (search, role = 'Pre-legal Agent') =>
   landingParams(new URLSearchParams(search), departmentOf(role), ME)
 
-check('a bare /accounts lands on my desk', land('')?.toString(), `who=${ME}`)
+check('a bare /accounts lands on my desk', land('')?.toString(), `book=active&who=${ME}`)
 /*
  * THE URL IS THE STATE ON THIS SCREEN, so anything it already says must win -- a link somebody was
  * sent, a bookmark, a filter built by hand. A redirect that overrode those would make every shared
@@ -272,7 +303,7 @@ check('...and the client is carried through', land('client=c1')?.get('client'), 
 check('a client beside a filter is left alone', land('client=c1&adrift=1'), null)
 /* AN EMPTY PARAMETER IS NOT A QUESTION EITHER: the filter panel writes '' to clear, and a cleared
    filter must land like a bare URL rather than pinning somebody to the whole book. */
-check('a cleared filter is still a bare page', land('adrift=&q=')?.toString(), `who=${ME}`)
+check('a cleared filter is still a bare page', land('adrift=&q=')?.toString(), `book=active&who=${ME}`)
 /* PAGE IS NOT A QUESTION. It is how far down the same list somebody has read. */
 check('a page number is not a question', land('page=2')?.get('who'), ME)
 

@@ -158,9 +158,19 @@ ok('...owned by the client liaison', /p\.name = c\.liaison/.test(settle ?? ''))
    settled account would bury the write-offs among them. */
 ok('...and only for a write-off', /if p_as = 'written_off' then[\s\S]{0,600}insert into public\.tasks \(/.test(settle ?? ''))
 
-/* TWO DIFFERENT TICKS. Writing off is the Administrator's; marking one paid up is the floor's. */
+/*
+ * TWO DIFFERENT TICKS. Writing off cancels a debt under the firm's own mandate and is the trust
+ * side's; marking one paid up or SETTLED is the money side -- somebody took a payment and agreed
+ * it was the end of it -- so both ask the same tick as recording one.
+ */
 ok('writing off asks the trust capability', /written_off' and not public\.has_capability\('finance\.view'\)/.test(settle ?? ''))
-ok('paid up asks who may record a payment', /paid_up' and not public\.may_record_payment\(\)/.test(settle ?? ''))
+ok('paid up and settled ask who may record a payment',
+  /p_as in \('paid_up', 'settled'\) and not public\.may_record_payment\(\)/.test(settle ?? ''))
+/* SETTLED IS A REAL ENDING AND NOT A KIND OF WRITE-OFF: one of the twenty test accounts is
+   "Settled by way of compromise", and folded into written_off it would read on every report as a
+   debt nobody recovered. */
+ok('settled is one of the three the function takes',
+  /p_as not in \('paid_up', 'settled', 'written_off'\)/.test(settle ?? ''))
 
 /* ------------------------- 6. an account ends once ------------------------- */
 

@@ -46,7 +46,7 @@ export async function withdrawAccount(
 }
 
 export async function settleAccount(
-  accountId: string, as: 'paid_up' | 'written_off', reason: string, note?: string,
+  accountId: string, as: 'paid_up' | 'settled' | 'written_off', reason: string, note?: string,
 ): Promise<string | null> {
   const { data, error } = await supabase.rpc('settle_account', {
     p_account: accountId, p_as: as, p_reason: reason, p_note: note ?? null,

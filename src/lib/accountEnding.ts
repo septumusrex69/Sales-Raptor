@@ -16,10 +16,21 @@
  * rather than a charge.
  */
 
-export type AccountEnding = 'paid_up' | 'written_off' | 'withdrawn'
+/*
+ * A FOURTH ENDING: SETTLED. Swordfish writes "Settled by way of compromise" and the firm reads it
+ * as its own thing -- the debtor paid something and both sides agreed that was the end of it.
+ * Folded into written_off it reads on every report as a debt nobody recovered, which is the
+ * opposite of what happened; one of the twenty test accounts is exactly this.
+ *
+ * `ClosureKind` in accountBooks.ts is the same four words, and this is the type the ending screens
+ * were already built on. They are held equal by check-books rather than by one importing the other,
+ * because this file is about CHOOSING an ending and that one is about reading a book.
+ */
+export type AccountEnding = 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
 
 export const ENDING_LABEL: Record<AccountEnding, string> = {
   paid_up: 'Paid up',
+  settled: 'Settled',
   written_off: 'Written off',
   withdrawn: 'Withdrawn by the client',
 }

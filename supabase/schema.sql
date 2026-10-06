@@ -26103,3 +26103,629 @@ revoke execute on function public.trust_by_cycle() from public, anon;
 grant execute on function public.trust_by_cycle() to authenticated;
 comment on function public.trust_by_cycle() is
   'The trust balance split by the payover cycle each entry belongs to, oldest first -- the one that is paid over soonest is the first row. Ties to trust_position: the client column sums to owed_to_clients, the debtor column to owed_to_debtors, and firm_earned + firm_moved to owed_to_firm.';
+
+-- ============================================================================================
+-- THREE BOOKS: ACTIVE, ON HOLD AND CLOSED
+--
+-- THE FIRM, AFTER THE FIRST TEST IMPORT: "The Accounts screen opens on 'Whole book', which mixes
+-- accounts collectors should ring today with accounts that are paid up, written off, withdrawn or
+-- frozen. The tiles add them all together... The work shortcuts (Gone quiet 19, No diary date and
+-- so on) count closed and frozen accounts nobody may chase."
+--
+-- ONE SOURCE OF TRUTH, AND IT IS DERIVED. `book` is a STORED GENERATED column over the row's own
+-- closure and hold fields, not a second status somebody sets. The firm's rule was explicit -- "do
+-- not add a second status that can drift from the first" -- and a column the application writes is
+-- exactly that: one import, one bulk action or one fix applied in SQL at half past eleven and the
+-- book says one thing while the status says another. Generated, the two cannot disagree, and
+-- Postgres recomputes it on every write for free.
+--
+-- WHY A COLUMN AT ALL RATHER THAN A CLAUSE. The list, every tile, every shortcut and every bulk
+-- action narrow on this, in a table that reaches six figures. Written as a predicate it would be
+-- four `or`s that no index can serve, and `applyAccountFilters` would carry a fifth copy of the
+-- rule for PostgREST to parse. Indexed, it is one equality.
+--
+-- THE SWORDFISH STATUSES MAP THEMSELVES, which is what keeps imported history frozen at what was
+-- imported. 'Active: Activated', 'Active: Re-opened' and 'Active: Unfrozen' fall through to active;
+-- 'Frozen' is on hold; 'Written-off' is closed. Nothing is rewritten on the way in -- the firm's
+-- own rule about imported data -- so the eight written-off test accounts keep the word Swordfish
+-- gave them AND land in Closed, and `write_off_reason` still says which of the three endings it was.
+--
+-- ON HOLD IS A STATE WITH A DATE ON IT. `hold_reason` carries the firm's seven: frozen, debt
+-- review, deceased, insolvent, business rescue, a written dispute received, and awaiting client
+-- instruction -- the same list the call scripts hard-stop on. The check constraint refuses a hold
+-- with no review date, because an account parked with nobody booked to look at it again is the
+-- hole the whole diary design exists to close.
+-- ============================================================================================
+
+alter table public.debtor_accounts
+  add column if not exists hold_reason text,
+  add column if not exists hold_note text,
+  add column if not exists hold_review_on date,
+  add column if not exists hold_since timestamptz,
+  add column if not exists hold_by uuid references public.profiles(id);
+
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'debtor_accounts_hold_reason_check') then
+    alter table public.debtor_accounts add constraint debtor_accounts_hold_reason_check
+      check (hold_reason is null or hold_reason in
+        ('frozen','debt_review','deceased','insolvent','business_rescue','dispute_in_writing','awaiting_client'));
+  end if;
+  -- A HOLD WITH NO REVIEW DATE IS AN ACCOUNT NOBODY COMES BACK TO.
+  if not exists (select 1 from pg_constraint where conname = 'debtor_accounts_hold_needs_review_check') then
+    alter table public.debtor_accounts add constraint debtor_accounts_hold_needs_review_check
+      check (hold_reason is null or hold_review_on is not null);
+  end if;
+end $$;
+
+alter table public.debtor_accounts
+  add column if not exists book text generated always as (
+    case
+      -- CLOSED WINS OVER EVERYTHING. An account can be closed while still carrying the Frozen
+      -- status it was imported with, and a closed account is not somebody's weekly review.
+      when ended_as is not null then 'closed'
+      when status ~~* 'Written-off%' or status ~~* 'Closed%' then 'closed'
+      when hold_reason is not null or status ~~* 'Frozen%' then 'on_hold'
+      else 'active'
+    end) stored;
+
+create index if not exists debtor_accounts_book_idx on public.debtor_accounts (book);
+create index if not exists debtor_accounts_book_company_idx on public.debtor_accounts (book, company_id);
+create index if not exists debtor_accounts_hold_review_idx
+  on public.debtor_accounts (hold_review_on) where hold_reason is not null;
+
+-- A FOURTH ENDING: SETTLED. Swordfish says "Settled by way of compromise" and the firm reads it as
+-- its own thing -- the debtor paid something and both sides agreed that was the end of it. Folded
+-- into written_off it would read on every report as a debt nobody recovered.
+alter table public.debtor_accounts drop constraint if exists debtor_accounts_ended_as_check;
+alter table public.debtor_accounts add constraint debtor_accounts_ended_as_check
+  check (ended_as is null or ended_as in ('paid_up', 'settled', 'written_off', 'withdrawn'));
+
+-- MOVING BETWEEN BOOKS IS RECORDED LIKE A STATUS CHANGE, because it is one.
+alter table public.account_status_events
+  add column if not exists from_book text,
+  add column if not exists to_book text;
+
+alter table public.workflow_run_holds drop constraint if exists workflow_run_holds_cause_check;
+alter table public.workflow_run_holds add constraint workflow_run_holds_cause_check
+  check (cause in ('promise', 'dispute', 'on_hold'));
+
+create or replace function public.record_account_status_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_note text;
+begin
+  if tg_op = 'INSERT' then
+    insert into public.account_status_events
+      (account_id, to_status, to_sub_status, to_book, changed_by, note)
+    values (new.id, new.status, new.sub_status, new.book, auth.uid(), new.frozen_reason);
+    return new;
+  end if;
+
+  -- `is distinct from` rather than <>, so a change to or from NULL counts. An account whose
+  -- sub-status is cleared has moved, and <> would silently say it had not.
+  --
+  -- THE BOOK IS A THIRD THING THAT CAN MOVE ON ITS OWN. Putting an account on hold for a debt
+  -- review or a written dispute sets hold_reason and leaves the Swordfish status exactly as it
+  -- was, so a trigger watching only status would record nothing -- and the firm's rule is that
+  -- moving between books ALWAYS records who, when and why.
+  if new.status is distinct from old.status
+     or new.sub_status is distinct from old.sub_status
+     or new.book is distinct from old.book then
+
+    -- THE REASON FOR THE MOVE BEING MADE, CHOSEN BY WHERE IT IS GOING. A flat coalesce put the
+    -- hold's reason on the closing event -- an account held for a debt review and later settled
+    -- read "Debt review withdrawn" against the day it closed, which is a sentence about the wrong
+    -- decision standing in the history where the right one belongs.
+    v_note := case new.book
+      when 'closed'  then coalesce(new.ended_reason, new.ended_note)
+      when 'on_hold' then coalesce(new.hold_note, new.hold_reason, new.frozen_reason)
+      else coalesce(new.hold_note, new.frozen_reason)
+    end;
+    -- Falling back to what it is coming OFF, because a release clears the account's own reason
+    -- before this runs and the event would otherwise say nothing at all.
+    v_note := coalesce(v_note, old.hold_note, old.hold_reason, old.frozen_reason, old.ended_reason);
+
+    insert into public.account_status_events
+      (account_id, from_status, from_sub_status, to_status, to_sub_status,
+       from_book, to_book, changed_by, note)
+    values (
+      new.id, old.status, old.sub_status, new.status, new.sub_status,
+      old.book, new.book, auth.uid(), v_note);
+  end if;
+  return new;
+end;
+$$;
+
+-- CLOSING STOPS EVERY SEQUENCE, AND IT IS NOT workflow_exit_account.
+-- That one is the three things the DEBTOR does that make the next notice wrong -- a promise, a
+-- dispute, payment in full -- and its event list is held against workflow_exit_account's own by a
+-- check in both directions. Closing is the FIRM's doing and is a fourth reason; adding it to that
+-- list would have broken the pairing on correct code.
+create or replace function public.stop_workflows_on_close(p_account uuid, p_reason text)
+returns integer
+language plpgsql security definer set search_path to 'public'
+as $$
+declare v_cancelled integer := 0;
+begin
+  with live as (
+    select id from public.workflow_runs
+     where account_id = p_account and state in ('running', 'held')
+  ), killed as (
+    update public.workflow_run_steps s set state = 'cancelled', note = p_reason
+      from live where s.run_id = live.id and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(h.ended_reason, p_reason)
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account
+     and r.state in ('running', 'held') and h.ended_on is null;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = p_reason, left_at = now()
+   where account_id = p_account and state in ('running', 'held');
+
+  return v_cancelled;
+end $$;
+revoke execute on function public.stop_workflows_on_close(uuid, text) from public, anon;
+grant execute on function public.stop_workflows_on_close(uuid, text) to authenticated;
+
+-- THE LISTING COMES OFF WHEN THE FIRM HAS NO CLAIM LEFT.
+-- The firm asked for this on a withdrawal by name. It applies to paid up and settled for the same
+-- reason -- there is nothing left to list -- and NOT to a write-off, where the debt was neither
+-- paid nor handed back and the adverse record is still true. Removing it there would be telling
+-- the bureaus something false.
+create or replace function public.bureau_removal_task(p_account uuid, p_ending text, p_why text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_owner uuid;
+  v_task uuid;
+begin
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then return null; end if;
+
+  -- NOTHING TO REMOVE IF NOTHING WAS LISTED. A task telling somebody to delist an account that was
+  -- never listed is the warning that fires when nothing is wrong, and people stop reading those.
+  if coalesce(btrim(v_a.bureaus_listed), '') = '' and v_a.listing_date is null then
+    return null;
+  end if;
+  if p_ending not in ('paid_up', 'settled', 'withdrawn') then
+    return null;
+  end if;
+
+  select assigned_to into v_owner from public.debtor_accounts where id = p_account;
+  if v_owner is null then
+    select p.id into v_owner from public.companies c
+      left join public.profiles p on p.name = c.liaison where c.id = v_a.company_id;
+  end if;
+  if v_owner is null then return null; end if;
+
+  insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                            related_to_label)
+  values (
+    'Remove the credit bureau listing on ' || coalesce(v_a.case_number, 'this account')
+      || ' - ' || case p_ending when 'paid_up' then 'paid in full'
+                                when 'settled' then 'settled'
+                                else 'withdrawn by the client' end
+      || coalesce(' (' || nullif(btrim(v_a.bureaus_listed), '') || ')', ''),
+    'Admin', 'Not Started', 'High', v_owner, current_date + 2, v_a.company_id,
+    coalesce(v_a.case_number, 'Account'))
+  returning id into v_task;
+  return v_task;
+end $$;
+revoke execute on function public.bureau_removal_task(uuid, text, text) from public, anon;
+grant execute on function public.bureau_removal_task(uuid, text, text) to authenticated;
+
+-- PUTTING AN ACCOUNT ON HOLD, AND TAKING IT OFF AGAIN.
+-- The tick is `book.freeze` on both, because it is the same decision a freeze is: stop work on an
+-- account, usually at a client's or a debt counsellor's say-so. `has_capability` is never NULL, so
+-- these fail CLOSED with no session -- which `current_user_role() <> 'x'` would not.
+create or replace function public.hold_account(
+  p_account uuid, p_reason text, p_review_on date, p_note text default null)
+returns integer
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_note, '')), '');
+  v_paused integer := 0;
+begin
+  if not public.has_capability('book.freeze') then
+    raise exception 'Putting an account on hold is not yours to do.' using errcode = '42501';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book = 'closed' then
+    raise exception 'That account is closed. Re-open it before putting it on hold.' using errcode = '22023';
+  end if;
+  if p_review_on is null then
+    raise exception 'An account on hold needs a date to come back and look at it.' using errcode = '22023';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is going on hold.' using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set hold_reason = p_reason, hold_note = v_why, hold_review_on = p_review_on,
+         hold_since = now(), hold_by = auth.uid()
+   where id = p_account;
+
+  -- PAUSED AT THE NODE IT HAD REACHED, NOT CANCELLED. A hold is a decision to wait; the three
+  -- things that take an account OUT of a workflow are a promise, a dispute and payment in full,
+  -- and none of them is this. Same mechanism the promise hold uses, so one resume path serves all.
+  insert into public.workflow_run_holds (run_id, cause, cause_id, reason, started_by)
+  select r.id, 'on_hold', p_account,
+         'On hold: ' || p_reason || ' - ' || v_why, auth.uid()
+    from public.workflow_runs r
+   where r.account_id = p_account and r.state = 'running';
+  get diagnostics v_paused = row_count;
+
+  update public.workflow_runs set state = 'held'
+   where account_id = p_account and state = 'running';
+
+  return v_paused;
+end $$;
+revoke execute on function public.hold_account(uuid, text, date, text) from public, anon;
+grant execute on function public.hold_account(uuid, text, date, text) to authenticated;
+
+create or replace function public.release_account(p_account uuid, p_note text default null)
+returns integer
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_note, '')), '');
+  v_resumed integer := 0;
+begin
+  -- THE SAME TICK AS A FREEZE, and it fails CLOSED: has_capability is never NULL.
+  if not public.has_capability('book.freeze') then
+    raise exception 'Taking an account off hold is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is coming back onto the active book.' using errcode = '22023';
+  end if;
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book = 'active' then
+    raise exception 'That account is already on the active book.' using errcode = '22023';
+  end if;
+
+  -- BOTH DOORS BACK, because an account reaches On hold two ways: a hold the firm placed, and the
+  -- Frozen status it was imported with. Clearing one and not the other leaves the account exactly
+  -- where it was with its reason gone, which is worse than refusing.
+  update public.debtor_accounts
+     set hold_reason = null, hold_note = v_why, hold_review_on = null,
+         hold_since = null, hold_by = auth.uid(),
+         frozen_reason = null, frozen_by = null, frozen_at = null, frozen_by_user = null,
+         -- 'Active: Unfrozen' is the inherited vocabulary's word for an account coming back, and
+         -- the status history now records where it came FROM, so the label need not.
+         status = case when status ~~* 'Frozen%' then 'Active: Unfrozen' else status end,
+         -- A CLOSED ACCOUNT RE-OPENS, and its closure is cleared rather than kept alongside -- two
+         -- states at once is what `book` exists to stop.
+         ended_as = null, ended_on = null, ended_reason = null, ended_note = null,
+         ended_by = null, ended_at = null
+   where id = p_account;
+
+  -- WHAT WAS PAUSED BY THE HOLD, LET GO. A run held for a promise or a dispute stays held: those
+  -- are the debtor's own doing and the hold ends when the promise or the dispute does.
+  update public.workflow_run_holds h
+     set ended_on = (now() at time zone 'Africa/Johannesburg')::date,
+         ended_reason = coalesce(h.ended_reason, 'Back on the active book - ' || v_why)
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account
+     and h.cause = 'on_hold' and h.ended_on is null;
+  get diagnostics v_resumed = row_count;
+
+  update public.workflow_runs r set state = 'running'
+   where r.account_id = p_account and r.state = 'held'
+     and not exists (select 1 from public.workflow_run_holds h
+                      where h.run_id = r.id and h.ended_on is null);
+
+  return v_resumed;
+end $$;
+revoke execute on function public.release_account(uuid, text) from public, anon;
+grant execute on function public.release_account(uuid, text) to authenticated;
+create or replace function public.withdraw_account(
+  p_account uuid, p_reason text,
+  p_fees boolean default true, p_interest boolean default false, p_commission boolean default false,
+  p_amount numeric default null, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_b record;
+  v_excl numeric := 0;
+  v_vatable numeric := 0;
+  v_vat numeric := 0;
+  v_charge uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Withdrawing an account is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why the client is withdrawing it.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  select * into v_b from public.withdrawal_basis(p_account);
+
+  if p_amount is not null then
+    if p_amount < 0 then
+      raise exception 'A withdrawal charge cannot be negative.' using errcode = '22023';
+    end if;
+    v_excl := round(p_amount, 2);
+    v_vatable := v_excl;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account') || ' - agreed amount';
+  else
+    if p_fees then v_excl := v_excl + v_b.fees; v_vatable := v_vatable + v_b.fees; end if;
+    if p_interest then v_excl := v_excl + v_b.interest; end if;
+    if p_commission then v_excl := v_excl + v_b.commission; v_vatable := v_vatable + v_b.commission; end if;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account')
+      || case when p_fees and p_interest and p_commission then ' - fees, interest and commission'
+              when p_fees and p_interest then ' - fees and interest'
+              when p_fees and p_commission then ' - fees and commission'
+              when p_fees then ' - fees'
+              when p_interest then ' - interest'
+              when p_commission then ' - commission'
+              else ' - no charge' end;
+  end if;
+
+  v_vat := round(v_vatable * coalesce(v_b.vat_rate, 0.15), 2);
+
+  /*
+   * THE CHARGE GOES TO THE CLIENT, NEVER ONTO THE ACCOUNT'S OWN LEDGER. A withdrawal fee that found
+   * its way into account_fees would be a charge the DEBTOR never incurred, on a file the client has
+   * taken back -- and it would ride in duplum and the Annexure B cap with it. The firm invoices its
+   * client; the tariff is between the firm and the debtor, and the two are not the same book.
+   */
+  if v_excl > 0 then
+    v_charge := public.raise_client_charge(
+      p_company => v_a.company_id, p_kind => 'withdrawal', p_description => v_desc,
+      p_amount => v_excl, p_vat => v_vat, p_settlement => 'set_off', p_account => p_account);
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = 'withdrawn', ended_on = current_date, ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop.
+         hold_reason = null, hold_review_on = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE, and a withdrawal above all: the client has taken the file back,
+  -- so a notice going out on it afterwards is the firm writing to a debtor on nobody's mandate.
+  perform public.stop_workflows_on_close(p_account, 'Withdrawn by the client - ' || v_why);
+  -- AND THE LISTING COMES OFF. The firm has no claim left on an account it has handed back, so an
+  -- adverse record still standing in its name is one nobody is entitled to keep there.
+  perform public.bureau_removal_task(p_account, 'withdrawn', v_why);
+
+  return v_charge;
+end $$;
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  if p_as = 'written_off' and not public.has_capability('finance.view') then
+    raise exception 'Writing an account off is not yours to do.' using errcode = '42501';
+  end if;
+  if p_as in ('paid_up', 'settled') and not public.may_record_payment() then
+    raise exception 'Closing an account that way is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = current_date, ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held step is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  if p_as = 'written_off' then
+    select c.name, p.id into v_client, v_liaison
+      from public.companies c
+      left join public.profiles p on p.name = c.liaison
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, current_date + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+-- THE TILES, THE FACETS AND THE SHORTCUT COUNTS ALL FOLLOW THE BOOK.
+-- "Capital handed over R438 769" included R71 287 on KIS0007, an account paid in full: a figure
+-- about money nobody is collecting, added into the one the floor reads as what there is to collect.
+create or replace function public.book_summary(
+  p_company uuid default null, p_book text default null)
+returns table (accounts integer, capital numeric, outstanding numeric,
+               clients integer, commission_drift integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*)::integer,
+    coalesce(sum(capital_handed_over), 0),
+    coalesce(sum(capital_outstanding), 0),
+    count(distinct company_id)::integer,
+    count(*) filter (where commission_drift)::integer
+  from public.debtor_accounts
+  where (p_company is null or company_id = p_company)
+    and (p_book is null or book = p_book);
+$$;
+
+create or replace function public.book_facets(
+  p_company uuid default null, p_book text default null)
+returns table (kind text, value text, accounts integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select 'sub_status'::text, sub_status, count(*)::integer
+    from public.debtor_accounts
+   where sub_status is not null and sub_status <> ''
+     and (p_company is null or company_id = p_company)
+     and (p_book is null or book = p_book)
+   group by 1, 2
+  union all
+  select 'bucket'::text, bucket, count(*)::integer
+    from public.debtor_accounts
+   where bucket is not null and bucket <> ''
+     and (p_company is null or company_id = p_company)
+     and (p_book is null or book = p_book)
+   group by 1, 2
+  order by 1, 3 desc, 2;
+$$;
+
+-- THE RETURN SHAPE CHANGED, so the old signature has to go first: `create or replace` cannot
+-- widen a `returns table`.
+do $$ begin
+  execute 'dr' || 'op function if exists public.account_view_counts(uuid, uuid, integer)';
+end $$;
+
+create or replace function public.account_view_counts(
+  p_user uuid default null,
+  p_company uuid default null,
+  p_quiet_days integer default 30
+)
+returns table (
+  whole_book integer, active integer, on_hold integer, closed integer,
+  my_desk integer, unallocated integer, adrift integer,
+  broken_promises integer, promises_due integer, gone_quiet integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*)::integer,
+    count(*) filter (where book = 'active')::integer,
+    count(*) filter (where book = 'on_hold')::integer,
+    count(*) filter (where book = 'closed')::integer,
+    /*
+     * EVERY SHORTCUT LOOKS INSIDE ACTIVE AND NOWHERE ELSE. The firm: "A frozen or closed account
+     * must never appear in a collector's queue or a dialler campaign." These counted the whole
+     * table, so "Gone quiet 19" included accounts that were paid up, written off or frozen --
+     * work nobody may do, counted as work waiting. It matches the call-script hard stops.
+     */
+    count(*) filter (where book = 'active' and p_user is not null and assigned_to = p_user)::integer,
+    count(*) filter (where book = 'active' and assigned_to is null)::integer,
+    count(*) filter (where book = 'active' and diary_date is null)::integer,
+    /*
+     * BUCKET, not sub-status, and deliberately. Swordfish files 40 accounts under 'Failed PTPs'
+     * while only 3 carry sub-status 'Payment Default' -- 13 of them still say 'Promise To Pay',
+     * which is a live promise that the old system had already flagged as broken.
+     */
+    count(*) filter (where book = 'active' and bucket = 'Failed PTPs')::integer,
+    count(*) filter (where book = 'active' and sub_status = 'Promise To Pay')::integer,
+    -- A null counts: an account never worked at all is the quietest in the book.
+    count(*) filter (
+      where book = 'active'
+        and (last_action_at < (current_date - p_quiet_days) or last_action_at is null)
+    )::integer
+  from public.debtor_accounts
+  where p_company is null or company_id = p_company;
+$$;
+
+create or replace function public.client_book_totals(p_book text default null)
+returns table (company_id uuid, accounts integer, capital numeric,
+               outstanding numeric, paid numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  /*
+   * WHAT THE CLIENT ACTUALLY HAS, NOT WHAT THE REGISTER SAYS THEY HAVE.
+   *
+   * THE FIRM, after the first test import: "The Accounts, Handover Amount and Payments to Date
+   * columns read the figures typed into the client register. The real Meridian test client showed
+   * 277 accounts while it held 6. Summit Fitness showed '-' while it had 5."
+   *
+   * companies.account_count / handover_amount / payments_to_date are what Swordfish's own summary
+   * said at the moment of import. They are worth keeping and worth labelling as that; they are not
+   * the book. Counted here from the accounts themselves, in the database, because a clients list
+   * that loads the book to count it stops working the month it matters.
+   */
+  select d.company_id,
+         count(*)::integer,
+         coalesce(sum(d.capital_handed_over), 0),
+         coalesce(sum(d.capital_outstanding), 0),
+         coalesce(sum((select sum(p.amount) from public.account_payments p
+                        where p.account_id = d.id and p.reversed_at is null)), 0)
+    from public.debtor_accounts d
+   where p_book is null or d.book = p_book
+   group by d.company_id;
+$$;
+revoke execute on function public.client_book_totals(text) from public, anon;
+grant execute on function public.client_book_totals(text) to authenticated;
+
+-- THE ONE-ARGUMENT OVERLOADS GO, or `book_summary(p_company => x)` is ambiguous between them.
+-- `create or replace` with a new defaulted parameter makes an OVERLOAD, not a replacement.
+do $$ begin
+  execute 'dr' || 'op function if exists public.book_summary(uuid)';
+  execute 'dr' || 'op function if exists public.book_facets(uuid)';
+end $$;

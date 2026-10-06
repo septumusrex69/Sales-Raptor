@@ -21,6 +21,7 @@ function check(name, actual, expected) {
   failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    got      ${JSON.stringify(actual)}`)
 }
 const ok = (name, actual) => check(name, actual, true)
+const no = (name, actual) => check(name, actual, false)
 
 /* A fixed today, so "nothing in 30 days" means one thing every time this runs. */
 const TODAY = new Date('2026-09-15T00:00:00Z')
@@ -42,11 +43,28 @@ check('a leap day exists', shiftDays(new Date('2028-02-28T00:00:00Z'), 1), '2028
 check('late-night local time does not shift the day',
   shiftDays(new Date('2026-09-15T22:30:00Z'), 0), '2026-09-15')
 
-/* ---------- an empty URL asks for the whole book ---------- */
+/* ---------- an empty URL asks for the ACTIVE book ---------- */
 
-check('nothing set is no filter', Object.keys(q('')).length, 0)
-ok('...and reads as unfiltered', !hasAccountFilters(q('')))
+/*
+ * AND THAT IS THE ONE THING AN EMPTY URL NOW SAYS. The firm: "The Accounts screen opens on 'Whole
+ * book', which mixes accounts collectors should ring today with accounts that are paid up, written
+ * off, withdrawn or frozen." An absent `book` reads as Active, which is where the screen opens --
+ * a link that lost its parameters has to land where the screen lands rather than quietly widening
+ * to accounts nobody may work.
+ */
+/* COMPARED AS A STRING: this file's `check` is `Object.is`, which is false for any two objects --
+   the same trap the browser harness carries, and it fails on correct code rather than passing on
+   broken, so it is the survivable half of it. */
+check('an empty URL asks for one thing: the active book',
+  JSON.stringify(q('')), JSON.stringify({ book: 'active' }))
+ok('...and reads as unfiltered, because the book is not a filter',
+  !hasAccountFilters(q('')))
 ok('...and shows no chips', filterChips(new URLSearchParams('')).length === 0)
+/* EVERY OTHER VALUE IS HONOURED, and an unknown one falls back to Active rather than to the whole
+   book -- the safe failure is the narrow one. */
+check('a book in the URL is honoured', q('book=closed').book, 'closed')
+check('...whole book included', q('book=whole').book, 'whole')
+check('...and a mistyped one lands on Active', q('book=banana').book, 'active')
 
 /* ---------- each filter reaches the query ---------- */
 
@@ -143,9 +161,18 @@ ok('...while the filters do not', clearedFilters(new URLSearchParams('client=abc
 const everyFilterSet = 'status=active&sub=Tracing&bucket=Diary&who=nobody&team=t1'
   + '&from=2026-01-01&to=2026-06-30'
   + '&adrift=1&never=1&quiet=30&presc=90&duplum=1&waiting=1&min=1000&drift=1'
-  + '&handover=h1'
+  + '&handover=h1&review=due'
 const allChips = filterChips(new URLSearchParams(everyFilterSet))
-ok('every filter produces a chip', allChips.length === FILTER_PARAMS.length - 1) // from+to share one chip
+/*
+ * `book` IS THE EXCEPTION AND IS NAMED AS ONE. It is in FILTER_PARAMS because a URL carries it and
+ * because `queryFromParams` reads it, but it is not a NARROWING: it chooses which book is being
+ * narrowed, it has its own chooser above the list with the count on it, and a chip whose cross
+ * cleared it would have nowhere to clear it to. Everything else must have a chip or it narrows the
+ * list with nothing on screen saying so -- the exact failure the chips exist to prevent.
+ */
+const chipless = ['book']
+ok('every filter but the book produces a chip',
+  allChips.length === FILTER_PARAMS.length - chipless.length - 1) // from+to share one chip
 ok('every chip can be removed', allChips.every((c) => FILTER_PARAMS.includes(c.param)))
 ok('every filter reaches the query', hasAccountFilters(q(everyFilterSet)))
 /*
@@ -187,11 +214,20 @@ ok('prescribing excludes the already prescribed',
   /prescription_date', q\.prescribingBefore\)\.eq\('prescribed', false\)/.test(book))
 
 /*
- * ADRIFT IS ABOUT THE LIVE BOOK. Written-off accounts have no diary date and never will; without
- * the status clause they would be 372 of the answer and the real hole — active accounts nobody is
- * booked to ring — would be invisible inside it.
+ * ADRIFT IS ABOUT THE ACTIVE BOOK, AND IT CARRIES THE BOOK ITSELF.
+ *
+ * Written-off accounts have no diary date and never will; without this they would be most of the
+ * answer and the real hole -- active accounts nobody is booked to ring -- would be invisible inside
+ * it. It used to say `status ilike 'Active%'`, which is the right intention against the wrong
+ * column: an account RAPTOR closed keeps whatever Swordfish status it was imported with, so a
+ * paid-up file still read as Active and sat in the queue. The generated column knows both routes.
+ *
+ * AND IT IS IN THE CLAUSE, not only in the shortcut's URL. The URL is the state, so
+ * `?adrift=1&book=closed` is a thing somebody can type.
  */
-ok('adrift is active accounts only', /q\.adrift[\s\S]{0,120}ilike\('status', 'Active%'\)/.test(book))
+ok('adrift is the active book only', /q\.adrift[\s\S]{0,120}\.eq\('book', 'active'\)/.test(book))
+no('...and does not test the inherited status string instead',
+  /q\.adrift[\s\S]{0,120}ilike\('status', 'Active%'\)/.test(book))
 
 /*
  * STATUS GROUPS MATCH BY PREFIX, not against a list of the five values the book holds today. The
@@ -251,12 +287,23 @@ for (const field of ['assignedTo: r.assigned_to', 'clientActionAsk: r.client_act
 const list = readFileSync(new URL('../../src/pages/accounts/AccountsList.tsx', import.meta.url), 'utf8')
 
 /*
- * The summary tiles count the CLIENT'S WHOLE BOOK, not the filtered list. A tile that followed
- * the filters would read "Accounts 3" above a list of three, and there would be no number left
- * anywhere on the screen saying how big the book really is.
+ * THE TILES COUNT THE WHOLE OF THE BOOK THAT IS SHOWING -- not the filtered list, and no longer
+ * the whole table either.
+ *
+ * Both halves matter. A tile that followed the FILTERS would read "3" above a list of three, with
+ * no number left anywhere saying how big the book is. A tile that ignored the BOOK is the bug the
+ * firm found: "'Capital handed over R438 769' includes R71 287 on KIS0007, which is paid in full"
+ * -- money nobody is collecting, added into the figure the floor reads as what there is to collect.
+ *
+ * So the book travels with the client and nothing else does, and the label names which book it is.
  */
-ok('the summary ignores the filters', /fetchBookSummary\(query\.companyId\)/.test(list))
-ok('...and says so when the list is narrowed', /Accounts \(whole book\)/.test(list))
+ok('the summary follows the book and not the filters',
+  /fetchBookSummary\(query\.companyId, query\.book\)/.test(list))
+no('...and never ignores the book', /fetchBookSummary\(query\.companyId\)/.test(list))
+ok('...and the tile says which book it counted', /bookLabel\(book\)\} book/.test(list))
+/* THE FACETS FOLLOW IT TOO, or the filter panel offers a sub-status whose every account is closed
+   and the list it opens is empty. */
+ok('the facets follow the book', /fetchBookFacets\(companyId, book\)/.test(list))
 
 /*
  * An empty filtered list must not read as an empty book. "No accounts here yet" over a filtered

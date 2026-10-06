@@ -78,10 +78,15 @@ export function EndAccountModal({ accountId, caseNumber, balance, canWriteOff, o
     }
   }
 
+  /*
+   * SETTLED SITS WITH PAID UP, not with written off, and the tick says so. Both are the money
+   * side of the firm -- somebody took a payment and agreed it was the end of it -- and the
+   * database asks `may_record_payment` for either. A write-off cancels a debt under the firm's own
+   * mandate and asks for the finance tick instead.
+   */
   const choices: AccountEnding[] = canWriteOff
-    ? ['paid_up', 'written_off', 'withdrawn']
-    /* Marking one paid up is the collections floor's work; the other two are not theirs. */
-    : ['paid_up']
+    ? ['paid_up', 'settled', 'written_off', 'withdrawn']
+    : ['paid_up', 'settled']
 
   return (
     <Modal

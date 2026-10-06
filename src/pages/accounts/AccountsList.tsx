@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, Loader2, Search, UserCheck, X } from 'lucide-react'
+import { BOOK_CHOICES, bookLabel, parseBook } from '../../lib/accountBooks'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
 import { useAppStore } from '../../store/AppStore'
@@ -148,6 +149,10 @@ export function AccountsList() {
   }, [search, params, setParam])
 
   const key = params.toString()
+  /* THE BOOK THE SCREEN IS SHOWING, read off the URL like every other filter. Unknown or absent
+     reads as Active, which is where the screen opens -- a link that lost the parameter must land
+     where the screen opens rather than quietly widening to accounts nobody may work. */
+  const book = parseBook(params.get('book'))
   const teamMembers = useCallback(
     (id: string) => teams.find((t) => t.id === id)?.memberIds ?? [],
     [teams],
@@ -199,7 +204,7 @@ export function AccountsList() {
       try {
         const [res, sum] = await Promise.all([
           fetchAccounts({ ...query, page: 0, pageSize }),
-          fetchBookSummary(query.companyId),
+          fetchBookSummary(query.companyId, query.book),
         ])
         if (cancelled) return
         setAccounts(res.accounts); setTotal(res.total); setSummary(sum)
@@ -285,15 +290,16 @@ export function AccountsList() {
     }
   }
 
-  // The dropdowns offer what the book holds, which changes with the client. Its own request, so
-  // a slow facet count never holds up the list itself.
+  // The dropdowns offer what the book holds, which changes with the client AND with which book is
+  // showing -- offering a sub-status whose every account is closed opens an empty list. Its own
+  // request, so a slow facet count never holds up the list itself.
   useEffect(() => {
     let cancelled = false
-    void fetchBookFacets(companyId)
+    void fetchBookFacets(companyId, book)
       .then((f) => { if (!cancelled) setFacets(f) })
       .catch(() => { if (!cancelled) setFacets(null) })
     return () => { cancelled = true }
-  }, [companyId])
+  }, [companyId, book])
 
   /*
    * The badges on the views row. Their own request too, and failing quietly: a view without a
@@ -346,7 +352,7 @@ export function AccountsList() {
     setPage(0)
     const [res, sum, counts] = await Promise.all([
       fetchAccounts({ ...query, page: 0, pageSize }),
-      fetchBookSummary(query.companyId),
+      fetchBookSummary(query.companyId, query.book),
       fetchViewCounts({ userId: currentUser?.id ?? null, companyId, quietDays: QUIET_VIEW_DAYS })
         .catch(() => null),
     ])
@@ -382,7 +388,9 @@ export function AccountsList() {
             that silently followed the filters would read "Accounts 3" next to a list of three
             and there would be no number left anywhere saying how big the book really is.
           */}
-          <Tile label={narrowed ? 'Accounts (whole book)' : 'Accounts'} value={summary.accounts.toLocaleString('en-ZA')} />
+          <Tile
+            label={narrowed ? `${bookLabel(book)} book (all of it)` : `${bookLabel(book)} book`}
+            value={summary.accounts.toLocaleString('en-ZA')} />
           <Tile label="Capital handed over" value={formatCurrency(summary.capital)} />
           <Tile label={companyId ? 'Client' : 'Clients'} value={companyId ? (companyName ?? '—') : String(summary.clients)} />
           <Tile
@@ -397,6 +405,48 @@ export function AccountsList() {
       )}
 
       {/*
+        THE BOOK COMES FIRST, ABOVE THE SHORTCUTS, BECAUSE IT DECIDES WHAT THEY MEAN.
+
+        THE FIRM: "The Accounts screen opens on 'Whole book', which mixes accounts collectors
+        should ring today with accounts that are paid up, written off, withdrawn or frozen."
+
+        Three books and a fourth choice that is not one. Active is where the screen opens; Whole
+        book is still there, one click away with its own count, for finding an account rather than
+        working a list. Picking a book keeps the client and clears the rest -- a shortcut is a
+        question about Active, and carrying "Gone quiet" across to Closed would be asking a question
+        nobody has about accounts nobody may chase.
+      */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">Book</span>
+        {BOOK_CHOICES.map((b) => {
+          const on = book === b.id
+          const count = viewCounts?.[b.countKey as keyof ViewCounts]
+          return (
+            <button key={b.id} type="button" title={b.hint}
+              onClick={() => {
+                const next = new URLSearchParams()
+                next.set('book', b.id)
+                if (companyId) next.set('client', companyId)
+                const q = params.get('q')
+                if (q) next.set('q', q)
+                setParams(next, { replace: true })
+              }}
+              className={`inline-flex items-center gap-1.5 text-sm font-medium rounded-lg border px-3 py-1.5 ${
+                on
+                  ? 'border-gold-500 bg-gold-400 text-navy-950'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+              {b.label}
+              {count !== undefined && (
+                <span className={`tabular-nums text-[11px] ${on ? 'text-navy-950/60' : 'text-slate-400'}`}>
+                  {count.toLocaleString('en-ZA')}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/*
         THE VIEWS ROW EXISTS BECAUSE THE DEFAULT WAS ARBITRARY. Six figures of accounts sorted
         alphabetically by account number is nobody's question — you open the book, land on
         "Abc1111", and cannot tell whether you are looking at the whole thing or a stray filter.
@@ -407,8 +457,50 @@ export function AccountsList() {
         saying exactly what is on screen: it can be pasted, bookmarked, narrowed further by hand,
         and cleared. None of that is true of a hidden mode.
       */}
+      {/*
+        ON HOLD HAS A REVIEW QUEUE, and it is two queues because they are two problems. A hold whose
+        date has passed is one somebody undertook to come back to and has not. A hold with NO date
+        is an account parked before a date was required -- every frozen account that came across
+        from Swordfish is one -- and nobody has ever undertaken to look at it at all.
+
+        LEADERS ONLY, because it is the weekly review rather than a collector's day. It draws only
+        when there is something in it: a permanent "0 due" strip is the warning that fires when
+        nothing is wrong, and people stop reading those.
+      */}
+      {book === 'on_hold' && canSeeOthers && (
+        <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Review</span>
+          <button type="button"
+            onClick={() => setParam('review', params.get('review') === 'due' ? null : 'due')}
+            className={`rounded-lg border px-2.5 py-1.5 font-medium ${
+              params.get('review') === 'due'
+                ? 'border-gold-500 bg-gold-50 text-gold-800'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+            Due a look
+          </button>
+          <button type="button"
+            onClick={() => setParam('review', params.get('review') === 'unset' ? null : 'unset')}
+            className={`rounded-lg border px-2.5 py-1.5 font-medium ${
+              params.get('review') === 'unset'
+                ? 'border-gold-500 bg-gold-50 text-gold-800'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+            No review date set
+          </button>
+          <span className="text-slate-400 text-[12.5px]">
+            An account on hold is one somebody has to come back to. These are the ones nobody has.
+          </span>
+        </div>
+      )}
+
+      {/*
+        AND THE SHORTCUTS ONLY EXIST INSIDE ACTIVE. They are queues -- work waiting -- and there is
+        no such thing as a broken promise on a written-off account or a diary date missing from a
+        frozen one. Offered on Closed they would be four links that each open an empty list, which
+        reads as a bug rather than as a rule.
+      */}
+      {book === 'active' && (
       <div className="flex flex-wrap items-center gap-1.5">
-        {views.map((v) => {
+        {views.filter((v) => v.id !== 'whole_book').map((v) => {
           const on = current === v.id
           const count = viewCounts?.[v.countKey as keyof ViewCounts]
           return (
@@ -434,6 +526,7 @@ export function AccountsList() {
           )
         })}
       </div>
+      )}
 
       <Card padded={false}>
         <div className="flex flex-wrap items-center gap-2 p-4 border-b border-slate-100">

@@ -20,6 +20,7 @@ import type { ExistingAccount } from './handoverImport.ts'
 import { debtorKey, type OtherAccount } from './sameDebtor.ts'
 import { isWrittenOff } from './accountStatus.ts'
 import { fetchAllRows } from './fetchAll.ts'
+import type { Book, BookChoice, ClosureKind, HoldReason } from './accountBooks.ts'
 
 export interface DebtorAccount {
   id: string
@@ -111,7 +112,22 @@ export interface DebtorAccount {
    * into the table; an ending is a fact the firm asserts, so it carries who said so and when.
    * Null while the account is still live, which is what clientPosition's `closed` input reads.
    */
-  endedAs: 'paid_up' | 'written_off' | 'withdrawn' | null
+  /** SETTLED IS A FOURTH ENDING, not a kind of write-off: both sides agreed and money changed
+      hands. Folded in with written off it reads on every report as a debt nobody recovered. */
+  endedAs: ClosureKind | null
+  /**
+   * WHICH BOOK, STRAIGHT OFF THE DATABASE'S OWN GENERATED COLUMN.
+   *
+   * Read, never computed up here: `bookOf` exists for a row held in memory, and the column is what
+   * the list, the tiles and every bulk action narrow on. A screen that worked it out again would
+   * be the second source of truth the firm said not to build.
+   */
+  book: Book
+  /** Set only while the account is on hold, with the reason, the date to look again, and who. */
+  holdReason: HoldReason | null
+  holdNote: string | null
+  holdReviewOn: string | null
+  holdSince: string | null
   endedOn: string | null
   endedReason: string | null
   endedNote: string | null
@@ -220,7 +236,14 @@ const toAccount = (r: any): DebtorAccount => ({
   frozenBy: (r.frozen_by as FrozenBy | null) ?? null,
   frozenReason: r.frozen_reason ?? null,
   frozenAt: r.frozen_at ?? null,
-  endedAs: (r.ended_as as 'paid_up' | 'written_off' | 'withdrawn' | null) ?? null,
+  endedAs: (r.ended_as as ClosureKind | null) ?? null,
+  /* READ, NOT DERIVED. CLAUDE.md's own warning is about a column that reaches the row and not the
+     mapper: it would read as undefined for ever and the list would quietly show the whole book. */
+  book: (r.book as Book | null) ?? 'active',
+  holdReason: (r.hold_reason as HoldReason | null) ?? null,
+  holdNote: r.hold_note ?? null,
+  holdReviewOn: r.hold_review_on ?? null,
+  holdSince: r.hold_since ?? null,
   endedOn: r.ended_on ?? null,
   endedReason: r.ended_reason ?? null,
   endedNote: r.ended_note ?? null,
@@ -287,6 +310,15 @@ export interface AccountQuery {
   search?: string
   status?: string
   /**
+   * WHICH BOOK. The one filter that is on by default and the only one that is.
+   *
+   * 'whole' and undefined both mean every account; the screen says which it meant. Everything else
+   * narrows on the generated column, which is one indexed equality rather than the four `or`s the
+   * rule would be written out as -- and, more to the point, rather than a fifth copy of a rule the
+   * database already holds.
+   */
+  book?: BookChoice
+  /**
    * The three answers anybody actually gives to "which accounts".
    *
    * The stored status is five values, three of which begin "Active:" and differ only in how the
@@ -324,6 +356,17 @@ export interface AccountQuery {
   handedOverFrom?: string
   /** Handed over on or before this date. */
   handedOverTo?: string
+  /**
+   * ON HOLD AND DUE A LOOK. The manager's weekly queue.
+   *
+   * 'due' is a hold whose review date has passed -- somebody undertook to come back to it and has
+   * not. 'unset' is an account on hold with NO review date at all, which is every frozen account
+   * that came across from Swordfish: nobody has ever undertaken to look at it. They are different
+   * problems and one list over both would flatten them.
+   */
+  review?: 'due' | 'unset'
+  /** Today, in the firm's zone, for `review`. Passed in: this file has no clock. */
+  today?: string
   /** Active, with no diary date: nobody is booked to ring it. */
   adrift?: boolean
   /** Handed over, and not one action logged since. */
@@ -383,6 +426,13 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
   if (q.handoverId) out = out.eq('handover_id', q.handoverId)
   if (q.status) out = out.eq('status', q.status)
   /*
+   * THE BOOK FIRST, because it is the one clause that is on unless somebody turned it off, and
+   * because a shortcut narrowing inside it must not be able to reach a frozen or closed account.
+   * 'whole' is the deliberate absence of this filter and is written out rather than left to a
+   * missing value, so "the whole book" is a thing somebody asked for rather than a thing nobody set.
+   */
+  if (q.book && q.book !== 'whole') out = out.eq('book', q.book)
+  /*
    * Prefix matching, not a list of the five values seen today. The import writes whatever
    * Swordfish sends, so 'Active: Reinstated' can arrive tomorrow and would silently fall out of
    * the live book if this were an `in` against values counted this afternoon.
@@ -402,10 +452,25 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
   if (q.handedOverTo) out = out.lte('handover_date', q.handedOverTo)
 
   /*
-   * ADRIFT. Active and nobody booked to ring it — the hole the whole diary design exists to
-   * close, and the one filter here that is about the firm rather than the debtor.
+   * ON HOLD AND DUE A LOOK: the manager's weekly queue, and it is two queues. A date that has
+   * passed is a promise to come back that nobody kept; no date at all is an account parked before
+   * a date was required, which every frozen account off the import is.
    */
-  if (q.adrift) out = out.is('diary_date', null).ilike('status', 'Active%')
+  if (q.review === 'due' && q.today) out = out.lte('hold_review_on', q.today)
+  if (q.review === 'unset') out = out.is('hold_review_on', null)
+
+  /*
+   * ADRIFT. On the active book and nobody booked to ring it -- the hole the whole diary design
+   * exists to close, and the one filter here that is about the firm rather than the debtor.
+   *
+   * IT CARRIES THE BOOK ITSELF rather than trusting the caller to have set it. The URL is the
+   * state, so `?adrift=1&book=closed` is a thing somebody can type, and the answer to that must
+   * not be a list of written-off accounts with no diary date. It used to say
+   * `status ilike 'Active%'`, which is the same intention against the wrong column: an account
+   * RAPTOR closed keeps whatever Swordfish status it was imported with, so a paid-up file still
+   * read as Active and sat in the queue.
+   */
+  if (q.adrift) out = out.is('diary_date', null).eq('book', 'active')
   if (q.neverWorked) out = out.is('last_action_at', null)
   /*
    * QUIET. Nothing logged since the date given — and an account never worked at all is the
@@ -764,19 +829,35 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
 export interface BookSummary {
   accounts: number
   capital: number
+  /** What is still outstanding on them -- the stored column, not a recomputed balance. */
+  outstanding: number
   clients: number
   commissionDrift: number
 }
 
 /** Headline figures for a client, or for the whole book when no client is given. */
-export async function fetchBookSummary(companyId?: string): Promise<BookSummary> {
-  const { data, error } = await supabase.rpc('book_summary', { p_company: companyId ?? null })
+/**
+ * The tiles over the list, FOR THE BOOK THAT IS SHOWING.
+ *
+ * THE FIRM: "'Capital handed over R438 769' includes R71 287 on KIS0007, which is paid in full."
+ * A figure about money nobody is collecting, added into the one the floor reads as what there is
+ * to collect. 'whole' is passed as null, which is the deliberate absence of the filter.
+ */
+export async function fetchBookSummary(
+  companyId?: string, book?: BookChoice,
+): Promise<BookSummary> {
+  const { data, error } = await supabase.rpc('book_summary', {
+    p_company: companyId ?? null,
+    p_book: !book || book === 'whole' ? null : book,
+  })
   if (error) throw new Error(error.message)
   const row = (Array.isArray(data) ? data[0] : data) as
-    { accounts: number; capital: number; clients: number; commission_drift: number } | undefined
+    { accounts: number; capital: number; outstanding: number
+      clients: number; commission_drift: number } | undefined
   return {
     accounts: Number(row?.accounts ?? 0),
     capital: Number(row?.capital ?? 0),
+    outstanding: Number(row?.outstanding ?? 0),
     clients: Number(row?.clients ?? 0),
     commissionDrift: Number(row?.commission_drift ?? 0),
   }
@@ -981,8 +1062,15 @@ export interface BookFacets {
  * in the worst direction, because the accounts carrying it become unfindable rather than
  * conspicuous. Aggregated in the database: a dozen rows come back whatever the book's size.
  */
-export async function fetchBookFacets(companyId?: string): Promise<BookFacets> {
-  const { data, error } = await supabase.rpc('book_facets', { p_company: companyId ?? null })
+export async function fetchBookFacets(
+  companyId?: string, book?: BookChoice,
+): Promise<BookFacets> {
+  /* THE FACETS FOLLOW THE BOOK TOO, or the filter panel offers a sub-status whose every account is
+     closed and the list it opens is empty. */
+  const { data, error } = await supabase.rpc('book_facets', {
+    p_company: companyId ?? null,
+    p_book: !book || book === 'whole' ? null : book,
+  })
   if (error) throw new Error(error.message)
   const rows = (data ?? []) as { kind: string; value: string; accounts: number }[]
   const of = (kind: string) => rows
@@ -1014,6 +1102,9 @@ export async function fetchViewCounts(input: {
   const n = (k: string) => Number((row as Record<string, unknown>)[k] ?? 0)
   return {
     whole_book: n('whole_book'),
+    active: n('active'),
+    on_hold: n('on_hold'),
+    closed: n('closed'),
     my_desk: n('my_desk'),
     unallocated: n('unallocated'),
     adrift: n('adrift'),

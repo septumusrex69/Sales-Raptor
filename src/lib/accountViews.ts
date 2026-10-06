@@ -15,6 +15,7 @@
  */
 
 import type { Department } from './departments'
+import { DEFAULT_BOOK } from './accountBooks.ts'
 
 export type AccountViewId =
   | 'whole_book'
@@ -43,7 +44,7 @@ export const ACCOUNT_VIEWS: AccountView[] = [
   {
     id: 'whole_book',
     label: 'Whole book',
-    hint: 'Every account, narrowed by nothing.',
+    hint: 'Every account in every book, narrowed by nothing. For finding one, not for working a list.',
     countKey: 'whole_book',
   },
   {
@@ -102,6 +103,20 @@ export const ACCOUNT_VIEWS: AccountView[] = [
  */
 export function viewParams(id: AccountViewId, currentUserId: string | null): URLSearchParams {
   const p = new URLSearchParams()
+  /*
+   * EVERY SHORTCUT IS A QUESTION ABOUT THE ACTIVE BOOK, AND SAYS SO IN THE URL.
+   *
+   * THE FIRM: "A frozen or closed account must never appear in a collector's queue or a dialler
+   * campaign." These counted and listed the whole table, so "Gone quiet 19" included accounts that
+   * were paid up, written off or frozen -- work nobody may do, drawn as work waiting, on the screen
+   * a collector works their day from. It matches the call-script hard stops.
+   *
+   * WRITTEN INTO THE PARAMS RATHER THAN FORCED IN THE QUERY, because the URL is the state: a
+   * shortcut somebody pastes to a colleague has to land on the same list, and a book applied
+   * invisibly would not travel with it. Whole book is the one that sets nothing, which is what
+   * makes it the search-and-audit view rather than a fifth queue.
+   */
+  if (id !== 'whole_book') p.set('book', DEFAULT_BOOK)
   switch (id) {
     case 'whole_book': break
     case 'my_desk': if (currentUserId) p.set('who', currentUserId); break
@@ -128,9 +143,18 @@ export function activeView(params: URLSearchParams, currentUserId: string | null
   const actual = new URLSearchParams(params)
   actual.delete('client')
   actual.delete('page')
+  /*
+   * THE BOOK IS NORMALISED BEFORE THE COMPARISON, because an absent `book` MEANS Active -- that is
+   * what parseBook decides and what the list then shows. Compared raw, a hand-typed or older
+   * `?who=<id>` would list exactly My desk and light nothing, which is the tab-says-one-thing,
+   * list-says-another failure this exact match exists to prevent, arrived at from the other side.
+   */
+  if (!actual.get('book')) actual.set('book', DEFAULT_BOOK)
 
   for (const view of ACCOUNT_VIEWS) {
     const want = viewParams(view.id, currentUserId)
+    /* Whole book is the one view that sets no book, so it is compared on the same footing. */
+    if (!want.get('book')) want.set('book', 'whole')
     if (sameParams(actual, want)) return view.id
   }
   return null
@@ -147,6 +171,11 @@ function sameParams(a: URLSearchParams, b: URLSearchParams): boolean {
 
 export interface ViewCounts {
   whole_book: number
+  /* THE THREE BOOKS, counted beside the shortcuts because the chooser and the shortcuts are read
+     in one glance and two round trips would let them disagree for a frame. */
+  active: number
+  on_hold: number
+  closed: number
   my_desk: number
   unallocated: number
   adrift: number

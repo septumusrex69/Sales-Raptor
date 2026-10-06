@@ -12,6 +12,7 @@
  * tool. Reload, back button, and a pasted link all have to land on the same list.
  */
 import type { AccountQuery } from './accountBook.ts'
+import { parseBook } from './accountBooks.ts'
 
 /** Relative windows, because nobody asks "since 17 July". They ask "in the last two months". */
 export const QUIET_CHOICES = [
@@ -45,6 +46,14 @@ export const STATUS_GROUPS = [
  * can turn off.
  */
 export const FILTER_PARAMS = [
+  /*
+   * `book` IS HERE AND IS NOT CLEARED LIKE THE REST -- see clearFilters. Every other param narrows
+   * a book; this one chooses which book is being narrowed, and "clear the filters" means "show me
+   * this whole book", not "show me every account that ever existed". Somebody standing on Closed
+   * who presses Clear is asking to see all of Closed.
+   */
+  'book',
+  'review',
   'status', 'sub', 'bucket', 'who', 'team', 'from', 'to',
   'adrift', 'never', 'quiet', 'presc', 'duplum', 'waiting', 'min', 'drift',
   /* The batch clears with the rest: somebody who came in from an approved handover and then
@@ -108,6 +117,23 @@ export function queryFromParams(
    */
   const handover = params.get('handover')
   if (handover) q.handoverId = handover
+
+  /*
+   * THE BOOK, AND IT IS ALWAYS SET. An absent or unknown value reads as Active rather than as the
+   * whole book: the screen opens on Active, and a URL that lost its parameter must land where the
+   * screen opens rather than quietly widening to accounts nobody may work.
+   */
+  q.book = parseBook(params.get('book'))
+
+  /* THE MANAGER'S WEEKLY QUEUE, inside On hold. `today` travels with it because applyAccountFilters
+     has no clock -- the same reason every other date in this file is a parameter. */
+  const review = params.get('review')
+  if (review === 'due' || review === 'unset') {
+    q.review = review
+    /* THE FIRM'S DAY, not UTC's. `toISOString` in Johannesburg is the previous date for the first
+       two hours of every morning, and a review queue is read first thing. */
+    q.today = today.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  }
 
   const group = params.get('status')
   if (group && STATUS_GROUPS.some((g) => g.value === group)) {
@@ -254,13 +280,26 @@ export function filterChips(params: URLSearchParams, names: ChipNames = {}): Fil
   if (min !== undefined && min > 0) out.push({ param: 'min', label: `${money(min)} or more outstanding` })
 
   if (params.get('drift') === '1') out.push({ param: 'drift', label: 'Off their mandate rate' })
+  /* THE REVIEW QUEUE GETS A CHIP LIKE EVERY OTHER NARROWING. Without one somebody lands on a short
+     On hold list with nothing on screen saying why it is short. The BOOK gets none, on purpose:
+     it is the chooser above the list, not a narrowing, and a cross on it would have nowhere to
+     clear it to. */
+  if (params.get('review') === 'due') out.push({ param: 'review', label: 'Review date has passed' })
+  if (params.get('review') === 'unset') out.push({ param: 'review', label: 'No review date set' })
 
   return out
 }
 
-/** A copy of the params with every filter this screen owns removed. Search and client survive. */
+/**
+ * A copy of the params with every filter this screen owns removed. Search and client survive.
+ *
+ * AND SO DOES THE BOOK. Clearing means "show me this whole book", not "show me every account that
+ * ever existed": somebody standing on Closed who presses Clear is asking to see all of Closed, and
+ * dropping them onto the active book would be answering a different question. It is the one param
+ * here that chooses what is being narrowed rather than narrowing it.
+ */
 export function clearedFilters(params: URLSearchParams): URLSearchParams {
   const next = new URLSearchParams(params)
-  for (const key of FILTER_PARAMS) next.delete(key)
+  for (const key of FILTER_PARAMS) if (key !== 'book') next.delete(key)
   return next
 }
