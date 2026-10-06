@@ -28,6 +28,8 @@ import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import { canHandOutAccounts } from '../../lib/permissions'
+import { useColumnWidths } from '../../lib/columnWidths'
+import { ResizableTh } from '../../components/ui/ResizableTh'
 import { formatCurrency, formatDate } from '../../data/mockData'
 
 /*
@@ -99,6 +101,21 @@ export function AccountsList() {
 
   const companyId = params.get('client') ?? undefined
   const companyName = companies.find((c) => c.id === companyId)?.name
+  /*
+   * HOW WIDE EACH COLUMN IS, set by whoever is reading -- see columnWidths.ts. The defaults are
+   * what the columns need at a normal book's lengths; a client called "Highveld Glass & Aluminium
+   * (Pty) Ltd" is one double-click on the Debtor edge away from a single line.
+   */
+  const { widths, setWidth, reset: resetWidths, changed: widthsChanged } = useColumnWidths(
+    'raptor.accounts.columns.v1',
+    {
+      account: 150, debtor: 210, client: 190, handed: 120, capital: 110, fees: 90, interest: 100,
+      paid: 100, balance: 120, rate: 80, position: 140, desk: 150, worked: 130,
+    },
+  )
+  /* The Client column is left out when the list is one client's -- the same rule as its heading. */
+  const visibleColumns = ['account', 'debtor', ...(companyId ? [] : ['client']), 'handed', 'capital',
+    'fees', 'interest', 'paid', 'balance', 'rate', 'position', 'desk', 'worked']
   const canSeeOthers = canHandOutAccounts(currentUser)
 
   /*
@@ -642,7 +659,15 @@ export function AccountsList() {
               310 accounts does nothing when pressed, and a control that does nothing is one
               people stop trusting the rest of.
             */}
-            <span className="ml-auto flex items-center gap-1">
+            {/* ONLY WHEN A WIDTH HAS BEEN CHANGED: a reset that does nothing is a button somebody
+                presses to find out what it does. */}
+            {widthsChanged && (
+              <button type="button" onClick={resetWidths}
+                className="ml-auto text-slate-400 underline hover:text-slate-600">
+                Reset column widths
+              </button>
+            )}
+            <span className={`${widthsChanged ? 'ml-3' : 'ml-auto'} flex items-center gap-1`}>
               <span className="text-slate-400">Show</span>
               {PAGE_SIZES.filter((n, i) => i === 0 || n <= total * 2).map((n) => (
                 <button key={n} type="button" onClick={() => setPageSize(n)}
@@ -705,7 +730,19 @@ export function AccountsList() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/*
+              WIDTHS THE PERSON SETS, NOT THE SCREEN. The table was `w-full` with automatic layout,
+              which squeezed every column to fit the window -- a long debtor name went onto four
+              lines. Fixed layout with a width per column, and the table as wide as their sum (never
+              narrower than the card), so a column is as wide as somebody made it and the list
+              scrolls sideways instead. See columnWidths.ts.
+            */}
+            <table className="min-w-full text-sm"
+              style={{ tableLayout: 'fixed', width: visibleColumns.reduce((t, k) => t + widths[k], canAllocate ? 40 : 0) }}>
+              <colgroup>
+                {canAllocate && <col style={{ width: 40 }} />}
+                {visibleColumns.map((k) => <col key={k} style={{ width: widths[k] }} />)}
+              </colgroup>
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
                   {canAllocate && (
@@ -714,8 +751,8 @@ export function AccountsList() {
                         onChange={togglePage} aria-label="Select every account on this page" />
                     </th>
                   )}
-                  <th className="px-4 py-2.5 font-medium">Account</th>
-                  <th className="px-4 py-2.5 font-medium">Debtor</th>
+                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className="px-4 py-2.5 font-medium">Account</ResizableTh>
+                  <ResizableTh label="Debtor" width={widths.debtor} onWidth={(px) => setWidth('debtor', px)} className="px-4 py-2.5 font-medium">Debtor</ResizableTh>
                   {/*
                     WHOSE BOOK THE ACCOUNT IS ON, at the firm's asking, and beside the debtor
                     because the two names are the two parties to the debt.
@@ -725,11 +762,11 @@ export function AccountsList() {
                     tile and in the scope line. A column of one repeated value is the "warning that
                     fires when nothing is wrong" in table form.
                   */}
-                  {!companyId && <th className="px-4 py-2.5 font-medium">Client</th>}
+                  {!companyId && <ResizableTh label="Client" width={widths.client} onWidth={(px) => setWidth('client', px)} className="px-4 py-2.5 font-medium">Client</ResizableTh>}
                   {/* THE FIRM: "something on there that can be added is the hand-over date as
                       well." It is how old the matter is, which is the first thing asked of a row
                       nobody has worked -- and it is what prescription runs from. */}
-                  <th className="px-4 py-2.5 font-medium">Handed over</th>
+                  <ResizableTh label="Handed over" width={widths.handed} onWidth={(px) => setWidth('handed', px)} className="px-4 py-2.5 font-medium">Handed over</ResizableTh>
                   {/*
                     THE FIVE FIGURES THE FIRM ASKED FOR, IN THE ORDER THEY ASKED FOR THEM:
                     "capital, fees, interest, paid, balance." They build to the balance left to
@@ -737,15 +774,15 @@ export function AccountsList() {
                     the same words the account's own summary uses, so a collector moving between
                     the two is reading one statement rather than learning a second layout.
                   */}
-                  <th className="px-4 py-2.5 font-medium text-right">Capital</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Fees</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Interest</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Paid</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Balance</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Rate</th>
-                  <th className="px-4 py-2.5 font-medium">Position</th>
-                  <th className="px-4 py-2.5 font-medium">Desk</th>
-                  <th className="px-4 py-2.5 font-medium">Last worked</th>
+                  <ResizableTh label="Capital" width={widths.capital} onWidth={(px) => setWidth('capital', px)} className="px-4 py-2.5 font-medium text-right">Capital</ResizableTh>
+                  <ResizableTh label="Fees" width={widths.fees} onWidth={(px) => setWidth('fees', px)} className="px-4 py-2.5 font-medium text-right">Fees</ResizableTh>
+                  <ResizableTh label="Interest" width={widths.interest} onWidth={(px) => setWidth('interest', px)} className="px-4 py-2.5 font-medium text-right">Interest</ResizableTh>
+                  <ResizableTh label="Paid" width={widths.paid} onWidth={(px) => setWidth('paid', px)} className="px-4 py-2.5 font-medium text-right">Paid</ResizableTh>
+                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-4 py-2.5 font-medium text-right">Balance</ResizableTh>
+                  <ResizableTh label="Rate" width={widths.rate} onWidth={(px) => setWidth('rate', px)} className="px-4 py-2.5 font-medium text-right">Rate</ResizableTh>
+                  <ResizableTh label="Position" width={widths.position} onWidth={(px) => setWidth('position', px)} className="px-4 py-2.5 font-medium">Position</ResizableTh>
+                  <ResizableTh label="Desk" width={widths.desk} onWidth={(px) => setWidth('desk', px)} className="px-4 py-2.5 font-medium">Desk</ResizableTh>
+                  <ResizableTh label="Last worked" width={widths.worked} onWidth={(px) => setWidth('worked', px)} className="px-4 py-2.5 font-medium">Last worked</ResizableTh>
                 </tr>
               </thead>
               <tbody>
@@ -774,9 +811,10 @@ export function AccountsList() {
                       </td>
                       {/* TRUNCATED, WITH THE WHOLE NAME ON THE TITLE. Client names run long --
                           "Highveld Glass & Aluminium (Pty) Ltd" -- and a wrapped one doubles the
-                          height of its row on a page of a hundred. */}
+                          height of its row on a page of a hundred. How much shows is the column's
+                          width now, which the reader sets: double-click its edge for the whole name. */}
                       {!companyId && (
-                        <td className="px-4 py-2.5 text-slate-500 max-w-[11rem] truncate"
+                        <td className="px-4 py-2.5 text-slate-500 truncate"
                           title={a.companyName ?? undefined}>
                           {a.companyName ?? '—'}
                         </td>

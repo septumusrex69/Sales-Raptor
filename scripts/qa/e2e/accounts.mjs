@@ -1034,6 +1034,72 @@ try {
 
   /* ---------- nothing broke on the way ---------- */
 
+  /* ---------- columns you can widen, and fit to what is in them ---------- */
+
+  /*
+   * THE FIRM: "if it's a long thing, it squeezes it in. So make it so that you can adjust these
+   * columns. And if you double click on the column on the top, it expands so that you can read it."
+   * Only a browser can show this: a width is a layout, and a layout is what source-reading cannot
+   * see. A fresh page so no overlay from the hand-out above is in the way.
+   */
+  await page.goto(`http://localhost:${PORT}/accounts?who=nobody`)
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15000 })
+  const debtorTh = page.locator('thead th', { hasText: /^Debtor$/ }).first()
+  const edge = page.getByRole('separator', { name: /Resize the Debtor column/ })
+  t.check('every heading but the tick box can be resized', await page.getByRole('separator').count(), 13)
+  const debtorWidth = async () => Math.round((await debtorTh.boundingBox())?.width ?? 0)
+  /* The debtor cells: the same index as the heading, read in the page. */
+  const debtorCells = () => page.evaluate(() => {
+    const th = [...document.querySelectorAll('thead th')].find((h) => h.textContent?.trim() === 'Debtor')
+    const i = th ? th.cellIndex : -1
+    return [...document.querySelectorAll('tbody tr')].map((r) => {
+      const c = r.cells[i]
+      if (!c) return { lines: 0, fits: true }
+      const range = document.createRange(); range.selectNodeContents(c)
+      const lines = new Set([...range.getClientRects()].map((q) => Math.round(q.top))).size
+      return { lines, fits: c.scrollWidth <= c.clientWidth + 1 }
+    })
+  })
+
+  /* DRAG: the edge moves the column, by about what the pointer moved. */
+  const startWidth = await debtorWidth()
+  const edgeBox = await edge.boundingBox()
+  await page.mouse.move(edgeBox.x + edgeBox.width / 2, edgeBox.y + edgeBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(edgeBox.x + edgeBox.width / 2 + 120, edgeBox.y + edgeBox.height / 2, { steps: 6 })
+  await page.mouse.up()
+  const dragged = await debtorWidth()
+  t.ok(`dragging the edge widens the column (${startWidth}px -> ${dragged}px)`, dragged >= startWidth + 100)
+
+  /* SQUEEZE IT, so names have to wrap -- the firm's four-line debtor, made on purpose. */
+  const box2 = await edge.boundingBox()
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box2.x - 600, box2.y + box2.height / 2, { steps: 6 })
+  await page.mouse.up()
+  const squeezed = await debtorCells()
+  t.ok(`squeezed, some debtor names wrap (${Math.max(...squeezed.map((c) => c.lines))} lines)`,
+    squeezed.some((c) => c.lines > 1 || !c.fits))
+
+  /* DOUBLE-CLICK THE EDGE: fitted to the longest name, every one on a single line. */
+  await edge.dblclick()
+  await page.waitForTimeout(200)
+  const fitted = await debtorCells()
+  t.ok('double-clicking the edge fits every debtor name on one line',
+    fitted.length > 0 && fitted.every((c) => c.lines <= 1 && c.fits))
+  const fittedWidth = await debtorWidth()
+  await t.shot(page, '40-accounts-columns-fitted')
+
+  /* REMEMBERED on this device, and undone in one press. */
+  await page.reload()
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15000 })
+  t.ok(`...and the width survives a reload (${fittedWidth}px -> ${await debtorWidth()}px)`,
+    Math.abs((await debtorWidth()) - fittedWidth) <= 2)
+  const resetLink = page.getByRole('button', { name: 'Reset column widths' })
+  t.ok('a changed width offers a reset', await resetLink.isVisible())
+  await resetLink.click()
+  t.check('...which puts the defaults back and goes away', await resetLink.count(), 0)
+
   const real = errors.filter((e) => !/favicon|404 \(Not Found\)/i.test(e))
   t.check('no console errors', real.length, 0)
   if (real.length) console.log('  console:', real.slice(0, 5))
