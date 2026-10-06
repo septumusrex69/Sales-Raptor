@@ -27412,3 +27412,401 @@ begin
   new.correspondent := old.correspondent;
   return new;
 end $$;
+
+
+-- ============================================================================
+-- A RECEIPT SWORDFISH ALREADY PAID OVER IS NEVER SPLIT, POSTED OR MOVED (prompt 8).
+--
+-- Found on staging re-importing the test book: the import writes settled receipts approved, the
+-- insert trigger ran allocate_payment on every one, and allocate_payment never asked
+-- paid_over_in_swordfish -- only approve_payment did, and imported receipts never pass through it.
+-- 90 payments became 90 allocations, 90 extra receipt fees (R21 685,76), 185 trust creditor entries
+-- (R297 506,84) and 62 engine interest postings, and the import then died on the interest index.
+--
+-- Three guards. allocate_payment returns before anything is posted, which covers every path that
+-- splits (insert trigger, approve_payment, reallocate_account); reverse_payment and
+-- move_payment_to_cycle refuse outright. check-swordfish-remitted holds all three, and
+-- swordfish_remitted_leaks() counts anything that got through anyway.
+-- ============================================================================
+
+create or replace function public.allocate_payment(p_payment_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_acct public.debtor_accounts%rowtype;
+  v_cutover timestamptz;
+  v_vat numeric;
+  v_fee_rate numeric;
+  v_fee_cap numeric;
+  v_tariff_from date;
+  b record;
+  o record;
+  k record;
+  v_rate numeric;
+  v_bands jsonb;
+  v_cumulative numeric;
+  v_mandate timestamptz;
+  s record;
+  v_commission numeric;
+  v_commission_vat numeric;
+  v_status text := 'allocated';
+  v_to_client numeric;
+  v_due_to_bf numeric;
+  v_id uuid;
+  v_day date;
+  v_accrued numeric;
+  v_recoverable numeric;
+  v_interest_retained numeric;
+  v_costs_taken numeric;
+begin
+  select * into v_pay from public.account_payments where id = p_payment_id;
+  if not found then return null; end if;
+
+  /* THREE REASONS NOT TO TOUCH IT, and none of them is an error: invented data, money already
+     given back, and history that Swordfish settled and a client has been paid on. */
+  /*
+   * SWORDFISH ALREADY PAID THIS ONE OVER, AND THAT IS THE FIRST GATE -- before the interest is
+   * brought up to date, before the receipt fee, before anything is posted at all.
+   *
+   * The comment below always named this reason and the code never asked it. The import writes a
+   * settled receipt already approved, the insert trigger called straight in here, and every one
+   * was split: a second receipt fee on top of the one Swordfish charged, the whole of the imported
+   * history posted to trust as money still owed to clients, and the open-period interest the
+   * engine posts first collided with the Swordfish interest rows the import wrote next, which is
+   * what stopped it (prompt 8, staging, 6 Oct 2026). Every path that splits comes through here --
+   * the insert trigger, approve_payment, reallocate_account -- so this one line covers them all.
+   */
+  if v_pay.paid_over_in_swordfish then return null; end if;
+
+  if v_pay.is_demo or v_pay.reversed_at is not null then return null; end if;
+
+  /*
+   * A FOURTH REASON, AND IT IS THE ORDINARY ONE: not approved yet.
+   *
+   * THE FIRM: "there should be a state of payments and payments that should be approved... on a
+   * daily basis." Until now a receipt was live the instant it landed -- the balance moved and the
+   * payover run could carry it to a client before anybody had looked.
+   *
+   * AND THE PAYOVER RUN NEEDS NO SECOND FILTER, which is why the gate is here. A run gathers
+   * ALLOCATIONS; an unapproved payment has none, so it is invisible to remittance by construction
+   * rather than by a rule somebody has to remember in two places.
+   */
+  if v_pay.approved_at is null then return null; end if;
+
+  select vat_rate, finance_cutover_at into v_vat, v_cutover from public.firm_settings limit 1;
+  if v_cutover is null or v_pay.created_at < v_cutover then return null; end if;
+
+  select * into v_acct from public.debtor_accounts where id = v_pay.account_id;
+  if not found then return null; end if;
+
+  v_day := (v_pay.received_at at time zone 'Africa/Johannesburg')::date;
+
+  /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. */
+  select rate, cap_excl_vat, effective_from into v_fee_rate, v_fee_cap, v_tariff_from
+    from public.annexure_b_tariffs
+   where item = '9'
+     and v_pay.received_at::date >= effective_from
+     and (effective_to is null or v_pay.received_at::date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then
+    raise exception 'No Annexure B item 9 tariff covers %', v_pay.received_at::date;
+  end if;
+
+  /*
+   * POST THE OPEN PERIOD FIRST, OR THERE IS NOTHING FOR THE SPLIT TO GIVE INTEREST TO.
+   *
+   * THE FIRM: "there was zero interest captured... I don't even know if the interest is actually
+   * running." It ran on the SCREEN and nowhere else. `engine_balances` adds up
+   * account_interest_accruals and nothing else, so an account whose interest has only ever been
+   * COMPUTED has no row there, `finance_split` was handed an interest balance of nought, and every
+   * cent of every payment went to costs and capital.
+   *
+   * TO THE PAYMENT'S OWN DAY, never to today, and EXCLUDING THIS PAYMENT: the accrual is what the
+   * debt earned UP TO the moment the money arrived, not after it.
+   *
+   * AND IT IS WHY engine_balances IS ASKED WITH NOTHING PENDING BELOW: by this line the open
+   * period is real rows, so the in duplum ceiling already counts it. Only the dry run has to say
+   * so explicitly.
+   */
+  perform public.accrue_interest_to(v_acct.id, v_day, p_payment_id);
+
+  select * into b from public.engine_balances(v_acct.id, p_payment_id);
+
+  select * into s from public.finance_split(
+    v_pay.amount, b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description,
+    amount_excl_vat, vat_rate, vat_amount, counts_toward_fee_cap,
+    incurred_at, source, payment_id, billed, action_code
+  ) values (
+    v_acct.id, '9', v_tariff_from, 'Receipt of instalment',
+    s.fee_excl, v_vat * 100, s.fee_vat, false,
+    v_pay.received_at, 'raptor', p_payment_id, true, 'receipt'
+  ) on conflict do nothing;
+
+  /*
+   * THE FIVE FIGURES BEHIND EACH LINE OF THE FEES SIDE, WRITTEN ONTO THE ALLOCATION.
+   *
+   * THE FIRM: "you can add whatever you need for the administrator to ensure that we can double
+   * check every single thing that comes in." A posted allocation used to carry the four takings
+   * and nothing they came out of, so the only way to check one afterwards was to re-derive it
+   * against a book that had moved -- which answers a different question every day.
+   *
+   * `open_interest` IS ASKED AGAIN AND THAT IS NOT A SECOND OPINION: accrue_interest_to has just
+   * written the open period as real rows, so this call returns what is still open, which is
+   * nought. It is here for the `accrued` figure on an account whose ceiling clipped it.
+   */
+  select * into o from public.open_interest(v_acct.id, v_day, p_payment_id);
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = v_acct.id;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+
+  select coalesce(sum(a.to_interest), 0), coalesce(sum(a.to_costs), 0)
+    into v_interest_retained, v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = v_acct.id and a.status <> 'reversed'
+     and a.payment_id is distinct from p_payment_id;
+
+  /*
+   * WHICH FEE THE COSTS HALF ACTUALLY PAID. `to_receipt_fee` and `to_fees` have been columns on
+   * this table since it was built and were written as 0, 0 ever since -- so every payment the firm
+   * would ever have approved recorded no answer at all to "did this pay its own receipt fee?"
+   * fee_split is the one place that is worked out, shared with preview_allocation so the approval
+   * screen and the ledger cannot disagree. NOTHING PENDING: the accrual is already a row.
+   */
+  select * into k from public.fee_split(
+    v_acct.id, p_payment_id, s.fee_excl + s.fee_vat, v_day, v_costs_taken, s.to_costs, 0);
+
+  select c.commission_rate, c.commission_bands, c.mandate_signed_at
+    into v_rate, v_bands, v_mandate
+    from public.companies c where c.id = v_acct.company_id;
+  v_rate := coalesce(v_acct.commission_rate, v_rate);
+
+  v_cumulative := 0;
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_acct.company_id
+       and a.status <> 'reversed'
+       and a.payment_id <> p_payment_id
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  v_commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+
+  if v_commission is null then
+    v_status := 'needs_rate';
+    v_commission := 0;
+  end if;
+  v_commission_vat := round(v_commission * v_vat, 2);
+
+  if v_pay.paid_to_client then
+    v_to_client := 0;
+    v_due_to_bf := s.to_interest + s.to_costs + v_commission;
+  else
+    v_to_client := s.to_capital - v_commission - v_commission_vat;
+    v_due_to_bf := 0;
+  end if;
+
+  insert into public.payment_allocations (
+    payment_id, account_id, payment_amount, half_a,
+    receipt_fee_excl, receipt_fee_vat,
+    to_interest, to_costs, to_capital, excess_credit,
+    to_receipt_fee, to_fees,
+    commission, commission_vat, to_client, due_to_bf,
+    capital_before, capital_after, commission_rate, vat_rate,
+    paid_to_client, status, engine_version, computed_at,
+    interest_total, interest_cant, interest_retained, interest_before, interest_after,
+    rf_total, rf_cant, rf_retained,
+    fees_total, fees_cant, fees_retained,
+    costs_before, costs_after
+  ) values (
+    p_payment_id, v_acct.id, v_pay.amount, s.half_a,
+    s.fee_excl, s.fee_vat,
+    s.to_interest, s.to_costs, s.to_capital, s.excess,
+    k.to_receipt_fees, k.to_fees,
+    v_commission, v_commission_vat, v_to_client, v_due_to_bf,
+    b.capital, b.capital - s.to_capital, v_rate, v_vat,
+    v_pay.paid_to_client, v_status, 'v2-5050-split', now(),
+    v_accrued, greatest(v_accrued - v_recoverable, 0), v_interest_retained,
+    b.interest, b.interest - s.to_interest,
+    k.rf_total, k.rf_cant, k.rf_retained,
+    k.fees_total, k.fees_cant, k.fees_retained,
+    b.costs, b.costs + s.fee_excl + s.fee_vat - s.to_costs
+  ) returning id into v_id;
+
+  update public.debtor_accounts
+     set capital_outstanding = greatest(b.capital - s.to_capital, 0),
+         last_payment_at = greatest(coalesce(last_payment_at, v_pay.received_at), v_pay.received_at)
+   where id = v_acct.id;
+
+  return v_id;
+end $$;
+
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') then
+    raise exception 'You are not allowed to reverse a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+  /*
+   * NOR ONE SWORDFISH ALREADY PAID OVER. Reversing writes a fresh copy of an approved payment for
+   * the engine to split, and the copy does not carry the flag -- so this would have turned frozen
+   * history into a Raptor receipt, fees, trust and all. Imported history is frozen at what was
+   * imported (CLAUDE.md); a correction to it is the firm's decision, made case by case.
+   */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It is history and cannot be reversed here.'
+      using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id
+    ) values (
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo, v_pay.bank_line_id, auth.uid(), v_pay.id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+create or replace function public.move_payment_to_cycle(p_payment uuid, p_period_start date)
+returns date
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_at timestamptz;
+  v_run record;
+begin
+  if not public.has_capability('payment.move') then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  -- STAGING ONLY, ASKED IN THE DATABASE, for the same reason reset_payover_run is: this moves
+  -- money between two invoices, and a browser guard is a courtesy rather than a boundary.
+  if not public.is_staging_database() then
+    raise exception 'Moving a payment between cycles is a testing control and this is not the staging database.'
+      using errcode = '42501';
+  end if;
+  if p_period_start is distinct from public.payover_cycle_start(
+       (p_period_start::timestamp at time zone 'Africa/Johannesburg')) then
+    raise exception 'A cycle starts on the 11th; % does not.', to_char(p_period_start, 'DD Mon YYYY')
+      using errcode = '22023';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  /* A RECEIPT SWORDFISH PAID OVER BELONGS TO NO RAPTOR CYCLE, and moving it into one is the
+     first step to paying it out a second time. */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It belongs to no Raptor cycle.'
+      using errcode = '22023';
+  end if;
+
+  -- AN INVOICED PAYMENT DOES NOT MOVE. Its figures are on a remittance a client has had, and
+  -- taking it out from under them is exactly what the reversal-as-a-negative-line rule exists to
+  -- prevent. Reset the run first if that is really what is wanted.
+  select r.invoice_number, r.status into v_run
+    from public.payment_allocations a
+    join public.payover_runs r on r.id = a.payover_run_id
+   where a.payment_id = p_payment and r.status in ('approved', 'sent', 'paid')
+   limit 1;
+  if v_run.invoice_number is not null then
+    raise exception 'That payment is on %, which is %. Reset that run first.',
+      v_run.invoice_number, v_run.status using errcode = '22023';
+  end if;
+
+  -- THE CYCLE IS DECIDED BY created_at, NOT BY THE RECEIVED DATE SOMEBODY TYPED. build_payover_run
+  -- claims on `p.created_at between the cycle's bounds`, so a backdated receipt still lands in the
+  -- cycle it was captured in -- which is right for an audit trail and is exactly what makes a
+  -- carry-forward or a negative payover untestable without this. Noon, so no timezone edge can
+  -- push it into the neighbouring cycle.
+  v_at := ((p_period_start + 15)::timestamp + time '12:00') at time zone 'Africa/Johannesburg';
+
+  /* THE ALLOCATION DATE MOVES; created_at DOES NOT.
+     This used to rewrite created_at, and said so honestly because created_at was what
+     build_payover_run claimed on. It was always the wrong column to move: created_at is when
+     the ROW was written and is the audit trail, and a testing control that edits the audit
+     trail leaves no way to tell a moved receipt from one captured that day. allocated_on is
+     the column that actually means "which payover cycle this was processed into", so moving a
+     payment between cycles is now one honest write of the field that decides it. */
+  update public.account_payments set allocated_on = v_at::date where id = p_payment;
+  -- AND IT LETS GO OF ANY OPEN RUN, or the next build finds it already claimed and silently
+  -- produces a run with the payment missing from both cycles.
+  update public.payment_allocations set payover_run_id = null where payment_id = p_payment;
+
+  return p_period_start;
+end $$;
+
+/*
+ * ANYTHING THAT GOT THROUGH ANYWAY: four counts that must all be nil.
+ *
+ * A receipt Swordfish already paid over is history. It may carry no allocation, no Raptor receipt
+ * fee (item 9 is Swordfish's, already charged), no trust creditor entry (the money left trust in
+ * Swordfish), and no engine interest posting. scripts/qa/live/check-swordfish-leaks.mjs calls this
+ * and fails on any non-zero count.
+ *
+ * ENGINE INTEREST CARRIES NO PAYMENT, so it is counted by account: the engine posts only inside
+ * allocate_payment, so an engine posting on an account where no Raptor receipt has ever been split
+ * can only have come from a remitted one.
+ *
+ * SERVICE ROLE ONLY. It reads the whole book; the script runs with the service key and nobody in
+ * the app needs it.
+ */
+create or replace function public.swordfish_remitted_leaks()
+returns table (allocations bigint, receipt_fees bigint, trust_entries bigint, engine_interest bigint)
+language sql stable security definer set search_path to 'public'
+as $$
+  with r as (select id from account_payments where paid_over_in_swordfish),
+  ra as (select a.id from payment_allocations a join r on r.id = a.payment_id)
+  select
+    (select count(*) from ra),
+    (select count(*) from account_fees f join r on r.id = f.payment_id where f.source = 'raptor'),
+    (select count(*) from trust_creditor_entries t
+      where t.payment_id in (select id from r) or t.allocation_id in (select id from ra)),
+    (select count(*) from account_interest_accruals i
+      where i.source = 'engine'
+        and not exists (
+          select 1 from payment_allocations a join account_payments p on p.id = a.payment_id
+           where a.account_id = i.account_id and not p.paid_over_in_swordfish))
+$$;
+
+revoke execute on function public.swordfish_remitted_leaks() from public, anon, authenticated;
+grant execute on function public.swordfish_remitted_leaks() to service_role;
