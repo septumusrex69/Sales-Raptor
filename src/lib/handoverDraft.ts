@@ -605,7 +605,9 @@ export async function approveDraft(input: {
    * for the same debt.
    */
   const built = going.map((row) => {
-    const debtor = toDebtorInput(row.values, row.planned?.defaultDate ?? null, clientRate)
+    /* HANDED OVER TODAY, the day this is approved; the sheet's date of default is a record
+       (prompt 11). `input.today` is the firm's day in SAST -- see firmToday at the callers. */
+    const debtor = toDebtorInput(row.values, row.planned?.defaultDate ?? null, clientRate, input.today)
     /*
      * THE SUBSTITUTE DATE, WHERE THE PLANNER SET ONE. THE FIRM: "when it's accepted it will be
      * minimum 30 days before handover -- let's make it default three months before handover."
@@ -615,11 +617,12 @@ export async function approveDraft(input: {
      * own `values` are left alone: that is what the client sent, it is what they have to correct,
      * and overwriting it would erase the thing the query is about.
      *
-     * handoverDate as well as the ledger's opening date -- they are one field on an account, and
-     * splitting them here would open the ledger on one date and count prescription from another.
+     * THE DEFAULT DATE ONLY, since prompt 11. The substitute stands in for the client's date of
+     * default, which is now a record; the handover date is the day of approval whatever the sheet
+     * said, so a missing default no longer moves when interest starts.
      */
     if (row.planned?.defaultDateUsed) {
-      debtor.handoverDate = row.planned.defaultDateUsed
+      debtor.defaultDate = row.planned.defaultDateUsed
       substituted.push(row.values.client_reference ?? `row ${row.line}`)
     }
     if (!debtor.accountNumber.trim()) {

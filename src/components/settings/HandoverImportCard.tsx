@@ -37,8 +37,11 @@ import {
 } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
 import { needsMandate } from '../../lib/mandateRule'
+import { firmToday } from '../../lib/dateLabels'
 
-const today = () => new Date().toISOString().slice(0, 10)
+/* THE FIRM'S DAY, IN SAST -- it becomes every new account's handover date (prompt 11), and the UTC
+   day is yesterday until two in the morning. */
+const today = () => firmToday()
 
 /** Which of this screen's actions is running. See the note on `busy`. */
 type BusyJob = 'load' | 'read' | 'hold' | 'approve' | 'discard' | 'undo'

@@ -289,7 +289,7 @@ export async function runOneStep(
    */
   const position = {
     capitalHandedOver: Number(account.capital_handed_over ?? 0),
-    handoverDate: account.opening_as_at ?? null,
+    handoverDate: account.handover_date ?? account.opening_as_at ?? null,
     ledgers: ledgerRes,
     /* IN DUPLUM IS NO LONGER PASSED, and this line is why the rest of the app was wrong. It said
        `true` unconditionally -- correctly, because the ceiling has no exception -- while the
@@ -375,7 +375,7 @@ export async function runOneStep(
   const values = accountMergeValues({
     account: {
       caseNumber: account.case_number ?? null,
-      handoverDate: account.opening_as_at ?? null,
+      handoverDate: account.handover_date ?? account.opening_as_at ?? null,
       /* WHAT THE CLIENT HANDED US, which is neither the capital still outstanding nor the balance
          owed today. Left off, {{balance_handover}} stood unresolved on every notice the runner
          sent -- and on the summary-of-account email it is the first of the three figures. */

@@ -169,10 +169,12 @@ ok('...and four are counted instead', /4 accounts/.test(many[0].message) && !/\(
 /* ---------- it is actually wired in ---------- */
 
 const lib = readFileSync('src/lib/handoverDraft.ts', 'utf8')
-/* THE ACCOUNT OPENS ON THE SUBSTITUTE. Without this the message says one date and the ledger
-   uses another, which is worse than refusing the row. */
-ok('the account opens on the substituted date',
-  /debtor\.handoverDate = row\.planned\.defaultDateUsed/.test(lib))
+/* THE SUBSTITUTE IS THE DATE OF DEFAULT ON RECORD -- and, since prompt 11, ONLY that. The account
+   is handed over on the day of approval whatever the sheet said ("interest runs from the date of
+   handover, never from the date of default"), so a substituted default moves no interest. */
+ok('the substituted date is the date of default on record',
+  /debtor\.defaultDate = row\.planned\.defaultDateUsed/.test(lib))
+ok('...and never the handover date', !/debtor\.handoverDate = row\.planned/.test(lib))
 ok('...and only where the planner set one', /if \(row\.planned\?\.defaultDateUsed\)/.test(lib))
 ok('Communications is notified after the accounts are open',
   lib.indexOf('communicationsNotices({') > lib.indexOf('createDebtorAccount('))

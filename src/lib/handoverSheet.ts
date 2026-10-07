@@ -109,7 +109,11 @@ export const HANDOVER_COLUMNS: HandoverColumn[] = [
   {
     key: 'default_date', label: 'Date of default', group: 'The account', kind: 'date',
     required: true, was: ['Date of Default'],
-    note: 'Day/month/year. The day the account fell into default \u2014 in duplum runs from here.',
+    /* A RECORD SINCE PROMPT 11: the account is handed over, and interest runs, from the day the
+       batch is approved -- "never from the date of default". The runner and the page both read
+       handover_date for {{handover_date}} too. */
+    note: 'Day/month/year. The day the account fell into default, kept on record. Interest runs '
+      + 'from the day we take the handover, not from this.',
   },
   /*
    * THE LAST PAYMENT, NOT "THE INTERRUPTOR". At the firm's instruction: "remove the things about

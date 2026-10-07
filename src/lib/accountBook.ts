@@ -154,7 +154,13 @@ export interface DebtorAccount {
   clientActionDue: string | null
   bucket: string | null
   writeOffReason: string | null
+  /** The day the account was handed over -- interest and the ledger run from here (prompt 11). */
   handoverDate: string | null
+  /**
+   * The client's date of default, off the handover sheet, kept as a RECORD (prompt 11). Nothing
+   * accrues from it. Null on Swordfish imports and on anything added before it existed.
+   */
+  defaultDate: string | null
   /** The three the listing notice is a record of. Null until the submission has actually gone. */
   listingDate: string | null
   listingReference: string | null
@@ -163,8 +169,9 @@ export interface DebtorAccount {
    * When the ROW was written -- which for an imported account is the day the handover was
    * approved, and is not the same question as handoverDate.
    *
-   * `handover_date` is the day the debt fell due; everything the account is measured by runs from
-   * it. This is the day it reached Raptor. The timeline shows both, at the firm's asking: "on the
+   * `handover_date` is the day the account was handed over; interest and the ledger run from it
+   * (the date of default is `default_date`, a record -- prompt 11). This is the day it reached
+   * Raptor. The timeline shows both, at the firm's asking: "on the
    * activity timeline it doesn't show which date it's imported -- date it handed over, and
    * imported."
    */
@@ -275,6 +282,7 @@ const toAccount = (r: any): DebtorAccount => ({
   bucket: r.bucket,
   writeOffReason: r.write_off_reason,
   handoverDate: r.handover_date,
+  defaultDate: r.default_date ?? null,
   /* Named here like every other column -- one missing from this mapper reads as undefined for
      ever and the listing notice would quietly print a placeholder at a debtor. */
   listingDate: r.listing_date,

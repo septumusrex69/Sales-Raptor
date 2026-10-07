@@ -113,8 +113,10 @@ const RANK: Record<TimelineKind, number> = {
  * date it handed over, and imported."
  */
 export interface AccountOpening {
-  /** The day the debt fell due. Everything the account is measured by runs from it. */
+  /** The day the account was handed over. Interest and the ledger run from it (prompt 11). */
   handoverDate: string | null
+  /** The client's date of default, kept as a record; nothing accrues from it. */
+  defaultDate?: string | null
   /** The day the row was written -- for an imported account, when the handover was approved. */
   importedAt: string | null
   /** The batch it came in on, where it came in on one. */
@@ -182,9 +184,13 @@ export function buildTimeline(
       at,
       title: 'Handed over',
       detail: [
+        /* TWO DATES, AND SAID AS TWO (prompt 11). The handover is what interest runs from; the
+           default is the client's record of when the debt fell due, and runs nothing. */
         opening.handoverDate
-          ? `The debt fell due on ${displayDay(opening.handoverDate)}, and the account is `
-            + 'measured from there.'
+          ? `Handed over on ${displayDay(opening.handoverDate)}; interest runs from that day.`
+          : null,
+        opening.defaultDate
+          ? `The client gives the date of default as ${displayDay(opening.defaultDate)}.`
           : 'No date of default is recorded.',
         opening.importedAt
           ? `It reached Raptor on ${displayDay(opening.importedAt)}${

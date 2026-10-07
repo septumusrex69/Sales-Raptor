@@ -53,7 +53,18 @@ export interface NewDebtorInput {
   idNumber: string
   /** Capital as at handover. The account opens here and everything else is movement. */
   capital: string
+  /**
+   * THE DAY THE ACCOUNT WAS HANDED OVER -- the day the batch is approved, or the day an account is
+   * added by hand. Interest runs from here (accountBalance.openAccrual, open_interest), and so does
+   * the ledger. NOT the date of default: the firm (7 Oct 2026), "interest runs from the date of
+   * handover, never from the date of default."
+   */
   handoverDate: string
+  /**
+   * THE DATE OF DEFAULT, as the client's sheet gave it -- a RECORD, kept on default_date. Nothing
+   * accrues from it. Optional: an account phoned in often arrives without one.
+   */
+  defaultDate?: string
   /** Percent a year. 24 is standard but negotiable per client and per account. */
   interestRateAnnual: string
 
@@ -241,6 +252,14 @@ export function validateNewDebtor(input: NewDebtorInput, today: string): Problem
   } else if (input.handoverDate > today) {
     problems.push({ field: 'handoverDate', message: 'A handover cannot be dated in the future.' })
   }
+  /* THE DATE OF DEFAULT, WHERE GIVEN, on the same rule: a typed column, so a bad one stops a write
+     and a transposed one is wrong for good. Not required -- it is a record, not a clock. */
+  const defaulted = (input.defaultDate ?? '').trim()
+  if (defaulted && !/^\d{4}-\d{2}-\d{2}$/.test(defaulted)) {
+    problems.push({ field: 'defaultDate', message: `"${defaulted}" is not a date.` })
+  } else if (defaulted && defaulted > today) {
+    problems.push({ field: 'defaultDate', message: 'A date of default cannot be in the future.' })
+  }
 
   if (input.email.trim() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(input.email.trim())) {
     problems.push({ field: 'email', message: 'That does not look like an email address.' })
@@ -330,9 +349,11 @@ export function toAccountRow(
     opening_interest: 0,
     opening_fees: 0,
     opening_as_at: input.handoverDate,
-    // Interest runs from the handover, which is what the date is for.
+    // Interest runs from the handover, which is what the date is for -- never from the default.
     interest_rate_annual: num(input.interestRateAnnual) ?? 0,
     interest_from: input.handoverDate,
+    // The client's date of default, kept as a record and read by nothing that accrues.
+    default_date: (input.defaultDate ?? '').trim() || null,
     commission_rate: rate,
     commission_rate_expected: rate,
     commission_rate_source: rate === null ? null : banded ? 'Band on capital at handover' : 'Client flat rate',

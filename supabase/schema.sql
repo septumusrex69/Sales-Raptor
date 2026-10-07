@@ -29166,3 +29166,23 @@ create or replace trigger handovers_need_a_mandate
 revoke all on function public.client_needs_mandate(uuid) from public, anon;
 revoke all on function public.refuse_handover_without_mandate() from public, anon;
 grant execute on function public.client_needs_mandate(uuid) to authenticated;
+
+-- =====================================================================================
+-- PROMPT 11: A HANDOVER SHEET'S DATE OF DEFAULT IS NOT THE HANDOVER DATE
+-- =====================================================================================
+--
+-- The sheet's "Date of default" went into handover_date, and interest runs from handover_date
+-- (accountBalance.openAccrual in the browser, open_interest in the database) -- so an account
+-- handed over today opened carrying months of interest, and the Accounts list showed the default
+-- date as "Handed over". The firm (Stephan, 7 Oct 2026): "interest runs from the date of handover,
+-- never from the date of default."
+--
+-- handover_date (and opening_as_at, interest_from) is now the day the batch is APPROVED, in SAST,
+-- for the sheet import and for Add debtor alike -- written by toAccountRow in the browser; no
+-- function or trigger writes it. The sheet's date of default is kept here, as a record, and
+-- nothing accrues from it. The Swordfish import is unchanged: it keeps the load date and the
+-- history it posts, and writes no default_date.
+-- =====================================================================================
+alter table public.debtor_accounts add column if not exists default_date date;
+comment on column public.debtor_accounts.default_date is
+  'The date of default the client''s handover sheet gave, kept as a record. Interest, the ledger and the Handed over date all run from handover_date (the day the batch was approved), never from this -- the firm, 7 Oct 2026.';

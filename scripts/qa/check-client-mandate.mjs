@@ -345,7 +345,8 @@ ok('the batch reads the rate off the client',
    accidentally testing. Both, named apart, so neither can stand in for the other. */
 ok('...and reads it off the row that comes back',
   /\?\.default_interest_rate_annual/.test(draft))
-ok('...and hands it to every row', /toDebtorInput\(row\.values, row\.planned\?\.defaultDate \?\? null, clientRate\)/.test(draft))
+/* With the approval day after it since prompt 11 -- the handover date, which the default is not. */
+ok('...and hands it to every row', /toDebtorInput\(row\.values, row\.planned\?\.defaultDate \?\? null, clientRate, input\.today\)/.test(draft))
 /*
  * `Number(null)` IS NOUGHT, NOT NaN, which is the trap this walked into first: a client with no
  * rate came through as an explicit 0% rather than as "nobody has said". The account opens the same

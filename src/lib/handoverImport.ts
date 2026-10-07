@@ -1151,6 +1151,12 @@ export function toDebtorInput(
    * the mandate is a fact about the client. approveDraft fetches it beside the client's code.
    */
   clientInterestRateAnnual: number | null = null,
+  /**
+   * THE DAY THE BATCH IS APPROVED, yyyy-mm-dd in SAST -- the handover date (prompt 11). The
+   * sheet's date of default is NOT it: it goes onto defaultDate as a record, and interest runs from
+   * this. Passed in because the row cannot know what day somebody presses Approve.
+   */
+  handedOverOn = '',
 ): NewDebtorInput {
   const v = (k: string) => (values[k] ?? '').trim()
   /*
@@ -1189,7 +1195,8 @@ export function toDebtorInput(
      */
     idNumber: v('id_number') || v('registration_number'),
     capital: v('capital'),
-    handoverDate: defaultDate ?? '',
+    handoverDate: handedOverOn,
+    defaultDate: defaultDate ?? '',
     /*
      * NOT ASKED FOR ON THE SHEET, at the firm's instruction -- "the rate is in the agreement the
      * firm already holds" -- SO IT IS READ OFF THAT AGREEMENT, which is the half that was missing.

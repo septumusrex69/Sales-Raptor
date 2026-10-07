@@ -181,12 +181,20 @@ const input = toDebtorInput({
   capital: '48250.00', id_number: '8503125009089',
   cell_1: '082 123 4567', street_1: '14 Protea Street', suburb: 'Wonderboom',
   city: 'Pretoria', street_code: '0182', next_of_kin: 'Maria', next_of_kin_phone: '083 234 5678',
-}, '2026-03-18')
+}, '2026-03-18', null, '2026-10-07')
 check('the surname becomes the surname', input.surname, 'Van Der Westhuizen')
 check('the reference is the client’s own', input.clientReference, 'GPS3/10103')
 check('the handover amount opens the ledger', input.capital, '48250.00')
-/* The account opens at the date of default, because that is what in duplum runs from. */
-check('and it opens at the date of default', input.handoverDate, '2026-03-18')
+/* PROMPT 11, THE FIRM (7 Oct 2026): "interest runs from the date of handover, never from the date
+   of default." The account opens on the day the batch is approved; the sheet's date of default is
+   kept beside it as a record. This asserted the opposite until then, and an account handed over
+   that day opened with six months of interest it had never earned. */
+check('it is handed over on the day it is approved', input.handoverDate, '2026-10-07')
+check('...and keeps the sheet\'s date of default as a record', input.defaultDate, '2026-03-18')
+const opened = toAccountRow(input, 'company-1', null)
+check('...so interest and the ledger start at the handover',
+  [opened.handover_date, opened.opening_as_at, opened.interest_from], ['2026-10-07', '2026-10-07', '2026-10-07'])
+check('...and the default is written where nothing accrues from it', opened.default_date, '2026-03-18')
 check('the address arrives on its own lines',
   input.address, '14 Protea Street\nWonderboom\nPretoria\n0182')
 check('next of kin comes across', [input.kin1Name, input.kin1Phone], ['Maria', '083 234 5678'])
@@ -627,8 +635,8 @@ const typed = planHandover({
 check('a day-first date is carried as a date', typed.rows[0].defaultDate, '2026-03-15')
 check('...and the third of April is the third of April',
   typed.rows[1].defaultDate, '2026-04-03')
-check('the account opens on that, not on what was typed',
-  toDebtorInput(typed.rows[1].values, typed.rows[1].defaultDate).handoverDate, '2026-04-03')
+check('the date of default on record is that, not what was typed',
+  toDebtorInput(typed.rows[1].values, typed.rows[1].defaultDate).defaultDate, '2026-04-03')
 /* The guard that makes the route impossible rather than merely unused: toDebtorInput cannot read
    the cell at all, so no caller can reintroduce this by forgetting. */
 ok('toDebtorInput cannot reach the date cell', !carried.includes("v('default_date')"))

@@ -658,6 +658,7 @@ export function AccountDetail() {
   const timeline = useMemo(
     () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? [], account && {
       handoverDate: account.handoverDate,
+      defaultDate: account.defaultDate,
       importedAt: account.createdAt,
     }, workspace?.contacts ?? []),
     [ledgers, workspace, account],
@@ -4584,6 +4585,10 @@ function PositionPanel({
           — "how long have we had this one" — and nobody counts months off a date in their head
           while a debtor is on the phone.
         */}
+        {/* BOTH DATES, AND NAMED APART (prompt 11): interest runs from the handover, never from the
+            default, which is the client's record of when the debt fell due. */}
+        <Field label="Date of default" value={account.defaultDate ? formatDate(account.defaultDate) : null}
+          note={account.defaultDate ? 'A record — nothing accrues from it' : undefined} />
         <Field label="Handed over" value={handedOver} />
         <Field label="Prescribes" value={account.prescriptionDate ? formatDate(account.prescriptionDate) : null} />
         <Field label="Diary date" value={account.diaryDate ? formatDate(account.diaryDate) : null} />

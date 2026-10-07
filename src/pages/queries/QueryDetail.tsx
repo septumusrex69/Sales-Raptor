@@ -38,9 +38,11 @@ import { canSendToClient } from '../../lib/disputeCategories.ts'
 import { canViewClients } from '../../lib/permissions.ts'
 import { fetchAccounts } from '../../lib/accountBook'
 import { rejectedSheetName, rejectedSheetRows } from '../../lib/rejectedSheet.ts'
+import { firmToday } from '../../lib/dateLabels'
 import { buildXlsx, downloadBytes, XLSX_MIME } from '../../lib/xlsxWrite.ts'
 
-const TODAY = () => new Date().toISOString().slice(0, 10)
+/* SAST, not UTC: a follow-up import approved here dates its accounts' handover today (prompt 11). */
+const TODAY = () => firmToday()
 
 const STAGE_CHIP: Record<QueryStage, string> = {
   agent: 'bg-slate-100 text-slate-600',

@@ -3,6 +3,8 @@ import { Paperclip, X } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { DictateButton } from '../ui/Dictate'
 import { fileSize } from '../../lib/fileSize.ts'
+import { firmToday } from '../../lib/dateLabels'
+import { formatDate } from '../../data/mockData'
 import { DEFAULT_INTEREST_RATE_ANNUAL, suggestReference, validateNewDebtor, type NewDebtorInput, type Problem } from '../../lib/newDebtor'
 
 /**
@@ -30,7 +32,8 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
    */
   onSave: (input: NewDebtorInput, note: string | null, files: File[]) => void
 }) {
-  const today = new Date().toISOString().slice(0, 10)
+  /* THE FIRM'S DAY, IN SAST: it is this account's handover date (prompt 11). */
+  const today = firmToday()
   const suggested = useMemo(
     () => suggestReference(existingReferences, clientCode),
     [existingReferences, clientCode],
@@ -45,6 +48,7 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
     idNumber: '',
     capital: '',
     handoverDate: today,
+    defaultDate: '',
     // Standard, and stated rather than assumed — a rate left to a hidden default is a rate
     // nobody checked.
     /* THE FIRM'S STANDING RATE, from the one place that holds it rather than typed here as
@@ -189,8 +193,16 @@ export function AddDebtorModal({ companyName, existingReferences, clientCode, bu
           <Field label="Capital handed over (R)" required problem={problemFor('capital')}>
             <input className={inputClass} value={form.capital} onChange={set('capital')} inputMode="decimal" />
           </Field>
-          <Field label="Handover date" required problem={problemFor('handoverDate')} hint="interest runs from here">
-            <input type="date" className={inputClass} value={form.handoverDate} onChange={set('handoverDate')} max={today} />
+          {/*
+            HANDED OVER TODAY, NOT TYPED (prompt 11). The box used to be "Handover date -- interest
+            runs from here", and what people typed into it was the client's date of default, which
+            opened the account with months of interest it had never earned. The firm: "interest
+            runs from the date of handover, never from the date of default." So the handover is the
+            day the account is added, and the default date is asked for as what it is: a record.
+          */}
+          <Field label="Date of default" problem={problemFor('defaultDate')}
+            hint={`a record only — handed over today, ${formatDate(today)}, and interest runs from today`}>
+            <input type="date" className={inputClass} value={form.defaultDate ?? ''} onChange={set('defaultDate')} max={today} />
           </Field>
 
           <div className="col-span-2">
