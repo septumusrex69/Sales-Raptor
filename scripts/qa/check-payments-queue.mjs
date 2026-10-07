@@ -161,6 +161,40 @@ ok('...and books a PTC client as owing interest + costs + commission + its VAT',
 check('no badge claims the items 1-7 limit was respected',
   /within (the )?limit|items 1.7[^']*within/i.test(stripTs(read('src/lib/paymentsQueue.ts'))), false)
 
+/* ---------------- a PTC overpayment is the client's to sort out ---------------- */
+
+/*
+ * THE FIRM, 7 October: "When the debtor pays the client directly and overpays the client directly,
+ * we only process the amount that is due. The client should sort that out." So the engine marks
+ * the excess `with_client` at allocation, the run blocker and the exceptions list pass it, and the
+ * screens never call it a credit the firm holds.
+ */
+const PTC_OVER = { ...B, paymentId: 'PTC-B', paidToClient: true, toClient: 0, dueToBf: 0.83 + 258.75 + 250 }
+const over = exceptionsOf(PTC_OVER, []).find((e) => e.key === 'credit')
+ok('a PTC overpayment is badged as overpaid to the client', /^Overpaid client/.test(over?.label ?? ''))
+ok('...and says the client sorts it out', /client sorts the rest out/.test(over?.detail ?? ''))
+const alloc_ = (() => {
+  const at = sql.lastIndexOf('create or replace function public.allocate_payment(')
+  return at < 0 ? '' : strip(sql.slice(at, sql.indexOf('$$;', at)))
+})()
+ok('the engine marks a PTC overpayment with_client when it allocates',
+  /computed_at, excess_disposal,/.test(alloc_)
+  && /case when v_pay\.paid_to_client and s\.excess > 0 then 'with_client' end/.test(alloc_))
+ok('...which the disposal check allows', /excess_disposal = any \(array\['refund','moved','released','parked','with_client'\]\)/.test(sql))
+const view = sql.slice(sql.lastIndexOf('create or replace view public.finance_exceptions as'))
+ok('...and the exceptions list leaves out', /excess_disposal IS DISTINCT FROM 'with_client'/.test(view.slice(0, 2000)))
+const blockers = (() => {
+  const at = sql.lastIndexOf('create or replace function public.payover_run_blockers(')
+  return at < 0 ? '' : sql.slice(at, sql.indexOf('$$;', at))
+})()
+ok('...as does the payover run blocker, because it is decided', /a\.excess_disposal is null/.test(blockers))
+ok('finance_exceptions is not readable by anon or authenticated',
+  sql.lastIndexOf('revoke all on public.finance_exceptions from anon, authenticated;') > sql.lastIndexOf('create or replace view public.finance_exceptions as'))
+const tPtc = batchTotals([A, PTC_OVER])
+check('the batch still closes with a PTC overpayment in it', batchReconciliation(tPtc).map((c) => c.holds), [true, true, true])
+ok('...and the debtor credit tile counts trust money only',
+  /value=\{rand\(t\.direct\.credit\)\}/.test(read('src/pages/finance/AwaitingApproval.tsx')))
+
 /* ---------------- the batch ---------------- */
 
 const t = batchTotals([A, B, PTC_A])

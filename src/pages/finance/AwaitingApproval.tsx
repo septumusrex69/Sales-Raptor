@@ -600,9 +600,11 @@ function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
         <Figure label="To pay clients" value={rand(t.toClients)} note="From trust, on direct receipts" emph />
         <Figure label="BF share incl. VAT" value={rand(t.bfShare)}
           note={t.ptc.count > 0 ? `Includes ${rand(t.ptc.dueToBf)} due from clients on PTCs` : 'Fees, interest, commission and its VAT'} emph />
-        <Figure label="Debtor credit" value={rand(t.credit)}
+        {/* HELD IN TRUST ONLY. A debtor who overpaid the CLIENT is the client's to sort out (the
+            firm, 7 Oct), so it is named under the figure and never counted as money the firm holds. */}
+        <Figure label="Debtor credit" value={rand(t.direct.credit)}
           note={t.ptc.credit > 0
-            ? `${rand(t.direct.credit)} held in trust · ${rand(t.ptc.credit)} on PTCs, custody not settled`
+            ? `Held in trust · plus ${rand(t.ptc.credit)} overpaid to clients, theirs to sort out`
             : 'Held for the debtor, never paid over'} />
         <Figure label="PTC due to BF incl. VAT" value={rand(t.ptc.dueToBf)}
           note={`${t.ptc.count} PTC${t.ptc.count === 1 ? '' : 's'} · client already holds ${rand(t.ptc.clientShareHeld)}`} />
@@ -826,7 +828,7 @@ function Breakdown({ row: r, a, f, problems, exceptions, onClose }: {
               ['Client share', rand(f.clientShare)],
               [f.route === 'ptc' ? 'To pay the client' : 'To pay the client from trust', rand(f.toClient)],
               ['BF share incl. VAT', rand(f.bfShare)],
-              ['Debtor credit', rand(f.credit)],
+              [f.route === 'ptc' ? 'Overpaid to the client — theirs to sort out' : 'Debtor credit', rand(f.credit)],
               ...(f.ptcDueToBf !== null
                 ? [['Due to BF from the client, incl. VAT', rand(f.ptcDueToBf)] as [string, string]]
                 : []),
@@ -854,7 +856,8 @@ function Breakdown({ row: r, a, f, problems, exceptions, onClose }: {
           <Section title="Payover">
             <p className="text-slate-600">
               {f.route === 'ptc'
-                ? 'Nothing is paid over: the client holds the money. What it owes the firm is set off in its payover.'
+                ? `Nothing is paid over: the client holds the money. What it owes the firm is set off in its payover.${
+                    f.credit > 0 ? ` The ${rand(f.credit)} overpaid is the client's to sort out with the debtor.` : ''}`
                 : `Received in the payover cycle opening ${shortDate(cycle)}. It reaches a payover run only once approved.`}
             </p>
           </Section>

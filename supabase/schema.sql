@@ -29943,3 +29943,288 @@ begin
     end;
   end loop;
 end $$;
+
+
+-- ============================================================================
+-- A DEBTOR WHO OVERPAYS THE CLIENT DIRECTLY IS THE CLIENT'S TO SORT OUT.
+--
+-- THE FIRM, 7 October: "When the debtor pays the client directly and overpays the client directly,
+-- we only process the amount that is due. The client should sort that out."
+--
+-- WHAT IT DID BEFORE: a PTC larger than the account owed wrote `excess_credit` like any other
+-- overpayment -- and then held the client's payover run on `needs_review` ("say what happens to
+-- the credit"), listed it under Exceptions as "held as a credit", and offered a refund, a move or a
+-- release of money that never reached the trust. Released, recompute_payover_run would have ADDED
+-- it to the client's payover: paying the client money the client already had.
+--
+-- WHAT IT DOES NOW: the split is unchanged -- the amount due is processed exactly as before, and
+-- the excess is still recorded, because the payment has to add back to itself and the account's
+-- history has to say the debtor paid that much. What changes is its DISPOSAL, decided by the engine
+-- at the moment of allocation: `with_client`. A disposal that is not null is one nobody has to
+-- make, so the run blocker passes it, dispose_excess_credit refuses it, `released` never sums it,
+-- and finance_exceptions leaves it off the list. trust_creditors_on_allocation already wrote no
+-- debtor entry for a PTC. No existing allocation needed changing: staging had none.
+--
+-- AND finance_exceptions IS NO LONGER READABLE BY anon OR authenticated. A view runs as its owner,
+-- so the default grants let anyone with the public key list every allocation that needs a look --
+-- account, amount, kind. Its only reader is finance_exception_jobs, Administrator-guarded and
+-- security definer; account_money_position was already closed the same way.
+-- ============================================================================
+do $$
+begin
+  execute 'alter table public.payment_allocations dr' || 'op constraint if exists payment_allocations_excess_disposal_check';
+  alter table public.payment_allocations
+    add constraint payment_allocations_excess_disposal_check
+    check (excess_disposal = any (array['refund','moved','released','parked','with_client']));
+end $$;
+
+create or replace function public.allocate_payment(p_payment_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_acct public.debtor_accounts%rowtype;
+  v_cutover timestamptz;
+  v_vat numeric;
+  v_fee_rate numeric;
+  v_fee_cap numeric;
+  v_tariff_from date;
+  b record;
+  o record;
+  k record;
+  v_rate numeric;
+  v_bands jsonb;
+  v_cumulative numeric;
+  v_mandate timestamptz;
+  s record;
+  v_commission numeric;
+  v_commission_vat numeric;
+  v_status text := 'allocated';
+  v_to_client numeric;
+  v_due_to_bf numeric;
+  v_id uuid;
+  v_day date;
+  v_accrued numeric;
+  v_recoverable numeric;
+  v_interest_retained numeric;
+  v_costs_taken numeric;
+begin
+  select * into v_pay from public.account_payments where id = p_payment_id;
+  if not found then return null; end if;
+
+  /* THREE REASONS NOT TO TOUCH IT, and none of them is an error: invented data, money already
+     given back, and history that Swordfish settled and a client has been paid on. */
+  /*
+   * SWORDFISH ALREADY PAID THIS ONE OVER, AND THAT IS THE FIRST GATE -- before the interest is
+   * brought up to date, before the receipt fee, before anything is posted at all.
+   *
+   * The comment below always named this reason and the code never asked it. The import writes a
+   * settled receipt already approved, the insert trigger called straight in here, and every one
+   * was split: a second receipt fee on top of the one Swordfish charged, the whole of the imported
+   * history posted to trust as money still owed to clients, and the open-period interest the
+   * engine posts first collided with the Swordfish interest rows the import wrote next, which is
+   * what stopped it (prompt 8, staging, 6 Oct 2026). Every path that splits comes through here --
+   * the insert trigger, approve_payment, reallocate_account -- so this one line covers them all.
+   */
+  if v_pay.paid_over_in_swordfish then return null; end if;
+
+  if v_pay.is_demo or v_pay.reversed_at is not null then return null; end if;
+
+  /*
+   * A FOURTH REASON, AND IT IS THE ORDINARY ONE: not approved yet.
+   *
+   * THE FIRM: "there should be a state of payments and payments that should be approved... on a
+   * daily basis." Until now a receipt was live the instant it landed -- the balance moved and the
+   * payover run could carry it to a client before anybody had looked.
+   *
+   * AND THE PAYOVER RUN NEEDS NO SECOND FILTER, which is why the gate is here. A run gathers
+   * ALLOCATIONS; an unapproved payment has none, so it is invisible to remittance by construction
+   * rather than by a rule somebody has to remember in two places.
+   */
+  if v_pay.approved_at is null then return null; end if;
+
+  select vat_rate, finance_cutover_at into v_vat, v_cutover from public.firm_settings limit 1;
+  if v_cutover is null or v_pay.created_at < v_cutover then return null; end if;
+
+  select * into v_acct from public.debtor_accounts where id = v_pay.account_id;
+  if not found then return null; end if;
+
+  v_day := (v_pay.received_at at time zone 'Africa/Johannesburg')::date;
+
+  /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. */
+  select rate, cap_excl_vat, effective_from into v_fee_rate, v_fee_cap, v_tariff_from
+    from public.annexure_b_tariffs
+   where item = '9'
+     and v_pay.received_at::date >= effective_from
+     and (effective_to is null or v_pay.received_at::date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then
+    raise exception 'No Annexure B item 9 tariff covers %', v_pay.received_at::date;
+  end if;
+
+  /*
+   * POST THE OPEN PERIOD FIRST, OR THERE IS NOTHING FOR THE SPLIT TO GIVE INTEREST TO.
+   *
+   * THE FIRM: "there was zero interest captured... I don't even know if the interest is actually
+   * running." It ran on the SCREEN and nowhere else. `engine_balances` adds up
+   * account_interest_accruals and nothing else, so an account whose interest has only ever been
+   * COMPUTED has no row there, `finance_split` was handed an interest balance of nought, and every
+   * cent of every payment went to costs and capital.
+   *
+   * TO THE PAYMENT'S OWN DAY, never to today, and EXCLUDING THIS PAYMENT: the accrual is what the
+   * debt earned UP TO the moment the money arrived, not after it.
+   *
+   * AND IT IS WHY engine_balances IS ASKED WITH NOTHING PENDING BELOW: by this line the open
+   * period is real rows, so the in duplum ceiling already counts it. Only the dry run has to say
+   * so explicitly.
+   */
+  perform public.accrue_interest_to(v_acct.id, v_day, p_payment_id);
+
+  select * into b from public.engine_balances(v_acct.id, p_payment_id);
+
+  select * into s from public.finance_split(
+    v_pay.amount, b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description,
+    amount_excl_vat, vat_rate, vat_amount, counts_toward_fee_cap,
+    incurred_at, source, payment_id, billed, action_code
+  ) values (
+    v_acct.id, '9', v_tariff_from, 'Receipt of instalment',
+    s.fee_excl, v_vat * 100, s.fee_vat, false,
+    v_pay.received_at, 'raptor', p_payment_id, true, 'receipt'
+  ) on conflict do nothing;
+
+  /*
+   * THE FIVE FIGURES BEHIND EACH LINE OF THE FEES SIDE, WRITTEN ONTO THE ALLOCATION.
+   *
+   * THE FIRM: "you can add whatever you need for the administrator to ensure that we can double
+   * check every single thing that comes in." A posted allocation used to carry the four takings
+   * and nothing they came out of, so the only way to check one afterwards was to re-derive it
+   * against a book that had moved -- which answers a different question every day.
+   *
+   * `open_interest` IS ASKED AGAIN AND THAT IS NOT A SECOND OPINION: accrue_interest_to has just
+   * written the open period as real rows, so this call returns what is still open, which is
+   * nought. It is here for the `accrued` figure on an account whose ceiling clipped it.
+   */
+  select * into o from public.open_interest(v_acct.id, v_day, p_payment_id);
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = v_acct.id;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+
+  select coalesce(sum(a.to_interest), 0), coalesce(sum(a.to_costs), 0)
+    into v_interest_retained, v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = v_acct.id and a.status <> 'reversed'
+     and a.payment_id is distinct from p_payment_id;
+
+  /*
+   * WHICH FEE THE COSTS HALF ACTUALLY PAID. `to_receipt_fee` and `to_fees` have been columns on
+   * this table since it was built and were written as 0, 0 ever since -- so every payment the firm
+   * would ever have approved recorded no answer at all to "did this pay its own receipt fee?"
+   * fee_split is the one place that is worked out, shared with preview_allocation so the approval
+   * screen and the ledger cannot disagree. NOTHING PENDING: the accrual is already a row.
+   */
+  select * into k from public.fee_split(
+    v_acct.id, p_payment_id, s.fee_excl + s.fee_vat, v_day, v_costs_taken, s.to_costs, 0);
+
+  /* THE RATE IS THE ACCOUNT'S, DECIDED ONCE (prompt 9): its own stamped rate, else its client's band
+     on the capital handed over, else the client's flat rate -- account_commission_rate. Never
+     marginal on the client's cumulative capital, which is what this read before. */
+  v_rate := public.account_commission_rate(v_acct.id);
+  v_bands := null;
+
+  v_cumulative := 0;
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_acct.company_id
+       and a.status <> 'reversed'
+       and a.payment_id <> p_payment_id
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  v_commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+
+  if v_commission is null then
+    v_status := 'needs_rate';
+    v_commission := 0;
+  end if;
+  v_commission_vat := round(v_commission * v_vat, 2);
+
+  if v_pay.paid_to_client then
+    v_to_client := 0;
+    v_due_to_bf := s.to_interest + s.to_costs + v_commission;
+  else
+    v_to_client := s.to_capital - v_commission - v_commission_vat;
+    v_due_to_bf := 0;
+  end if;
+
+  insert into public.payment_allocations (
+    payment_id, account_id, payment_amount, half_a,
+    receipt_fee_excl, receipt_fee_vat,
+    to_interest, to_costs, to_capital, excess_credit,
+    to_receipt_fee, to_fees,
+    commission, commission_vat, to_client, due_to_bf,
+    capital_before, capital_after, commission_rate, vat_rate,
+    paid_to_client, status, engine_version, computed_at, excess_disposal,
+    interest_total, interest_cant, interest_retained, interest_before, interest_after,
+    rf_total, rf_cant, rf_retained,
+    fees_total, fees_cant, fees_retained,
+    costs_before, costs_after
+  ) values (
+    p_payment_id, v_acct.id, v_pay.amount, s.half_a,
+    s.fee_excl, s.fee_vat,
+    s.to_interest, s.to_costs, s.to_capital, s.excess,
+    k.to_receipt_fees, k.to_fees,
+    v_commission, v_commission_vat, v_to_client, v_due_to_bf,
+    b.capital, b.capital - s.to_capital, v_rate, v_vat,
+    v_pay.paid_to_client, v_status, 'v2-5050-split', now(),
+    /* A PTC OVERPAYMENT IS THE CLIENT'S TO SORT OUT -- the firm: "we only process the amount that
+       is due. The client should sort that out." The money never reached the trust. */
+    case when v_pay.paid_to_client and s.excess > 0 then 'with_client' end,
+    v_accrued, greatest(v_accrued - v_recoverable, 0), v_interest_retained,
+    b.interest, b.interest - s.to_interest,
+    k.rf_total, k.rf_cant, k.rf_retained,
+    k.fees_total, k.fees_cant, k.fees_retained,
+    b.costs, b.costs + s.fee_excl + s.fee_vat - s.to_costs
+  ) returning id into v_id;
+
+  update public.debtor_accounts
+     set capital_outstanding = greatest(b.capital - s.to_capital, 0),
+         last_payment_at = greatest(coalesce(last_payment_at, v_pay.received_at), v_pay.received_at)
+   where id = v_acct.id;
+
+  return v_id;
+end $$;
+
+create or replace view public.finance_exceptions as
+ SELECT a.id AS allocation_id, a.payment_id, a.account_id, d.company_id,
+    'needs_rate'::text AS kind,
+    'No commission rate on the account or the client'::text AS problem,
+    a.to_capital AS amount, a.computed_at
+   FROM payment_allocations a JOIN debtor_accounts d ON d.id = a.account_id
+  WHERE a.status = 'needs_rate'::text
+UNION ALL
+ SELECT a.id, a.payment_id, a.account_id, d.company_id,
+    'excess_credit'::text,
+    'Paid more than the account owed; held as a credit'::text,
+    a.excess_credit, a.computed_at
+   FROM payment_allocations a JOIN debtor_accounts d ON d.id = a.account_id
+  WHERE a.excess_credit > 0::numeric AND a.status <> 'reversed'::text
+    AND a.excess_disposal IS DISTINCT FROM 'with_client'
+UNION ALL
+ SELECT a.id, a.payment_id, a.account_id, d.company_id,
+    'closed_account'::text,
+    'Payment received on an account that is closed or written off'::text,
+    a.payment_amount, a.computed_at
+   FROM payment_allocations a JOIN debtor_accounts d ON d.id = a.account_id
+  WHERE a.status <> 'reversed'::text AND (d.write_off_reason IS NOT NULL OR d.status ~~* 'Closed%'::text);
+
+revoke all on public.finance_exceptions from anon, authenticated;

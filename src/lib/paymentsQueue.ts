@@ -173,9 +173,18 @@ export function exceptionsOf(
 ): QueueException[] {
   const f = queueFigures(r)
   const out: QueueException[] = []
+  /*
+   * A PTC OVERPAYMENT IS NOT A CREDIT THE FIRM HOLDS. The firm, 7 October: "When the debtor pays the
+   * client directly and overpays the client directly, we only process the amount that is due. The
+   * client should sort that out." The engine marks it `with_client`; the badge says so.
+   */
   if (f.credit > CENT) {
-    out.push({ key: 'credit', label: `Credit ${amount(f.credit)}`, warn: false,
-      detail: 'Paid more than the account owed. Held for the debtor, never paid over.' })
+    out.push(r.paidToClient
+      ? { key: 'credit', label: `Overpaid client ${amount(f.credit)}`, warn: false,
+          detail: 'The debtor paid the client more than was owed. Only the amount due is processed; '
+            + 'the client sorts the rest out with the debtor.' }
+      : { key: 'credit', label: `Credit ${amount(f.credit)}`, warn: false,
+          detail: 'Paid more than the account owed. Held for the debtor, never paid over.' })
   }
   if (r.capitalBefore > CENT && r.capitalAfter <= CENT) {
     out.push({ key: 'capital_paid_off', label: 'Capital paid off', warn: false,

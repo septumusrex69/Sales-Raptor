@@ -82,7 +82,9 @@ export function LedgerPanel({ accountId }: { accountId: string }) {
                     {l.capturedAt ? ` · captured ${fmt(l.capturedAt)}` : ''}
                     {l.reversed && l.reversalReason ? ` · reversed: ${l.reversalReason}` : ''}
                     {l.needsRate && ' · no commission rate'}
-                    {l.excessCredit > 0 && ` · ${rand(l.excessCredit)} held as a credit`}
+                    {l.excessCredit > 0 && (l.paidToClient
+                      ? ` · ${rand(l.excessCredit)} overpaid to the client, theirs to sort out`
+                      : ` · ${rand(l.excessCredit)} held as a credit`)}
                   </div>
                 </td>
                 <td className={clsx('px-4 py-2.5 text-right tabular-nums', l.reversed && 'line-through')}>{rand(l.amount)}</td>

@@ -146,7 +146,12 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
                 <Row label="Half B → capital" value={preview.toCapital} />
                 <Row label="Commission" value={-preview.commission} sub />
                 <Row label="VAT on commission (SARS)" value={-preview.commissionVat} sub />
-                {preview.excessCredit > 0 && <Row label="Overpaid — held as a credit" value={preview.excessCredit} sub />}
+                {/* A PTC OVERPAYMENT IS THE CLIENT'S TO SORT OUT (the firm, 7 Oct): only the amount
+                    due is processed, and the money never reached the trust to be held. */}
+                {preview.excessCredit > 0 && (
+                  <Row label={direct ? 'Overpaid the client — the client sorts it out' : 'Overpaid — held as a credit'}
+                    value={preview.excessCredit} sub />
+                )}
                 <tr className="border-t border-slate-200">
                   <td className="py-1.5 font-medium text-slate-700">BF takes</td>
                   <td className="py-1.5 text-right font-medium tabular-nums">{rand(preview.bfTakes)}</td>
