@@ -170,8 +170,9 @@ ok('the date is stamped at midday so no timezone moves it',
  * because collecting on an unmandated book is work the firm cannot lawfully charge for. What it
  * could not do was tell anybody where to go.
  */
+/* Through needsMandate since prompt 10 -- a Swordfish client is exempt; check-mandate-rule. */
 ok('the import still refuses without a mandate',
-  /const noMandate = !!client && !client\.mandateSignedAt/.test(importCard))
+  /const noMandate = needsMandate\(client\)/.test(importCard))
 ok('...and the refusal still stops the import rather than warning about it',
   /if \(!plan \|\| !sheet \|\| !companyId \|\| noMandate\) return/.test(importCard))
 ok('...and now links to the client it is talking about',

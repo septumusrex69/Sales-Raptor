@@ -36,6 +36,7 @@ import {
   type UnallocatedBatch,
 } from '../../lib/accountBook'
 import { formatCurrency } from '../../data/mockData'
+import { needsMandate } from '../../lib/mandateRule'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -344,7 +345,9 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
    * form people fill in with a made-up one. The refusal belongs where the consequence is.
    */
   const client = clients.find((c) => c.id === companyId)
-  const noMandate = !!client && !client.mandateSignedAt
+  /* A CLIENT BROUGHT ACROSS FROM SWORDFISH IS EXEMPT (prompt 10) -- needsMandate decides it, and
+     the database's handovers_need_a_mandate trigger holds the same rule underneath. */
+  const noMandate = needsMandate(client)
 
   async function hold() {
     if (!plan || !sheet || !companyId || noMandate) return

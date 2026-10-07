@@ -372,6 +372,11 @@ export interface Company {
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
   /**
+   * Set on a client the Swordfish import created -- the run that brought it across. Such a client
+   * takes handovers without a mandate date (prompt 10); see mandateRule.ts.
+   */
+  importBatchId?: string | null
+  /**
    * The interest rate in THIS CLIENT'S mandate, as a PERCENT a year — 24 means 24%.
    *
    * NOT A FRACTION, unlike commissionRate above, and the difference is deliberate rather than

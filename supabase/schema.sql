@@ -29104,3 +29104,65 @@ grant execute on function public.draw_from_trust(numeric, text, uuid) to authent
 grant execute on function public.business_month(date, date) to authenticated;
 grant execute on function public.business_drawings(date, date) to authenticated;
 grant execute on function public.business_income(date, date) to authenticated;
+
+-- =====================================================================================
+-- PROMPT 10: A CLIENT BROUGHT ACROSS FROM SWORDFISH NEEDS NO MANDATE DATE TO TAKE A HANDOVER
+-- =====================================================================================
+--
+-- "No mandate, no handover" was the firm's rule for a client SIGNED IN RAPTOR, and it lived only
+-- in the browser (HandoverImportCard). Swordfish's register carries "Sign Date" for some clients
+-- and not others, so clients that already have a book with the firm -- SMT, BPM, LVM on staging --
+-- were refused new handovers until somebody invented a date for them.
+--
+-- THE RULE NOW, IN THE DATABASE AS WELL AS ON THE SCREEN:
+--   a client the Swordfish import created (companies.import_batch_id is not null) may take a
+--   handover with no mandate date and no mandate document; a client created in Raptor still needs
+--   the date, exactly as before.
+--
+-- ENFORCED ON THE BATCH ROW, which is what a handover IS in the database (CLAUDE.md: the
+-- `handovers` table is the batch). approveDraft writes it before any account, so a refusal here
+-- leaves nothing behind. A batch the Swordfish import itself writes carries its own
+-- import_batch_id and is never refused -- its client is a Swordfish client by definition.
+--
+-- NOT TOUCHED: allocate_payment, preview_allocation and expected_from_promises read
+-- mandate_signed_at to decide which capital a sliding scale counts. That is commission, and the
+-- prompt is explicit that nothing about commission changes.
+-- =====================================================================================
+
+create or replace function public.client_needs_mandate(p_company uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select coalesce((
+    select c.import_batch_id is null and c.mandate_signed_at is null
+      from public.companies c where c.id = p_company
+  ), false)
+$$;
+
+create or replace function public.refuse_handover_without_mandate()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_name text;
+begin
+  if new.import_batch_id is null and public.client_needs_mandate(new.company_id) then
+    select name into v_name from public.companies where id = new.company_id;
+    raise exception '% has no signed mandate on record, so no handover can be imported for them.',
+      coalesce(v_name, 'This client') using errcode = '23514';
+  end if;
+  return new;
+end
+$$;
+
+create or replace trigger handovers_need_a_mandate
+  before insert on public.handovers
+  for each row execute function public.refuse_handover_without_mandate();
+
+revoke all on function public.client_needs_mandate(uuid) from public, anon;
+revoke all on function public.refuse_handover_without_mandate() from public, anon;
+grant execute on function public.client_needs_mandate(uuid) to authenticated;

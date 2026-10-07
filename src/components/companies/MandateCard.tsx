@@ -8,6 +8,7 @@ import {
 } from '../../lib/clientDocuments'
 import { DEFAULT_INTEREST_RATE_ANNUAL } from '../../lib/newDebtor'
 import type { Company } from '../../types'
+import { fromSwordfish } from '../../lib/mandateRule'
 
 const KB = 1024
 const fileSize = (n: number | null) =>
@@ -204,7 +205,9 @@ export function MandateCard({
           <p className="text-[11px] text-slate-400 mt-2">
             {draft
               ? 'The date the client signed, not the date it was filed.'
-              : 'Saving it empty takes the mandate off record — no handover could then be imported.'}
+              : fromSwordfish(company)
+                ? 'Brought across from Swordfish, so handovers still go through without a date.'
+                : 'Saving it empty takes the mandate off record — no handover could then be imported.'}
           </p>
 
           {/* ---------- and the rate the mandate sets ---------- */}
@@ -272,6 +275,15 @@ export function MandateCard({
             </p>
           )}
         </div>
+      ) : fromSwordfish(company) ? (
+        /* PROMPT 10: a client the Swordfish import brought across already has a book with the
+           firm, and takes handovers without a mandate date. Said in plain words rather than as a
+           red warning, because nothing is wrong -- and the date and the paper can still be added
+           above and below if somebody has them. */
+        <p className="text-sm text-slate-600 mb-4">
+          Brought across from Swordfish: no mandate needed for handovers.
+          {canEdit ? ' If you have the signed mandate, add its date above and file it below.' : ''}
+        </p>
       ) : (
         <p className="text-sm text-negative-700 mb-4">
           No mandate on record, so no handover can be imported for this client.

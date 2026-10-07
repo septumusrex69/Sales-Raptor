@@ -120,9 +120,13 @@ ok('...and the screen says it is a percentage', /% of what is collected/.test(mo
  * cannot lawfully charge for and cannot defend when the debtor's attorney asks on whose authority
  * the demand was issued -- and by then two hundred accounts are open and letters have gone out.
  */
-ok('the import knows whether the client has a mandate', /mandateSignedAt/.test(importCard))
+/* THROUGH THE SHARED RULE since prompt 10, which exempts a client the Swordfish import brought
+   across; check-mandate-rule holds the rule itself and the trigger that holds it in the database. */
+const mandateRule = src('../../src/lib/mandateRule.ts')
+ok('the import knows whether the client has a mandate',
+  /needsMandate/.test(importCard) && /c\.mandateSignedAt/.test(mandateRule))
 ok('...and refuses to hold a handover without one',
-  /noMandate = !!client && !client\.mandateSignedAt/.test(importCard))
+  /noMandate = needsMandate\(client\)/.test(importCard))
 ok('...by disabling the button, not by warning beside it',
   /disabled=\{!companyId \|\| !!busy \|\| noMandate\}/.test(importCard))
 /* Said when the client is chosen, not after the sheet is read: somebody who has to go and find a
