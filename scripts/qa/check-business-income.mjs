@@ -69,15 +69,16 @@ for (const w of WRITERS) {
 /* ---------------- 2. each rand once ---------------- */
 
 const month = liveFn('business_month')
+/* And, since prompt 12, a bank charge (the firm's cost) and the business paying the trust back. */
 ok('business_month: earned leaves out drawings and charge recoveries',
-  /firm_entry_kind\(reason\) not in \('drawing', 'charge_recovered'\)/.test(month))
+  /firm_entry_kind\(reason\) not in \('drawing', 'charge_recovered', 'bank_charge', 'transfer_in'\)/.test(month))
 ok('...drawn is the drawings and nothing else', /-sum\(amount\) filter \(where public\.firm_entry_kind\(reason\) = 'drawing'\)/.test(month))
 /* THE OLD SHAPE, which counted every negative entry as a drawing and every positive one as earned. */
 check('...and no longer sorts by sign', /filter \(where amount [<>] 0\)/.test(month), false)
 ok('...and still counts charges when raised', /from public\.client_charges/.test(month))
 
 const income = liveFn('business_income')
-ok('business_income leaves out drawings and charge recoveries', /kind not in \('drawing', 'charge_recovered'\)/.test(income))
+ok('business_income leaves out drawings and charge recoveries', /kind not in \('drawing', 'charge_recovered', 'bank_charge', 'transfer_in'\)/.test(income))
 ok('...splits a receipt by the allocation it was built from',
   /left join public\.payment_allocations a on a\.id = e\.allocation_id/.test(income))
 /* THE FOUR PARTS ARE THE FOUR trust_creditors_on_allocation ADDS UP -- if it ever adds a fifth,

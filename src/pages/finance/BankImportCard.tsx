@@ -113,7 +113,7 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
               note="matched to an account where the number is known" />
             <Tile label="For you to place" value={sum.withoutReference.toLocaleString('en-ZA')}
               note="a depositor's name, not an account number" tone={sum.withoutReference ? 'warn' : undefined} />
-            <Tile label="Paid out" value={rand(sum.debitTotal)} note={`${sum.debits} payments out — not imported`} />
+            <Tile label="Paid out" value={rand(sum.debitTotal)} note={`${sum.debits} payments out — each to be allocated`} />
           </div>
 
           {/*
@@ -123,8 +123,9 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
           <p className="text-[12px] text-slate-500 leading-relaxed">
             Receipts whose reference names exactly one account become payments, and each one is
             split immediately — receipt fee, interest, costs, capital, commission. The rest wait in
-            the list below for you to place. Money paid out is kept so the statement reconciles,
-            but nothing is imported from it until you tie it to a payover run.
+            the list below for you to place. Money paid out is imported too, and each line waits
+            under Exceptions to be allocated — a payover, a refund, a transfer to the business
+            account, bank charges or other — so that every rand that leaves the trust has a reason.
             {sum.notes > 0 && ` ${sum.notes} zero-amount line${sum.notes === 1 ? '' : 's'} ignored.`}
           </p>
 

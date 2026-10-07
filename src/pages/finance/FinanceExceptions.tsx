@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { DisposeExcessModal } from '../../components/finance/DisposeExcessModal'
 import { ParkedCredits } from '../../components/finance/ParkedCredits'
+import { BankLinesToAllocate } from '../../components/finance/BankLinesToAllocate'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
@@ -141,6 +142,14 @@ export function FinanceExceptions() {
         nowhere else to surface. It draws nothing at all when nothing is parked.
       */}
       <ParkedCredits />
+
+      {/*
+        EVERY STATEMENT LINE NOT YET ACCOUNTED FOR (prompt 12): money out that is not tied to a
+        payover, a refund, a drawing or a bank charge, and money in that is not a debtor's and not
+        yet said to be anything. Until this list is empty the trust ledger does not balance against
+        the bank, and the trust overview says so.
+      */}
+      <BankLinesToAllocate />
 
       {disposing?.allocationId && (
         <DisposeExcessModal

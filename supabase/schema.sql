@@ -29186,3 +29186,668 @@ grant execute on function public.client_needs_mandate(uuid) to authenticated;
 alter table public.debtor_accounts add column if not exists default_date date;
 comment on column public.debtor_accounts.default_date is
   'The date of default the client''s handover sheet gave, kept as a record. Interest, the ledger and the Handed over date all run from handover_date (the day the batch was approved), never from this -- the firm, 7 Oct 2026.';
+
+-- =====================================================================================
+-- PROMPT 12: EVERY LINE ON THE TRUST STATEMENT IS ALLOCATED, IN AND OUT
+-- =====================================================================================
+--
+-- THE FIRM: "So that the trust fund completely reconciles and gets a zero balance. Every single
+-- payment going in or going out should be allocated and have a reason for being there."
+--
+-- WHAT WAS THERE. A debit was imported as 'excluded' -- "kept so the statement reconciles" -- and
+-- the only thing that could ever account for one was a payover run of exactly its amount. A bank
+-- charge, a refund, a transfer to the business account sat on the statement with nothing on the
+-- trust ledger behind it, so the bank and the ledger disagreed by their sum for ever; and a credit
+-- that was not a debtor's payment (the bank's interest) could only be got rid of by pretending it
+-- was a payment and then rejecting it, which wrote no reason and no ledger entry.
+--
+-- NOW every statement line carries what it IS, and a ledger entry tied to it by bank_line_id:
+--
+--   OUT  payover            a payover run of that amount, settled by the match (reconcile_bank_debit,
+--                           whose trigger writes the client's entry)
+--        refund             an open refund to a debtor (trust_payments_out), settled by the match
+--                           (its trigger writes the debtor's entry)
+--        business_transfer  the firm's fees, commission, interest and VAT drawn to the business
+--                           account -- a drawing, linked to one already recorded or written now
+--        bank_charge        the firm's cost, never a client's or a debtor's: a NEGATIVE FIRM entry,
+--                           which is the business account owing the trust until it pays it back
+--        other              with a reason typed in, on the 'unidentified' party -- the money is
+--                           accounted for against the bank and still flagged as owned by nobody
+--   IN   (a debtor's payment is placed as it always was -- place_bank_line / split_bank_line)
+--        bank_interest      credited to the firm
+--        business_transfer_in  the business account paying the trust back (e.g. for bank charges)
+--        other              with a reason, on 'unidentified'
+--
+-- A PERSON CONFIRMS EACH ONE. The screen suggests where it is obvious (bankLineAllocation.ts);
+-- nothing is allocated on import except a debtor payment whose reference names exactly one account,
+-- exactly as before.
+--
+-- AN ALLOCATION IS FINAL, like the ledger entry it writes: protect_bank_statement_line freezes it.
+-- A mistake is corrected by a counter-entry, never by rewriting what the statement was said to be.
+--
+-- WHICH LINES. Every line imported through the trust statement import, whatever account number it
+-- carries -- that screen IS the trust import. Whether a statement for another account should be
+-- refused at import is still the firm's open question (HANDOFF section 4, item 6); trust_position's
+-- bank balance keeps reading the trust account number exactly as before.
+--
+-- NOTHING ABOUT RECEIPT SPLITS, COMMISSION OR FEES CHANGES: allocate_payment is not touched, and a
+-- debtor's payment is still placed and split by the functions that always did it.
+-- =====================================================================================
+
+alter table public.bank_statement_lines add column if not exists allocation_kind text;
+alter table public.bank_statement_lines add column if not exists allocation_reason text;
+alter table public.bank_statement_lines add column if not exists trust_entry_id uuid
+  references public.trust_creditor_entries(id);
+alter table public.bank_statement_lines add column if not exists allocated_at timestamptz;
+alter table public.bank_statement_lines add column if not exists allocated_by uuid
+  references public.profiles(id);
+do $c$ begin
+  if not exists (select 1 from pg_constraint where conname = 'bank_statement_lines_allocation_kind_check') then
+    alter table public.bank_statement_lines add constraint bank_statement_lines_allocation_kind_check
+      check (allocation_kind is null or allocation_kind in (
+        'payover', 'refund', 'business_transfer', 'bank_charge', 'other',
+        'bank_interest', 'business_transfer_in'));
+  end if;
+end $c$;
+
+-- A DEBIT IS NO LONGER 'excluded' ON ARRIVAL: it is unallocated until somebody says what it was.
+-- Only the bank's zero-amount notes are excluded, because they move no money.
+update public.bank_statement_lines
+   set status = 'unallocated'
+ where direction = 'debit' and status = 'excluded'
+   and payover_run_id is null and allocation_kind is null;
+
+-- THE ALLOCATION, ONCE MADE, IS FROZEN WITH THE BANK'S OWN FACTS.
+create or replace function public.protect_bank_statement_line()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  new.bank_account := old.bank_account;
+  new.line_key := old.line_key;
+  new.txn_date := old.txn_date;
+  new.amount := old.amount;
+  new.balance := old.balance;
+  new.description := old.description;
+  new.direction := old.direction;
+  new.imported_at := old.imported_at;
+  new.imported_by := old.imported_by;
+  -- A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is what FinancePayments
+  -- does, through the ledger, with a reason written on it.
+  --
+  -- EXCEPT WHERE THE PAYMENT WAS REJECTED, which is the one case where nothing was ever made.
+  -- The firm: "there are no way to reject payments that are imported... I do not want to approve
+  -- them." A rejected receipt never reached allocate_payment, never moved a balance and never
+  -- reached a payover run -- so there is no ledger to reverse it through, and leaving the line
+  -- pointing at it would keep the money claimed by a payment nobody is going to make. The line
+  -- has to go back on the unallocated list to be placed properly, and it cannot while it is held.
+  --
+  -- NARROW ON PURPOSE, AND IT ASKS THE PAYMENT RATHER THAN TRUSTING THE CALLER: only a clearing
+  -- (new.payment_id is null), and only where that payment really carries a rejection. Anything
+  -- else -- a different payment, a half-written one, an approved one -- is refused exactly as
+  -- before.
+  if old.payment_id is not null
+     and not (new.payment_id is null
+              and exists (select 1 from public.account_payments p
+                           where p.id = old.payment_id and p.rejected_at is not null))
+  then
+    new.payment_id := old.payment_id;
+    new.account_id := old.account_id;
+  end if;
+  -- PROMPT 12: WHAT A LINE WAS SAID TO BE, ONCE SAID, STAYS SAID. It wrote a ledger entry, and the
+  -- ledger is append-only; a wrong allocation is answered with a counter-entry, not a rewrite.
+  if old.allocation_kind is not null then
+    new.allocation_kind := old.allocation_kind;
+    new.allocation_reason := old.allocation_reason;
+    new.trust_entry_id := old.trust_entry_id;
+    new.allocated_at := old.allocated_at;
+    new.allocated_by := old.allocated_by;
+  end if;
+  return new;
+end
+$$;
+
+-- ALLOCATE ONE LINE. The only door: the screen calls this and nothing else writes the five columns.
+create or replace function public.allocate_bank_line(
+  p_line uuid, p_kind text, p_reason text default null, p_target uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_l public.bank_statement_lines%rowtype;
+  v_amt numeric;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+  v_entry uuid;
+  v_out public.trust_payments_out%rowtype;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to allocate.' using errcode = '42501';
+  end if;
+  select * into v_l from public.bank_statement_lines where id = p_line for update;
+  if not found then raise exception 'That statement line no longer exists.' using errcode = 'P0002'; end if;
+  if v_l.allocation_kind is not null or v_l.status in ('allocated', 'reconciled') then
+    raise exception 'That line is already allocated.' using errcode = '22023';
+  end if;
+  v_amt := abs(v_l.amount);
+  v_desc := coalesce(nullif(btrim(v_l.description), ''), 'statement line ' || to_char(v_l.txn_date, 'DD Mon YYYY'));
+
+  if v_l.direction = 'debit' then
+    if p_kind not in ('payover', 'refund', 'business_transfer', 'bank_charge', 'other') then
+      raise exception 'Money out is a payover, a refund, a transfer to the business account, a bank charge or other.'
+        using errcode = '22023';
+    end if;
+  elsif v_l.direction = 'credit' then
+    if p_kind not in ('bank_interest', 'business_transfer_in', 'other') then
+      raise exception 'Money in from a debtor is placed on their account; otherwise it is bank interest, a transfer from the business account, or other.'
+        using errcode = '22023';
+    end if;
+  else
+    raise exception 'A note on the statement moves no money and is not allocated.' using errcode = '22023';
+  end if;
+  if p_kind = 'other' and v_why is null then
+    raise exception 'Say what it was -- "other" needs a reason.' using errcode = '22023';
+  end if;
+
+  if p_kind = 'payover' then
+    if p_target is null then raise exception 'Choose the payover run it paid.' using errcode = '22023'; end if;
+    -- The existing match: the run must be approved or sent and its net payover exactly this amount.
+    -- Its trigger writes the client's ledger entry when the run is marked paid.
+    perform public.reconcile_bank_debit(p_line, p_target);
+
+  elsif p_kind = 'refund' then
+    select * into v_out from public.trust_payments_out where id = p_target for update;
+    if not found then raise exception 'Choose the refund it paid.' using errcode = '22023'; end if;
+    if v_out.paid_at is not null or v_out.cancelled_at is not null then
+      raise exception 'That refund is already paid or cancelled.' using errcode = '22023';
+    end if;
+    if round(v_out.amount, 2) <> round(v_amt, 2) then
+      raise exception 'That refund is R % and this line is R %.', to_char(v_out.amount, 'FM999999990.00'),
+        to_char(v_amt, 'FM999999990.00') using errcode = '22023';
+    end if;
+    -- Settling it fires trust_creditors_on_payment_out, which writes the debtor's entry.
+    update public.trust_payments_out
+       set paid_at = (v_l.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+           paid_reference = v_desc, bank_line_id = p_line
+     where id = p_target;
+    select id into v_entry from public.trust_creditor_entries where payment_out_id = p_target
+     order by entry_at desc limit 1;
+
+  elsif p_kind = 'business_transfer' then
+    if p_target is not null then
+      -- A DRAWING ALREADY RECORDED on the Drawings screen, now found on the statement.
+      select e.id into v_entry from public.trust_creditor_entries e
+       where e.id = p_target and e.party = 'firm'
+         and public.firm_entry_kind(e.reason) = 'drawing'
+         and round(-e.amount, 2) = round(v_amt, 2)
+         and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id);
+      if v_entry is null then
+        raise exception 'That drawing is not one of this amount, or is already on the statement.' using errcode = '22023';
+      end if;
+    else
+      -- NOT RECORDED YET: the money has left, so it is written now. Not refused for want of
+      -- earnings the way draw_from_trust is -- that refusal is for money about to move, and this
+      -- has moved; a firm balance below nought then shows as the business owing the trust.
+      insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+      values ('firm', -v_amt, 'Drawn to the business account - ' || coalesce(v_why, v_desc), p_line, auth.uid())
+      returning id into v_entry;
+    end if;
+
+  elsif p_kind = 'bank_charge' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', -v_amt, 'Bank charges - ' || v_desc, p_line, auth.uid())
+    returning id into v_entry;
+
+  elsif p_kind = 'bank_interest' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', v_amt, 'Bank interest received - ' || v_desc, p_line, auth.uid())
+    returning id into v_entry;
+
+  elsif p_kind = 'business_transfer_in' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', v_amt, 'Paid in from the business account - ' || coalesce(v_why, v_desc), p_line, auth.uid())
+    returning id into v_entry;
+
+  else -- other
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('unidentified', case when v_l.direction = 'debit' then -v_amt else v_amt end,
+            case when v_l.direction = 'debit' then 'Paid out - ' else 'Received - ' end || v_why,
+            p_line, auth.uid())
+    returning id into v_entry;
+  end if;
+
+  update public.bank_statement_lines
+     set allocation_kind = p_kind, allocation_reason = v_why, trust_entry_id = v_entry,
+         allocated_at = now(), allocated_by = auth.uid(),
+         status = case when p_kind = 'payover' then 'reconciled' else 'allocated' end
+   where id = p_line;
+  return v_entry;
+end
+$$;
+
+-- WHAT IS STILL TO ALLOCATE: every line that moved money and is not yet accounted for. A credit
+-- placed on a debtor counts as accounted for (status 'allocated', as always); a credit set aside as
+-- "not a receipt" before this existed has no reason and so is listed again.
+create or replace function public.bank_lines_to_allocate()
+returns table (id uuid, txn_date date, amount numeric, description text, direction text,
+               reference text, bank_account text, bank_account_label text, status text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description, l.direction, l.reference,
+         l.bank_account, l.bank_account_label, l.status
+    from public.bank_statement_lines l
+   where public.has_capability('finance.view')
+     and l.direction in ('credit', 'debit')
+     and l.allocation_kind is null
+     and l.status not in ('allocated', 'reconciled')
+   order by l.txn_date desc, l.amount
+$$;
+
+-- WHAT A LINE COULD BE MATCHED TO: open payover runs, open refunds, drawings not yet on a statement.
+create or replace function public.bank_allocation_candidates()
+returns table (kind text, id uuid, amount numeric, label text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'payover', r.id, r.net_payover,
+         coalesce(r.invoice_number, 'Payover') || ' - ' || coalesce(c.name, 'client')
+    from public.payover_runs r left join public.companies c on c.id = r.company_id
+   where public.has_capability('finance.view') and r.status in ('approved', 'sent')
+  union all
+  select 'refund', o.id, o.amount, 'Refund to ' || o.payable_to
+    from public.trust_payments_out o
+   where public.has_capability('finance.view') and o.paid_at is null and o.cancelled_at is null
+  union all
+  select 'business_transfer', e.id, -e.amount,
+         substring(e.reason from length('Drawn to the business account - ') + 1)
+    from public.trust_creditor_entries e
+   where public.has_capability('finance.view') and e.party = 'firm'
+     and public.firm_entry_kind(e.reason) = 'drawing'
+     and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id)
+$$;
+
+-- THE CLASSIFIER LEARNS THE NEW ENTRIES. A bank charge is the firm's COST and a transfer in from the
+-- business is the firm's own money coming back -- neither is earnings, so neither may raise
+-- "earned" or Income. Bank interest credited to the firm is.
+create or replace function public.firm_entry_kind(p_reason text)
+returns text
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case
+    when p_reason like 'Drawn to the business account - %' then 'drawing'
+    when p_reason like 'Charges recovered from payover %' then 'charge_recovered'
+    when p_reason like 'Fees, interest and commission earned%' then 'earned'
+    when p_reason like 'Parked credit taken to the firm%'
+      or p_reason like 'Parked credit returned to the debtor%' then 'credit'
+    when p_reason like 'Bank charges - %' then 'bank_charge'
+    when p_reason like 'Paid in from the business account - %' then 'transfer_in'
+    when p_reason like 'Bank interest received - %' then 'bank_interest'
+    else 'other'
+  end
+$$;
+
+-- THE MATCH SCREEN'S LIST STOPS OFFERING A LINE THAT HAS BEEN SAID TO BE SOMETHING ELSE.
+create or replace function public.unreconciled_payouts()
+returns table(id uuid, txn_date date, amount numeric, description text, candidate_run uuid,
+              candidate_invoice text, candidate_client text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select l.id, l.txn_date, l.amount, l.description,
+         r.id, r.invoice_number, c.name
+    from public.bank_statement_lines l
+    join public.firm_settings f on true
+    left join public.payover_runs r
+      on r.status in ('approved', 'sent')
+     and r.net_payover = abs(l.amount)
+    left join public.companies c on c.id = r.company_id
+   where public.has_capability('finance.view')
+     and l.bank_account = f.trust_account_number
+     and l.direction = 'debit'
+     and l.payover_run_id is null
+     and l.allocation_kind is null
+   order by l.txn_date desc
+$$;
+
+revoke all on function public.allocate_bank_line(uuid, text, text, uuid) from public, anon;
+revoke all on function public.bank_lines_to_allocate() from public, anon;
+revoke all on function public.bank_allocation_candidates() from public, anon;
+revoke all on function public.unreconciled_payouts() from public, anon;
+revoke all on function public.firm_entry_kind(text) from public, anon;
+grant execute on function public.allocate_bank_line(uuid, text, text, uuid) to authenticated;
+grant execute on function public.bank_lines_to_allocate() to authenticated;
+grant execute on function public.bank_allocation_candidates() to authenticated;
+grant execute on function public.unreconciled_payouts() to authenticated;
+grant execute on function public.firm_entry_kind(text) to authenticated;
+
+-- PROMPT 12, AND THE BUSINESS SIDE: a bank charge is the firm's COST and a transfer in from the
+-- business account is the firm's own money coming back -- neither is earnings, so business_month's
+-- "earned" and Income leave both out. Bank interest credited to the firm counts, as "other".
+create or replace function public.business_month(p_from date, p_to date)
+returns table(earned numeric, drawn numeric, still_in_trust numeric, invoiced numeric,
+              invoices_paid numeric, owed_by_clients numeric, expenses numeric, expenses_vat numeric,
+              made numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    /* EARNED: every firm entry that is not a drawing, a charge being paid, a bank charge or the
+       business paying the trust back, NET -- so a reversed receipt takes its earnings back off, and
+       a parked credit returned to the debtor is not a drawing. DRAWN: the drawings, and nothing
+       else. See firm_entry_kind. */
+    select coalesce(sum(amount) filter (where public.firm_entry_kind(reason) not in ('drawing', 'charge_recovered', 'bank_charge', 'transfer_in')), 0) as earned,
+           coalesce(-sum(amount) filter (where public.firm_entry_kind(reason) = 'drawing'), 0) as drawn
+      from public.trust_creditor_entries
+     where party = 'firm'
+       and (entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  held as (
+    /* Not period-bound: what is sitting in trust right now, whenever it was earned. */
+    select coalesce(sum(amount), 0) as bal from public.trust_creditor_entries where party = 'firm'
+  ),
+  charges as (
+    select coalesce(sum(amount + vat) filter (where cancelled_at is null), 0) as invoiced,
+           coalesce(sum(amount + vat) filter (where cancelled_at is null and paid_at is not null), 0) as paid
+      from public.client_charges
+     where raised_on between p_from and p_to
+  ),
+  owing as (
+    select coalesce(sum(amount + vat), 0) as bal from public.client_charges
+     where cancelled_at is null and paid_at is null
+  ),
+  spent as (
+    select coalesce(sum(amount), 0) as ex, coalesce(sum(vat), 0) as vat
+      from public.business_expenses
+     where cancelled_at is null and incurred_on between p_from and p_to
+  )
+  select f.earned, f.drawn, h.bal, c.invoiced, c.paid, o.bal, s.ex, s.vat,
+         /* WHAT THE FIRM MADE: earned less spent. Not "drawn less spent" -- money earned and still
+            sitting in trust has been earned, and a month read on drawings would say the firm made
+            nothing in any month it chose not to transfer. */
+         f.earned + c.invoiced - s.ex
+    from firm f, held h, charges c, owing o, spent s
+   where public.has_capability('business.view')
+$$;
+
+create or replace function public.business_income(p_from date, p_to date)
+returns table(company_id uuid, company_name text, interest numeric, costs numeric,
+              commission numeric, commission_vat numeric, credit_taken numeric,
+              charges_raised numeric, other numeric, total numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(e.company_id, d.company_id) as company_id,
+           public.firm_entry_kind(e.reason) as kind, e.amount, a.id as alloc_id,
+           a.to_interest, a.to_costs, a.commission, a.commission_vat
+      from public.trust_creditor_entries e
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'firm'
+       and (e.entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  lines as (
+    select company_id,
+           -- A RECEIPT'S EARNINGS ARE SPLIT ONLY WHERE THE ALLOCATION IS THERE TO SPLIT THEM BY;
+           -- an earned entry with none falls to `other`, whole, rather than being guessed apart.
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_interest, 0) else 0 end) as interest,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_costs, 0) else 0 end) as costs,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission, 0) else 0 end) as commission,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission_vat, 0) else 0 end) as commission_vat,
+           sum(case when kind = 'credit' then amount else 0 end) as credit_taken,
+           0::numeric as charges_raised,
+           sum(case when kind not in ('earned', 'credit') or (kind = 'earned' and alloc_id is null) then amount else 0 end)
+             -- AND WHATEVER THE SPLIT DID NOT ACCOUNT FOR, so the parts always sum to the ledger.
+             + sum(case when kind = 'earned' and alloc_id is not null
+                        then amount - (coalesce(to_interest, 0) + coalesce(to_costs, 0)
+                                       + coalesce(commission, 0) + coalesce(commission_vat, 0))
+                        else 0 end) as other
+      from firm
+     where kind not in ('drawing', 'charge_recovered', 'bank_charge', 'transfer_in')
+     group by company_id
+    union all
+    select c.company_id, 0, 0, 0, 0, 0, sum(c.amount + c.vat), 0
+      from public.client_charges c
+     where c.cancelled_at is null and c.raised_on between p_from and p_to
+     group by c.company_id
+  )
+  select l.company_id, co.name,
+         sum(l.interest), sum(l.costs), sum(l.commission), sum(l.commission_vat),
+         sum(l.credit_taken), sum(l.charges_raised), sum(l.other),
+         sum(l.interest + l.costs + l.commission + l.commission_vat + l.credit_taken
+             + l.charges_raised + l.other)
+    from lines l
+    left join public.companies co on co.id = l.company_id
+   where public.has_capability('business.income')
+   group by l.company_id, co.name
+   order by 10 desc
+$$;
+
+-- PROMPT 12: A DEBIT ARRIVES UNALLOCATED, not 'excluded' -- it is money that left the trust and has
+-- to be said to be something (allocate_bank_line). Only the bank's zero-amount notes are excluded.
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to import into.' using errcode = '42501';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'note' then 'excluded' else 'unallocated' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- EXACTLY ONE ACCOUNT, OR NOBODY. account_number is the reference the DEBTOR knows and types.
+    -- It is not unique the way case_number is, so a reference naming two accounts is counted and
+    -- left for a person -- guessing credits one debtor with another's money, and a payment is
+    -- immutable once processed. (array_agg, not min(): there is no min(uuid).)
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.account_number) = v_ref;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid()
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;
+
+create or replace function public.place_bank_line(p_line uuid, p_account uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_payment uuid;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to place a receipt in.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  -- The three ways this could put money somewhere it does not belong, each refused by name.
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be placed against an account.';
+  end if;
+  if v_line.payment_id is not null then
+    raise exception 'That receipt has already been placed.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client,
+    created_by, bank_line_id
+  ) values (
+    p_account,
+    (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+    v_line.amount, 'EFT',
+    coalesce(v_line.reference, left(v_line.description, 60)),
+    v_line.description, 'bank', false, auth.uid(), p_line
+  ) returning id into v_payment;
+
+  update public.bank_statement_lines
+     set status = 'allocated', account_id = p_account, payment_id = v_payment,
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_payment;
+end $$;
+
+-- ============================================================================================
+-- THE TRUST LEDGER, LISTED: ONE BALANCE PER PARTY
+--
+-- trust_position says how much is owed out of the trust account. This says WHO it is owed to, and
+-- it is the reader behind the ledger screen -- the last thing built in the database over the past
+-- few prompts that had no face.
+--
+-- THE NETTING IS COPIED FROM trust_position ON PURPOSE, down to the grouping expression: a client
+-- nets across their whole book because that is how they are paid, and a debtor nets per account
+-- because two files of the same person are two debts. Listed any other way the ledger and the
+-- reconciliation would disagree about who is owed what, which is the single thing a trust ledger
+-- exists to settle. Verified against the position's own arithmetic before shipping.
+--
+-- A ZERO BALANCE IS NOT LISTED. A client paid out in full has entries on both sides that cancel;
+-- drawing them as a R0.00 row would bury the ten people who are actually owed something among
+-- hundreds who are not. The entries themselves are never deleted -- the ledger has no update or
+-- delete policy at all, which check-financial-immutability asserts.
+--
+-- IT WILL NOT SUM TO net_owed, AND THAT IS CORRECT. trust_position adds unplaced receipts to what
+-- is owed, because money sitting on the statement with nobody's name on it is still somebody's;
+-- this function can only list parties it knows. The screen says so rather than leaving two figures
+-- to look like a disagreement.
+-- ============================================================================================
+
+create or replace function public.trust_balances()
+returns table(party text, who_id text, who_name text, who_detail text,
+              balance numeric, entries bigint, last_at timestamptz)
+language sql stable security definer set search_path to 'public'
+as $$
+  with by_party as (
+    select e.party,
+           case when e.party = 'client' then e.company_id::text
+                else coalesce(e.account_id::text, e.party) end as who,
+           sum(e.amount) as bal,
+           count(*) as n,
+           max(e.entry_at) as last_at
+      from public.trust_creditor_entries e
+     group by 1, 2
+  )
+  select b.party,
+         b.who,
+         case b.party
+           when 'client' then coalesce(c.name, 'Unknown client')
+           when 'debtor' then coalesce(nullif(btrim(coalesce(a.debtor_first_name, a.debtor_initials, '')
+                                     || ' ' || coalesce(a.debtor_surname, '')), ''), 'Unknown debtor')
+           when 'firm' then 'Bredell Ferreira'
+           else 'Not yet identified'
+         end,
+         case b.party
+           when 'client' then coalesce(c.code, '')
+           when 'debtor' then coalesce(a.case_number, '')
+           when 'firm' then 'Fees, interest and commission earned'
+           else 'Receipts nobody has placed'
+         end,
+         round(b.bal, 2), b.n, b.last_at
+    from by_party b
+    left join public.companies c on b.party = 'client' and c.id = b.who::uuid
+    left join public.debtor_accounts a on b.party = 'debtor' and a.id = b.who::uuid
+   where public.has_capability('finance.view')
+     and round(b.bal, 2) <> 0
+   order by abs(b.bal) desc
+$$;
