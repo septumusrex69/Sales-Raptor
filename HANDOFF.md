@@ -24,10 +24,11 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run (third session, at `a27f451`, before prompts 10–12): **all green, 18 148
-checks across 282 files.** After prompt 12 the fast suite is green at 16 759 checks across 252
-files, and every e2e touched by prompts 10–12 was run on its own and is green. Run the full suite
-first thing next session.
+At the last full run (third session, at `51afe97`, the Payments in redesign): **285 of 288 files
+green, every browser test among them.** The three that failed (`check-capabilities`,
+`check-finance-is-administrator-only`, `check-themes`) had not been updated for the redesign. They
+were fixed in that same commit after the run had already read them, and the fast suite on the
+commit is **all green, 16 857 checks across 253 files**.
 
 ---
 
