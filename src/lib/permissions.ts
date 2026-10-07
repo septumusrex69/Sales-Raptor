@@ -394,6 +394,14 @@ export function canRecordPayment(user: Pick<User, 'role' | 'grants' | 'revokes'>
 }
 
 /**
+ * WHO MAY REVERSE A POSTED PAYMENT -- the browser's copy of reverse_payment's own guard, so the
+ * button on Check is only drawn where the database will honour it.
+ */
+export function canReversePayment(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'payment.reverse')
+}
+
+/**
  * WHO MAY RECORD THAT A CLIENT ACCEPTED A SETTLEMENT -- the client liaisons and the Administrator,
  * at the firm's ruling. approve_settlement asks the same tick, so a button drawn here is never
  * refused there.

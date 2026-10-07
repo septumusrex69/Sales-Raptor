@@ -22,7 +22,7 @@
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-embedded-shape.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 
 let pass = 0
 const failures = []
@@ -46,44 +46,58 @@ const payments = read('src/pages/finance/FinancePayments.tsx')
 ok('one split per payment, enforced by a unique key',
   /payment_id uuid not null unique references public\.account_payments \(id\)/.test(sql))
 
-/* ---------------- and the reader takes either shape ---------------- */
-
-ok('the embed is read through a helper', /const oneOf = \(a: Allocation \| Allocation\[\] \| null \| undefined\)/.test(payments))
-ok('...which takes either shape', /Array\.isArray\(a\) \? a\[0\] : a \?\? undefined/.test(payments))
-ok('...and the type says both are possible',
-  /payment_allocations: Allocation \| Allocation\[\] \| null/.test(payments))
+/* ---------------- and nothing reads it the broken way ---------------- */
 
 /*
- * AND NOTHING INDEXES IT DIRECTLY ANY MORE. This is the assertion that the bug is gone rather than
- * that the helper merely exists -- the table read it one way and the Reverse box the other, and
- * both were wrong in the same way.
+ * THE LIST THAT HAD THE BUG IS GONE. The firm redesigned Payments in -- "Payments in is only for
+ * processing current payments" -- and the list of every payment, which embedded the allocation,
+ * went with it. Its two readers went to places that do not embed: the queue reads
+ * payments_awaiting_approval and Check reads payments_posted, both of which JOIN the allocation in
+ * SQL and hand back one flat row. So what is held now is that the broken read cannot come back
+ * anywhere, and that whoever embeds the allocation again meets this file's rule.
  */
-check('no allocation is read by indexing the embed',
-  (payments.match(/payment_allocations\?\.\[0\]/g) ?? []).length, 0)
-ok('the table reads it through the helper', /const a = oneOf\(r\.payment_allocations\)/.test(payments))
-ok('...and so does the "already paid over" warning',
-  /const invoiced = Boolean\(oneOf\(row\.payment_allocations\)\?\.payover_run_id\)/.test(payments))
+const SRC = new URL('../../src/', import.meta.url)
+const files = []
+const walk = (dir) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = new URL(e.name + (e.isDirectory() ? '/' : ''), dir)
+    if (e.isDirectory()) walk(p)
+    else if (/\.tsx?$/.test(e.name)) files.push(p)
+  }
+}
+walk(SRC)
+ok('the source tree was read', files.length > 100)
+const indexed = files.filter((f) => /payment_allocations\??\.\[0\]/.test(readFileSync(f, 'utf8')))
+check('no allocation is read by indexing the embed, anywhere', indexed.map((f) => f.pathname.split('/src/')[1]), [])
+/* AN EMBED IN A SELECT STRING: ' payment_allocations(' -- the shape this file is about. */
+const embeds = files.filter((f) => /['+ ]payment_allocations\(/.test(readFileSync(f, 'utf8')))
+for (const f of embeds) {
+  ok(`${f.pathname.split('/src/')[1]} embeds the allocation and reads it through a helper that takes either shape`,
+    /Array\.isArray\([^)]*\) \? [^:]+\[0\] :/.test(readFileSync(f, 'utf8')))
+}
+check('Payments in no longer embeds the allocation at all', /payment_allocations\(/.test(payments), false)
 
-/* ---------------- and a payment with no split yet says which ---------------- */
+/* ---------------- the warning it silenced still draws ---------------- */
 
 /*
- * THE FIRM'S OWN QUESTION, once the dashes are explained: "should it go in there already? Or
- * should it wait to be approved before it goes there?"
- *
- * IT BELONGS HERE. This list is the book, and a payment invisible until somebody approves it is a
- * payment the person who captured it cannot find -- so they capture it again. What it must not do
- * is look like one that has moved money: after the fix an approved payment shows figures, so an
- * empty row can only mean "not approved", and that has to be said rather than inferred.
+ * "ALREADY PAID OVER" WAS THE SENTENCE THAT NEVER DREW. The Reverse box moved to Check, where the
+ * payover run arrives as a joined column -- not an embed -- so it is read straight off the row.
  */
-ok('a payment still waiting is marked', /Waiting for approval/.test(payments))
-ok('...decided by the approval, not by the split',
-  /const waiting = !r\.approved_at && !r\.reversed_at/.test(payments))
-ok('...which means the list has to read that column', /account_id, approved_at,'/.test(payments))
+const check_ = read('src/pages/finance/CheckPayments.tsx')
+ok('the Reverse box is on Check', /function ReverseModal\(/.test(check_))
+ok('...and its "already paid over" warning reads the run off the posted row',
+  /const invoiced = Boolean\(row\.runInvoice\)/.test(check_))
+ok('...which payments_posted joins in SQL', /left join public\.payover_runs r on r\.id = a\.payover_run_id/.test(sql))
+
+/* ---------------- and a payment with no split yet is still findable ---------------- */
+
 /*
- * AND IT IS NOT OFFERED A REVERSE. Nothing has happened to reverse: no fee raised, no capital
- * moved, no remittance. It is taken out of the queue above instead.
+ * THE FIRM'S OWN QUESTION, once the dashes were explained: "should it go in there already?" A
+ * payment invisible until somebody approves it is one the person who captured it captures again.
+ * It is on Payments in, in the queue, named as pending -- not mixed into a list of posted ones.
  */
-ok('...and is not offered a reversal', /\{!reversed && !waiting && \(/.test(payments))
+ok('Payments in draws the queue', /<AwaitingApproval /.test(payments))
+ok('...headed as pending', /Pending processing/.test(read('src/pages/finance/AwaitingApproval.tsx')))
 
 console.log(`\ncheck-embedded-shape: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

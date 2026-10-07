@@ -29851,3 +29851,95 @@ as $$
      and round(b.bal, 2) <> 0
    order by abs(b.bal) desc
 $$;
+
+-- ============================================================================
+-- PAYMENTS IN, THE MONTH SO FAR: WHAT WAS PROCESSED, BY ROUTE.
+--
+-- THE FIRM, REDESIGNING THE SCREEN: "Payments in is only for processing current payments" -- the
+-- list of every payment ever went, and an overview of tiles took its place: pending, processed in
+-- trust, paid directly to the client, unmatched. The pending and unmatched tiles are the lists on
+-- the screen; the two PROCESSED tiles have no list there any more, so they are counted here.
+--
+-- SUMMED IN THE DATABASE, because a month is about three thousand payments and PostgREST hands
+-- back a thousand rows at most -- a tile summed in the browser would be right in a quiet month and
+-- silently short in a busy one, which is the failure CLAUDE.md names for lists that load the book
+-- to count it.
+-- ============================================================================
+create or replace function public.payments_in_month(p_from date, p_to date)
+returns table(trust_count integer, trust_amount numeric, ptc_count integer, ptc_amount numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select
+    count(*) filter (where not p.paid_to_client)::integer,
+    coalesce(sum(p.amount) filter (where not p.paid_to_client), 0),
+    count(*) filter (where p.paid_to_client)::integer,
+    coalesce(sum(p.amount) filter (where p.paid_to_client), 0)
+  from public.account_payments p
+  where public.has_capability('finance.view')
+    and not p.is_demo
+    and p.approved_at is not null
+    and p.reversed_at is null
+    and (p.approved_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+$$;
+
+comment on function public.payments_in_month(date, date) is
+  'What Payments in processed between two days (SAST, by the day it was approved): receipts into '
+  'trust and payments made straight to the client, counted and summed in the database so the tile '
+  'is right on a month of three thousand payments rather than on the first page of them. Reversed '
+  'and demo payments are left out. finance.view, checked in the WHERE clause because this is '
+  'security definer.';
+
+revoke all on function public.payments_in_month(date, date) from public, anon;
+grant execute on function public.payments_in_month(date, date) to authenticated;
+
+-- ============================================================================
+-- AND payments_in_month IS IN THE REVOKE LIST, restated whole for the reason every block like this
+-- gives: schema.sql is append-only and the LAST block is the live one, so a block carrying one name
+-- would leave every other function in it un-revoked on a fresh database. (The function also
+-- revokes itself where it is created; this is the list check-finance-is-administrator-only reads.)
+-- ============================================================================
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

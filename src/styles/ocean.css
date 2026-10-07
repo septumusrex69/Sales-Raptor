@@ -30,6 +30,8 @@ html[data-theme='ocean'] {
      so the cards sit in the same air as the photographs. */
   --color-surface: #f2f5f8;
   --color-card: #fbfcfd;
+  /* A pinned table cell's background (Payments in): the card, opaque. */
+  --color-card-solid: #fbfcfd;
 
   /* Neutrals run from spray down to deep water, so every grey belongs to the pictures' family. */
   --color-slate-50: #f6f8fa;

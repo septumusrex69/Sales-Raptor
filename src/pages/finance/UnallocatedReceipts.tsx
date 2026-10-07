@@ -30,9 +30,11 @@ import {
  * a person deciding. A wrong placement credits the wrong debtor AND remits the wrong client, and
  * a payment is immutable once processed -- reversal leaves both rows on the ledger for ever.
  */
-export function UnallocatedReceipts({ refreshKey, onPlaced }: {
+export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
   refreshKey: number
   onPlaced: () => void
+  /** What is unmatched or in suspense, for the overview tile on Payments in -- read once here. */
+  onTotals?: (count: number, total: number) => void
 }) {
   const [rows, setRows] = useState<UnallocatedReceipt[]>([])
   const [payouts, setPayouts] = useState<UnreconciledPayout[]>([])
@@ -59,10 +61,12 @@ export function UnallocatedReceipts({ refreshKey, onPlaced }: {
         fetchUnallocatedReceipts(), fetchUnreconciledPayouts(), fetchSuspendedPayments(),
       ])
       setRows(r); setPayouts(p); setParked(sp)
+      /* BOTH HALVES OF SUSPENSE: receipts never attributed, and receipts parked off the queue. */
+      onTotals?.(r.length + sp.length, r.reduce((n, x) => n + x.amount, 0) + sp.reduce((n, x) => n + x.amount, 0))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the unplaced receipts.')
     } finally { setLoading(false) }
-  }, [])
+  }, [onTotals])
   useEffect(() => { void load() }, [load, refreshKey])
 
   async function tie(lineId: string, runId: string) {

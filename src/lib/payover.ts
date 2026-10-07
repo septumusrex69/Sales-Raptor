@@ -1578,3 +1578,38 @@ export async function releasePaymentFromSuspense(paymentId: string): Promise<voi
   const { error } = await supabase.rpc('release_payment_from_suspense', { p_payment: paymentId })
   if (error) throw new Error(error.message)
 }
+
+/**
+ * EACH ACCOUNT'S HANDOVER DAY, for the "before handover" badge on the approval queue.
+ *
+ * Read separately rather than added to payments_awaiting_approval, whose OUT columns would have to
+ * be dropped and re-made to grow. IN CHUNKS: a morning of three thousand receipts is three thousand
+ * ids, and one `in.(...)` that long is a URL the gateway refuses. A failure here only loses a badge,
+ * so it is the caller's to swallow -- the badge is then absent, never drawn as a pass.
+ */
+export async function fetchHandoverDates(accountIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(accountIds)]
+  const out = new Map<string, string>()
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await supabase.from('debtor_accounts')
+      .select('id, handover_date').in('id', ids.slice(i, i + 150))
+    if (error) throw new Error(error.message)
+    for (const r of (data ?? []) as { id: string; handover_date: string | null }[]) {
+      if (r.handover_date) out.set(r.id, r.handover_date)
+    }
+  }
+  return out
+}
+
+/** What Payments in has already processed between two days -- see payments_in_month. */
+export interface ProcessedMonth { trustCount: number; trustAmount: number; ptcCount: number; ptcAmount: number }
+
+export async function fetchProcessedMonth(from: string, to: string): Promise<ProcessedMonth> {
+  const { data, error } = await supabase.rpc('payments_in_month', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  const r = ((data ?? []) as Record<string, unknown>[])[0] ?? {}
+  return {
+    trustCount: Number(r.trust_count ?? 0), trustAmount: Number(r.trust_amount ?? 0),
+    ptcCount: Number(r.ptc_count ?? 0), ptcAmount: Number(r.ptc_amount ?? 0),
+  }
+}

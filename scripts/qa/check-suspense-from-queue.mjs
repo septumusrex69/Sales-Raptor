@@ -158,7 +158,7 @@ ok('the library offers all three', /export async function suspendPayment\(/.test
   && /export async function releasePaymentFromSuspense\(/.test(lib)
   && /export async function fetchSuspendedPayments\(/.test(lib))
 
-ok('the queue has the button', /Suspense\b/.test(queue))
+ok('the queue has the button', /onClick=\{\(\) => setParking\(r\)\}[\s\S]{0,140}>Suspense</.test(queue))
 ok('...beside Move, which is the same question answered the other way', /setMoving\(r\)/.test(queue))
 ok('...opening a box that asks why', /Why is it going to suspense\?/.test(queue))
 /* THE REASON IS REQUIRED ON THE SCREEN TOO, so the refusal is a disabled button rather than a

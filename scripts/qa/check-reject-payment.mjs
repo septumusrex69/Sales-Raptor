@@ -331,7 +331,9 @@ check('every column payments_rejected returns is read by the mapper', missed.joi
 
 /* ---------------- the screen ---------------- */
 
-ok('the queue can reject what is ticked', /setRejecting\(rows\.filter\(\(r\) => picked\.has\(r\.paymentId\)\)\)/.test(queue))
+ok('the queue can reject what is ticked',
+  /const pickedRows = useMemo\(\(\) => rows\.filter\(\(r\) => picked\.has\(r\.paymentId\)\)/.test(queue)
+  && /setRejecting\(pickedRows\)/.test(queue))
 ok('...and one row on its own', /setRejecting\(\[r\]\)/.test(queue))
 ok('...and there is a box that asks why', /function RejectModal\(/.test(queue))
 /*

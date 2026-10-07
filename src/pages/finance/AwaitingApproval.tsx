@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Check, Loader2, RotateCcw, Search, Undo2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, Search, Undo2, X,
+} from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
@@ -7,19 +9,22 @@ import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
   fetchAwaitingApproval, approvePayments, setPaymentAccount, suspendPayment,
-  awaitingAllocation, fetchRejectedPayments, rejectPayments, unrejectPayment,
+  awaitingAllocation, fetchRejectedPayments, rejectPayments, unrejectPayment, fetchHandoverDates,
   type AwaitingPayment, type RejectedPayment,
 } from '../../lib/payover'
-import { checkAllocation } from '../../lib/allocationRules'
-/*
- * THE THREE SECTIONS ARE DRAWN BY ONE COMPONENT, shared with the administrator's check of posted
- * payments. The firm asked to see these figures in two places; CLAUDE.md's rule about the same
- * figures on two screens applies to the drawing as much as to the arithmetic -- written out twice,
- * the queue and the audit list would quietly disagree about what a payment paid.
- */
+import type { Allocation, Violation } from '../../lib/allocationRules'
 import {
-  FeeBodyCells, FeeHeadCells, feeColumns, toggled, type SectionKey,
-} from '../../components/finance/FeeSections'
+  batchReconciliation, batchTotals, checkedRow, totalsByClient,
+  type QueueException, type QueueFigures,
+} from '../../lib/paymentsQueue'
+import { cycleStartOn, shortDate } from '../../lib/trustCycles'
+/*
+ * THE FOUR FIGURES BEHIND EACH FEE LINE ARE DRAWN FROM ONE DEFINITION, shared with the
+ * administrator's check of posted payments. On the queue they moved out of the table and into the
+ * breakdown drawer -- a row is one line of answers now -- but the definitions are the same ones,
+ * so the queue and the audit list cannot quietly disagree about what a payment paid.
+ */
+import { BEFORE, SECTIONS } from '../../components/finance/FeeSections'
 
 /**
  * THE DAY'S PAYMENTS, WAITING TO BE APPROVED.
@@ -36,16 +41,34 @@ import {
  * THEY CARRY OVER BY THEMSELVES. The firm: "if there's a payment that has not been approved on a
  * specific day, then it carries over and it stays there." This list is everything not yet
  * approved, whatever day it arrived -- no nightly job, and so no night it fails to run.
+ *
+ * ------------------------------------------------------------------------------------------------
+ * ONE LINE A PAYMENT (the redesign)
+ * ------------------------------------------------------------------------------------------------
+ *
+ * About three thousand payments a month, so a row is 44-56px of figures, not a card: the debtor
+ * pinned on the left, the money scrolling sideways in the order it is spent -- payment, interest
+ * and fees, capital, commission, the final split, then what is unusual about it. Everything a row
+ * cannot hold is in the breakdown drawer, one tap away. Every figure is the engine's;
+ * `paymentsQueue.ts` names and sums them and never re-splits a payment.
  */
-export function AwaitingApproval({ refreshKey, onApproved }: {
+const PAGE = 100
+
+export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
   refreshKey: number
   onApproved: () => void
+  /** The queue's size, for the overview tile above it -- read once, not fetched twice. */
+  onLoaded?: (count: number, total: number) => void
 }) {
   const [rows, setRows] = useState<AwaitingPayment[]>([])
+  const [handovers, setHandovers] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /* A failed READ, kept apart so a good reload clears it without wiping an action's report. */
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [page, setPage] = useState(0)
   /* The receipt whose debtor is being corrected, if one is. */
   const [moving, setMoving] = useState<AwaitingPayment | null>(null)
   /*
@@ -64,9 +87,8 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
    * there's some ones waiting in the queue to be approved, but I don't want to approve them."
    *
    * Move is "I know whose this is and it is not this debtor's". Suspense is "I do not know whose
-   * this is yet". Reject is "this should not become a payment at all" -- and until now the only
-   * way to clear one off the list was to approve it, which is the one thing the firm was saying
-   * they did not want to do.
+   * this is yet". Reject is "this should not become a payment at all" -- and REJECTING IS NOT A
+   * REFUND: no money leaves the trust, the receipt simply does not become a payment.
    *
    * A LIST RATHER THAN A ROW, because a morning's rubbish is thrown out together and for the same
    * reason. One row goes through the same box with one id in it.
@@ -75,20 +97,19 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
   /* WHAT WAS THROWN OUT, so it is visible rather than vanished -- and so the undo is beside the
      mistake. Rejecting happens at speed down a list, which is when the wrong row gets pressed. */
   const [rejected, setRejected] = useState<RejectedPayment[]>([])
-  /*
-   * WHICH OF THE THREE FEE SECTIONS IS OPENED OUT.
-   *
-   * THE FIRM: "the column that you will be showing to us is the interest that we are taking now.
-   * But if you click on the interest taking, it expands all of the other columns just to double
-   * check." So the default is one column a section -- what this payment takes -- and the
-   * arithmetic behind it is a click away rather than always on the screen. Per SECTION and not
-   * per row: the four figures are a column each, and a row that opened its own would put a
-   * different number of cells in one table.
-   */
-  const [opened, setOpened] = useState<Set<SectionKey>>(new Set())
+  /* The payment open in the breakdown drawer. */
+  const [opened, setOpened] = useState<string | null>(null)
+  /* APPROVE ALL ASKS FIRST, because "all" is the whole queue and not the page on the screen. */
+  const [confirmAll, setConfirmAll] = useState(false)
 
+  /*
+   * A RELOAD DOES NOT CLEAR THE ERROR LINE. Approving reloads this list twice -- once itself and
+   * once through the page's refresh key -- and a reload that cleared it wiped "2 approved, 1 could
+   * not be" before anybody could read it, which is the one sentence the firm needs after a partial
+   * approval. Each action clears it when it starts instead.
+   */
   const load = useCallback(async () => {
-    setLoading(true); setError(null)
+    setLoading(true)
     try {
       const [queue, thrown] = await Promise.all([
         fetchAwaitingApproval(),
@@ -98,17 +119,17 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
       ])
       setRows(queue)
       setRejected(thrown)
+      setLoadError(null)
+      /* A ROW THAT LEFT THE QUEUE LEAVES THE SELECTION, or "Approve 3" would approve a payment
+         somebody else already approved -- or worse, count one that is no longer here. */
+      setPicked((p) => new Set([...p].filter((id) => queue.some((r) => r.paymentId === id))))
+      /* The badge only. Without it a row is drawn without "before handover", never with a pass. */
+      fetchHandoverDates(queue.map((r) => r.accountId)).then(setHandovers).catch(() => setHandovers(new Map()))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the day’s payments.')
+      setLoadError(e instanceof Error ? e.message : 'Could not load the day’s payments.')
     } finally { setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load, refreshKey])
-
-  const total = useMemo(() => rows.reduce((n, r) => n + r.amount, 0), [rows])
-  const pickedTotal = useMemo(
-    () => rows.filter((r) => picked.has(r.paymentId)).reduce((n, r) => n + r.amount, 0),
-    [rows, picked],
-  )
 
   /*
    * THE FIGURES AS THE RULES SEE THEM, AND WHAT THE RULES MAKE OF THEM.
@@ -122,29 +143,34 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
    * way; a screen that refused to show a receipt it could not reconcile would leave the firm with
    * nothing to act on. It is marked, named and approvable.
    */
-  const checked = useMemo(() => rows.map((r) => {
-    const a = awaitingAllocation(r)
-    return { row: r, a, problems: checkAllocation(a) }
-  }), [rows])
+  const checked = useMemo(() => rows.map((r) =>
+    checkedRow(r, awaitingAllocation(r), handovers.get(r.accountId) ?? null)), [rows, handovers])
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
+  const totals = useMemo(() => batchTotals(rows), [rows])
+  const total = totals.total
+  useEffect(() => { if (!loading) onLoaded?.(rows.length, total) }, [loading, rows.length, total, onLoaded])
 
-  function toggleSection(k: SectionKey) {
-    setOpened((p) => toggled(p, k))
-  }
+  const pickedRows = useMemo(() => rows.filter((r) => picked.has(r.paymentId)), [rows, picked])
+  const pickedTotal = useMemo(() => pickedRows.reduce((n, r) => n + r.amount, 0), [pickedRows])
+  const pages = Math.max(1, Math.ceil(checked.length / PAGE))
+  const shown = checked.slice(page * PAGE, page * PAGE + PAGE)
+  useEffect(() => { if (page > pages - 1) setPage(pages - 1) }, [page, pages])
 
   async function approve(ids: string[]) {
+    /* BUSY IS THE GUARD AGAINST A SECOND PRESS: every approve button is disabled while one runs,
+       and this refuses a call that slipped in before the re-render. */
     if (ids.length === 0 || busy) return
     setBusy(true); setError(null)
     try {
       const out = await approvePayments(ids)
+      setPicked(new Set())
+      await load()
+      onApproved()
       /* A PAYMENT THAT COULD NOT GO THROUGH NAMES ITSELF and the rest still did -- the database
          approves them one at a time inside one call. Reported rather than swallowed. */
       if (out.problems.length > 0) {
         setError(`${out.approved} approved, ${out.skipped} could not be: ${out.problems.slice(0, 3).join('; ')}`)
       }
-      setPicked(new Set())
-      await load()
-      onApproved()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Those payments could not be approved.')
     } finally { setBusy(false) }
@@ -169,7 +195,7 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
 
-  if (loading) {
+  if (loading && rows.length === 0) {
     return <Card><div className="py-8 text-center"><Loader2 className="mx-auto w-4 h-4 animate-spin text-slate-400" /></div></Card>
   }
   /*
@@ -185,6 +211,11 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
   if (rows.length === 0) {
     return (
       <Card padded={false}>
+        {(error ?? loadError) && (
+          <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error ?? loadError}</span>
+          </div>
+        )}
         <p className="px-4 py-4 text-center text-[13px] text-slate-500">
           {rejected.length > 0
             ? 'No payments waiting. Everything that has arrived has been approved or rejected.'
@@ -195,48 +226,52 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
     )
   }
 
+  const open = opened ? checked.find((c) => c.row.paymentId === opened) ?? null : null
+  const allOnPage = shown.length > 0 && shown.every((c) => picked.has(c.row.paymentId))
+
   return (
     <Card padded={false}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
         <div>
-          <h3 className="text-[15px] font-semibold text-slate-800">Payments waiting for you</h3>
+          <h3 className="text-[15px] font-semibold text-slate-800" data-testid="queue-heading">
+            Pending processing · {rows.length.toLocaleString('en-ZA')}
+          </h3>
           <p className="text-[12px] text-slate-500">
             Nothing has moved yet. These are the figures each one would post if you approve it.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[15px] font-semibold tabular-nums text-navy-950">{rand(total)}</span>
+        <div className="flex flex-wrap items-center gap-2">
           <button type="button" disabled={busy || picked.size === 0}
             onClick={() => void approve([...picked])}
             className="text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-200
               text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
-            Approve {picked.size} · {rand(pickedTotal)}
+            Approve selected · {picked.size} · {rand(pickedTotal)}
           </button>
           {/*
             AND THE OTHER WAY OFF THE LIST, beside the one that was there.
 
             THE FIRM: "there's some ones waiting in the queue to be approved, but I don't want to
-            approve them." Until now the only button that cleared a row was the one that posted it.
+            approve them." Until then the only button that cleared a row was the one that posted it.
           */}
           <button type="button" disabled={busy || picked.size === 0}
-            onClick={() => setRejecting(rows.filter((r) => picked.has(r.paymentId)))}
+            onClick={() => setRejecting(pickedRows)}
             className="text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-200
               text-slate-600 hover:border-negative-300 hover:bg-negative-50 disabled:opacity-40">
-            Reject {picked.size}
+            Reject selected · {picked.size}
           </button>
-          <button type="button" disabled={busy}
-            onClick={() => void approve(rows.map((r) => r.paymentId))}
+          <button type="button" disabled={busy} onClick={() => setConfirmAll(true)}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
               border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-40">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-            Approve all {rows.length}
+            Approve all {rows.length} · {rand(total)}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700">
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
+      {(error ?? loadError) && (
+        <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700"
+          data-testid="queue-error">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error ?? loadError}</span>
         </div>
       )}
 
@@ -267,229 +302,167 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px] whitespace-nowrap">
-          {/*
-            TWO HEADER ROWS, BECAUSE A PAYMENT HAS TWO SIDES AND THE FIRM DREW IT THAT WAY.
+      <BatchSummary rows={rows} />
 
-            THE FIRM: "what I need you to do is to split the payments into two... you'll see the
-            payment. Then first we will handle the fees section and then we will handle the capital
-            section. It's 50-50 unless the fees are less than 50% of the payment, then the rest is
-            allocated to the capital."
+      {/*
+        THE TABLE SCROLLS SIDEWAYS AND THE DEBTOR DOES NOT.
 
-            THE SPANS ARE COMPUTED FROM WHAT IS OPEN, so an opened section widens its own group
-            rather than pushing the headings out of line -- a colspan written as a constant goes
-            wrong the first time somebody clicks.
-          */}
+        The tick box and the debtor are `sticky` on the left with an OPAQUE background -- a
+        translucent one lets the figures scrolling under it show through, and a row then reads as
+        two payments printed over each other. `touch-pan-x` and momentum scrolling are for the
+        firm's iPad; the scrollbar stays visible on a desktop, where a hidden one leaves half the
+        columns undiscoverable.
+      */}
+      <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] queue-scroll"
+        data-testid="queue-scroll">
+        <table className="min-w-full text-[12.5px] whitespace-nowrap border-separate border-spacing-0">
           <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
-            <tr className="border-b border-slate-100 text-slate-400">
-              {/*
-                SIX: the tick box, Received, Account, Debtor, Client and Payment. It was five until
-                the client name went in, and a span left behind shifts every heading after it by one
-                column -- so the figure under "Commission" is the VAT. Nothing warns; the screen
-                looks right and the firm reads the wrong number off it. check-allocation-rules adds
-                the three fixed spans up against the number of fixed columns for exactly this, and
-                it is what caught the stale five.
-              */}
-              <th colSpan={6} />
-              <th colSpan={feeColumns(opened)}
-                className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
-                The fees side — half the payment
-              </th>
-              {/* SEVEN: capital outstanding, taking and after, then commission, its VAT, what the
-                  client is paid and what the client owes. `Due to BF` belongs on this side and not
-                  outside it -- it is the same money read from the other direction, owed BY the
-                  client where the debtor paid them rather than the firm. */}
-              <th colSpan={7}
-                className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
-                The capital side — the other half, and whatever the fees side could not spend
-              </th>
-              <th colSpan={2} />
+            <tr className="text-slate-400">
+              <th colSpan={2} className={`${STICKY_HEAD} left-0 z-20`} />
+              <GroupHead span={3}>Payment</GroupHead>
+              <GroupHead span={4}>Interest and fees</GroupHead>
+              <GroupHead span={3}>Capital</GroupHead>
+              <GroupHead span={3}>Commission</GroupHead>
+              <GroupHead span={4}>Final split</GroupHead>
+              <GroupHead span={3}>Review</GroupHead>
             </tr>
-            <tr className="border-b border-slate-100">
-              <th className="px-3 py-2">
-                <input type="checkbox"
-                  checked={picked.size === rows.length && rows.length > 0}
-                  onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.paymentId)) : new Set())} />
+            <tr>
+              <th className={`${STICKY_HEAD} left-0 z-20 ${TICK_COL} py-2 border-b border-slate-100`}>
+                <input type="checkbox" aria-label="Select every payment on this page" checked={allOnPage}
+                  onChange={(e) => setPicked((p) => {
+                    const n = new Set(p)
+                    for (const c of shown) { if (e.target.checked) n.add(c.row.paymentId); else n.delete(c.row.paymentId) }
+                    return n
+                  })} />
               </th>
-              <th className="px-2 py-2 text-left font-medium">Received</th>
-              <th className="px-2 py-2 text-left font-medium">Account</th>
-              <th className="px-2 py-2 text-left font-medium">Debtor</th>
-              {/* THE FIRM ASKED FOR THIS ONE. The queue mixes every client, and every column to the
-                  right of the payment -- commission, VAT, what goes to the client -- is about a
-                  client the row did not name. The rows reading "no rate" are the sharpest case: the
-                  question that answers is "which client has no mandate rate here", and the screen
-                  could not say. */}
-              <th className="px-2 py-2 text-left font-medium">Client</th>
-              <th className="px-2 py-2 text-right font-medium">Payment</th>
-              <FeeHeadCells opened={opened} onToggle={toggleSection} />
-              {/*
-                THE LINE ITEM THE FIRM FOUND MISSING: "one line item that is missing is the capital
-                outstanding. So the capital outstanding will be what is outstanding on the capital
-                of the payment." Drawn either side of what the payment takes, the same shape as an
-                opened fee section, so the two sides of the screen read the same way.
-              */}
-              <th className="px-2 py-2 text-right font-normal text-slate-400 border-l border-slate-200">
-                Capital outstanding
+              <th className={`${STICKY_HEAD} left-10 z-20 px-2 py-2 text-left font-medium border-b border-r border-slate-100 min-w-[13rem]`}>
+                Debtor
               </th>
-              <th className="px-2 py-2 text-right font-medium">Capital taking</th>
-              <th className="px-2 py-2 text-right font-normal text-slate-400">Capital after</th>
-              {/*
-                "COMMISSION", NOT "RETAINED COL. COMMISSION" -- the firm's own correction: "the
-                retained collection commission, just call that commission and then VAT is the VAT
-                on commission and then pay to the client, due to BF."
-              */}
-              <th className="px-2 py-2 text-right font-medium">Commission</th>
-              <th className="px-2 py-2 text-right font-medium">VAT</th>
-              <th className="px-2 py-2 text-right font-medium">To client</th>
-              <th className="px-2 py-2 text-right font-medium border-l border-slate-200">Due to BF</th>
-              <th className="px-2 py-2 text-left font-medium">Type</th>
-              <th className="px-2 py-2 text-left font-medium">Reference</th>
+              <Th first>Received</Th><Th right>Amount</Th><Th>Route</Th>
+              <Th first right>Interest</Th><Th right>Receipt fee incl. VAT</Th>
+              <Th right>Earlier fees incl. VAT</Th><Th right>Unused half A → capital</Th>
+              <Th first right>Outstanding before</Th><Th right>Paid</Th><Th right>Remaining</Th>
+              <Th first right>Rate</Th><Th right>Amount</Th><Th right>VAT on commission</Th>
+              <Th first right>To client</Th><Th right>BF keeps incl. VAT</Th>
+              <Th right>Debtor credit</Th><Th right>PTC due to BF incl. VAT</Th>
+              <Th first>Exceptions</Th><Th>Reference</Th><Th>Actions</Th>
             </tr>
           </thead>
           <tbody>
-            {checked.map(({ row: r, a, problems }) => (
-              <tr key={r.paymentId}
-                /*
-                  A RETURNED RECEIPT IS TINTED, and that is not decoration. The firm: a reversal
-                  "goes back into a state ready for approval" -- so it arrives on this list looking
-                  exactly like the morning's new money, and approving it unread puts it straight
-                  back onto the debtor it should never have been on.
-                */
-                className={`border-b border-slate-50 ${
-                  picked.has(r.paymentId) ? 'bg-gold-50/40'
-                    : problems.length > 0 ? 'bg-amber-50'
-                      : r.cameBackFrom ? 'bg-amber-50/50' : ''}`}>
-                <td className="px-3 py-1.5">
-                  <input type="checkbox" checked={picked.has(r.paymentId)}
-                    onChange={() => toggle(r.paymentId)} />
-                </td>
-                <td className="px-2 py-1.5 text-slate-600">{formatDate(r.receivedOn)}</td>
-                <td className="px-2 py-1.5 text-slate-600">
-                  {r.caseNumber ?? r.accountNumber}
-                  {/* THE RULES THAT DID NOT HOLD, ON THE ROW THEY DID NOT HOLD ON. The band at the
-                      top carries the first four; a morning with more than four needs the rest
-                      findable, and the row is where somebody is already looking. */}
-                  {problems.length > 0 && (
-                    <span className="ml-1 inline-flex align-middle text-amber-700"
-                      title={problems.map((v) => `${v.rule} — ${v.detail}`).join('\n')}>
-                      <AlertTriangle size={11} />
+            {shown.map(({ row: r, f, exceptions, problems }) => {
+              const sel = picked.has(r.paymentId)
+              /*
+               * A TINTED ROW IS A ROW TO READ. A returned receipt arrives looking exactly like the
+               * morning's new money, and approving it unread puts it straight back onto the debtor
+               * it should never have been on.
+               */
+              const tint = sel ? 'bg-gold-50' : problems.length > 0 || r.cameBackFrom ? 'bg-amber-50' : ''
+              return (
+                <tr key={r.paymentId} data-testid="queue-row" data-payment={r.paymentId}
+                  className={`h-12 ${tint}`}>
+                  {/* THE PINNED CELLS STAY SOLID and carry the row's state as a bar instead: a
+                      tint is translucent on some skins, and a pinned cell must hide what scrolls
+                      beneath it. */}
+                  <td className={`${STICKY_CELL} left-0 ${TICK_COL} ${sel ? 'shadow-[inset_3px_0_0_#c9a052]'
+                    : tint ? 'shadow-[inset_3px_0_0_#d97706]' : ''}`}>
+                    <input type="checkbox" aria-label={`Select ${r.debtor ?? 'this payment'}`} checked={sel}
+                      onChange={() => toggle(r.paymentId)} />
+                  </td>
+                  <td className={`${STICKY_CELL} left-10 px-2 border-r min-w-[13rem] max-w-[16rem]`}>
+                    <button type="button" onClick={() => setOpened(r.paymentId)}
+                      className="block w-full text-left" title="Open the breakdown">
+                      <span className="block truncate font-medium text-slate-800 hover:underline">
+                        {r.debtor || 'Unnamed debtor'}
+                      </span>
+                      <span className="block truncate text-[11px] text-slate-400">
+                        {r.caseNumber ?? r.accountNumber}{r.client ? ` · ${r.client}` : ''}
+                      </span>
+                    </button>
+                  </td>
+                  <Td first muted>{formatDate(r.receivedOn)}</Td>
+                  <Td right strong>{rand(r.amount)}</Td>
+                  <Td>
+                    <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${f.route === 'ptc'
+                      ? 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]' : 'bg-slate-100 text-slate-600'}`}>
+                      {f.route === 'ptc' ? 'Paid client (PTC)' : 'Paid into trust'}
                     </span>
-                  )}
-                  {/*
-                    THE ONE THING THIS SCREEN MAY CHANGE, and the firm chose it: which debtor the
-                    money goes on. The amount and the date are what the bank said. Offered on every
-                    row rather than only the returned ones -- a receipt placed on the wrong debtor
-                    by a mistyped reference is the same mistake found one step earlier.
-                  */}
-                  <button type="button" onClick={() => setMoving(r)}
-                    className="ml-1.5 text-[11px] font-medium text-slate-400 underline underline-offset-2
-                      hover:text-slate-700">
-                    Move
-                  </button>
-                  {/*
-                    BESIDE MOVE, BECAUSE THEY ARE THE SAME QUESTION ANSWERED TWO WAYS. Move is "I
-                    know whose this is"; Suspense is "I know it is not this debtor's and I do not
-                    yet know whose". The second had no button at all, so the only ways out of the
-                    queue were approving it onto an account somebody doubted or leaving it there.
-                  */}
-                  <button type="button" onClick={() => setParking(r)}
-                    className="ml-1.5 text-[11px] font-medium text-slate-400 underline underline-offset-2
-                      hover:text-slate-700">
-                    Suspense
-                  </button>
-                  {/* AND THE THIRD ANSWER. Move is "I know whose this is"; Suspense is "I do not
-                      know whose"; Reject is "this should not be a payment at all". */}
-                  <button type="button" onClick={() => setRejecting([r])}
-                    className="ml-1.5 text-[11px] font-medium text-slate-400 underline underline-offset-2
-                      hover:text-negative-700">
-                    Reject
-                  </button>
-                </td>
-                <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
-                {/*
-                  WHOSE BOOK THIS RECEIPT IS ON, at the firm's asking.
-                  
-                  The queue mixes every client, and the columns to the right -- commission, VAT,
-                  what goes to the client -- are all ABOUT a client this row never named. The rows
-                  reading "no rate" are the sharpest case: the question that answers is "which
-                  client has no mandate rate on this account", and the screen could not say.
-                  
-                  TRUNCATED LIKE THE DEBTOR BESIDE IT. "Highveld Glass & Aluminium (Pty) Ltd" is a
-                  real client name and wrapping it doubles the height of a row in a hundred-row
-                  morning; the full name is on the title.
-                */}
-                <td className="px-2 py-1.5 text-slate-500 max-w-[11rem] truncate" title={r.client ?? undefined}>
-                  {r.client || '—'}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
-                {/*
-                  NOT YET A LEDGER ROW, AND THE SCREEN SAYS SO. Most of the interest here is the
-                  open period -- computed to the day the money arrived, written only when somebody
-                  approves. A collector reading it down the telephone is quoting a real amount; one
-                  looking for it in the ledger before approval will not find it, and the marker is
-                  what stops that being a surprise.
-                */}
-                <FeeBodyCells a={a} opened={opened}
-                  note={r.interestOpen > 0 && r.interestOpenFrom
-                    ? `${rand(r.interestOpen)} of the interest has accrued since ${
-                        formatDate(r.interestOpenFrom)} and is posted when you approve`
-                    : undefined} />
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-400 border-l border-slate-200">
-                  {rand(r.capitalBefore)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-700">{rand(r.toCapital)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{rand(r.capitalAfter)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">
+                  </Td>
+                  <Td first right>{rand(f.interestPaid)}</Td>
+                  <Td right>{rand(f.receiptFeePaid)}</Td>
+                  <Td right>{rand(f.earlierFeesPaid)}</Td>
+                  <Td right muted>{rand(f.halfAUnused)}</Td>
+                  <Td first right muted>{rand(f.capitalBefore)}</Td>
+                  <Td right>{rand(f.capitalPaid)}</Td>
+                  <Td right muted>{rand(f.capitalAfter)}</Td>
                   {/* NO RATE IS NOT A ZERO. Approving still writes the allocation, marked
                       needs_rate, and the exceptions screen carries it -- but a confident 0.00
                       here would read as "this client pays us nothing". */}
-                  {r.hasRate ? rand(r.commission) : <span className="text-amber-700">no rate</span>}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.commissionVat)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-[var(--c-green)]">{rand(r.toClient)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-slate-600 border-l border-slate-200">
-                  {rand(r.dueToBf)}
-                </td>
-                <td className="px-2 py-1.5">
-                  {/* THE TWO DIRECTIONS OF MONEY, named the way the firm's own export names them. */}
-                  <span className={`text-[10.5px] px-1.5 py-0.5 rounded ${
-                    r.paidToClient
-                      ? 'bg-[var(--tint-steel)] text-[var(--c-navy-mid)]'
-                      : 'bg-slate-100 text-slate-600'}`}>
-                    {r.paidToClient ? 'Client direct' : 'Direct'}
-                  </span>
-                  {/*
-                    WHY IT IS BACK, carried from the reversal it replaces. Without it the row is
-                    indistinguishable from new money and gets approved again exactly as it was.
-                  */}
-                  {r.cameBackFrom && (
-                    <span className="ml-1 inline-flex items-center gap-1 text-[10.5px] px-1.5 py-0.5
-                      rounded bg-amber-100 text-amber-900"
-                      title={`Reversed ${r.cameBackOn ? formatDate(r.cameBackOn) : ''} — ${
-                        r.cameBackReason ?? 'no reason given'}`}>
-                      <RotateCcw size={10} /> Came back
+                  <Td first right muted>{f.commissionRate !== null ? pct(f.commissionRate) : <span className="text-amber-700">no rate</span>}</Td>
+                  <Td right>{r.hasRate ? rand(f.commission) : '—'}</Td>
+                  <Td right muted>{rand(f.commissionVat)}</Td>
+                  <Td first right emph>
+                    {rand(f.toClient)}
+                    {/* ON A PTC THE CLIENT ALREADY HAS ITS SHARE, and nought paid over has to say
+                        so or it reads as a client who gets nothing. */}
+                    {f.route === 'ptc' && (
+                      <span className="block text-[10.5px] font-normal text-slate-400">{rand(f.clientShare)} held by client</span>
+                    )}
+                  </Td>
+                  <Td right emph>{rand(f.bfShare)}</Td>
+                  <Td right muted>{f.credit > 0 ? rand(f.credit) : rand(0)}</Td>
+                  <Td right>{f.ptcDueToBf !== null ? rand(f.ptcDueToBf) : <span className="text-slate-300">—</span>}</Td>
+                  <Td first><Badges list={exceptions} /></Td>
+                  <Td muted>
+                    <span className="block max-w-[12rem] truncate" title={r.bankDescription ?? r.details ?? ''}>
+                      {r.reference ?? r.bankDescription ?? '—'}
                     </span>
-                  )}
-                  {/* AND THE MONEY THAT PAID NOTHING. An overpayment is held as a credit, never
-                      paid over -- the client is owed capital and this is not capital. */}
-                  {r.excess > 0 && (
-                    <span className="ml-1 text-[10.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"
-                      title="Everything on the account is settled, so this is held as a credit rather than paid over">
-                      {rand(r.excess)} credit
+                  </Td>
+                  <Td>
+                    {/*
+                      THE THREE ANSWERS TO "THIS SHOULD NOT BE APPROVED AS IT IS". Move is "I know
+                      whose this is"; Suspense is "I do not yet know whose"; Reject is "this should
+                      not be a payment at all". The amount and the date are the bank's facts and no
+                      action here changes them.
+                    */}
+                    {/* INLINE, NOT A MENU: a dropdown inside the sideways scroller is clipped by it,
+                        and on the last row of the page it opened into nothing. */}
+                    <span className="inline-flex gap-2 text-[11px] font-medium">
+                      <button type="button" onClick={() => setMoving(r)}
+                        className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Move</button>
+                      <button type="button" onClick={() => setParking(r)}
+                        className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Suspense</button>
+                      <button type="button" onClick={() => setRejecting([r])}
+                        className="text-slate-400 underline underline-offset-2 hover:text-negative-700">Reject</button>
                     </span>
-                  )}
-                </td>
-                <td className="px-2 py-1.5 text-slate-500 max-w-[14rem] truncate"
-                  title={r.bankDescription ?? r.details ?? ''}>
-                  {r.reference ?? r.bankDescription ?? '—'}
-                </td>
-              </tr>
-            ))}
+                  </Td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
 
+      {pages > 1 && (
+        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2.5 text-[12.5px]">
+          <button type="button" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 disabled:opacity-40">Back</button>
+          <span className="text-slate-500">
+            {page * PAGE + 1}–{Math.min(checked.length, page * PAGE + PAGE)} of {checked.length.toLocaleString('en-ZA')}
+          </span>
+          <button type="button" disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 disabled:opacity-40">Next {PAGE}</button>
+        </div>
+      )}
+
+      {open && (
+        <Breakdown row={open.row} a={open.a} f={open.f} problems={open.problems}
+          exceptions={open.exceptions} onClose={() => setOpened(null)} />
+      )}
+      {confirmAll && (
+        <ApproveAllModal count={rows.length} total={total} trust={totals.direct} ptc={totals.ptc}
+          busy={busy} onClose={() => setConfirmAll(false)}
+          onConfirm={async () => { await approve(rows.map((r) => r.paymentId)); setConfirmAll(false) }} />
+      )}
       {moving && (
         <MoveAccountModal
           payment={moving}
@@ -514,6 +487,389 @@ export function AwaitingApproval({ refreshKey, onApproved }: {
         />
       )}
     </Card>
+  )
+}
+
+/* ---------------------------------------------------------------- table pieces */
+
+/* THE BACKGROUND IS THE CARD'S, MADE SOLID. `--color-card` is translucent on the glass skin, and a
+   sticky cell must hide what scrolls beneath it -- so it reads `--color-card-solid` where a skin
+   defines one. */
+const STICKY_HEAD = 'sticky bg-[var(--color-card-solid,var(--color-card))]'
+/* EXACTLY 2.5rem, because the debtor column is pinned at `left-10`: a tick-box column a few pixels
+   wider lets the scrolled headings show through the gap between the two pinned cells. */
+const TICK_COL = 'w-10 min-w-10 max-w-10 px-0 text-center'
+const STICKY_CELL = 'sticky z-10 bg-[var(--color-card-solid,var(--color-card))] border-b border-slate-100 border-r-slate-200'
+
+function GroupHead({ span, children }: { span: number; children: string }) {
+  return (
+    <th colSpan={span}
+      className="px-2 pt-2 pb-1 text-left font-semibold tracking-wider border-l border-slate-200">
+      {children}
+    </th>
+  )
+}
+
+function Th({ children, right, first }: { children: ReactNode; right?: boolean; first?: boolean }) {
+  return (
+    <th className={`px-2 py-2 font-medium border-b border-slate-100 ${right ? 'text-right' : 'text-left'} ${
+      first ? 'border-l border-l-slate-200' : ''}`}>
+      {children}
+    </th>
+  )
+}
+
+function Td({ children, right, first, muted, strong, emph }: {
+  children: ReactNode; right?: boolean; first?: boolean; muted?: boolean; strong?: boolean; emph?: boolean
+}) {
+  return (
+    <td className={`px-2 py-1.5 border-b border-slate-100 ${right ? 'text-right tabular-nums' : ''} ${
+      first ? 'border-l border-l-slate-200' : ''} ${
+      emph ? 'font-semibold text-navy-950' : strong ? 'font-medium text-navy-950' : muted ? 'text-slate-400' : 'text-slate-700'}`}>
+      {children}
+    </td>
+  )
+}
+
+const pct = (r: number) => `${(Math.round(r * 10000) / 100).toString()}%`
+
+/** The badges, warnings first. Each says what it means on hover and again in the drawer. */
+function Badges({ list }: { list: QueueException[] }) {
+  if (list.length === 0) return <span className="text-slate-300">—</span>
+  const sorted = [...list].sort((a, b) => Number(b.warn) - Number(a.warn))
+  return (
+    <span className="inline-flex flex-wrap gap-1 max-w-[16rem] whitespace-normal">
+      {sorted.map((e) => (
+        <span key={e.key} title={e.detail} data-exception={e.key}
+          className={`text-[10.5px] px-1.5 py-0.5 rounded whitespace-nowrap ${
+            e.warn ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-600'}`}>
+          {e.label}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/* ---------------------------------------------------------------- the batch summary */
+
+/**
+ * WHAT THE QUEUE WOULD DO, ADDED UP -- AND SAID TO BE A PROJECTION.
+ *
+ * "Projected on approval" is on it because none of it has happened: approve half and these are
+ * half wrong. Trust receipts and PTCs are kept apart because they are different money -- one is in
+ * the firm's bank, the other is in the client's. The firm's share is ONE figure across both routes;
+ * the PTC due is shown as part of it, never added to it a second time. And where a PTC overpaid,
+ * the credit is counted but nothing here says whose bank holds it -- that is not decided.
+ */
+function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
+  const [byClient, setByClient] = useState(false)
+  const t = useMemo(() => batchTotals(rows), [rows])
+  const checks = useMemo(() => batchReconciliation(t), [t])
+  const clients = useMemo(() => (byClient ? totalsByClient(rows) : []), [rows, byClient])
+  const failing = checks.filter((c) => !c.holds)
+  return (
+    <div className="border-b border-slate-100 px-4 py-3" data-testid="batch-summary">
+      <p className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">
+        Projected on approval · the whole queue
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+        <Figure label="Total awaiting" value={rand(t.total)}
+          note={`${rand(t.direct.amount)} into trust · ${rand(t.ptc.amount)} paid to clients`} />
+        <Figure label="To pay clients" value={rand(t.toClients)} note="From trust, on direct receipts" emph />
+        <Figure label="BF share incl. VAT" value={rand(t.bfShare)}
+          note={t.ptc.count > 0 ? `Includes ${rand(t.ptc.dueToBf)} due from clients on PTCs` : 'Fees, interest, commission and its VAT'} emph />
+        <Figure label="Debtor credit" value={rand(t.credit)}
+          note={t.ptc.credit > 0
+            ? `${rand(t.direct.credit)} held in trust · ${rand(t.ptc.credit)} on PTCs, custody not settled`
+            : 'Held for the debtor, never paid over'} />
+        <Figure label="PTC due to BF incl. VAT" value={rand(t.ptc.dueToBf)}
+          note={`${t.ptc.count} PTC${t.ptc.count === 1 ? '' : 's'} · client already holds ${rand(t.ptc.clientShareHeld)}`} />
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px]" data-testid="batch-checks">
+        {checks.map((c) => (
+          <span key={c.label} className={c.holds ? 'text-emerald-700' : 'text-negative-700 font-medium'}
+            title={`${rand(c.left)} against ${rand(c.right)}`}>
+            {c.holds ? <Check size={11} className="inline mr-0.5" /> : <AlertTriangle size={11} className="inline mr-0.5" />}
+            {c.label}
+          </span>
+        ))}
+        {failing.length > 0 && (
+          <span className="text-negative-700">— {failing.map((c) => `${rand(c.left)} against ${rand(c.right)}`).join('; ')}</span>
+        )}
+        <button type="button" onClick={() => setByClient((v) => !v)}
+          className="ml-auto inline-flex items-center gap-1 text-[12px] font-medium text-slate-500 hover:text-navy-950">
+          {byClient ? <ChevronDown size={12} /> : <ChevronRight size={12} />} By client
+        </button>
+      </div>
+      {byClient && (
+        <div className="mt-2 overflow-x-auto">
+          <table className="min-w-full text-[12px] whitespace-nowrap" data-testid="batch-by-client">
+            <thead className="text-[10.5px] uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-2 py-1 text-left font-medium">Client</th>
+                <th className="px-2 py-1 text-right font-medium">Payments</th>
+                <th className="px-2 py-1 text-right font-medium">Into trust</th>
+                <th className="px-2 py-1 text-right font-medium">Paid to client</th>
+                <th className="px-2 py-1 text-right font-medium">To pay client</th>
+                <th className="px-2 py-1 text-right font-medium">BF share incl. VAT</th>
+                <th className="px-2 py-1 text-right font-medium">Credit</th>
+                <th className="px-2 py-1 text-right font-medium">PTC due to BF</th>
+              </tr>
+            </thead>
+            <tbody className="tabular-nums">
+              {clients.map((c) => (
+                <tr key={c.client} className="border-t border-slate-100">
+                  <td className="px-2 py-1 text-slate-700">{c.client}</td>
+                  <td className="px-2 py-1 text-right">{c.count}</td>
+                  <td className="px-2 py-1 text-right">{rand(c.direct.amount)}</td>
+                  <td className="px-2 py-1 text-right">{rand(c.ptc.amount)}</td>
+                  <td className="px-2 py-1 text-right font-medium">{rand(c.toClients)}</td>
+                  <td className="px-2 py-1 text-right font-medium">{rand(c.bfShare)}</td>
+                  <td className="px-2 py-1 text-right">{rand(c.credit)}</td>
+                  <td className="px-2 py-1 text-right">{rand(c.ptc.dueToBf)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Figure({ label, value, note, emph }: { label: string; value: string; note?: string; emph?: boolean }) {
+  return (
+    <div className="rounded-lg border border-slate-200 px-3 py-2">
+      <p className="text-[10.5px] uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`text-[15px] tabular-nums ${emph ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>{value}</p>
+      {note && <p className="text-[11px] leading-snug text-slate-400 mt-0.5">{note}</p>}
+    </div>
+  )
+}
+
+/* ---------------------------------------------------------------- approve all */
+
+/** "ALL" IS THE WHOLE QUEUE, said before it is pressed -- including the rows on other pages. */
+function ApproveAllModal({ count, total, trust, ptc, busy, onClose, onConfirm }: {
+  count: number; total: number
+  trust: { count: number; amount: number }; ptc: { count: number; amount: number }
+  busy: boolean; onClose: () => void; onConfirm: () => Promise<void>
+}) {
+  return (
+    <Modal title={`Approve all ${count} payments`} subtitle={rand(total)} onClose={onClose} width={460}>
+      <p className="text-sm text-slate-600">
+        Every payment in the queue, not only the ones on this page: {trust.count} into trust
+        ({rand(trust.amount)}) and {ptc.count} paid to clients directly ({rand(ptc.amount)}).
+      </p>
+      <p className="text-[12px] text-slate-400 mt-2">
+        Each is split as shown and posted. A payment that cannot go through is named and the rest
+        still are.
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose}
+          className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600">Cancel</button>
+        <button type="button" disabled={busy} onClick={() => void onConfirm()}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-1.5 rounded-lg
+            border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-40">
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+          Approve all {count}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+/* ---------------------------------------------------------------- the breakdown drawer */
+
+/**
+ * ONE PAYMENT, END TO END, FROM THE ENGINE'S OWN FIGURES.
+ *
+ * What the row cannot hold: the receipt fee raised against what was paid, half A spent line by
+ * line with the firm's four figures behind each (the arithmetic that used to open out of the
+ * table's column headings), capital, commission, the three-way split and a reconciliation to the
+ * cent. A DRAWER rather than a modal so the table stays visible beside it on an iPad.
+ *
+ * "CAN'T RECOVER", NEVER A SILENT ZERO. What the in duplum ceiling refuses is shown as such. The
+ * items 1-7 cap is NOT reported per payment by the engine, and the drawer says that rather than
+ * calling the payment within the limit.
+ */
+function Breakdown({ row: r, a, f, problems, exceptions, onClose }: {
+  row: AwaitingPayment; a: Allocation; f: QueueFigures; problems: Violation[]
+  exceptions: QueueException[]; onClose: () => void
+}) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  const recon = Math.round((f.clientShare + f.bfShare + f.credit) * 100) / 100
+  const cycle = cycleStartOn(r.receivedOn)
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="Payment breakdown">
+      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-navy-950/30" />
+      <aside className="relative h-full w-full max-w-md overflow-y-auto bg-[var(--color-card-solid,var(--color-card))] shadow-xl"
+        data-testid="payment-breakdown">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-100
+          bg-[var(--color-card-solid,var(--color-card))] px-4 py-3">
+          <div className="min-w-0">
+            <h3 className="truncate text-[15px] font-semibold text-slate-800">{r.debtor || 'Unnamed debtor'}</h3>
+            <p className="text-[12px] text-slate-500">
+              {r.caseNumber ?? r.accountNumber}{r.client ? ` · ${r.client}` : ''}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="Close the breakdown">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-4 px-4 py-3 text-[12.5px]">
+          <Section title="The payment">
+            <Lines rows={[
+              ['Amount', rand(r.amount)],
+              ['Received', formatDate(r.receivedOn)],
+              ['Route', f.route === 'ptc' ? 'Paid to the client directly (PTC)' : 'Paid into the trust account'],
+              ['Reference', r.reference ?? '—'],
+              ['On the statement', r.bankDescription ?? '—'],
+            ]} />
+            {exceptions.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {exceptions.map((e) => (
+                  <li key={e.key} className={e.warn ? 'text-amber-900' : 'text-slate-600'}>
+                    <span className="font-medium">{e.label}</span> — {e.detail}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section title="Receipt fee (item 9)">
+            <Lines rows={[
+              ['Raised by this payment', `${rand(r.receiptFee)} + ${rand(r.receiptFeeVat)} VAT = ${rand(r.receiptFee + r.receiptFeeVat)}`],
+              ['Paid by this payment, incl. VAT', rand(f.receiptFeePaid)],
+            ]} />
+          </Section>
+
+          <Section title={`Half A — ${rand(f.halfA)} for interest and fees`}>
+            {SECTIONS.map((sec) => {
+              const c = sec.of(a)
+              return (
+                <div key={sec.key} className="mb-1.5">
+                  <p className="font-medium text-slate-700">{sec.label}: {rand(c.taking)}</p>
+                  <Lines rows={BEFORE.map((b) => [
+                    b.label === 'ceiling refuses' ? "can't recover (in duplum)" : b.label,
+                    rand(b.of(c)),
+                  ] as [string, string]).concat([['after', rand(c.after)]])} muted />
+                </div>
+              )
+            })}
+            <Lines rows={[
+              ['Half A spent', rand(f.feesSide)],
+              ['Unused, rolled to capital', rand(f.halfAUnused)],
+            ]} />
+            {r.interestOpen > 0 && r.interestOpenFrom && (
+              <p className="mt-1 text-[11px] text-slate-400">
+                {rand(r.interestOpen)} of the interest has accrued since {formatDate(r.interestOpenFrom)} and
+                is posted when you approve.
+              </p>
+            )}
+          </Section>
+
+          <Section title="Half B and the rollover — capital">
+            <Lines rows={[
+              ['Half B', rand(Math.round((r.amount - f.halfA) * 100) / 100)],
+              ['Plus the rollover', rand(f.halfAUnused)],
+              ['Capital outstanding before', rand(f.capitalBefore)],
+              ['Capital paid', rand(f.capitalPaid)],
+              ['Capital remaining', rand(f.capitalAfter)],
+            ]} />
+            {f.feesSide > f.halfA + 0.005 && (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Capital is paid off, so {rand(Math.round((f.feesSide - f.halfA) * 100) / 100)} beyond half A
+                went to the interest and costs still standing.
+              </p>
+            )}
+          </Section>
+
+          <Section title="Commission">
+            <Lines rows={[
+              ['Rate', f.commissionRate !== null ? pct(f.commissionRate) : 'No rate — needs one before it is final'],
+              ['Commission on capital paid', rand(f.commission)],
+              ['VAT on commission', rand(f.commissionVat)],
+            ]} />
+          </Section>
+
+          <Section title="The split">
+            <Lines rows={[
+              ['Client share', rand(f.clientShare)],
+              [f.route === 'ptc' ? 'To pay the client' : 'To pay the client from trust', rand(f.toClient)],
+              ['BF share incl. VAT', rand(f.bfShare)],
+              ['Debtor credit', rand(f.credit)],
+              ...(f.ptcDueToBf !== null
+                ? [['Due to BF from the client, incl. VAT', rand(f.ptcDueToBf)] as [string, string]]
+                : []),
+            ]} strong />
+            <p className={`mt-1.5 text-[12px] ${Math.abs(recon - r.amount) <= 0.005 ? 'text-emerald-700' : 'text-negative-700 font-medium'}`}
+              data-testid="breakdown-reconciliation">
+              {rand(f.clientShare)} + {rand(f.bfShare)} + {rand(f.credit)} = {rand(recon)}
+              {Math.abs(recon - r.amount) <= 0.005 ? ' — the whole payment, to the cent.' : ` — not the payment of ${rand(r.amount)}.`}
+            </p>
+          </Section>
+
+          <Section title="Ceilings">
+            <Lines rows={[
+              ["Interest that can't be recovered", rand(r.interestCant)],
+              ["Receipt fees that can't be recovered", rand(r.rfCant)],
+              ["Other fees that can't be recovered", rand(r.feesCant)],
+            ]} />
+            <p className="mt-1 text-[11px] text-slate-400">
+              The in duplum ceiling is applied by the engine and shown above. The engine does not
+              report per payment what the items 1–7 cap held back, so nothing here says this payment
+              is within it.
+            </p>
+          </Section>
+
+          <Section title="Payover">
+            <p className="text-slate-600">
+              {f.route === 'ptc'
+                ? 'Nothing is paid over: the client holds the money. What it owes the firm is set off in its payover.'
+                : `Received in the payover cycle opening ${shortDate(cycle)}. It reaches a payover run only once approved.`}
+            </p>
+          </Section>
+
+          {problems.length > 0 && (
+            <Section title="Formulas that do not hold">
+              <ul className="space-y-1">
+                {problems.map((v) => (
+                  <li key={v.rule}><span className="font-medium text-amber-900">{v.rule}</span><br />
+                    <span className="tabular-nums text-slate-600">{v.detail}</span></li>
+                ))}
+              </ul>
+            </Section>
+          )}
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h4 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">{title}</h4>
+      {children}
+    </section>
+  )
+}
+
+function Lines({ rows, muted, strong }: { rows: [string, string][]; muted?: boolean; strong?: boolean }) {
+  return (
+    <dl className="space-y-0.5">
+      {rows.map(([k, v]) => (
+        <div key={k} className="flex items-baseline justify-between gap-3">
+          <dt className={muted ? 'text-slate-400' : 'text-slate-500'}>{k}</dt>
+          <dd className={`tabular-nums text-right ${muted ? 'text-slate-500' : strong ? 'font-medium text-slate-900' : 'text-slate-800'}`}>{v}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 

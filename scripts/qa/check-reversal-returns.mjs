@@ -38,7 +38,8 @@ const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
 const sql = read('supabase/schema.sql')
 const lib = read('src/lib/payover.ts')
 const screen = read('src/pages/finance/AwaitingApproval.tsx')
-const modal = read('src/pages/finance/FinancePayments.tsx')
+/* THE REVERSE BOX MOVED TO CHECK when the all-payments list left Payments in. */
+const modal = read('src/pages/finance/CheckPayments.tsx')
 
 /* schema.sql is append-only: the LAST definition is the live one, and both spellings exist --
    a function whose return type changed cannot be replaced, so it is dropped and created plainly. */
@@ -169,9 +170,9 @@ ok('the library reads the three back', /cameBackFrom: s\(r\.came_back_from\)/.te
   && /cameBackReason: s\(r\.came_back_reason\)/.test(lib)
   && /cameBackOn: s\(r\.came_back_on\)/.test(lib))
 ok('the screen marks a returned receipt', /Came back/.test(screen))
-ok('...and tints the row so it is not approved unread', /r\.cameBackFrom \? 'bg-amber-50\/50'/.test(screen))
+ok('...and tints the row so it is not approved unread', /problems\.length > 0 \|\| r\.cameBackFrom \? 'bg-amber-50'/.test(screen))
 /* SAID BEFORE IT IS PRESSED, on the box that does it. */
-ok('the reverse box says where the money goes', /comes back to <strong[\s\S]{0,60}?Awaiting approval/.test(modal))
+ok('the reverse box says where the money goes', /comes back to <strong[\s\S]{0,60}?Payments in/.test(modal))
 
 /* ---------------- correcting the debtor, and only the debtor ---------------- */
 

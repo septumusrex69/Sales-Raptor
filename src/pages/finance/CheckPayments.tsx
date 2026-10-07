@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
+import { Modal, inputClass } from '../../components/ui/Modal'
+import { useAuth } from '../../store/AuthContext'
+import { canReversePayment } from '../../lib/permissions'
 import { useAppStore } from '../../store/AppStore'
 import { fetchAccount } from '../../lib/accountBook'
 import { accountRate } from '../../lib/commissionRule'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import {
-  fetchPostedPayments, postedAllocation, type PostedPayment,
+  fetchPostedPayments, postedAllocation, reversePayment, type PostedPayment,
 } from '../../lib/payover'
 import { checkAllocation, feesSideTaking, type Violation } from '../../lib/allocationRules'
 import {
@@ -44,6 +47,11 @@ import {
  * -- the four ledgers have no update or delete policy and Postgres refuses -- so this screen is
  * deliberately all reading. What an administrator does about a row it flags is a reversal, on the
  * payment, with a reason, which is the one route that leaves a record of itself.
+ *
+ * AND THE REVERSAL IS HERE NOW. It was the row action of the all-payments list on Payments in,
+ * which the firm removed -- "Payments in is only for processing current payments" -- and it was
+ * the only place in the app that could reverse a payment. This is where a processed payment is
+ * found, so it is where it is undone: from the opened receipt, after reading what it did.
  */
 export function CheckPayments() {
   const [rows, setRows] = useState<PostedPayment[]>([])
@@ -56,6 +64,9 @@ export function CheckPayments() {
   /* THE DEFAULT IS EVERY RECEIPT THERE HAS EVER BEEN, which is what "every single thing that comes
      in" means. The box narrows it; it does not widen it. */
   const [onlyBroken, setOnlyBroken] = useState(false)
+  const { currentUser } = useAuth()
+  const mayReverse = canReversePayment(currentUser)
+  const [reversing, setReversing] = useState<PostedPayment | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -97,7 +108,8 @@ export function CheckPayments() {
             <h3 className="text-[15px] font-semibold text-slate-800">Check what has gone through</h3>
             <p className="text-[12px] text-slate-500">
               Every approved receipt, with the arithmetic the engine wrote and every formula run
-              over it. Reading only — nothing on this screen changes a figure.
+              over it. Nothing here changes a figure; a wrong one is reversed from the opened
+              receipt.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -227,16 +239,99 @@ export function CheckPayments() {
               <h3 className="text-[15px] font-semibold text-slate-800">
                 {c.row.caseNumber ?? c.row.accountNumber} · {c.row.debtor}
               </h3>
-              <p className="text-[12px] text-slate-500">
-                {rand(c.row.amount)} banked {formatDate(c.row.receivedOn)}
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-[12px] text-slate-500">
+                  {rand(c.row.amount)} banked {formatDate(c.row.receivedOn)}
+                </p>
+                {mayReverse && !c.row.reversedOn && (
+                  <button type="button" onClick={() => setReversing(c.row)}
+                    className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-100">
+                    Reverse
+                  </button>
+                )}
+              </div>
             </div>
             <Opened r={c.row} a={c.a} problems={c.problems} />
             </div>
           </Card>
         )
       })()}
+      {reversing && (
+        <ReverseModal row={reversing} onClose={() => setReversing(null)}
+          onDone={async () => { setReversing(null); setOpen(null); await load() }} />
+      )}
     </div>
+  )
+}
+
+/**
+ * REVERSING ASKS WHY, AND THE ANSWER IS KEPT.
+ *
+ * It becomes the cancellation reason on the receipt fee -- so the account's own ledger says a fee
+ * was raised and then cancelled because the cheque came back, rather than the fee simply
+ * vanishing. Everything else follows in the database.
+ */
+function ReverseModal({ row, onClose, onDone }: { row: PostedPayment; onClose: () => void; onDone: () => Promise<void> }) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  /* ALREADY ON A RUN: the invoice that carried it is not touched -- see below. */
+  const invoiced = Boolean(row.runInvoice)
+  return (
+    <Modal title="Reverse this payment" onClose={onClose} width={440}>
+      <div className="space-y-3">
+        <p className="text-[13px] text-slate-600">
+          {rand(row.amount)} received {formatDate(row.receivedOn)}. The receipt fee is cancelled, the
+          capital goes back on the account, and every later payment is re-split against the balances
+          this one moved.
+        </p>
+        {/*
+          WHERE THE MONEY GOES, which the firm asked about directly: "not really the suspense
+          account -- it goes back into a state ready for approval." Said here because it is the
+          difference between a reversal that loses the receipt and one that hands it back to be
+          redone, and nobody should have to find that out by looking afterwards.
+        */}
+        <p className="rounded-lg bg-brand-50 px-3 py-2 text-[13px] text-slate-700">
+          This receipt then comes back to <strong className="font-medium">Payments in</strong>{' '}
+          as {rand(row.amount)} still to be processed, so it can go on the right debtor and be
+          approved again. This reversal stays on the ledger with your reason on it.
+        </p>
+        {invoiced && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+            This payment has already been paid over. The invoice that carried it is not touched —
+            the correction becomes a negative line in the client&rsquo;s next run.
+          </p>
+        )}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Why</label>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}
+            placeholder="Cheque returned, debit order unpaid, captured twice…" />
+        </div>
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          {/*
+            THROUGH THE FUNCTION, NOT AT THE TABLE. account_payments is one of the four ledgers
+            with no update policy: a direct PATCH matches no rows, PostgREST answers 204, and the
+            box would close on a reversal that never happened. reverse_payment asks
+            payment.reverse and keeps the reason; the rest is the trigger on reversed_at.
+          */}
+          <button type="button" disabled={busy || !reason.trim()}
+            onClick={() => {
+              setBusy(true); setError(null)
+              void reversePayment(row.paymentId, reason.trim())
+                .then(async () => { await onDone(); setBusy(false) })
+                .catch((e: unknown) => {
+                  setError(e instanceof Error ? e.message : 'That payment could not be reversed.')
+                  setBusy(false)
+                })
+            }}
+            className="rounded-lg bg-negative-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-negative-700 disabled:opacity-50">
+            {busy ? 'Reversing…' : 'Reverse it'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

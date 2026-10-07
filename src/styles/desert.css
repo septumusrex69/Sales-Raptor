@@ -31,6 +31,8 @@ html[data-theme='desert'] {
      warm cards is the fastest way to make the warmth look like a mistake. */
   --color-surface: #f7f4ee;
   --color-card: #fffdfa;
+  /* A pinned table cell's background (Payments in): the card, opaque. */
+  --color-card-solid: #fffdfa;
 
   /* Neutrals run from pale sand down to the shadow side of a dune, so every grey in the app
      belongs to the same family as the photographs rather than sitting beside them. */

@@ -412,8 +412,39 @@ ok('the ceiling is one of them', /label: 'ceiling refuses'/.test(sections))
  * fixed group spans must add up to it. That is what catches a heading shifted one column left, and
  * it is what caught the stale `colSpan={5}` when the client column went in.
  */
+/*
+ * THE APPROVAL QUEUE NO LONGER OPENS THE SECTIONS IN ITS TABLE. The firm's redesign made a row one
+ * line of answers -- about three thousand payments a month -- and the four figures behind each fee
+ * line moved into the breakdown drawer. They are still the SHARED definitions, which is what this
+ * holds: the drawer draws SECTIONS and BEFORE, and keeps no copy of either.
+ */
+ok('the approval queue draws the shared fee definitions in its drawer',
+  /import \{ BEFORE, SECTIONS \} from '\.\.\/\.\.\/components\/finance\/FeeSections'/.test(queueScreen)
+  && /SECTIONS\.map\(/.test(queueScreen) && /BEFORE\.map\(/.test(queueScreen))
+ok('...and keeps no copy of its own',
+  !/\{ key: 'receiptFee'/.test(queueScreen) && !/label: 'ceiling refuses', of/.test(queueScreen))
+/*
+ * AND ITS GROUP HEADINGS STILL LINE UP -- the same failure as below, in a new table: a span one
+ * short shifts every heading after it, so "To client" sits over the commission VAT. The group row
+ * is the pinned lead plus six groups; the column row is two pinned cells plus one <Th> a column.
+ */
+{
+  const thead = queueScreen.slice(queueScreen.indexOf('<thead'), queueScreen.indexOf('</thead>'))
+  const groupRow = thead.slice(0, thead.indexOf('</tr>'))
+  const headRow = thead.slice(thead.indexOf('</tr>') + 5)
+  const lead = [...groupRow.matchAll(/colSpan=\{(\d+)\}/g)].map((m) => Number(m[1]))
+  const groups = [...groupRow.matchAll(/<GroupHead span=\{(\d+)\}>([^<]+)</g)].map((m) => [m[2], Number(m[1])])
+  check('the approval queue: the six column groups, in the order the money is spent',
+    groups.map(([n]) => n), ['Payment', 'Interest and fees', 'Capital', 'Commission', 'Final split', 'Review'])
+  const cols = (headRow.match(/<th\b/g) ?? []).length + (headRow.match(/<Th\b/g) ?? []).length
+  check('the approval queue: the group spans cover every column',
+    lead.reduce((a, b) => a + b, 0) + groups.reduce((a, [, n]) => a + n, 0), cols)
+  /* AND THE BODY HAS A CELL FOR EACH: two pinned <td>s and one <Td> a column. */
+  const tbody = queueScreen.slice(queueScreen.indexOf('<tbody'), queueScreen.indexOf('</tbody>'))
+  check('the approval queue: every row has a cell under every heading',
+    (tbody.match(/<td\b/g) ?? []).length + (tbody.match(/<Td\b/g) ?? []).length, cols)
+}
 for (const [name, screen, fixedExpected] of [
-  ['the approval queue', queueScreen, 15],
   ['the check screen', checkScreen, 14],
 ]) {
   ok(`${name} draws the shared sections`,
@@ -462,8 +493,11 @@ ok('the opened receipt is drawn outside the scrolling table',
 /* AND THE RULES ARE RUN ON BOTH, not merely available to them. This is the firm's "if anything
    touches a formula, there is a problem", and a library nothing calls is a library nothing
    protects. */
+/* The queue goes through paymentsQueue.checkedRow, which runs checkAllocation over the engine's
+   figures -- the same rules, one call away. */
 ok('the approval queue checks every row against the rules',
-  queueScreen.includes('checkAllocation(a)') && queueScreen.includes('awaitingAllocation(r)'))
+  queueScreen.includes('checkedRow(r, awaitingAllocation(r)')
+  && /const problems = checkAllocation\(a\)/.test(read('lib/paymentsQueue.ts')))
 ok('the check screen checks every posted row against the rules',
   checkScreen.includes('checkAllocation(a)') && checkScreen.includes('postedAllocation(r)'))
 /*

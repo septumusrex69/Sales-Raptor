@@ -116,15 +116,14 @@ try {
     const { context, page, calls } = await openQueue(browser, {
       waiting: [WAITING, SECOND, BY_HAND], rejected: [ALREADY],
     })
-    await page.waitForSelector('text=Payments waiting for you', { timeout: 15000 })
+    await page.getByTestId('queue-heading').waitFor({ timeout: 15000 })
 
     /*
-     * COUNTED BY THE ROWS THAT CAN BE TICKED, not by `tbody tr`. This screen carries more than one
-     * table and the queue's own has a totals row, so a bare row count was four for three receipts
-     * -- and would have been four for two as well.
+     * COUNTED BY THE QUEUE'S OWN ROWS, not by `tbody tr`. This screen carries more than one table
+     * (the summary by client is another), so a bare row count was four for three receipts.
      */
     t.check('all three are waiting',
-      await page.locator('tbody tr:has(input[type=checkbox])').count(), 3)
+      await page.getByTestId('queue-row').count(), 3)
 
     /* THE UNDO IS ON THE PAGE, with the reason and where the line went. This is the panel a
        source check cannot see. */
@@ -136,7 +135,7 @@ try {
       /back on the unallocated list/.test(strip))
 
     /* ---- one row on its own ---- */
-    await page.locator('tbody tr').first().getByRole('button', { name: /^Reject$/ }).click()
+    await page.getByTestId('queue-row').first().getByRole('button', { name: /^Reject$/ }).click()
     await page.waitForSelector('text=Reject this receipt', { timeout: 5000 })
     t.ok('one row opens a box about one receipt',
       (await page.locator('text=Reject this receipt').count()) > 0)
@@ -173,8 +172,8 @@ try {
   /* ------------------------------------------------- a hand-captured receipt has no line to ask about */
   {
     const { context, page } = await openQueue(browser, { waiting: [BY_HAND] })
-    await page.waitForSelector('text=Payments waiting for you', { timeout: 15000 })
-    await page.locator('tbody tr').first().getByRole('button', { name: /^Reject$/ }).click()
+    await page.getByTestId('queue-heading').waitFor({ timeout: 15000 })
+    await page.getByTestId('queue-row').first().getByRole('button', { name: /^Reject$/ }).click()
     await page.waitForSelector('text=Reject this receipt', { timeout: 5000 })
 
     /*
@@ -192,12 +191,12 @@ try {
   /* ------------------------------------------------------------- many at once, and not a receipt */
   {
     const { context, page, calls } = await openQueue(browser, { waiting: [WAITING, SECOND] })
-    await page.waitForSelector('text=Payments waiting for you', { timeout: 15000 })
+    await page.getByTestId('queue-heading').waitFor({ timeout: 15000 })
 
     /* TICK BOTH AND THROW THEM OUT TOGETHER -- the firm clears a morning's list, and one reason
        covers the lot. */
-    for (const box of await page.locator('tbody input[type=checkbox]').all()) await box.check()
-    await page.getByRole('button', { name: /^Reject 2$/ }).click()
+    for (const box of await page.getByTestId('queue-row').locator('input[type=checkbox]').all()) await box.check()
+    await page.getByRole('button', { name: /^Reject selected · 2$/ }).click()
     await page.waitForSelector('text=Reject 2 receipts', { timeout: 5000 })
     t.ok('two ticked opens a box about two', true)
     t.ok('...and the line question is plural',
