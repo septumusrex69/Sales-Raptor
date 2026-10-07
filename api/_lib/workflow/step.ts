@@ -14,6 +14,7 @@ import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.j
 import { notifyHeld } from './notify.js'
 import { nextUnpaidFromRow } from '../../../src/lib/ptpSchedule.js'
 import type { Arrangement } from '../../../src/lib/arrangements.js'
+import { toSettlement } from '../../../src/lib/settlement.js'
 import {
   chargeItemWith, type ChargeDb, type ChargeResult,
 } from '../../../src/lib/chargeEngine.js'
@@ -147,7 +148,7 @@ export async function runOneStep(
   const node = toNode(nodeRow)
 
   const [contactsRes, collectorRes, liaisonRes, templatesRes, ledgerRes, priorRes, promiseRes,
-    disputeRes, noticesRes] = await Promise.all([
+    disputeRes, noticesRes, settlementRes] = await Promise.all([
     admin.from('account_contacts').select('kind, value, is_primary, retired_at').eq('account_id', account.id),
     account.assigned_to
       ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', account.assigned_to).maybeSingle()
@@ -227,6 +228,13 @@ export async function runOneStep(
       .eq('workflow_runs.account_id', account.id)
       .eq('workflow_nodes.statutory', true)
       .eq('state', 'sent'),
+    /*
+     * THE SETTLEMENT, WHICH IS WHAT THE THREE {{settlement_*}} FIELDS COME FROM -- read for every
+     * step for the reason the arrangement and the dispute are. accountMergeValues answers them only
+     * off an approved, unlapsed offer, so an unattended message quoting them on an account with
+     * nothing agreed HOLDS rather than telling a debtor a figure the client never accepted.
+     */
+    admin.rpc('account_settlement', { p_account: account.id }),
   ])
 
   const collector = collectorRes.data
@@ -417,6 +425,10 @@ export async function runOneStep(
      * promise row, so a notice cannot quote a weekly instalment under a monthly frequency, and an
      * account with no arrangement answers null to both and holds the step.
      */
+    settlement: (() => {
+      const row = (settlementRes.data as Record<string, unknown>[] | null)?.[0]
+      return row ? toSettlement(row) : null
+    })(),
     arrangement: nextUnpaidFromRow(promiseRes.data)
       ? ((promiseRes.data?.arrangement as Arrangement | null) ?? null) : null,
     /*

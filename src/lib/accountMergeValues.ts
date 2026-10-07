@@ -22,6 +22,7 @@ import { mergeValuesFor, type Person, type TemplateAccount } from './messageTemp
 import type { Arrangement } from './arrangements.js'
 import { addWorkingDays } from './workingDays.js'
 import type { FirmSettings } from './firmSettings.js'
+import { isQuotable, type Settlement } from './settlement.js'
 
 /** Only what the address is picked on. The account screen's AccountContact satisfies it. */
 export interface ContactLike {
@@ -160,6 +161,12 @@ export function accountMergeValues(input: {
     summary: string | null
   } | null
   /**
+   * THE ACCOUNT'S SETTLEMENT, whatever state it is in. Only an approved, unlapsed one answers the
+   * three settlement fields -- decided here, by isQuotable, so neither caller can pass a proposal
+   * through by mistake.
+   */
+  settlement?: Settlement | null
+  /**
    * THE DATE THE MESSAGE'S OWN PERIOD RUNS TO, where it is not the ordinary one.
    *
    * `respondBy` below is ten working days from today, which is what a section 129 gives. A DISPUTE
@@ -206,6 +213,9 @@ export function accountMergeValues(input: {
       arrangement: input.arrangement ?? null,
       paymentReceived: input.paymentReceived ?? null,
       dispute: input.dispute ?? null,
+      settlement: isQuotable(input.settlement)
+        ? { amount: input.settlement.amount, expiresOn: input.settlement.expiresOn, saving: input.settlement.saving }
+        : null,
       breakdown: input.breakdown ?? null,
       interestRateAnnual: input.interestRateAnnual ?? null,
       interestFrom: input.interestFrom ?? null,

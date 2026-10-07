@@ -28513,3 +28513,357 @@ create or replace trigger companies_commission_expected
   execute function public.commission_expected_follows_rule();
 
 revoke all on function public.commission_expected_follows_rule() from public, anon;
+
+
+-- =====================================================================================
+-- TWO NEW TICKS: settlement.approve, AND business.income WHICH NO ROLE HAS
+-- =====================================================================================
+--
+-- settlement.approve -- recording that a CLIENT accepted a settlement figure. The firm (7 Oct
+-- 2026) gave it to the client liaison role: the figure is the client's, and the liaison is the
+-- person the client tells. The Administrator has it as it has everything.
+--
+-- business.income -- what the firm EARNED: commission, fees and interest. The firm, of exactly
+-- this: "we're not going to be disclosing commission and income from the Annexure B fees. We'll do
+-- that on another place, which is not even for an administrator." So it is the first capability
+-- in NO role's template, the Administrator's included, and is granted person by person.
+--
+-- WHICH BREAKS AN ASSUMPTION, deliberately. all_capabilities() was defined as the
+-- Administrator's template -- "every capability there is" and "everything the Administrator has"
+-- were the same list. A tick outside that list is unknown to has_capability and therefore
+-- ungrantable to ANYBODY, silently. So the closed list is now written as the Administrator's
+-- template PLUS the ones no role is born with, and check-capabilities holds that sum.
+-- =====================================================================================
+
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','settlement.approve','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+-- THE CLOSED LIST: the Administrator's template plus the ticks no role is born with.
+create or replace function public.all_capabilities()
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select public.role_capabilities('Administrator') || array['business.income']
+$$;
+
+-- =====================================================================================
+-- A SETTLEMENT IS THE CLIENT'S FIGURE, KEPT ON THE ACCOUNT (task #69)
+-- =====================================================================================
+--
+-- THE FIRM'S OWN CALL SCRIPT is the spec: "{{client_name}} has agreed to accept
+-- {{settlement_amount}} in full and final settlement, instead of the {{balance}} that is owing.
+-- That is {{settlement_saving}} written off. ... It must be one payment, in full, and it must
+-- reach our trust account by {{settlement_expiry}}." And its DO NOT list: "Quote a settlement
+-- figure that is not approved on the account. Extend an expiry date yourself. Call a part payment
+-- a settlement."
+--
+-- Until now there was nowhere to keep that figure, so the three fields drew as red gaps and the
+-- only settlement Raptor knew was the ENDING (settle_account 'settled'), which records that it
+-- happened and not what was agreed. This is the agreement.
+--
+-- ONE ROW PER OFFER, four stored states and one derived:
+--   proposed   somebody put the debtor's offer up. Quotable by nobody.
+--   approved   the CLIENT said yes, recorded by a liaison with how they said it and an expiry.
+--   declined   the client said no.            (closed)
+--   withdrawn  the debtor withdrew, or it was a mistake.  (closed)
+--   paid       a person confirmed it was paid in full and closed the account as settled.
+--   LAPSED IS DERIVED: approved with its expiry behind it. A stored 'lapsed' needs a nightly job,
+--   and the night it does not run a collector quotes a dead figure (CLAUDE.md: derived, never
+--   stored, like isMissed).
+--
+-- WHO MAY DO WHAT, as the firm decided (7 Oct 2026):
+--   propose  anybody signed in. A proposal grants nothing and is quoted to nobody.
+--   approve / decline   settlement.approve -- the client liaisons and the Administrator by
+--            default, because the figure is the CLIENT's and the liaison is who hears it.
+--   close as settled    a PERSON confirms; nothing closes an account by itself. The press goes
+--            through settle_account, so its own gate (payment.record) and its workflow stop and
+--            bureau removal all apply unchanged.
+-- =====================================================================================
+
+create table if not exists public.account_settlements (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null references public.debtor_accounts(id) on delete cascade,
+  amount numeric(14,2) not null check (amount > 0),
+  -- THE BALANCE THE SAVING IS MEASURED FROM, AND THE DAY IT WAS. "A settlement figure sent to a
+  -- debtor without a date on it is wrong the moment it is opened" (debt-collection-model.md).
+  -- Frozen at the proposal: the saving the client agreed to is the one they were shown.
+  balance_at_offer numeric(14,2) not null,
+  balance_as_at date not null,
+  status text not null default 'proposed'
+    check (status in ('proposed', 'approved', 'declined', 'withdrawn', 'paid')),
+  expires_on date,
+  proposed_by uuid references public.profiles(id),
+  proposed_at timestamptz not null default now(),
+  proposal_note text,
+  approved_by uuid references public.profiles(id),
+  approved_at timestamptz,
+  -- HOW THE CLIENT SAID YES, in words: "Email from Rinda 6 Oct", "Signed mandate letter". The
+  -- call script's rule is that it goes in writing or it did not happen.
+  approval_evidence text,
+  closed_by uuid references public.profiles(id),
+  closed_at timestamptz,
+  closed_reason text,
+  -- A SETTLEMENT FOR THE WHOLE BALANCE IS NOT A SETTLEMENT; it is a payment in full.
+  constraint account_settlements_less_than_owed check (amount < balance_at_offer),
+  constraint account_settlements_approved_has_terms check (
+    status not in ('approved', 'paid')
+    or (expires_on is not null and approved_at is not null
+        and nullif(btrim(coalesce(approval_evidence, '')), '') is not null)),
+  constraint account_settlements_closed_says_why check (
+    status not in ('declined', 'withdrawn', 'paid')
+    or (closed_at is not null and nullif(btrim(coalesce(closed_reason, '')), '') is not null))
+);
+
+-- ONE LIVE OFFER PER ACCOUNT. Two approved figures on one account is two answers to "what will
+-- you accept", and the debtor will be quoted the lower.
+create unique index if not exists account_settlements_one_live
+  on public.account_settlements (account_id) where status in ('proposed', 'approved');
+
+alter table public.account_settlements enable row level security;
+-- READ BY ANYBODY SIGNED IN, like the account it is on: a collector must see an approved figure
+-- to quote it. NO write policy at all -- every change goes through the functions below, which are
+-- where the ticks are asked.
+create policy account_settlements_select on public.account_settlements
+  for select to authenticated using ((select auth.uid()) is not null);
+grant select on public.account_settlements to authenticated;
+
+-- THE ONE PLACE "TODAY" IS DECIDED FOR AN EXPIRY. Johannesburg's date, not the server's: at
+-- 01:00 on the expiry day UTC is still the day before, and an offer would read as live for two
+-- hours after it lapsed.
+create or replace function public.settlement_today()
+returns date
+language sql
+stable
+set search_path to 'public'
+as $$ select (now() at time zone 'Africa/Johannesburg')::date $$;
+
+-- WHAT THE SCREEN AND THE MERGE READ: the stored status with LAPSED derived, and what has reached
+-- the trust account towards it. Paid-toward counts only money that is really there -- approved,
+-- not reversed, rejected or parked -- received from the day of the offer to its expiry.
+create or replace function public.account_settlement(p_account uuid)
+returns table (
+  id uuid, account_id uuid, amount numeric, balance_at_offer numeric, balance_as_at date,
+  saving numeric, status text, state text, expires_on date,
+  proposed_by uuid, proposed_at timestamptz, proposal_note text,
+  approved_by uuid, approved_at timestamptz, approval_evidence text,
+  closed_by uuid, closed_at timestamptz, closed_reason text, paid_toward numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select s.id, s.account_id, s.amount, s.balance_at_offer, s.balance_as_at,
+         s.balance_at_offer - s.amount,
+         s.status,
+         case when s.status = 'approved' and s.expires_on < public.settlement_today()
+              then 'lapsed' else s.status end,
+         s.expires_on, s.proposed_by, s.proposed_at, s.proposal_note,
+         s.approved_by, s.approved_at, s.approval_evidence,
+         s.closed_by, s.closed_at, s.closed_reason,
+         coalesce((
+           select sum(p.amount) from public.account_payments p
+            where p.account_id = s.account_id
+              and p.approved_at is not null
+              and p.reversed_at is null and p.rejected_at is null and p.suspended_at is null
+              and (p.received_at at time zone 'Africa/Johannesburg')::date
+                  between (s.proposed_at at time zone 'Africa/Johannesburg')::date
+                      and coalesce(s.expires_on, public.settlement_today())
+         ), 0)
+    from public.account_settlements s
+   where s.account_id = p_account
+   -- THE LIVE ONE FIRST, then the newest closed one, so the card can say what happened last.
+   order by (s.status in ('proposed', 'approved')) desc, s.proposed_at desc
+   limit 1
+$$;
+
+create or replace function public.propose_settlement(
+  p_account uuid, p_amount numeric, p_balance numeric, p_note text default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_id uuid; v_a public.debtor_accounts%rowtype;
+begin
+  -- ANYBODY SIGNED IN. A proposal is the debtor's offer written down; it is quoted to nobody and
+  -- grants nothing, so the gate is on approval, where the figure becomes something to say.
+  if auth.uid() is null then
+    raise exception 'Sign in first.' using errcode = '42501';
+  end if;
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A settlement is an amount, so it has to be more than nothing.' using errcode = '22023';
+  end if;
+  if coalesce(p_balance, 0) <= p_amount then
+    raise exception 'That is the whole balance or more. A payment in full is not a settlement.'
+      using errcode = '22023';
+  end if;
+  if exists (select 1 from public.account_settlements
+              where account_id = p_account and status in ('proposed', 'approved')) then
+    raise exception 'There is already an offer on this account. Withdraw it first.' using errcode = '23505';
+  end if;
+  insert into public.account_settlements
+    (account_id, amount, balance_at_offer, balance_as_at, proposed_by, proposal_note)
+  values (p_account, round(p_amount, 2), round(p_balance, 2), public.settlement_today(), auth.uid(),
+          nullif(btrim(coalesce(p_note, '')), ''))
+  returning id into v_id;
+  return v_id;
+end
+$$;
+
+-- RECORDING THE CLIENT'S YES. Also how an expiry is EXTENDED or a lapsed offer revived: the
+-- script's "I cannot revive the old offer myself" is the collector's position, not the liaison's
+-- -- a liaison who has the client's fresh approval records it here, with what the client said.
+-- The client may come back with a different figure, so the amount can change at approval.
+create or replace function public.approve_settlement(
+  p_id uuid, p_expires_on date, p_evidence text, p_amount numeric default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        v_why text := nullif(btrim(coalesce(p_evidence, '')), '');
+        v_amount numeric := round(coalesce(p_amount, 0), 2);
+begin
+  if not public.has_capability('settlement.approve') then
+    raise exception 'Recording a client''s approval is not yours to do.' using errcode = '42501';
+  end if;
+  select * into v_s from public.account_settlements where id = p_id for update;
+  if not found then raise exception 'That offer no longer exists.' using errcode = 'P0002'; end if;
+  if v_s.status not in ('proposed', 'approved') then
+    raise exception 'That offer was % and cannot be approved now. Put a new one up.', v_s.status
+      using errcode = '22023';
+  end if;
+  if p_expires_on is null or p_expires_on < public.settlement_today() then
+    raise exception 'An approved settlement needs an expiry that has not passed.' using errcode = '22023';
+  end if;
+  if v_why is null then
+    raise exception 'Say how the client approved it - in writing, or it did not happen.'
+      using errcode = '22023';
+  end if;
+  if v_amount = 0 then v_amount := v_s.amount; end if;
+  if v_amount < 0 or v_amount >= v_s.balance_at_offer then
+    raise exception 'A settlement is less than the balance and more than nothing.' using errcode = '22023';
+  end if;
+  update public.account_settlements
+     set status = 'approved', amount = v_amount, expires_on = p_expires_on,
+         approved_by = auth.uid(), approved_at = now(), approval_evidence = v_why
+   where id = p_id;
+end
+$$;
+
+-- DECLINED (the client said no) or WITHDRAWN (the debtor did, or it was put up by mistake).
+-- Declining is the client's answer, so it takes the same tick as approving. Withdrawing a
+-- proposal is open to whoever put it up as well.
+create or replace function public.close_settlement_offer(p_id uuid, p_as text, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if p_as not in ('declined', 'withdrawn') then
+    raise exception 'An offer is declined or withdrawn.' using errcode = '22023';
+  end if;
+  select * into v_s from public.account_settlements where id = p_id for update;
+  if not found then raise exception 'That offer no longer exists.' using errcode = 'P0002'; end if;
+  if v_s.status not in ('proposed', 'approved') then
+    raise exception 'That offer is already %.', v_s.status using errcode = '22023';
+  end if;
+  if not (public.has_capability('settlement.approve')
+          or (p_as = 'withdrawn' and v_s.status = 'proposed' and v_s.proposed_by = auth.uid())) then
+    raise exception 'That is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why.' using errcode = '22023';
+  end if;
+  update public.account_settlements
+     set status = p_as, closed_by = auth.uid(), closed_at = now(), closed_reason = v_why
+   where id = p_id;
+end
+$$;
+
+-- PAID: A PERSON CONFIRMS, and the account closes as settled through settle_account, so its gate,
+-- its workflow stop and its bureau removal apply exactly as they do to a settlement closed by hand.
+-- "A part payment does not settle it": refused until the money in the trust account, received
+-- between the offer and its expiry, reaches the figure.
+create or replace function public.close_as_settled(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s record;
+begin
+  select * into v_s from public.account_settlement(
+    (select account_id from public.account_settlements where id = p_id)) where id = p_id;
+  if not found then
+    raise exception 'That offer is not the live one on its account.' using errcode = 'P0002';
+  end if;
+  if v_s.status <> 'approved' then
+    raise exception 'Only an approved settlement can be paid.' using errcode = '22023';
+  end if;
+  if v_s.paid_toward < v_s.amount then
+    raise exception 'R % of R % has reached the trust account. A part payment does not settle it.',
+      to_char(v_s.paid_toward, 'FM999999990.00'), to_char(v_s.amount, 'FM999999990.00')
+      using errcode = '22023';
+  end if;
+  update public.account_settlements
+     set status = 'paid', closed_by = auth.uid(), closed_at = now(),
+         closed_reason = 'Paid in full by ' || to_char(v_s.expires_on, 'DD Mon YYYY')
+   where id = p_id;
+  perform public.settle_account(v_s.account_id, 'settled',
+    'Settlement of R' || to_char(v_s.amount, 'FM999999990.00') || ' paid, approved by the client ('
+      || v_s.approval_evidence || ')');
+end
+$$;
+
+revoke all on function public.settlement_today() from public, anon;
+revoke all on function public.account_settlement(uuid) from public, anon;
+revoke all on function public.propose_settlement(uuid, numeric, numeric, text) from public, anon;
+revoke all on function public.approve_settlement(uuid, date, text, numeric) from public, anon;
+revoke all on function public.close_settlement_offer(uuid, text, text) from public, anon;
+revoke all on function public.close_as_settled(uuid) from public, anon;
+grant execute on function public.settlement_today() to authenticated;
+grant execute on function public.account_settlement(uuid) to authenticated;
+grant execute on function public.propose_settlement(uuid, numeric, numeric, text) to authenticated;
+grant execute on function public.approve_settlement(uuid, date, text, numeric) to authenticated;
+grant execute on function public.close_settlement_offer(uuid, text, text) to authenticated;
+grant execute on function public.close_as_settled(uuid) to authenticated;

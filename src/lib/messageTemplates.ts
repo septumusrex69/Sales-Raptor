@@ -598,6 +598,21 @@ export const MERGE_FIELDS: Record<TemplateScope, MergeField[]> = {
     { key: 'dispute_received_date', label: 'The day the dispute arrived in writing', sample: '24 September 2026' },
     { key: 'dispute_summary', label: 'What the collector wrote down about the dispute', sample: 'Says the account was settled in 2023.' },
     /*
+     * THE SETTLEMENT THE CLIENT APPROVED, AND ONLY THAT ONE.
+     *
+     * The firm's call script quotes all three -- "{{client_name}} has agreed to accept
+     * {{settlement_amount}} ... That is {{settlement_saving}} written off ... by
+     * {{settlement_expiry}}" -- and its DO NOT list is the rule: "Quote a settlement figure that is
+     * not approved on the account." So they answer ONLY off an approved, unlapsed offer
+     * (settlement.isQuotable decides it, once). Everywhere else they are unanswered and the
+     * placeholder stands, which is what holds a settlement message on an account with nothing
+     * agreed. NOT optional, for the same reason a balance is not: a settlement letter with its
+     * figure quietly dropped out is not a shorter letter, it is a wrong one.
+     */
+    { key: 'settlement_amount', label: 'The settlement the client approved', sample: 'R 18,000.00' },
+    { key: 'settlement_expiry', label: 'The day that settlement must be paid by', sample: '31 October 2026' },
+    { key: 'settlement_saving', label: 'What the debtor is let off, against the balance it was offered on', sample: 'R 30,250.00' },
+    /*
      * AND THE FIRM'S OWN DETAILS, which are not the agent's and not the client's. Raptor has no
      * table for them -- companies.banking_details is where REMITTANCE GOES, which is the opposite
      * direction from where a debtor pays -- so these resolve to nothing until it has one.
@@ -733,6 +748,10 @@ export const FIELD_GROUPS: { title: string; keys: string[] }[] = [
      sitting in a group of its own than while it is the fourteenth entry under "The account". */
   { title: 'The dispute', keys: ['dispute_days_left', 'dispute_alleged_date', 'dispute_received_date',
     'dispute_summary'] },
+  /* APART FROM THE BALANCE, because a settlement figure beside {{balance}} under one heading reads
+     as another way of saying what is owed. It is not: it is what the client has agreed to accept
+     INSTEAD, until a date, and the three only exist together. */
+  { title: 'The settlement', keys: ['settlement_amount', 'settlement_expiry', 'settlement_saving'] },
   { title: 'Their business', keys: ['company_name', 'service_interested'] },
   { title: 'The deal', keys: ['deal_name', 'deal_value'] },
   { title: 'The client', keys: ['client_name'] },
@@ -1315,6 +1334,12 @@ export function mergeValuesFor(input: {
     summary: string | null
   } | null
   /**
+   * THE SETTLEMENT THE CLIENT APPROVED, already decided quotable by the caller
+   * (settlement.isQuotable). Null or absent on every other account, which leaves the three
+   * placeholders standing.
+   */
+  settlement?: { amount: number; expiresOn: string; saving: number } | null
+  /**
    * The firm's own details, PASSED WHOLE RATHER THAN FIELD BY FIELD.
    *
    * The shape is FirmSettings' -- same key names, every one optional but `firmName` -- and the
@@ -1503,6 +1528,9 @@ export function mergeValuesFor(input: {
     dispute_alleged_date: input.dispute?.allegedOn ? longDate(input.dispute.allegedOn) : null,
     dispute_received_date: input.dispute?.receivedOn ? longDate(input.dispute.receivedOn) : null,
     dispute_summary: input.dispute?.summary ?? null,
+    settlement_amount: input.settlement ? input.money(input.settlement.amount) : null,
+    settlement_expiry: input.settlement ? longDate(input.settlement.expiresOn) : null,
+    settlement_saving: input.settlement ? input.money(input.settlement.saving) : null,
     position_as_at: input.positionAsAt ? longDate(input.positionAsAt) : null,
     firm_bank: bankLine(input.firm.trustBank, input.firm.trustBranchCode),
     firm_bank_name: some(input.firm.trustBank),

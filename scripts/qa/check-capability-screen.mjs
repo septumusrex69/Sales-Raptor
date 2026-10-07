@@ -153,7 +153,7 @@ ok('...and which ones the database enforces', /CAPABILITIES\[c\]\.inDatabase/.te
 check('the ones marked as enforced are the ones the database really checks',
   CAPABILITY_ORDER.filter((c) => CAPABILITIES[c].inDatabase).sort(),
   ['business.view', 'finance.view', 'library.edit', 'mail.refile', 'payment.approve',
-    'payment.move', 'payment.record', 'payment.reverse'].sort())
+    'payment.move', 'payment.record', 'payment.reverse', 'settlement.approve'].sort())
 /*
  * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
  *

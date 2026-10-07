@@ -36,7 +36,10 @@ import { timeOnDesk, firmToday } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
-import { canRecordPayment } from '../../lib/permissions'
+import { canApproveSettlement, canRecordPayment } from '../../lib/permissions'
+import { isQuotable, type Settlement } from '../../lib/settlement'
+import { fetchSettlement } from '../../lib/settlementApi'
+import { SettlementPanel } from '../../components/accounts/SettlementPanel'
 import { ENDING_LABEL } from '../../lib/accountEnding'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
@@ -177,6 +180,15 @@ export function AccountDetail() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [documents, setDocuments] = useState<AccountDocument[]>([])
   const [queries, setQueries] = useState<AccountQuery[]>([])
+  /*
+   * THE SETTLEMENT, read on its own rather than inside the page's opening Promise.all: a page that
+   * cannot say whether a settlement exists is still a page a collector can work, and a failure here
+   * must not blank the account. Null answers the three settlement fields with nothing, which is the
+   * safe direction -- the placeholder stands and nothing unapproved is quoted. `settlementTick`
+   * is bumped by reload, which every action on this page already calls.
+   */
+  const [settlement, setSettlement] = useState<Settlement | null>(null)
+  const [settlementTick, setSettlementTick] = useState(0)
   const [emails, setEmails] = useState<AccountEmail[]>([])
   const [standing, setStanding] = useState<AccountStanding>({ directors: [], judgments: [] })
   const [traces, setTraces] = useState<FiledTrace[]>([])
@@ -334,6 +346,14 @@ export function AccountDetail() {
    */
   const [firm, setFirm] = useState<FirmSettings>(FIRM_UNSET)
   useEffect(() => { void fetchFirmSettings().then(setFirm) }, [])
+  useEffect(() => {
+    if (!id) return
+    let live = true
+    fetchSettlement(id)
+      .then((x) => { if (live) setSettlement(x) })
+      .catch(() => { if (live) setSettlement(null) })
+    return () => { live = false }
+  }, [id, settlementTick])
 
   /*
    * THE DEBTOR'S OTHER ACCOUNTS, fetched only where the identity number can be trusted.
@@ -552,6 +572,7 @@ export function AccountDetail() {
       loadRuns(),
     ])
     if (a) setAccount(a)
+    setSettlementTick((n) => n + 1)
     setLedgers(l)
     setWorkspace(w)
     setDocuments(d)
@@ -809,6 +830,9 @@ export function AccountDetail() {
          */
         paymentReceived: [...(statement?.lines ?? [])]
           .filter((l) => l.kind === 'payment').at(-1)?.credit ?? null,
+        /* Whatever state it is in -- accountMergeValues answers the three fields only off an
+           approved, unlapsed one, so a proposal on this screen cannot reach a debtor either. */
+        settlement,
       })
       : {},
   /* Before the early returns below, because a hook cannot run conditionally -- which is also why
@@ -819,7 +843,7 @@ export function AccountDetail() {
   /* `promises` is in here because the arrangement's own two fields are read out of it: left off,
      a reminder keeps quoting the instalment that was next before the last payment landed. */
   }), [account, statement?.breakdown?.balance, statement?.lines, client?.name, client?.accountOwnerId, users,
-    workspace?.contacts, workspace?.promises,
+    workspace?.contacts, workspace?.promises, settlement,
     currentUser?.name, currentUser?.phone, currentUser?.email, currentUser?.whatsapp, firm])
 
 
@@ -933,9 +957,13 @@ export function AccountDetail() {
       /* AN INSTALMENT DUE TODAY, AND ONE ALREADY MISSED, which are different calls. */
       instalmentDueToday: next !== null && next.dueOn === today,
       arrangementInDefault: next !== null && next.dueOn < today,
+      /* AN APPROVED FIGURE TO GET PAID, which is what pops the settlement script. Approved and not
+         lapsed only -- the script quotes {{settlement_amount}}, and a lapsed one is "the full
+         balance is owing again". The same predicate the merge fields answer off. */
+      settlementLive: isQuotable(settlement),
       workflowNode: node,
     }
-  }, [account, queries, workspace?.promises, runs])
+  }, [account, queries, workspace?.promises, runs, settlement])
 
   /*
    * THE CALL IS RECORDED, AND ONLY WHAT IS KNOWN IS WRITTEN.
@@ -1391,6 +1419,19 @@ export function AccountDetail() {
       ask={account.clientActionAsk}
       askDue={account.clientActionDue}
       onAsk={() => setAskingClient(true)}
+    />
+  )
+  const settlementPanel = (
+    <SettlementPanel
+      accountId={account.id}
+      settlement={settlement}
+      balance={b?.balance}
+      open={!account.endedAs}
+      canApprove={canApproveSettlement(currentUser)}
+      canClose={canRecordPayment(currentUser)}
+      userId={currentUser?.id ?? null}
+      nameOf={(uid) => users.find((u) => u.id === uid)?.name ?? null}
+      onChange={reload}
     />
   )
   const promisePanel = (
@@ -1983,7 +2024,7 @@ export function AccountDetail() {
            * by and a dispute is the thing that stops it; the workflow is a record of what has
            * already gone out by itself, which is worth seeing and never the first thing to act on.
            */
-          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel,
+          side={[clientLinePanel, summaryPanel, otherAccountsPanel, promisePanel, settlementPanel,
             disputesPanel, workflowNowPanel, testClockPanel, positionPanel]}
           /*
            * THE TRACE, THE DIRECTORS AND THE JUDGMENTS, under the timeline where the firm asked

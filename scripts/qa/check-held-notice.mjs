@@ -104,10 +104,12 @@ const now = read('src/components/collections/WorkflowNowPanel.tsx')
 ok('the overview still says which sequence is running', now.length > 500)
 ok('...drawn on the account', /<WorkflowNowPanel/.test(account))
 /* BELOW THE PROMISE AND THE DISPUTE, at the firm's earlier asking -- "a promise to pay and a
-   dispute holds more weight than that". Asserted as the order they are placed in. */
+   dispute holds more weight than that". Asserted as the order they are placed in. The settlement
+   may sit between the promise and the dispute: it is the other half of "what will this debtor
+   pay", and the workflow is still below all three. */
 const sideAt = account.indexOf('side={[clientLinePanel')
 const side = account.slice(sideAt, sideAt + 220)
-ok('...below the promise and the dispute', /promisePanel,\s*\n?\s*disputesPanel, workflowNowPanel/.test(side))
+ok('...below the promise and the dispute', /promisePanel,\s*(settlementPanel,\s*)?\n?\s*disputesPanel, workflowNowPanel/.test(side))
 /* AND NOTHING WHERE NOTHING IS RUNNING, which is most of the book: a card saying "no workflow"
    on twenty-three thousand accounts pushes the figures down to say nothing. A FINISHED run is
    not drawn either -- what the debtor was sent is history, and history lives on the tab. */

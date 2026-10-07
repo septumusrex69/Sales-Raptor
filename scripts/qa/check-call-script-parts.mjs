@@ -204,34 +204,24 @@ for (const [key, body] of scripts) {
 }
 
 /*
- * EVERY FIELD THE FIRM'S SCRIPTS USE IS ONE THE BOOK OFFERS -- with three exceptions that are
- * recorded here rather than hidden.
+ * EVERY FIELD THE FIRM'S SCRIPTS USE IS ONE THE BOOK OFFERS -- now with no exceptions.
  *
- * {{settlement_amount}}, {{settlement_expiry}} AND {{settlement_saving}} ARE NOT BUILT. The
- * brief lists them as "already flagged in prompts 1 to 5", and flagged is as far as they got:
- * there is no settlement record anywhere in Raptor -- no approved amount, no expiry, no client
- * approval -- so there is nothing for them to resolve from. script-settlement-call therefore draws
- * three named red gaps, which is the honest failure: the collector sees that the figures are not
- * on the account and does not read a settlement figure out of thin air. The firm's own DO NOT on
- * that script is "quote a settlement figure that is not approved on the account".
- *
- * NAMED RATHER THAN EXCLUDED BY A PATTERN. A `startsWith('settlement_')` would also wave through
- * the next field somebody adds to that script, which is the thing this assertion is for.
+ * {{settlement_amount}}, {{settlement_expiry}} AND {{settlement_saving}} WERE THE THREE, held here
+ * by name while there was no settlement record to answer them (task #69). The store landed with
+ * account_settlements, and the fields answer only off an APPROVED, unlapsed offer -- the firm's
+ * DO NOT on script-settlement-call is "quote a settlement figure that is not approved on the
+ * account", and settlement.isQuotable is the one place that decides it. So the exception was
+ * deleted rather than left as a stale apology, which is what its own reverse assertion was for.
  */
-const AWAITING_SETTLEMENT_WORK = ['settlement_amount', 'settlement_expiry', 'settlement_saving']
 const { MERGE_FIELDS } = await import('../../src/lib/messageTemplates.ts')
 const known = new Set(MERGE_FIELDS.collections.map((f) => f.key))
 const unknown = new Set()
 for (const [, body] of scripts) {
   for (const f of fieldsInScript(parseCallScript(body))) if (!known.has(f)) unknown.add(f)
 }
-check('every field the scripts quote is in the collections vocabulary, bar the settlement three',
-  [...unknown].filter((f) => !AWAITING_SETTLEMENT_WORK.includes(f)), [])
-/* AND THE THREE ARE STILL MISSING, asserted in the other direction so this list cannot outlive
-   the gap: the day a settlement store lands and the fields are added, this fails and somebody
-   deletes the exception rather than leaving a stale apology in the checks. */
-check('...and the settlement three are still the only ones outstanding',
-  AWAITING_SETTLEMENT_WORK.filter((f) => known.has(f)), [])
+check('every field the scripts quote is in the collections vocabulary', [...unknown], [])
+check('...the settlement three among them',
+  ['settlement_amount', 'settlement_expiry', 'settlement_saving'].filter((f) => known.has(f)).length, 3)
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-call-script-parts: ${pass} passed, ${failures.length} failed`)

@@ -380,6 +380,15 @@ export function canRecordPayment(user: Pick<User, 'role' | 'grants' | 'revokes'>
 }
 
 /**
+ * WHO MAY RECORD THAT A CLIENT ACCEPTED A SETTLEMENT -- the client liaisons and the Administrator,
+ * at the firm's ruling. approve_settlement asks the same tick, so a button drawn here is never
+ * refused there.
+ */
+export function canApproveSettlement(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'settlement.approve')
+}
+
+/**
  * WHO MAY UNDO A HANDOVER THAT SHOULD NEVER HAVE COME IN.
  *
  * THE FIRM, after a test import went in twice: "make sure that everything is being deleted." The

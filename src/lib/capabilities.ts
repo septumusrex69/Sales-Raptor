@@ -83,6 +83,7 @@ export type Capability =
   | 'dispute.write_to_client'
   | 'dispute.pool'
   | 'mail.refile'
+  | 'settlement.approve'
   /* ---- the library ---- */
   | 'library.view'
   | 'library.edit'
@@ -240,6 +241,24 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     group: 'Clients and disputes',
     inDatabase: true,
   },
+  /*
+   * THE CLIENT'S YES TO A SETTLEMENT, WRITTEN DOWN.
+   *
+   * A settlement figure is the client's to give, never the collector's -- the firm's own call
+   * script: "Never quote a settlement figure that is not approved on the account." Anybody may put
+   * a debtor's offer UP; this is the tick that records the client accepted it, with how they said
+   * so and until when, and it is what turns {{settlement_amount}} into something a collector may
+   * say. The firm gave it to the client liaison role (7 Oct 2026): the liaison is who the client
+   * tells. account_settlements has no write policy, so approve_settlement is the only door.
+   */
+  'settlement.approve': {
+    label: "Record a client's approval of a settlement",
+    blurb: 'Turn a debtor’s offer into a figure collectors may quote, with the client’s written '
+      + 'approval and an expiry. Also how an expiry is extended. A figure approved here is money '
+      + 'the client has agreed to write off.',
+    group: 'Clients and disputes',
+    inDatabase: true,
+  },
   /* ---------------------------------- the library ---------------------------------- */
   'library.view': {
     label: 'Read the library',
@@ -278,10 +297,11 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
   'Sales Representative': ['client.view', 'library.view'],
   'Liaison Manager': [
     'payment.record', 'book.hand_out', 'book.reassign', 'book.freeze',
-    'client.view', 'dispute.write_to_client', 'library.view',
+    'client.view', 'dispute.write_to_client', 'settlement.approve', 'library.view',
   ],
   Liaison: [
-    'payment.record', 'book.freeze', 'client.view', 'dispute.write_to_client', 'library.view',
+    'payment.record', 'book.freeze', 'client.view', 'dispute.write_to_client', 'settlement.approve',
+    'library.view',
   ],
   'Call Centre Manager': [
     'payment.record', 'book.hand_out', 'floor.lead', 'client.view', 'library.view',
