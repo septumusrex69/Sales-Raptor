@@ -398,7 +398,7 @@ ok('...and it draws nothing when nothing was rejected',
 ok('an empty queue says what actually happened to them',
   /approved or rejected/.test(queue))
 ok('...and only where something was in fact rejected',
-  /rejected\.length > 0\s*\?\s*'No payments waiting\. Everything that has arrived has been approved or rejected\.'/.test(queue))
+  /rejected\.length > 0\s*\?\s*'Everything that has arrived has been approved or rejected\.'/.test(queue))
 
 /* THE SCREEN SAYS NOTHING IS DELETED. Somebody pressing this needs to know the money is still
    accounted for, or they go looking for it in the bank and cannot find it anywhere in Raptor. */

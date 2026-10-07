@@ -97,7 +97,8 @@ ok('...which payments_posted joins in SQL', /left join public\.payover_runs r on
  * It is on Payments in, in the queue, named as pending -- not mixed into a list of posted ones.
  */
 ok('Payments in draws the queue', /<AwaitingApproval /.test(payments))
-ok('...headed as pending', /Pending processing/.test(read('src/pages/finance/AwaitingApproval.tsx')))
+ok('...headed as the approval queue, with its count', /Approval queue/.test(read('src/pages/finance/AwaitingApproval.tsx'))
+  && /\{count\.toLocaleString\('en-ZA'\)\} pending/.test(read('src/pages/finance/AwaitingApproval.tsx')))
 
 console.log(`\ncheck-embedded-shape: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

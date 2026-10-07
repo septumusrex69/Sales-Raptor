@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Banknote, Check, FileUp, Loader2, Upload } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertTriangle, Banknote, Check, ChevronRight, FileUp, Loader2, Upload } from 'lucide-react'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { parseBankStatement, summarise, type BankStatement } from '../../lib/bankStatement'
@@ -25,7 +25,18 @@ import {
  * sixth of the lines are money going OUT. Showing "1 815 payments" would be three different
  * numbers wearing one label.
  */
-export function BankImportCard({ onImported }: { onImported: () => void }) {
+export function BankImportCard({ onImported, compact = false, leading, trailing }: {
+  onImported: () => void
+  /*
+   * COMPACT IS PAYMENTS IN'S SHAPE, off the firm's own mock-up: two buttons on one line -- Record
+   * payment and Import bank statement -- rather than a card each. `leading` and `trailing` sit on
+   * that line either side of this card's own button; the preview and the outcome open below it
+   * only while there is something to show. The history is `LatestStatement`, further down the page.
+   */
+  compact?: boolean
+  leading?: ReactNode
+  trailing?: ReactNode
+}) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [statement, setStatement] = useState<BankStatement | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
@@ -76,31 +87,35 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
 
   const sum = statement ? summarise(statement.lines) : null
 
-  return (
-    <Card>
-      <CardHeader title="Import a bank statement"
-        subtitle="The account history from the bank, as CSV. Nothing is written until you confirm." />
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f) }} />
-        <button type="button" onClick={() => fileRef.current?.click()}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
-            border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-          <FileUp size={14} /> Choose a statement
-        </button>
-        {fileName && <span className="text-[13px] text-slate-500">{fileName}</span>}
-      </div>
-
-      {error && (
-        <div className="mt-3 flex items-start gap-2 rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">
-          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
+  if (compact) {
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {leading}
+          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f) }} />
+          <button type="button" onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+              border border-slate-200 bg-[var(--color-card)] text-slate-700 hover:bg-slate-50">
+            <FileUp size={14} /> Import bank statement
+          </button>
+          {fileName && <span className="text-[13px] text-slate-500">{fileName}</span>}
+          {trailing}
         </div>
-      )}
+        {error && (
+          <div className="flex items-start gap-2 rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
+          </div>
+        )}
+        {statement && sum && <Card>{preview(statement, sum)}</Card>}
+        {outcome && outcomeBox(outcome)}
+      </div>
+    )
+  }
 
-      {/* ---- what the file would do ---- */}
-      {statement && sum && (
-        <div className="mt-4 space-y-3">
+  function preview(statement: BankStatement, sum: ReturnType<typeof summarise>) {
+    return (
+        <div className="space-y-3">
           <p className="text-[13px] text-slate-600">
             {statement.accountLabel ?? 'Account'} {statement.accountNumber}
             {statement.accountName ? ` · ${statement.accountName}` : ''} ·{' '}
@@ -122,9 +137,9 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
           */}
           <p className="text-[12px] text-slate-500 leading-relaxed">
             Receipts whose reference names exactly one account become payments, and each one is
-            split immediately — receipt fee, interest, costs, capital, commission. The rest wait in
-            the list below for you to place. Money paid out is imported too, and each line waits
-            under Exceptions to be allocated — a payover, a refund, a transfer to the business
+            split immediately — receipt fee, interest, costs, capital, commission. The rest wait
+            under Needs an account for you to place. Money paid out is imported too, and each line
+            waits under Exceptions to be allocated — a payover, a refund, a transfer to the business
             account, bank charges or other — so that every rand that leaves the trust has a reason.
             {sum.notes > 0 && ` ${sum.notes} zero-amount line${sum.notes === 1 ? '' : 's'} ignored.`}
           </p>
@@ -149,17 +164,18 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
               className="text-sm text-slate-600 hover:text-slate-800 px-2">Cancel</button>
           </div>
         </div>
-      )}
+    )
+  }
 
-      {/* ---- what the last upload did ---- */}
-      {outcome && (
-        <div className="mt-4 rounded-lg bg-positive-50 px-3 py-3 text-[13px] text-positive-800">
+  function outcomeBox(outcome: ImportOutcome) {
+    return (
+        <div className="rounded-lg bg-positive-50 px-3 py-3 text-[13px] text-positive-800">
           <p className="flex items-center gap-1.5 font-medium">
             <Check size={14} /> {outcome.allocated.toLocaleString('en-ZA')} payments recorded and split.
           </p>
           <ul className="mt-1.5 space-y-0.5 text-[12px] text-slate-600">
             {outcome.unallocated > 0 && (
-              <li>{outcome.unallocated.toLocaleString('en-ZA')} receipts are waiting for you to place.</li>
+              <li>{outcome.unallocated.toLocaleString('en-ZA')} receipts need an account.</li>
             )}
             {/*
               A DUPLICATE IS NOT A FAILURE AND IS WORTH SAYING. Statements overlap at month ends,
@@ -169,11 +185,9 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
             {outcome.duplicates > 0 && (
               <li>{outcome.duplicates.toLocaleString('en-ZA')} lines were already imported and were left alone.</li>
             )}
-            {outcome.debits > 0 && <li>{outcome.debits.toLocaleString('en-ZA')} payments out are waiting to be tied to a run.</li>}
-            {/*
-              AMBIGUOUS IS ITS OWN LINE, because it is the one that needs a decision rather than a
-              search: the reference matched more than one account, and both look right.
-            */}
+            {outcome.debits > 0 && <li>{outcome.debits.toLocaleString('en-ZA')} payments out are waiting under Exceptions to be allocated.</li>}
+            {/* AMBIGUOUS IS ITS OWN LINE: it needs a decision rather than a search -- the reference
+                matched more than one account, and both look right. */}
             {outcome.ambiguous > 0 && (
               <li className="text-amber-800">
                 {outcome.ambiguous} reference(s) matched more than one account and were not placed.
@@ -181,7 +195,36 @@ export function BankImportCard({ onImported }: { onImported: () => void }) {
             )}
           </ul>
         </div>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Import a bank statement"
+        subtitle="The account history from the bank, as CSV. Nothing is written until you confirm." />
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f) }} />
+        <button type="button" onClick={() => fileRef.current?.click()}
+          className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+            border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
+          <FileUp size={14} /> Choose a statement
+        </button>
+        {fileName && <span className="text-[13px] text-slate-500">{fileName}</span>}
+      </div>
+
+      {error && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span>
+        </div>
       )}
+
+      {/* ---- what the file would do ---- */}
+      {statement && sum && <div className="mt-4">{preview(statement, sum)}</div>}
+
+      {/* ---- what the last upload did ---- */}
+      {outcome && <div className="mt-4">{outcomeBox(outcome)}</div>}
 
       {/* ---- and what is already in ---- */}
       {history.length > 0 && !statement && (
@@ -214,6 +257,53 @@ function Tile({ label, value, note, tone }: {
       <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
       <p className={`text-[15px] font-semibold tabular-nums ${skin}`}>{value}</p>
       {note && <p className="text-[11px] text-slate-400 leading-snug mt-0.5">{note}</p>}
+    </div>
+  )
+}
+
+/**
+ * THE LAST STATEMENT, IN ONE LINE THAT OPENS.
+ *
+ * From the firm's mock-up: "Latest statement · 44 lines · 1 receipt needs an account", folded. What
+ * was imported is reference, not the day's work, so it sits closed between the figures and the
+ * queue, and opens to every account's history. `refreshKey` reloads it after an import.
+ */
+export function LatestStatement({ refreshKey }: { refreshKey: number }) {
+  const [history, setHistory] = useState<BankImportHistory[] | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    let live = true
+    fetchBankImportHistory().then((h) => { if (live) setHistory(h) }).catch(() => { if (live) setHistory([]) })
+    return () => { live = false }
+  }, [refreshKey])
+  if (!history || history.length === 0) return null
+  const latest = [...history].sort((a, b) => (b.lastTxn ?? '').localeCompare(a.lastTxn ?? ''))[0]
+  return (
+    <div className="border-b border-slate-200 pb-3" data-testid="latest-statement">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="inline-flex items-center gap-1.5 text-[13.5px] text-slate-600 hover:text-navy-950">
+        <ChevronRight size={14} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+        Latest statement · {latest.lines.toLocaleString('en-ZA')} lines
+        {latest.unallocated > 0
+          ? ` · ${latest.unallocated} receipt${latest.unallocated === 1 ? '' : 's'} need${latest.unallocated === 1 ? 's' : ''} an account`
+          : ' · every receipt placed'}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1 pl-5">
+          {history.map((h) => (
+            <div key={h.bankAccount} className="flex flex-wrap items-baseline justify-between gap-2 text-[12px]">
+              <span className="text-slate-600">
+                <Banknote size={12} className="inline mr-1 text-slate-400" />
+                {h.bankAccountLabel ?? 'Account'} {h.bankAccount} · {h.firstTxn} to {h.lastTxn}
+              </span>
+              <span className="text-slate-500 tabular-nums">
+                {h.lines.toLocaleString('en-ZA')} lines · {rand(h.received)} in · {rand(h.paidOut)} out
+                {h.unallocated > 0 ? ` · ${h.unallocated} unplaced` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

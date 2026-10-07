@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { firmToday } from '../../lib/dateLabels'
+import { formatDate } from '../../data/mockData'
 import { fetchProcessedMonth, type ProcessedMonth } from '../../lib/payover'
-import { BankImportCard } from './BankImportCard'
+import { BankImportCard, LatestStatement } from './BankImportCard'
 import { UnallocatedReceipts } from './UnallocatedReceipts'
 import { RecordPaymentModal } from './RecordPaymentModal'
 import { AwaitingApproval } from './AwaitingApproval'
@@ -51,40 +52,43 @@ export function FinancePayments() {
   const onUnmatched = useCallback((count: number, total: number) => setUnmatched({ count, total }), [])
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/*
-        THE TWO WAYS IN, NEXT TO EACH OTHER. Said beside the button because it is the thing people
-        get wrong: a statement only ever carries money that reached the firm's own bank, so a
-        debtor who paid the CLIENT direct never appears on one and has to be recorded by hand.
+        THE FIRM'S OWN MOCK-UP, 7 October: two buttons on one line, one card of four figures, the
+        last statement folded into a line, then the queue and what needs an account -- "This looks
+        much better. Do something like this."
+
+        THE TWO WAYS IN, NEXT TO EACH OTHER. A statement only ever carries money that reached the
+        firm's own bank, so a debtor who paid the CLIENT direct never appears on one and has to be
+        recorded by hand -- which is why Record payment is the gold one.
       */}
-      <div className="grid gap-4 lg:grid-cols-2 items-start">
-        <div className="card p-5 h-full">
-          <h3 className="font-semibold text-[15px] text-slate-800">Record a payment</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            By hand. A PTC never comes in on a statement — the debtor paid the client.
-          </p>
+      <BankImportCard compact onImported={bump}
+        leading={(
           <button type="button" onClick={() => setRecording(true)}
-            className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
+            title="By hand. A PTC never comes in on a statement — the debtor paid the client."
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
               border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500">
-            <Plus size={14} /> Record a payment
+            <Plus size={14} /> Record payment
           </button>
-        </div>
-        <BankImportCard onImported={bump} />
+        )}
+        trailing={<span className="ml-auto text-[13px] text-slate-500">{formatDate(firmToday())}</span>} />
+
+      {/* THE FOUR FIGURES, IN ONE CARD. A dash while one is being read, never a nought it has not
+          earned. Needs an account turns amber when there is something in it. */}
+      <div className="card grid grid-cols-1 gap-px overflow-hidden bg-slate-200 sm:grid-cols-2 xl:grid-cols-4" data-testid="payments-overview">
+        <OverviewTile label="Waiting for approval"
+          value={pending ? rand(pending.total) : '—'}
+          note={pending ? `${pending.count.toLocaleString('en-ZA')} payment${pending.count === 1 ? '' : 's'}` : 'Reading the queue…'} />
+        <OverviewTile label="Processed into trust" value={month ? rand(month.trustAmount) : '—'}
+          note={month ? `${month.trustCount.toLocaleString('en-ZA')} payments this month` : 'This month'} />
+        <OverviewTile label="Paid to clients · PTC" value={month ? rand(month.ptcAmount) : '—'}
+          note={month ? `${month.ptcCount.toLocaleString('en-ZA')} payments this month` : 'This month'} />
+        <OverviewTile label="Needs an account" warn={!!unmatched && unmatched.count > 0}
+          value={unmatched ? rand(unmatched.total) : '—'}
+          note={unmatched ? `${unmatched.count.toLocaleString('en-ZA')} receipt${unmatched.count === 1 ? '' : 's'} in suspense` : 'Reading suspense…'} />
       </div>
 
-      {/* THE OVERVIEW. A dash while a figure is being read, never a nought it has not earned. */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="payments-overview">
-        <OverviewTile label="Pending processing" tone="gold"
-          value={pending ? rand(pending.total) : '—'}
-          note={pending ? `${pending.count.toLocaleString('en-ZA')} waiting for approval` : 'Reading the queue…'} />
-        <OverviewTile label="Processed in trust" value={month ? rand(month.trustAmount) : '—'}
-          note={month ? `${month.trustCount.toLocaleString('en-ZA')} this month` : 'This month'} />
-        <OverviewTile label="Paid directly to client" value={month ? rand(month.ptcAmount) : '—'}
-          note={month ? `${month.ptcCount.toLocaleString('en-ZA')} PTCs this month` : 'This month'} />
-        <OverviewTile label="Unmatched / suspense" tone={unmatched && unmatched.count > 0 ? 'warn' : undefined}
-          value={unmatched ? rand(unmatched.total) : '—'}
-          note={unmatched ? `${unmatched.count.toLocaleString('en-ZA')} to place, below the queue` : 'Reading suspense…'} />
-      </div>
+      <LatestStatement refreshKey={changed} />
 
       {/*
         THE QUEUE IS THE DAY'S WORK: money arrives, somebody checks what each payment would do, and
@@ -92,7 +96,8 @@ export function FinancePayments() {
       */}
       <AwaitingApproval refreshKey={changed} onApproved={bump} onLoaded={onLoaded} />
 
-      {/* SUSPENSE LIVES HERE, BELOW THE PENDING PAYMENTS, at the firm's asking. */}
+      {/* SUSPENSE LIVES HERE, BELOW THE PENDING PAYMENTS, at the firm's asking -- named the way
+          their mock-up names it: Needs an account. */}
       <UnallocatedReceipts refreshKey={changed} onPlaced={bump} onTotals={onUnmatched} />
 
       <p className="text-[12px] text-slate-400">
@@ -109,14 +114,17 @@ export function FinancePayments() {
   )
 }
 
-function OverviewTile({ label, value, note, tone }: {
-  label: string; value: string; note?: string; tone?: 'gold' | 'warn'
+/* One quarter of the overview card. The rules between them are the card's 1px gap showing through,
+   so the four read as one panel of figures at any width rather than four cards competing with the
+   queue. */
+function OverviewTile({ label, value, note, warn }: {
+  label: string; value: string; note?: string; warn?: boolean
 }) {
   return (
-    <div className={`card px-4 py-3 ${tone === 'gold' ? 'border-l-4 border-l-gold-400' : tone === 'warn' ? 'border-l-4 border-l-amber-500' : ''}`}>
-      <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-[18px] font-semibold tabular-nums text-navy-950">{value}</p>
-      {note && <p className="text-[11.5px] text-slate-400 mt-0.5">{note}</p>}
+    <div className="bg-[var(--color-card-solid,var(--color-card))] px-5 py-4">
+      <p className="text-[13px] text-slate-500">{label}</p>
+      <p className={`mt-1 text-[22px] font-semibold tabular-nums ${warn ? 'text-amber-700' : 'text-navy-950'}`}>{value}</p>
+      {note && <p className="text-[12.5px] text-slate-500 mt-1">{note}</p>}
     </div>
   )
 }

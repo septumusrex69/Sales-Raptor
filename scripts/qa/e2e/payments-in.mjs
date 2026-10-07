@@ -110,15 +110,18 @@ try {
   /* ---- the page ---- */
   t.check('the three payments are in the queue', await rows.count(), 3)
   const tiles = await page.getByTestId('payments-overview').innerText()
-  t.ok('the tiles: pending, processed in trust, paid to client, suspense',
-    /Pending processing/i.test(tiles) && /Processed in trust/i.test(tiles)
-    && /Paid directly to client/i.test(tiles) && /Unmatched \/ suspense/i.test(tiles))
+  t.ok('the four figures: waiting, processed into trust, paid to clients, needs an account',
+    /Waiting for approval/.test(tiles) && /Processed into trust/.test(tiles)
+    && /Paid to clients · PTC/.test(tiles) && /Needs an account/.test(tiles))
   t.ok('...pending is the queue’s total', money(tiles).includes('R18000.00'))
-  t.ok('...and processed is the month the database summed', money(tiles).includes('R34500.00') && /12 this month/.test(tiles))
+  t.ok('...and processed is the month the database summed', money(tiles).includes('R34500.00') && /12 payments this month/.test(tiles))
   t.check('the old list of every payment is gone', await page.getByRole('option', { name: 'Every client' }).count(), 0)
-  t.ok('Record a payment and Choose a statement are both on the page',
-    await page.getByRole('button', { name: 'Record a payment' }).isVisible()
-    && await page.getByRole('button', { name: 'Choose a statement' }).isVisible())
+  const record = await page.getByRole('button', { name: 'Record payment' }).boundingBox()
+  const importer = await page.getByRole('button', { name: 'Import bank statement' }).boundingBox()
+  t.ok('Record payment and Import bank statement sit on one line',
+    !!record && !!importer && Math.abs(record.y - importer.y) < 4 && importer.x > record.x)
+  t.ok('the queue is headed with its count', /Approval queue/.test(await page.getByTestId('queue-heading').innerText())
+    && await page.getByText('3 pending').isVisible())
 
   /* ---- the PTC figure ---- */
   const ptc = page.locator('[data-payment="nandi-ptc"]')

@@ -210,19 +210,27 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
    */
   if (rows.length === 0) {
     return (
-      <Card padded={false}>
-        {(error ?? loadError) && (
-          <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error ?? loadError}</span>
+      <QueueSection count={0}>
+        <Card padded={false}>
+          {(error ?? loadError) && (
+            <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error ?? loadError}</span>
+            </div>
+          )}
+          <div className="flex items-start gap-3 px-5 py-4" data-testid="queue-empty">
+            <Check size={20} className="mt-0.5 shrink-0 text-[var(--c-steel)]" />
+            <div>
+              <p className="text-[14px] font-medium text-slate-800">No payments waiting for approval</p>
+              <p className="text-[12.5px] text-slate-500">
+                {rejected.length > 0
+                  ? 'Everything that has arrived has been approved or rejected.'
+                  : 'All payments in the approval queue have been approved.'}
+              </p>
+            </div>
           </div>
-        )}
-        <p className="px-4 py-4 text-center text-[13px] text-slate-500">
-          {rejected.length > 0
-            ? 'No payments waiting. Everything that has arrived has been approved or rejected.'
-            : 'No payments waiting. Everything that has arrived has been approved.'}
-        </p>
-        <RejectedToday rejected={rejected} busy={busy} onPutBack={putBack} />
-      </Card>
+          <RejectedToday rejected={rejected} busy={busy} onPutBack={putBack} />
+        </Card>
+      </QueueSection>
     )
   }
 
@@ -230,16 +238,12 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
   const allOnPage = shown.length > 0 && shown.every((c) => picked.has(c.row.paymentId))
 
   return (
+    <QueueSection count={rows.length}>
     <Card padded={false}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-        <div>
-          <h3 className="text-[15px] font-semibold text-slate-800" data-testid="queue-heading">
-            Pending processing · {rows.length.toLocaleString('en-ZA')}
-          </h3>
-          <p className="text-[12px] text-slate-500">
-            Nothing has moved yet. These are the figures each one would post if you approve it.
-          </p>
-        </div>
+        <p className="text-[12.5px] text-slate-500">
+          Nothing has moved yet. These are the figures each one would post if you approve it.
+        </p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" disabled={busy || picked.size === 0}
             onClick={() => void approve([...picked])}
@@ -487,6 +491,24 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
         />
       )}
     </Card>
+    </QueueSection>
+  )
+}
+
+/**
+ * THE QUEUE'S HEADING SITS ABOVE ITS CARD, as the firm's mock-up draws it: "Approval queue" with the
+ * count on the right, empty or not -- so an empty queue still says what it is and that it is empty,
+ * rather than the section disappearing and leaving the page to be read for its absence.
+ */
+function QueueSection({ count, children }: { count: number; children: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-[16px] font-semibold text-slate-800" data-testid="queue-heading">Approval queue</h2>
+        <span className="text-[13px] text-slate-500">{count.toLocaleString('en-ZA')} pending</span>
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -572,8 +594,8 @@ function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
       <p className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">
         Projected on approval · the whole queue
       </p>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-        <Figure label="Total awaiting" value={rand(t.total)}
+      <div className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 xl:grid-cols-5">
+        <Figure wide label="Total awaiting" value={rand(t.total)}
           note={`${rand(t.direct.amount)} into trust · ${rand(t.ptc.amount)} paid to clients`} />
         <Figure label="To pay clients" value={rand(t.toClients)} note="From trust, on direct receipts" emph />
         <Figure label="BF share incl. VAT" value={rand(t.bfShare)}
@@ -637,10 +659,12 @@ function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
   )
 }
 
-function Figure({ label, value, note, emph }: { label: string; value: string; note?: string; emph?: boolean }) {
+/* `wide` spans both columns below xl: five figures in a two-column grid would leave an empty cell,
+   which the hairline grid draws as a grey block. */
+function Figure({ label, value, note, emph, wide }: { label: string; value: string; note?: string; emph?: boolean; wide?: boolean }) {
   return (
-    <div className="rounded-lg border border-slate-200 px-3 py-2">
-      <p className="text-[10.5px] uppercase tracking-wide text-slate-500">{label}</p>
+    <div className={`bg-[var(--color-card-solid,var(--color-card))] px-3 py-2.5 ${wide ? 'col-span-2 xl:col-span-1' : ''}`}>
+      <p className="text-[12px] text-slate-500">{label}</p>
       <p className={`text-[15px] tabular-nums ${emph ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>{value}</p>
       {note && <p className="text-[11px] leading-snug text-slate-400 mt-0.5">{note}</p>}
     </div>

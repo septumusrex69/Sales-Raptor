@@ -83,31 +83,33 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
 
   return (
     <>
-      <Card padded={false}>
-        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 px-4 py-3">
+      <Card padded={false} className="border-t-[3px] border-t-gold-400">
+        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-5 py-4">
           <div>
             {/*
-              SUSPENSE, WHICH IS THE FIRM'S OWN WORD FOR IT: "all payments that do not have
-              reference numbers go into something we call the suspense account. So now we have to
-              create a suspense account for all unallocated payments that we can allocate later."
-              It is a LIST rather than a standing account in the book -- asked directly, the firm
-              chose the queue: no money is posted to a debtor until somebody places it.
+              SUSPENSE, AND THE NAME ON THE SCREEN IS THE FIRM'S MOCK-UP'S: "Needs an account". The
+              firm's own word for the pot is suspense -- "all payments that do not have reference
+              numbers go into something we call the suspense account" -- and it is still said in
+              the line under it. It is a LIST rather than a standing account in the book: asked
+              directly, the firm chose the queue, and no money is posted to a debtor until somebody
+              places it.
             */}
-            <h3 className="text-[15px] font-semibold text-slate-800">Suspense</h3>
-            <p className="text-[12px] text-slate-500">
-              Money received with no account number on it. Until it is placed the debtor is not
-              credited and the client is not remitted — so somebody who has paid stays on the book.
+            <h3 className="text-[16px] font-semibold text-slate-800">Needs an account</h3>
+            <p className="text-[12.5px] text-slate-500">
+              Receipts held in suspense until matched to an account. Until one is placed the debtor
+              is not credited and the client is not remitted.
             </p>
           </div>
-          {rows.length > 0 && (
+          {rows.length + parked.length > 0 && (
             <span className="text-right">
               {/* THE BALANCE IS THE POINT AS MUCH AS THE LIST: it is the firm's own measure of how
                   much is sitting in trust belonging to nobody yet. */}
-              <span className="block text-[11px] uppercase tracking-wide text-slate-500">In suspense</span>
-              <span className="block text-[17px] font-semibold tabular-nums text-amber-700">{rand(waiting)}</span>
-              <span className="block text-[11px] text-slate-500">
-                {rows.length} receipt{rows.length === 1 ? '' : 's'}
+              <span className="inline-block rounded-md bg-amber-50 px-2 py-0.5 text-[12px] font-medium text-amber-800">
+                {rows.length + parked.length} to resolve
               </span>
+              {rows.length > 0 && (
+                <span className="mt-1 block text-[13px] font-semibold tabular-nums text-amber-700">{rand(waiting)}</span>
+              )}
             </span>
           )}
         </div>
@@ -122,7 +124,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
           <div className="py-8 text-center"><Loader2 className="mx-auto w-4 h-4 animate-spin text-slate-400" /></div>
         ) : rows.length === 0 ? (
           <p className="px-4 py-6 text-center text-[13px] text-slate-500">
-            Nothing in suspense. Every receipt imported has been placed against an account.
+            Nothing needs an account. Every receipt imported has been placed.
           </p>
         ) : (
           <table className="w-full text-[13px]">

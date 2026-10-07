@@ -218,7 +218,7 @@ try {
   /* --------------------------------------------- the queue empties, and the undo is still there */
   {
     const { context, page, calls } = await openQueue(browser, { waiting: [], rejected: [ALREADY] })
-    await page.waitForSelector('text=/No payments waiting/', { timeout: 15000 })
+    await page.getByTestId('queue-empty').waitFor({ timeout: 15000 })
 
     /*
      * THIS IS THE ONE THAT WAS BROKEN. The screen returned early on an empty queue, so rejecting
@@ -229,7 +229,7 @@ try {
       (await page.locator('text=/Rejected today · 1/').count()) > 0)
 
     /* AND IT NO LONGER CLAIMS EVERYTHING WAS APPROVED, which is false on exactly this morning. */
-    const line = await page.locator('text=/No payments waiting/').first().innerText()
+    const line = await page.getByTestId('queue-empty').innerText()
     t.ok('the empty line says what actually happened', /approved or rejected/.test(line))
 
     /*
