@@ -16,6 +16,7 @@ import {
 import { chargeItemWith, type ChargeResult } from '../../src/lib/chargeEngine.js'
 import { bodyToStore, tooBigFor } from '../../src/lib/mailBodyCache.js'
 import { actsOnItsOwn, bounceSeverity } from '../../src/lib/bounceSeverity.js'
+import { clientMailActivity } from '../../src/lib/clientMailActivity.js'
 import { notifyHeld } from './workflow/notify.js'
 
 export interface EmailConnectionRow {
@@ -803,21 +804,19 @@ async function fileAccountEmail(
       .from('debtor_accounts').select('company_id').eq('id', accountId).maybeSingle()
     if (acc?.company_id) {
       const { error: actError } = await admin.from('activities').upsert(
-        {
-          type: 'Email',
-          user_id: message.mailbox.userId,
-          company_id: acc.company_id,
-          subject: `Email received: ${message.subject}`,
-          notes: message.body,
-          activity_date: message.at,
-          email_message_id: message.messageId,
-          is_read: false,
-          attachment_names: message.attachmentNames,
-          email_to_recipients: message.toRecipients,
-          email_cc_recipients: message.ccRecipients,
-          email_folder: message.folder,
-          email_uid: message.uid,
-        },
+        clientMailActivity({
+          userId: message.mailbox.userId,
+          companyId: acc.company_id,
+          subject: message.subject,
+          body: message.body,
+          at: message.at,
+          messageId: message.messageId,
+          attachmentNames: message.attachmentNames,
+          toRecipients: message.toRecipients,
+          ccRecipients: message.ccRecipients,
+          folder: message.folder,
+          uid: message.uid,
+        }),
         { onConflict: 'user_id,email_message_id', ignoreDuplicates: true },
       )
       if (actError) {

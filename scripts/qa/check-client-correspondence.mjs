@@ -123,10 +123,39 @@ const file = sync.slice(sync.indexOf('async function fileAccountEmail('), sync.i
 ok('the sync reads the answer back', /\.select\('id, correspondent'\)/.test(file))
 const clientBlock = file.indexOf("if (inserted[0].correspondent === 'client' && !message.queryId) {")
 ok('...and gives ticketless client mail to the client', clientBlock > 0)
-ok('...as an email activity on the company',
-  /from\('activities'\)\.upsert\([\s\S]{0,200}type: 'Email'[\s\S]{0,200}company_id: acc\.company_id/.test(file.slice(clientBlock)))
+ok('...as the shared email activity, on the company',
+  /from\('activities'\)\.upsert\(\s*clientMailActivity\(\{[\s\S]{0,200}companyId: acc\.company_id/.test(file.slice(clientBlock)))
 ok('...once, however often a mailbox is resynced',
   /onConflict: 'user_id,email_message_id', ignoreDuplicates: true/.test(file.slice(clientBlock)))
+
+/* ---------- 4c. and so does a person filing it by hand ---------- */
+
+/*
+ * HANDOFF section 5 named the gap: "only the SYNC writes the client-record activity, so that one is
+ * on nobody's screen except the person's own mailbox." Filing by hand now reads the database's
+ * answer back and writes the same row through the same builder -- one shape, two doors.
+ */
+const { clientMailActivity } = await import('../../src/lib/clientMailActivity.ts')
+const row = clientMailActivity({
+  userId: 'u', companyId: 'c', subject: 'Re: KIS0012', body: 'We accept.', at: '2026-10-07T08:00:00Z',
+  messageId: '<m@x>', attachmentNames: [], toRecipients: [], ccRecipients: [], folder: 'INBOX', uid: 4,
+})
+check('the shared row is an email activity on the client', [row.type, row.company_id], ['Email', 'c'])
+/* UNREAD FOR THE LIAISON, even when the filer has read it: the client's record is theirs. */
+check('...and lands unread', row.is_read, false)
+check('...keyed for the resync index', row.email_message_id, '<m@x>')
+
+const userMail = code('src/lib/userMail.ts')
+const byHand = userMail.slice(userMail.indexOf('async function fileOnAccount('), userMail.indexOf('export async function saveAccountContacts('))
+ok('filing by hand reads the answer back', /\.select\('correspondent'\)/.test(byHand))
+const handBlock = byHand.indexOf("if (filed?.correspondent === 'client'")
+ok('...and gives client mail to the client', handBlock > 0)
+ok('...through the same builder', /clientMailActivity\(\{[\s\S]{0,200}companyId: acc\.company_id/.test(byHand.slice(handBlock)))
+ok('...once, where there is a Message-ID to key it on',
+  /onConflict: 'user_id,email_message_id', ignoreDuplicates: true/.test(byHand.slice(handBlock)))
+/* THE FEE STILL COMES FIRST, whoever wrote it -- the firm's ruling, as on the sync. */
+const handCharge = byHand.indexOf('const charge = await chargeItem({')
+ok('...after the item 6 charge, which is not gated on who wrote it', handCharge > 0 && handCharge < handBlock)
 
 /* ---------- 5. the fee is not touched ---------- */
 

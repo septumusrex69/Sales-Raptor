@@ -34,6 +34,7 @@ import { mirrorReadToAccount, mirrorUnreadToAccount } from './mailReadState'
 import type { ContactCandidate } from './signature'
 import { chargeItem, type ChargeResult } from './accountCharges'
 import { addNote } from './accountWorkspace'
+import { clientMailActivity } from './clientMailActivity'
 import {
   automatedMailKind,
   CORRESPONDENCE_ACTION_CODE, CORRESPONDENCE_DESCRIPTION, CORRESPONDENCE_ITEM_ID,
@@ -1249,7 +1250,7 @@ async function fileOnAccount(input: {
    * is still in the mailbox, and this is the point at which it would be worth fetching if the
    * firm ever wants the whole text on the account.
    */
-  const { error: fileError } = await supabase.from('account_emails').insert({
+  const { data: filed, error: fileError } = await supabase.from('account_emails').insert({
     account_id: input.accountId,
     direction: 'in',
     debtor_address: input.mail.fromAddress,
@@ -1265,8 +1266,41 @@ async function fileOnAccount(input: {
     read_at: new Date().toISOString(),
     charged_excl_vat: charge.exclVat,
     occurred_at: input.mail.occurredAt,
-  })
+  /* `correspondent` is not written here: the database decides it on insert from the account's
+     contacts and the client's (account_email_correspondent), and it is read back for the step
+     below -- exactly as the sync does. */
+  }).select('correspondent').maybeSingle<{ correspondent: 'debtor' | 'client' }>()
   if (fileError) console.error('[userMail] filed and charged, but the account copy failed:', fileError.message)
+
+  /*
+   * THE CLIENT WROTE IT, SO IT GOES ON THE CLIENT TOO (HANDOFF section 5). Filed by hand there is
+   * no ticket -- this path never carries one -- so the debtor's Emails tab leaves it out and,
+   * without this, nobody's screen shows it but the filer's own mailbox. The same activity the sync
+   * writes, built by the same function.
+   */
+  if (filed?.correspondent === 'client' && input.actor.id) {
+    const { data: acc } = await supabase
+      .from('debtor_accounts').select('company_id').eq('id', input.accountId).maybeSingle<{ company_id: string | null }>()
+    if (acc?.company_id) {
+      const row = clientMailActivity({
+        userId: input.actor.id,
+        companyId: acc.company_id,
+        subject: input.mail.subject,
+        body: input.mail.snippet,
+        at: input.mail.occurredAt,
+        messageId: input.mail.messageId,
+        attachmentNames: input.mail.attachmentNames,
+        toRecipients: input.mail.toRecipients,
+        ccRecipients: input.mail.ccRecipients,
+        folder: input.mail.folder,
+        uid: input.mail.uid,
+      })
+      const { error: actError } = row.email_message_id
+        ? await supabase.from('activities').upsert(row, { onConflict: 'user_id,email_message_id', ignoreDuplicates: true })
+        : await supabase.from('activities').insert(row)
+      if (actError) console.error('[userMail] filed, but not put on the client:', actError.message)
+    }
+  }
 
   await addNote({
     accountId: input.accountId,
