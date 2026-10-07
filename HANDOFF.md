@@ -4,7 +4,8 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **6 October 2026**, second session on `claude/sales-raptor-review-p1pzx2`.
+Last updated: **7 October 2026**, end of the second session on `claude/sales-raptor-review-p1pzx2`
+(prompts 8 and 9 and the firm's requests in between). Everything is committed and pushed.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -33,7 +34,8 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| *Prompt 9* (this commit, "Prompt 9 — a sliding commission scale…") | **A sliding scale can be seen, set, and prices each account once.** The band rule is settled: ONE rate per account, from the band its capital handed over falls in, decided at handover, boundary rand in the lower band (mandates, model §3a, `rateForCapital`). The engine had been reading the client's bands marginally on cumulative capital; `account_commission_rate` (account's own → band on capital → flat) is now what `allocate_payment`, `preview_allocation`, `expected_from_promises` and `payments_awaiting_approval` charge. `companies.commission_tiers` holds the register's prefix/rate pairs (written by the import from now on) and `commission_bands_dated` the mandate date. **One dialog** (`CommissionModal`, saved by `saveCommission`) opened from Trust settings and the client page's Commission card (Edit, behind `finance.view`); a flat rate over a scale must be ticked to confirm. Trust settings shows "Sliding scale" with bands, or amber **"Scale, boundaries missing"** with the tiers. Account page and payment detail say the rate **and where it came from** ("21% — as billed in Swordfish (KIS tier)"). A handover — and a single account added by hand — is priced on each account's own capital and **refused** for a client on tiers with no boundaries (`handoverRateBlock`, checked in `approveDraft` before any write). The trigger `companies_commission_expected` moves `commission_rate_expected` (never `commission_rate`) when a client's rule changes, so "off their mandate rate" counts accounts off the CURRENT rule. `check-commission-rule` (42), `e2e/commission-scale` (25). |
+| `8c6743a` | **A sliding scale can be seen, set, and prices each account once.** The band rule is settled: ONE rate per account, from the band its capital handed over falls in, decided at handover, boundary rand in the lower band (mandates, model §3a, `rateForCapital`). The engine had been reading the client's bands marginally on cumulative capital; `account_commission_rate` (account's own → band on capital → flat) is now what `allocate_payment`, `preview_allocation`, `expected_from_promises` and `payments_awaiting_approval` charge. `companies.commission_tiers` holds the register's prefix/rate pairs (written by the import from now on) and `commission_bands_dated` the mandate date. **One dialog** (`CommissionModal`, saved by `saveCommission`) opened from Trust settings and the client page's Commission card (Edit, behind `finance.view`); a flat rate over a scale must be ticked to confirm. Trust settings shows "Sliding scale" with bands, or amber **"Scale, boundaries missing"** with the tiers. Account page and payment detail say the rate **and where it came from** ("21% — as billed in Swordfish (KIS tier)"). A handover — and a single account added by hand — is priced on each account's own capital and **refused** for a client on tiers with no boundaries (`handoverRateBlock`, checked in `approveDraft` before any write). The trigger `companies_commission_expected` moves `commission_rate_expected` (never `commission_rate`) when a client's rule changes, so "off their mandate rate" counts accounts off the CURRENT rule. `check-commission-rule` (42), `e2e/commission-scale` (25). |
+| `089a604` | **A client's commission can be a sliding scale from Trust settings** (the firm: "Here I can't choose a sliding scale"). The tier editor was lifted out of Add client into `CommissionScaleEditor` and `src/lib/commissionTiers.ts`, so both screens share it. Superseded in part by `8c6743a`, which moved the dialog into `CommissionModal`. |
 | `eb7c973` | **A promise from Swordfish is history, not a new arrangement.** An "open" Swordfish promise already past its date (incl. Swordfish's own "Late") comes in **broken** — not defaulted, which would start the broken-promise workflow and write to the debtor — with a note, and its account filed under 'Failed PTPs' so the Broken promises list finds it; nobody's diary (the firm: "it might fill up the collector's diary"). On a live imported arrangement the promise workflow records its confirmation as **not sent** and sends only dates still ahead, today included. Staging: the 8 confirmation charges cancelled with a reason, the 4 overdue promises marked broken, their accounts filed. `check-imported-promises` (27). |
 | `5779bac` | **Accounts list columns: drag to resize, double-click the edge to fit** (iPad double-tap too); widths per device; reset link. |
 | `e6f7cf5` | **The import button is a button** — `btn-primary` was never defined; three screens drew it as plain text. |
@@ -67,9 +69,17 @@ Nothing.
 
 ## 3. Open requests the firm has made and nobody has started
 
-None. Both requests from the end of the first session were done in the second (§2):
-the calendar invitation now opens the email, and client correspondence leaves the debtor's
-Emails tab for the ticket or the client's record.
+None outstanding as a build. Everything asked in the second session shipped (§2). What is left
+is waiting on an ANSWER, not on work — §4 items 6 and 7: the non-trust bank statement, and
+Kestrel's real rand boundaries.
+
+**Explained to the firm, no change asked for** (so a new session does not "fix" them):
+- **The interest lines on an imported account** were confusing because of how Swordfish
+  calculated and showed interest, not because Raptor got it wrong (the firm: "The problem is not
+  you"). Imported figures stay as imported (CLAUDE.md).
+- **Going back from a handed-out batch** to the "ready to import" state: the existing **Discard**
+  on the handover import already does it while nothing on the batch has been worked; the firm
+  understood it once explained.
 
 ---
 
@@ -252,6 +262,13 @@ assertions fail on correct code. Compare as JSON strings. The e2e responder sign
 **A comment can break a check.** A note in `schema.sql` saying what must never be added contained
 the words it was warning about, and the check counted the warning as the thing. Strip comments
 first — the house already does this in `check-company-dashboard`.
+
+**`create or replace trigger` exists (Postgres 14+)** and avoids writing `drop trigger`, which the
+MCP tools hang on. Prompt 9's `companies_commission_expected` was created that way.
+
+**Chromium's `en-ZA` thousands separator is not Node's.** Node gives a (non-breaking) space; the
+e2e browser has drawn a comma. A browser assertion on a Rand amount matches `[\s,]`, never a
+literal space.
 
 **Break-test convention, and it is not optional.** After writing a check, break the thing it guards
 and confirm it fails. Twice this session a "break test" was equivalent code and proved nothing;
