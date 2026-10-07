@@ -4,9 +4,27 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **7 October 2026**, end of the third session on `claude/sales-raptor-review-p1pzx2`
-(the build items the second session left, then prompts 10, 11 and 12). Everything is committed
-and pushed.
+Last updated: **7 October 2026, evening**, end of the third session on
+`claude/sales-raptor-review-p1pzx2` (the build items the second session left, prompts 10, 11 and
+12, the Ocean skin, and the Payments in redesign twice over — the second time to the firm's own
+mock-up). Everything is committed and pushed; the last commit is `6ea667f` and the firm's preview
+deploys from it.
+
+### Start here tomorrow
+
+1. **Nothing is half-built.** Every request from the third session is finished and on the preview.
+2. **The firm's last word was approval of a design**: their Payments in mock-up ("This looks much
+   better. Do something like this."), now built (§2, top row). If they come back with changes to
+   Payments in, the pieces are: `src/pages/finance/FinancePayments.tsx` (the page),
+   `AwaitingApproval.tsx` (queue, batch summary, breakdown drawer), `BankImportCard.tsx` (compact
+   import button + `LatestStatement`), `UnallocatedReceipts.tsx` ("Needs an account"), and
+   `src/lib/paymentsQueue.ts` (the pure figures — every number on the queue comes through it).
+3. **Two new questions for the firm** sit in §4 (items 10 and 11): who holds a PTC overpayment's
+   credit, and whether they want the items 1–7 cap reported per payment.
+4. **Run the full suite first** (`npm run qa`, ≈12 min). The last full run predates the two
+   Payments in commits' final wording; the fast suite on `6ea667f` is green (16 857 checks).
+5. **Production is still a go-live, not a port** (§5) — the user said it will be done later. Do
+   not start it unasked.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -24,11 +42,11 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run (third session, at `51afe97`, the Payments in redesign): **285 of 288 files
-green, every browser test among them.** The three that failed (`check-capabilities`,
-`check-finance-is-administrator-only`, `check-themes`) had not been updated for the redesign. They
-were fixed in that same commit after the run had already read them, and the fast suite on the
-commit is **all green, 16 857 checks across 253 files**.
+At the last full run (third session, at `51afe97`): **285 of 288 files green, every browser test
+among them**; the three that failed (`check-capabilities`, `check-finance-is-administrator-only`,
+`check-themes`) had not been updated for the redesign and were fixed in that commit. Since then
+(`6ea667f`, the mock-up layout) the fast suite is **all green, 16 857 checks across 253 files**, and
+`e2e/payments-in` (33) and `e2e/reject-payment` (24) were run on their own and are green.
 
 ---
 
