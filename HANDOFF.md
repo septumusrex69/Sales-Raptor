@@ -4,8 +4,9 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **7 October 2026**, end of the second session on `claude/sales-raptor-review-p1pzx2`
-(prompts 8 and 9 and the firm's requests in between). Everything is committed and pushed.
+Last updated: **7 October 2026**, end of the third session on `claude/sales-raptor-review-p1pzx2`
+(the build items the second session left: the import's Stop button, the settlement store, Income
+and Drawings, hand-filed client mail). Everything is committed and pushed.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -18,17 +19,28 @@ the problem to the next session rather than solved it.
 |---|---|
 | Branch | `claude/sales-raptor-review-p1pzx2` (one branch per session — two sessions on one branch means one force-pushes the other) |
 | Staging | `kvkajxpremantdkhmjvb` — work here, data is disposable and the firm has said so |
-| Production | `qcvesjzoiznrvunjrqpv` — **do not write to it casually**, it is behind staging and holds real client money |
+| Production | `qcvesjzoiznrvunjrqpv` — **do not write to it casually**. It is NOT "a little behind": see §5, first item |
+| Live app | Vercel project `sales-raptor`, production deploys **`Main` at `acae2c8` (12 Sep)** against the production database. The firm works on this branch's preview, against staging |
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run (end of the second session, after prompt 9): **all green, 17 962 checks across 278 files.**
+At the last full run (end of the third session): see §2's last line — the number is written there
+when the run is read, not before.
 
 ---
 
 ## 2. What shipped this session
 
 Newest first. Each commit message carries the full reasoning; this is the index.
+
+**Third session (7 October):**
+
+| Commit | What it is |
+|---|---|
+| `a27f451` | **A client's email filed by hand reaches the client's record too.** `fileOnAccount` reads back the `correspondent` the database decided and, for the client, writes the same email activity the sync writes — both now build it through `clientMailActivity`. Fee unchanged and still raised first. `check-client-correspondence` 37 → 45. |
+| `8c93007` | **Business → Income and Drawings, and each rand counted once.** Drawings: what the firm holds in trust (the most it may draw), the month's drawings, and the button — `draw_from_trust` now needs **finance.view AND business.view** (the firm's ruling). Income: a calendar month client by client — commission, VAT on commission, Annexure B fees and costs, interest, charges to clients, unclaimed credit, other — **exact**, because a receipt's ledger entry IS its allocation's four parts (`business_income`). Behind **`business.income`, which no role has, not even the Administrator** ("not even for an administrator"); `NO_ROLE_CAPABILITIES` keeps it out of every template and `all_capabilities()` keeps it grantable. **Fixed a double count:** `business_month` counted a charge set off against a payover in `earned` AND `invoiced`, and called a parked credit given back a drawing; `firm_entry_kind()` is now the one classifier. `check-business-income` (54), `e2e/business-income` (15). |
+| `8fc692a` | **The settlement store (task #69).** `account_settlements`: proposed → approved (by the client, recorded with evidence and an expiry) → paid / declined / withdrawn; **lapsed is derived**, never stored. Anybody may put an offer up; **`settlement.approve`** (new: client liaisons + Administrator, the firm's ruling) records the client's yes; **a person** closes a paid one (`close_as_settled` → `settle_account('settled')`), refused on a part payment. `{{settlement_amount}}`, `{{settlement_expiry}}`, `{{settlement_saving}}` exist and answer **only** off an approved, unlapsed offer (`isQuotable`, in `accountMergeValues`, for the page and the runner alike); the settlement call script now pops. Settlement panel on the account, under the promise. `check-settlement` (58), `e2e/settlement` (23). |
+| `02d554b` | **The Swordfish import has a Stop button.** Honoured between chunks; a stopped run is taken back out by `discard_import_batch` exactly like a failed one; not offered during the wipe. `e2e/swordfish-import` 31. |
 
 **Second session (6 October, later):**
 
@@ -69,9 +81,9 @@ Nothing.
 
 ## 3. Open requests the firm has made and nobody has started
 
-None outstanding as a build. Everything asked in the second session shipped (§2). What is left
-is waiting on an ANSWER, not on work — §4 items 6 and 7: the non-trust bank statement, and
-Kestrel's real rand boundaries.
+None outstanding as a build. The third session built everything the second left (§2). What is left
+is waiting on an ANSWER, not on work — §4 — and the production go-live, which the user has said
+will be done later (§5, first item).
 
 **Explained to the firm, no change asked for** (so a new session does not "fix" them):
 - **The interest lines on an imported account** were confusing because of how Swordfish
@@ -126,6 +138,11 @@ Do not guess these. Each one changes money.
    Administrator confirms? Also proposed: an "Awaiting approval" row in the overview's ownership
    table for money banked but not yet approved. **Not answered; nothing built.**
 
+**Decided on 7 October (third session), so nobody asks again:** a settlement's approval is recorded
+by the client liaison role (+ Administrator); a paid settlement is closed by a PERSON, never by
+itself; the Income screen is behind a tick no role has; a drawing needs both the trust and the
+business ticks.
+
 7. **Kestrel's rand boundaries.** Staging now carries Kestrel's four register tiers (KIS 21%, KIS2
    15%, KIS3 12%, KIS4 10%, typed from prompt 9 — the register file is not in this repo) and NO
    bands, so its client page and Trust settings say the boundaries are missing and a new handover
@@ -139,6 +156,20 @@ Do not guess these. Each one changes money.
 
 ## 5. Known gaps and things still outstanding
 
+- **PRODUCTION IS A GO-LIVE, NOT A PORT.** Found on 7 October: production has **25 tables and 4
+  functions** (staging: 67 and 174), **1 account and 2 companies**, and none of September's work —
+  no `payments`, `allocate_payment`, payover runs, trust ledger, workflows, templates or
+  `firm_settings`. Its last sync from staging was 10 September (`sync_with_staging_1..3`) plus four
+  migrations since; staging has ~200 more. The live Vercel deployment is `Main` at `acae2c8`
+  (12 Sep); `Main`'s only commit not on this branch is a merge of two commits this branch already
+  has. **So prompts 8 and 9 cannot be ported on their own** — every bullet below that says
+  "production needs X" is a subset of: bring production to staging's schema in order, then merge
+  this branch into `Main`. **The user decided (7 Oct): work on staging; production later.** Ask
+  before starting it, and do it as a staged, verified plan — not a pile of `apply_migration`s.
+- **Third session's work is on staging only:** `account_settlements` and its five functions,
+  `settlement_today`, the two new ticks in `role_capabilities` / `all_capabilities`,
+  `firm_entry_kind`, `business_drawings`, `business_income`, and the new `business_month` and
+  `draw_from_trust` — all at the end of `schema.sql`.
 - **PROMPT 9 IS ON STAGING ONLY.** Production needs, from the end of `schema.sql`: "A CLIENT'S
   SLIDING SCALE PRICES EACH ACCOUNT ONCE" (`commission_band_rate`, `account_commission_rate`, the
   four engine functions), the `commission_tiers` / `commission_bands_dated` columns, and "THE
@@ -156,9 +187,15 @@ Do not guess these. Each one changes money.
   import instead, so the real migration cannot pass it silently.
 - **Item 6 remainder:** "allow the wipe on production only before the first migration" is not done —
   it needs a fact about production that nothing in Raptor records.
-- **Settlement store** (approved amount, expiry, saving) — task #69, not started.
-- **The R22,77 settlement shortfall on RRC00002** is unexplained.
-- **Business workspace** still has no Income and no Drawings-from-trust screens.
+- **The settlement store has no letters yet.** The fields exist and answer off an approved offer,
+  but there is no settlement OFFER letter or settlement CONFIRMATION letter in the library, and the
+  SETL call disposition still only writes its note (it does not open the panel's propose box).
+- **The R22,77 settlement shortfall on RRC00002** is unexplained, and is NOT what the settlement
+  store is about: it is the full-balance "to settle today" quote's receipt fee being worked on the
+  balance while the fee charged is 10% of the payment. Still the firm's question.
+- **Income counts what the trust LEDGER credits the firm.** A PTC's earnings (paid straight to the
+  client) are recorded as the client owing the trust, not as a firm entry, so they reach Income only
+  when recovered. Worth confirming with the firm what they expect to see for those.
 - **PROMPT 8 IS ON STAGING ONLY, AND PRODUCTION MUST HAVE IT BEFORE ANY REAL IMPORT.** The
   `allocate_payment` gate, the `reverse_payment` / `move_payment_to_cycle` refusals,
   `swordfish_remitted_leaks()`, `import_batch_id` and `discard_import_batch` — all at the end of
@@ -171,14 +208,10 @@ Do not guess these. Each one changes money.
   book is the firm's export and is not in this public repo. Re-run it from the branch preview, then
   run the leak check (or `select * from swordfish_remitted_leaks()` on staging): all four counts
   must be nil.
-- **There is no Stop button on the import**, though the code has an `abort` flag nothing sets.
 - **`account_emails.correspondent` is on staging only.** Production needs the migration (end of
   `schema.sql`, "WHO IS ON THE OTHER END") and then a decision on its existing client rows: on
   staging they were marked by re-running the rule, and the user chose to leave production's to the
   firm, case by case. Until then production behaves exactly as before.
-- **Client mail filed by hand from the mailbox** onto an account with no ticket is classified by the
-  same trigger and leaves the debtor's tab — but only the SYNC writes the client-record activity, so
-  that one is on nobody's screen except the person's own mailbox. Small; not yet handled.
 - **The debtor's Activity timeline still carries a note for client correspondence** (the sync's and
   `recordSentEmail`'s `account_notes` rows). The firm's complaint was the Emails tab, which is the
   evidence; the timeline was left alone. Raise it if they mention it.
@@ -269,6 +302,20 @@ MCP tools hang on. Prompt 9's `companies_commission_expected` was created that w
 **Chromium's `en-ZA` thousands separator is not Node's.** Node gives a (non-breaking) space; the
 e2e browser has drawn a comma. A browser assertion on a Rand amount matches `[\s,]`, never a
 literal space.
+
+**`protect_profile_privileged_fields` silently reverts a grant made with nobody signed in.** In a
+probe, set `request.jwt.claims` to an Administrator BEFORE updating `profiles.grants`/`revokes`; done
+as plain `postgres` first, the update "succeeds", the trigger puts the old value back, and the
+capability then reads false for no visible reason. The trigger is right — it is the probe order.
+
+**Staging's book is empty** (0 accounts, 0 payments, 3 companies). A behaviour probe has to create
+its own account inside the rolled-back transaction; a `debtor_accounts` row needs only `company_id`,
+and `commission_rate` is a FRACTION (0.20), checked by `debtor_accounts_commission_rate_is_a_fraction`.
+An approved receipt inserted there runs the real engine (allocation + ledger entries).
+
+**This session started on a stale `Main`.** A fresh container may check out `Main` (12 Sep, the
+live deployment), not this branch. Fetch `claude/sales-raptor-review-p1pzx2` before believing
+anything is missing.
 
 **Break-test convention, and it is not optional.** After writing a check, break the thing it guards
 and confirm it fails. Twice this session a "break test" was equivalent code and proved nothing;
