@@ -145,7 +145,7 @@ for (const [id, tokens] of bySkin) {
  * three of that panel's tokens. Named rather than pattern-matched, so the next token somebody adds
  * to that panel is not waved through with them.
  */
-const PRIVATE = /^--(raptor|desert|glass)/
+const PRIVATE = /^--(raptor|desert|glass|ocean)/
 const BASELINE_IMAGERY = [
   '--skin-collections-hero-image',
   '--skin-collections-hero-ground',
@@ -238,7 +238,7 @@ function webpSize(file) {
   return { width: at(24), height: at(27) }
 }
 
-const HERO_ART = ['/brand/desert-hero.webp', '/brand/desert-band.webp']
+const HERO_ART = ['/brand/desert-hero.webp', '/brand/desert-band.webp', '/brand/ocean-hero.webp', '/brand/ocean-band.webp']
 for (const art of HERO_ART) {
   const file = new URL(`../../public${art}`, import.meta.url)
   const bytes = statSync(file).size

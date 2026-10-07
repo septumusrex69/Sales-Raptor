@@ -6,7 +6,7 @@
  * in the stylesheet — no component changes, which is the whole point of the arrangement.
  */
 
-export type ThemeId = 'original' | 'raptor' | 'desert' | 'glass-mountain'
+export type ThemeId = 'original' | 'raptor' | 'desert' | 'glass-mountain' | 'ocean'
 
 export interface ThemeDefinition {
   id: ThemeId
@@ -95,6 +95,25 @@ export const THEMES: ThemeDefinition[] = [
     /* A mountain under a sky, so it keeps the sky line. A skin with a photograph of its own may
        write its own saying; one that does not has no reason to borrow the desert's. */
     heroLine: { first: 'The sky is only', second: 'the beginning.' },
+  },
+  {
+    id: 'ocean',
+    name: 'Ocean',
+    description: 'Deep water, a broken sky and the light on the sea. The same Raptor, at depth.',
+    /* The same product name as raptor, for the desert's reason: a skin is the same brand in
+       another light, and a name of its own would be a rename rather than a skin. */
+    productName: 'Raptor',
+    lockupLight: '/brand/raptor-lockup-light.png',
+    /* Ground, surface, accent -- read off ocean.css's own --color-navy-950, --color-surface and
+       --c-gold, so the preview tile cannot drift from the skin. */
+    swatch: { ground: '#06121e', surface: '#f2f5f8', accent: '#d2b57a' },
+    /*
+     * THE OCEAN'S OWN SAYING, which the firm gave with the photographs: "the new slogan is going to
+     * be depth changes perspective."
+     *
+     * The break falls after "changes", so the champagne half is the word the line turns on.
+     */
+    heroLine: { first: 'Depth changes', second: 'perspective.' },
   },
 ]
 

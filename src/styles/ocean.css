@@ -1,0 +1,368 @@
+/*
+ * OCEAN — a visual skin.
+ *
+ * The firm asked for the sea: "now create the sea theme... the ocean theme", with two
+ * photographs — a dark wing over open water, and the open water itself under a broken sky with
+ * the sun coming through on the right. And a saying of its own for the company dashboard:
+ * "Depth changes perspective."
+ *
+ * SAME BARGAIN AS raptor.css AND desert.css, AND SELECTORS QUALIFIED THE SAME WAY.
+ * `html[data-theme='ocean']` rather than the bare attribute: `:root` and `[data-theme]` carry
+ * identical specificity and the default tokens are declared after this file in the bundle, so a
+ * bare selector would lose every override to source order and this file would do nothing at all.
+ *
+ * IT CHANGES NOTHING BUT APPEARANCE. No component knows it exists; it redefines the tokens the
+ * application already draws from. With any other skin selected not one rule here applies.
+ *
+ * THE CHARACTER, AND WHY THE ACCENT IS NOT BLUE. Both photographs are deep water and cool cloud,
+ * so the structure is carried by sea-spray greys and a near-black that is the colour of deep
+ * water rather than of night. An accent in the same blues would vanish into them -- a selected
+ * row would look like any other row -- so the accent is the one warm thing in both pictures: the
+ * pale champagne light where the sun breaks through the cloud and lies on the water. It is spent
+ * only where something is active, selected or worth the eye, exactly as the gold is elsewhere.
+ *
+ * GOOD AND BAD NEWS ARE COLOURS THE SEA HAS: a sea green and a coral, both still read at a glance.
+ */
+
+html[data-theme='ocean'] {
+  /* ── Structure ─────────────────────────────────────────────────────────── */
+  /* Sea mist rather than neutral grey: the page behind every card, cool and very slightly blue
+     so the cards sit in the same air as the photographs. */
+  --color-surface: #f2f5f8;
+  --color-card: #fbfcfd;
+
+  /* Neutrals run from spray down to deep water, so every grey belongs to the pictures' family. */
+  --color-slate-50: #f6f8fa;
+  --color-slate-100: #ebf0f4;
+  --color-slate-200: #dbe3ea;
+  --color-slate-300: #c5d0da;
+  --color-slate-400: #8e9fae;
+  --color-slate-500: #6c7d8d;
+  --color-slate-600: #566777;
+  --color-slate-700: #36475a;
+  --color-slate-800: #213143;
+  --color-slate-900: #132030;
+
+  /* The dark ground: deep water, a blue-black with green in it, not the raptor skin's night navy.
+     It is what the wing photograph is darkest at, so the sidebar and the band are one colour. */
+  --color-navy-950: #06121e;
+  --color-navy-900: #0a1828;
+  --color-navy-800: #102238;
+  --color-navy-700: #18304b;
+  --color-navy-600: #233f60;
+
+  /* The light on the water. Paler and cooler than the desert's amber or the raptor gold, because
+     it is sunlight through cloud on a cold sea rather than a low sun on sand. */
+  --color-gold-600: #9a7d45;
+  --color-gold-500: #d2b57a;
+  --color-gold-400: #e1c995;
+  --color-gold-300: #efe0bd;
+
+  --color-brand-50: #f2f6fa;
+  --color-brand-100: #e1eaf2;
+  --color-brand-500: #233f60;
+  --color-brand-600: #102238;
+  --color-brand-700: #06121e;
+
+  --color-positive: #2f7f73;
+  --color-negative: #c4553f;
+
+  --color-red-50: #fbeeeb;
+  --color-red-100: #f5dbd5;
+  --color-red-200: #ebc1b7;
+  --color-red-500: #c4553f;
+  --color-red-600: #ae4a36;
+  --color-red-700: #8f3c2c;
+
+  /* ── Categorical palette ───────────────────────────────────────────────── */
+  /* The names are the application's and are not re-coined per skin: a token called --c-navy-deep
+     is "the darkest structural colour", whichever skin is on. */
+  --c-navy-deep: #06121e;
+  --c-navy: #102238;
+  --c-navy-mid: #1a3350;
+  --c-navy-slate: #2a3c50;
+  --c-navy-ink: #14263b;
+  --c-navy-steel: #344b63;
+  /* Steel is the sea itself -- the blue of the water under the light -- and it is the family the
+     charts lean on; the champagne below is their counterpoint. */
+  --c-steel: #3d6a91;
+  --c-steel-soft: #5179a0;
+  --c-steel-bright: #6a90b4;
+  --c-steel-deep: #2f5576;
+  --c-steel-light: #8eaac6;
+  --c-steel-pale: #c3d3e2;
+  --c-gold: #d2b57a;
+  --c-gold-brand: #d2b57a;
+  --c-gold-bright: #e1c995;
+  --c-gold-light: #ead8ae;
+  --c-gold-deep: #9a7d45;
+  --c-gold-dark: #7c6436;
+  --c-gold-bronze: #9a7d45;
+  --c-gold-deep-hover: #7c6436;
+  --c-green: #2f7f73;
+  --c-green-bright: #3a9284;
+  --c-green-muted: #6a9890;
+  --c-rust: #c4553f;
+  --c-rust-deep: #a8462f;
+  --c-rust-hover: #a8462f;
+  --c-rust-deep-hover: #8c3a27;
+  --c-grey: #6c7d8d;
+  --c-grey-warm: #7f8c98;
+  --c-grey-light: #8e9fae;
+  --c-grey-blue: #8a9cb0;
+  --c-grey-pale: #cdd7e0;
+  --c-ink: #06121e;
+
+  --tint-steel: #eaf1f7;
+  --tint-steel-soft: #e4edf5;
+  --tint-steel-alt: #edf2f7;
+  --tint-gold: #faf4e6;
+  --tint-gold-deep: #f6eedb;
+  --tint-gold-dark: #f2e7cf;
+  --tint-gold-pale: #e9d9b2;
+  --tint-green: #e8f3f1;
+  --tint-green-bright: #e1efec;
+  --tint-rust: #fbebe7;
+  --tint-rust-deep: #f7dfd9;
+  --tint-neutral: #ebf0f4;
+  --tint-neutral-soft: #f6f8fa;
+
+  --stage-new-deal: #3d6a91;
+  --stage-quotation-sent: #d2b57a;
+  --stage-mandate-sent: #b39658;
+  --stage-won: #2f7f73;
+  --stage-rejected: #c4553f;
+
+  /* Won takes the light, as it does in every skin: it is the outcome the page is about. */
+  --outcome-won: #d2b57a;
+  --outcome-open: #6a90b4;
+  --outcome-rejected: #4a5868;
+  --outcome-value: #102238;
+
+  /* ── Surfaces ──────────────────────────────────────────────────────────── */
+  --skin-card-radius: 14px;
+  --skin-card-border: #e1e8ef;
+  /* A cool shadow: a warm or neutral one under a cool card is a grey halo. */
+  --skin-card-shadow: 0 1px 2px rgba(6, 22, 38, 0.05), 0 6px 18px rgba(6, 22, 38, 0.05);
+  --skin-card-shadow-hover: 0 1px 2px rgba(6, 22, 38, 0.06), 0 12px 30px rgba(6, 22, 38, 0.1);
+  --skin-body-text: #142132;
+  --skin-scrollbar: #c5d0da;
+
+  /* ── Imagery ───────────────────────────────────────────────────────────── */
+  /*
+   * THE WING IS THE BAND AND THE OPEN SEA IS THE HERO, the same division as the desert's: the
+   * wing is a wide 3:1 frame made for a band, and the open water under a broken sky is the
+   * photograph the company dashboard's headline sits over.
+   *
+   * ONE PLAIN url() AND NOT image-set(), for the reason written out on `.login-photo` in
+   * index.css: Lightning CSS reads a stack of declarations as one intent, drops the plain url()
+   * safety net and emits a prefixed image-set that WebKit rejects -- an empty panel on Safari, and
+   * the firm works on an iPad.
+   *
+   * THE BAND'S WASH IS LIGHT. The wing itself is near-black on the left, which is exactly where
+   * the name sits, so the gradient only has to steady the contrast there and can lift away
+   * towards the sun on the right rather than drowning the feathers.
+   */
+  --skin-hero-background:
+    linear-gradient(100deg, rgba(4, 12, 21, 0.9) 0%, rgba(6, 18, 30, 0.7) 38%, rgba(8, 22, 36, 0.3) 100%);
+  --skin-hero-image: url('/brand/ocean-band.webp');
+  --skin-hero-radius: 18px;
+
+  /*
+   * THE COMPANY DASHBOARD'S PHOTOGRAPH, 2576x1449 and therefore 16:9, like the desert's -- close
+   * enough to the panel's own shape that a desktop loses almost nothing and an iPad about a
+   * quarter of the width.
+   *
+   * THE COMPOSITION DOES MOST OF THE WORK. The sky is the top half, the horizon sits just above
+   * the middle, and the bottom half is deep water that darkens towards the foreground -- which is
+   * where the four figures and the controls sit.
+   */
+  --skin-collections-hero-image: url('/brand/ocean-hero.webp');
+  /* The photograph's own foreground water, so a frame that loads late is the colour of the
+     picture arriving rather than a different blue flashing to it. */
+  --skin-collections-hero-ground: #0d1f33;
+  /*
+   * THE WASH, AND WHERE IT IS SPENT.
+   *
+   * UNLIKE THE DESERT, THE TOP-LEFT IS PALE SKY, not storm cloud, and that is where the headline
+   * sits -- so the across pass starts heavier on the left than the desert's (0.5 against 0.34)
+   * and has to: champagne type on pale cloud does not read. It falls away through the middle,
+   * where the horizon and the sea are, and comes back on the right, where the rail of small caps
+   * sits beside the sun itself.
+   *
+   * DOWN, it is nearly nothing: the near water is already dark, and a gradient there would spend
+   * the waves to darken something that is dark already.
+   */
+  --skin-collections-scrim:
+    linear-gradient(
+      90deg,
+      rgba(5, 14, 24, 0.5) 0%,
+      rgba(5, 14, 24, 0.24) 38%,
+      rgba(5, 14, 24, 0.06) 62%,
+      rgba(5, 14, 24, 0.42) 100%
+    ),
+    linear-gradient(
+      to bottom,
+      rgba(5, 14, 24, 0.12) 0%,
+      rgba(5, 14, 24, 0) 30%,
+      rgba(5, 14, 24, 0) 58%,
+      rgba(5, 14, 24, 0.14) 78%,
+      rgba(5, 14, 24, 0.28) 100%
+    );
+
+  /*
+   * THE WATER AND NOT THE WING, for the desert's reason: the wing is a close-up, so at 640px
+   * across the sidebar it draws individual feathers -- a pattern behind the nav. The waves at the
+   * same size are a texture.
+   */
+  --skin-sidebar-art: url('/brand/ocean-sidebar.webp');
+  --skin-sidebar-art-opacity: 0.22;
+
+  --ocean-light-metal: linear-gradient(
+    135deg,
+    #7c6436 0%,
+    #c9ab6e 34%,
+    #efe0bd 54%,
+    #b8975a 78%,
+    #6f5a31 100%
+  );
+
+  /* Metallic light, for logo-like decoration only — never body text or a whole button. */
+  --skin-gold-gradient: var(--ocean-light-metal);
+  --skin-gold-gradient-deep: linear-gradient(135deg, #9a7d45 0%, #d2b57a 100%);
+}
+
+/* ── The hero band ───────────────────────────────────────────────────────── */
+html[data-theme='ocean'] .app-hero {
+  background:
+    var(--skin-hero-background),
+    var(--skin-hero-image) center / cover no-repeat;
+}
+
+/*
+ * The company dashboard's hero. ONLY THE POSITION IS SET HERE; the image, the ground and the wash
+ * arrive as tokens above.
+ *
+ * A LITTLE BELOW CENTRE, and that is the one number here chosen for the picture. On a narrow
+ * window `cover` fits the frame to the height and loses width evenly off both sides, which keeps
+ * the sun on the right; on a wide one it fits to the width and loses height, and 55% gives that
+ * loss to the empty sky at the top rather than the water the figures stand on.
+ */
+html[data-theme='ocean'] .collections-hero {
+  background-position: 50% 55%;
+}
+
+/*
+ * The hero's own palette, declared inside `.collections-hero` in index.css because that panel is
+ * the only thing that wears it -- so a skin that changes the photograph has to reach it there, or
+ * the champagne headline stays tuned to a sunrise that is no longer behind it.
+ */
+html[data-theme='ocean'] .collections-hero {
+  --ch-glass: rgba(6, 16, 28, 0.6);
+  --ch-edge: rgba(255, 255, 255, 0.12);
+  --ch-gold: #d2b57a;
+  --ch-champagne: #efe0bd;
+  --ch-muted: #b4c2cf;
+}
+
+/* ── The sign-in photograph ──────────────────────────────────────────────── */
+/*
+ * THE SAME PHOTOGRAPH AS THE DASHBOARD, IN A COLUMN. The sign-in panel is taller than it is wide,
+ * so `cover` fits the 16:9 frame to the height and shows barely half its width -- and this picks
+ * which half: 72% keeps the sun breaking through the cloud and the light on the water in the
+ * column, rather than the plainer sky on the left.
+ *
+ * THE 2x RULE IS OVERRIDDEN TOO. index.css sets the retina file inside a resolution query, and a
+ * media-qualified rule beats an unqualified one of equal specificity whatever the source order --
+ * without the second block a dense screen would sign in under the raptor photograph. One file for
+ * both densities: half of a 2576px picture is already more than this column has pixels for.
+ */
+html[data-theme='ocean'] .login-photo {
+  background-image: url('/brand/ocean-hero.webp');
+  background-position: 72% 50%;
+}
+@media (min-resolution: 2dppx) {
+  html[data-theme='ocean'] .login-photo {
+    background-image: url('/brand/ocean-hero.webp');
+  }
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────── */
+html[data-theme='ocean'] h1,
+html[data-theme='ocean'] h2,
+html[data-theme='ocean'] h3 {
+  letter-spacing: -0.012em;
+}
+
+/* Figures line up in columns across the app, so they are set in tabular numerals. */
+html[data-theme='ocean'] table,
+html[data-theme='ocean'] .app-hero {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+html[data-theme='ocean'] .card {
+  transition: box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+html[data-theme='ocean'] .app-sidebar {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Low in the frame and heavily dimmed: a texture under the last nav items, not a picture. */
+html[data-theme='ocean'] .app-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, #06121e 0%, rgba(6, 18, 30, 0.7) 38%, rgba(6, 18, 30, 0.9) 100%),
+    var(--skin-sidebar-art) center bottom / cover no-repeat;
+  opacity: var(--skin-sidebar-art-opacity);
+  pointer-events: none;
+}
+
+html[data-theme='ocean'] .app-sidebar nav a[aria-current='page'] {
+  background: linear-gradient(180deg, #e1c995 0%, #d2b57a 100%);
+  color: #0a1626;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+html[data-theme='ocean'] tbody tr:hover {
+  background-color: #f6f8fa;
+}
+
+/* ── Inputs and controls ─────────────────────────────────────────────────── */
+html[data-theme='ocean'] input:not([type='checkbox']):not([type='radio']),
+html[data-theme='ocean'] select,
+html[data-theme='ocean'] textarea {
+  border-radius: 10px;
+}
+
+html[data-theme='ocean'] input:focus-visible,
+html[data-theme='ocean'] select:focus-visible,
+html[data-theme='ocean'] textarea:focus-visible,
+html[data-theme='ocean'] button:focus-visible,
+html[data-theme='ocean'] a:focus-visible {
+  outline: 2px solid rgba(61, 106, 145, 0.6);
+  outline-offset: 1px;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────────── */
+html[data-theme='ocean'] button,
+html[data-theme='ocean'] a {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme='ocean'] *,
+  html[data-theme='ocean'] *::before,
+  html[data-theme='ocean'] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
