@@ -5,8 +5,8 @@ change often; this file is the moving part. It says what shipped, what the firm 
 decided, what is still open, and which tools lie to you in this repo.
 
 Last updated: **7 October 2026**, end of the third session on `claude/sales-raptor-review-p1pzx2`
-(the build items the second session left: the import's Stop button, the settlement store, Income
-and Drawings, hand-filed client mail). Everything is committed and pushed.
+(the build items the second session left, then prompts 10, 11 and 12). Everything is committed
+and pushed.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -24,8 +24,10 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run (end of the third session): see §2's last line — the number is written there
-when the run is read, not before.
+At the last full run (third session, at `a27f451`, before prompts 10–12): **all green, 18 148
+checks across 282 files.** After prompt 12 the fast suite is green at 16 759 checks across 252
+files, and every e2e touched by prompts 10–12 was run on its own and is green. Run the full suite
+first thing next session.
 
 ---
 
@@ -37,6 +39,9 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
+| `493a99b` | **Prompt 12 — every trust statement line is allocated, in and out.** `allocate_bank_line` (finance.view) says what a line was and writes the ledger entry behind it, tied by `bank_line_id`. Money out can be a payover (exact run match), a refund (settles `trust_payments_out`, which nothing could do before), a transfer to the business (links a recorded drawing or writes one), a **bank charge (a negative FIRM entry = the business owing the trust)**, or other (reason required, on `unidentified`). Money in can be bank interest (credited to the firm), from the business account, or other; a debtor's payment is still *placed*. Debits now arrive `unallocated`, not `excluded`. An allocation is frozen once made. **Trust → Exceptions** lists every line not yet allocated, with suggestions a person confirms. `firm_entry_kind` learns `bank_charge` / `transfer_in`, both kept out of earned and Income. `check-bank-line-allocation` (51), `e2e/bank-line-allocation` (12). |
+| `5b96a13` | **Prompt 11 — the date of default is not the handover date.** `handover_date` / `opening_as_at` / `interest_from` = the day the batch is approved (SAST, `firmToday`); the sheet's date of default goes to the new **`debtor_accounts.default_date`**, a record nothing accrues from. Add debtor hands over today and asks for an optional date of default. The account page shows both; the runner's `{{handover_date}}` reads `handover_date`. Engines unchanged (both already start at `handover_date`). Swordfish untouched. `check-handover-date` (21). |
+| `04f49b5` | **Prompt 10 — a Swordfish client needs no mandate date for a handover.** `needsMandate()` in the browser and, new, a database trigger on the batch row (`handovers_need_a_mandate` → `client_needs_mandate`): `import_batch_id` set ⇒ exempt; a Raptor client still needs the date. The Mandate card says "Brought across from Swordfish: no mandate needed for handovers". The three functions that read `mandate_signed_at` for COMMISSION are untouched. `check-mandate-rule` (21). |
 | `a27f451` | **A client's email filed by hand reaches the client's record too.** `fileOnAccount` reads back the `correspondent` the database decided and, for the client, writes the same email activity the sync writes — both now build it through `clientMailActivity`. Fee unchanged and still raised first. `check-client-correspondence` 37 → 45. |
 | `8c93007` | **Business → Income and Drawings, and each rand counted once.** Drawings: what the firm holds in trust (the most it may draw), the month's drawings, and the button — `draw_from_trust` now needs **finance.view AND business.view** (the firm's ruling). Income: a calendar month client by client — commission, VAT on commission, Annexure B fees and costs, interest, charges to clients, unclaimed credit, other — **exact**, because a receipt's ledger entry IS its allocation's four parts (`business_income`). Behind **`business.income`, which no role has, not even the Administrator** ("not even for an administrator"); `NO_ROLE_CAPABILITIES` keeps it out of every template and `all_capabilities()` keeps it grantable. **Fixed a double count:** `business_month` counted a charge set off against a payover in `earned` AND `invoiced`, and called a parked credit given back a drawing; `firm_entry_kind()` is now the one classifier. `check-business-income` (54), `e2e/business-income` (15). |
 | `8fc692a` | **The settlement store (task #69).** `account_settlements`: proposed → approved (by the client, recorded with evidence and an expiry) → paid / declined / withdrawn; **lapsed is derived**, never stored. Anybody may put an offer up; **`settlement.approve`** (new: client liaisons + Administrator, the firm's ruling) records the client's yes; **a person** closes a paid one (`close_as_settled` → `settle_account('settled')`), refused on a part payment. `{{settlement_amount}}`, `{{settlement_expiry}}`, `{{settlement_saving}}` exist and answer **only** off an approved, unlapsed offer (`isQuotable`, in `accountMergeValues`, for the page and the runner alike); the settlement call script now pops. Settlement panel on the account, under the promise. `check-settlement` (58), `e2e/settlement` (23). |
@@ -138,6 +143,14 @@ Do not guess these. Each one changes money.
    Administrator confirms? Also proposed: an "Awaiting approval" row in the overview's ownership
    table for money banked but not yet approved. **Not answered; nothing built.**
 
+8. **Bank interest on the trust account is credited to the FIRM** by prompt 12's allocation. That
+   follows the firm's own words ("interest received ... allocated"), but who trust interest belongs
+   to is a regulatory question (Debt Collectors Act / the firm's auditor). **Confirm it**; if it is
+   not the firm's, the `bank_interest` branch of `allocate_bank_line` is the one line to change.
+9. **Bank charges are recorded as owed by the business to the trust** (the prompt's rule), and are
+   left out of the business side's "earned". They do not yet appear as an EXPENSE on the business
+   side unless somebody captures them under Expenses, so "made" is overstated by them until then.
+
 **Decided on 7 October (third session), so nobody asks again:** a settlement's approval is recorded
 by the client liaison role (+ Administrator); a paid settlement is closed by a PERSON, never by
 itself; the Income screen is behind a tick no role has; a drawing needs both the trust and the
@@ -166,7 +179,20 @@ business ticks.
   "production needs X" is a subset of: bring production to staging's schema in order, then merge
   this branch into `Main`. **The user decided (7 Oct): work on staging; production later.** Ask
   before starting it, and do it as a staged, verified plan — not a pile of `apply_migration`s.
-- **Third session's work is on staging only:** `account_settlements` and its five functions,
+- **Prompts 10–12 are on staging only:** `client_needs_mandate` + the `handovers_need_a_mandate`
+  trigger; `debtor_accounts.default_date`; the five allocation columns on `bank_statement_lines`,
+  `allocate_bank_line`, `bank_lines_to_allocate`, `bank_allocation_candidates`, and new versions of
+  `import_bank_lines`, `protect_bank_statement_line`, `unreconciled_payouts`, `firm_entry_kind`,
+  `business_month`, `business_income`.
+- **Staging data as left by this session:** SMT, BPM and LVM carry `mandate_signed_at` = 1 Jan 2024
+  (somebody set it; prompt 10 said null — left as found). Their 60 sheet accounts keep the
+  `handover_date` of 7 Oct the user set; `default_date` was filled for all 60 from their draft rows.
+  The test statement's two R57.50 `##BANK CHARGE` lines are **unallocated on purpose** — confirm
+  them on Trust → Exceptions; the probe proved what they become. Its two unplaced receipts
+  (`CAPITEC T NGUBANE` R300, `CAPITEC SMT199999` R450) are debtor payments to be PLACED.
+- **The test statement is not on the trust account number** (`9999999999` vs `62700201255`), so
+  `trust_position`'s bank balance does not see it — §4 item 6. Allocation works on it anyway.
+- **Third session's earlier work is on staging only:** `account_settlements` and its five functions,
   `settlement_today`, the two new ticks in `role_capabilities` / `all_capabilities`,
   `firm_entry_kind`, `business_drawings`, `business_income`, and the new `business_month` and
   `draw_from_trust` — all at the end of `schema.sql`.
