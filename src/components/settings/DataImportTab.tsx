@@ -168,7 +168,17 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
    */
   const [startOver, setStartOver] = useState(false)
   const [toll, setToll] = useState<WipeToll | null>(null)
+  /*
+   * THE STOP BUTTON (the handoff: "There is no Stop button on the import, though the code has an
+   * `abort` flag nothing sets"). A stop is honoured BETWEEN chunks of 500, never mid-request, and
+   * a stopped run goes down exactly the road a failed one does -- `discard_import_batch` -- because
+   * half a book is half a book whoever decided it. It is NOT offered while the wipe runs: a wipe
+   * stopped part-way leaves a book that is neither the old one nor empty, which is the one state
+   * worse than either. `stoppable` is what the button reads; `abort` is what the loop reads.
+   */
   const abort = useRef(false)
+  const [stoppable, setStoppable] = useState(false)
+  const [stopping, setStopping] = useState(false)
 
   const isAdmin = currentUser?.role === 'Administrator'
 
@@ -237,7 +247,8 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
 
   const runImport = useCallback(async () => {
     if (!plan) return
-    setError(null); setDone(null); abort.current = false
+    setError(null); setDone(null); abort.current = false; setStopping(false)
+    const STOPPED = 'You stopped the import.'
     const rows = planRows(plan)
     const totalRows = IMPORT_TABLES.reduce((t, k) => t + rows[k].length, 0)
     try {
@@ -247,6 +258,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
        * it and then failing on the first insert leaves a mess that looks like data loss, because
        * it is. The read is cheap and the alternative is unrecoverable by the person clicking.
        */
+      setStoppable(true)
       setPhase({ step: 'Checking the database is ready', done: 0, total: 0 })
       for (const table of IMPORT_TABLES) {
         const { error: e } = await supabase.from(table).select('id').limit(1)
@@ -259,13 +271,16 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
         }
       }
 
+      if (abort.current) throw new Error(`${STOPPED} Nothing was changed.`)
       if (wipe) {
+        setStoppable(false)
         for (const [i, table] of WIPE_TABLES.entries()) {
           setPhase({ step: `Clearing ${table.replace(/_/g, ' ')}`, done: i, total: WIPE_TABLES.length })
           // PostgREST requires a filter before it will delete in bulk; this one matches every row.
           const { error: e } = await supabase.from(table).delete().not('id', 'is', null)
           if (e) throw new Error(`Clearing ${table}: ${e.message}`)
         }
+        setStoppable(true)
       }
       /*
        * ALL OR NOTHING, keyed on this run (prompt 8). The firm's test import died part-way and left
@@ -284,7 +299,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             ? rows[table].map((r) => ({ ...r, import_batch_id: batch }))
             : rows[table]
           for (let i = 0; i < all.length; i += 500) {
-            if (abort.current) throw new Error('Stopped.')
+            if (abort.current) throw new Error(STOPPED)
             const chunk = all.slice(i, i + 500)
             const { error: e } = await supabase.from(table).insert(chunk)
             if (e) throw new Error(explain(table, i, e.message))
@@ -297,6 +312,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
         /* Nothing written yet is nothing to take back -- and saying "taken back out" over a run
            that never wrote a row would be a claim about the book that is not true. */
         if (written === 0) throw new Error(`${why} Nothing was written.`)
+        setStoppable(false)
         setPhase({ step: 'Taking this import back out', done: 0, total: 0 })
         const { data: undone, error: undoError } = await supabase.rpc('discard_import_batch', { p_batch: batch })
         if (undoError) {
@@ -315,7 +331,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setPhase(null)
+      setPhase(null); setStoppable(false); setStopping(false)
     }
   }, [plan, wipe])
 
@@ -512,7 +528,22 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
                 </>
               )}
             </div>
+            {stoppable && (
+              <button
+                type="button"
+                disabled={stopping}
+                onClick={() => { abort.current = true; setStopping(true) }}
+                className="shrink-0 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {stopping ? 'Stopping…' : 'Stop'}
+              </button>
+            )}
           </div>
+          {stopping && (
+            <p className="text-xs text-slate-500 mt-2">
+              Stopping after this batch of rows. Everything this import has written will be taken back out.
+            </p>
+          )}
         </Card>
       )}
 

@@ -16,6 +16,8 @@
  *   3. every client, batch and account carries ONE id for the run
  *   4. the interest insert refused  -> discard_import_batch is called with that same id, and the
  *      screen says the run was taken back out rather than leaving half a book
+ *   5. Stop pressed part-way        -> the next chunk is never sent, the run is taken back out by
+ *      the same id, and the screen says the person stopped it (not that something failed)
  *
  * Run: node scripts/qa/e2e/swordfish-import.mjs
  */
@@ -57,6 +59,7 @@ const INTEREST = csv(['2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01'].ma
 let sent = {}          // table -> rows POSTed, for the run in progress
 let discards = []      // p_batch of every discard_import_batch call
 let refuseInterest = false
+let holdPayments = null // a promise the payments insert waits on, so Stop can be pressed mid-run
 let shotTaken = false
 
 const handlers = [
@@ -67,7 +70,7 @@ const handlers = [
     return { body: { accounts: 1, batches: 1, clients: 1 } }
   }],
   [(u, req) => req.method() === 'POST' && /\/rest\/v1\/(companies|handovers|debtor_accounts|account_payments|account_fees|account_interest_accruals|account_contacts|promises_to_pay|account_notes|diary_entries)\b/.test(u),
-    (u, req) => {
+    async (u, req) => {
       const table = /\/rest\/v1\/(\w+)/.exec(u)[1]
       /* THE FAILURE THAT STOPPED THE REAL IMPORT, on the same table and the same index. */
       if (table === 'account_interest_accruals' && refuseInterest) {
@@ -76,6 +79,7 @@ const handlers = [
           body: { code: '23505', message: 'duplicate key value violates unique constraint "account_interest_accruals_period_idx"' },
         }
       }
+      if (table === 'account_payments' && holdPayments) await holdPayments
       const rows = req.postDataJSON()
       sent[table] = [...(sent[table] ?? []), ...(Array.isArray(rows) ? rows : [rows])]
       return { status: 201, body: [] }
@@ -84,7 +88,7 @@ const handlers = [
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
 
-async function importWith(page, cutoff) {
+async function importWith(page, cutoff, whileRunning = null) {
   sent = {}; discards = []
   await page.goto(`http://127.0.0.1:${PORT}/settings?tab=Data%20Import`, { waitUntil: 'domcontentloaded' })
   await page.getByText('Client Account Summary').first().waitFor({ timeout: 20000 })
@@ -117,8 +121,9 @@ async function importWith(page, cutoff) {
     await t.shot(page, 'swordfish-import-button')
   }
   await go.click()
+  if (whileRunning) await whileRunning()
   /* Wait for the run to END, either way, before reading what it sent. */
-  await page.getByText(/Imported [\d  ]+ rows\.|taken back out|Nothing was written/).first()
+  await page.getByText(/Imported [\d  ]+ rows\.|has been taken back out|ALSO failed|Nothing was written|Nothing was changed/).first()
     .waitFor({ timeout: 30000 })
 }
 
@@ -179,6 +184,39 @@ try {
   await t.shot(page, 'swordfish-import-taken-back-out')
   refuseInterest = false
 
+  /* ---------- 5. Stop pressed part-way ---------- */
+  let release
+  holdPayments = new Promise((r) => { release = r })
+  let stopShown = false
+  let stoppingShown = false
+  await importWith(page, '2026-10-05', async () => {
+    const stop = page.getByRole('button', { name: 'Stop', exact: true })
+    /* PRESSED MID-WRITE, not during the readiness check: the accounts are in and the payments
+       insert is being held open, so there is something written for the stop to take back out. */
+    await page.getByText(/Writing debtor accounts/).first().waitFor({ timeout: 20000 })
+    await stop.waitFor({ timeout: 20000 })
+    stopShown = true
+    await stop.click()
+    await page.getByRole('button', { name: 'Stopping…' }).waitFor({ timeout: 5000 })
+    stoppingShown = await page.getByText(/will be taken back out/).first().isVisible()
+    await t.shot(page, 'swordfish-import-stopping')
+    release()
+  })
+  holdPayments = null
+  const stoppedRun = (sent.debtor_accounts ?? [])[0]?.import_batch_id
+  t.ok('while the import writes, a Stop button is offered', stopShown)
+  t.ok('...pressing it says the run is stopping and will be taken back out', stoppingShown)
+  t.check('...the chunk after the stop is never sent (no interest written)',
+    (sent.account_interest_accruals ?? []).length, 0)
+  t.check('...the run is taken back out, once', discards.length, 1)
+  t.check('...by the id it had stamped', discards[0], stoppedRun)
+  t.ok('...and the screen says the person stopped it',
+    await page.getByText(/You stopped the import\..*has been taken back out/).first().isVisible())
+  t.check('...rather than claiming it finished', await page.getByText(/Imported [\d  ]+ rows\./).count(), 0)
+  t.check('...and the Stop button is gone once the run has ended',
+    await page.getByRole('button', { name: /^Stop/ }).count(), 0)
+  await t.shot(page, 'swordfish-import-stopped')
+
   await context.close()
 } catch (e) {
   t.ok(`the run finished without throwing (${String(e).split('\n')[0].slice(0, 160)})`, false)
@@ -193,5 +231,5 @@ try {
 
 
 const good = t.finish(`The import sends remitted receipts as history and the rest for approval, stamps one
-id on the whole run, and takes the run back out when it fails part-way. Screenshots in ${OUT}.`)
+id on the whole run, and takes the run back out when it fails part-way or is stopped. Screenshots in ${OUT}.`)
 process.exit(good ? 0 : 1)
