@@ -345,6 +345,20 @@ export function canViewBusiness(user: Pick<User, 'role' | 'grants' | 'revokes'> 
   return can(user, 'business.view')
 }
 
+/** The Income screen: business.income, which no role has by default. business_income asks the same. */
+export function canViewIncome(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'business.income')
+}
+
+/**
+ * MAY THIS PERSON DRAW THE FIRM'S EARNINGS OUT OF TRUST? Both ticks: it is done from the business
+ * side and it moves trust money, at the firm's ruling -- and draw_from_trust asks both, so the
+ * button is never drawn for somebody the database would refuse.
+ */
+export function canDrawFromTrust(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'finance.view') && can(user, 'business.view')
+}
+
 /**
  * WHO MAY RECORD THAT MONEY ARRIVED.
  *

@@ -30,7 +30,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-capability-screen.mjs
  */
 import { readFileSync } from 'node:fs'
-import { ROLE_CAPABILITIES, CAPABILITIES, CAPABILITY_ORDER } from '../../src/lib/capabilities.ts'
+import { ROLE_CAPABILITIES, CAPABILITIES, CAPABILITY_ORDER, NO_ROLE_CAPABILITIES } from '../../src/lib/capabilities.ts'
 
 let pass = 0
 const failures = []
@@ -153,7 +153,7 @@ ok('...and which ones the database enforces', /CAPABILITIES\[c\]\.inDatabase/.te
 check('the ones marked as enforced are the ones the database really checks',
   CAPABILITY_ORDER.filter((c) => CAPABILITIES[c].inDatabase).sort(),
   ['business.view', 'finance.view', 'library.edit', 'mail.refile', 'payment.approve',
-    'payment.move', 'payment.record', 'payment.reverse', 'settlement.approve'].sort())
+    'payment.move', 'payment.record', 'payment.reverse', 'settlement.approve', 'business.income'].sort())
 /*
  * AND THE DATABASE REALLY ASKS FOR EACH ONE, which is what the mark claims.
  *
@@ -178,10 +178,11 @@ const GROUPS = ['Money', 'The book', 'Clients and disputes', 'The library']
 for (const c of CAPABILITY_ORDER) {
   ok(`${c} is in a group the screen draws`, GROUPS.includes(CAPABILITIES[c].group))
 }
-/* AND THE ADMINISTRATOR TEMPLATE IS STILL EVERY ONE, which is what makes the list closed and what
-   `all_capabilities()` returns in the database. */
-check('an administrator still has every capability',
-  [...ROLE_CAPABILITIES.Administrator].sort(), [...CAPABILITY_ORDER].sort())
+/* AND THE ADMINISTRATOR TEMPLATE IS EVERY ONE BUT THE TICKS NO ROLE IS BORN WITH -- business.income,
+   which the firm put beyond even the Administrator. The two together are the closed list, and what
+   `all_capabilities()` returns in the database; check-capabilities holds the SQL half. */
+check('an administrator has every capability but the ones no role is born with',
+  [...ROLE_CAPABILITIES.Administrator, ...NO_ROLE_CAPABILITIES].sort(), [...CAPABILITY_ORDER].sort())
 
 console.log(`\ncheck-capability-screen: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

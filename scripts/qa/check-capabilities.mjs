@@ -22,7 +22,8 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  CAPABILITIES, CAPABILITY_ORDER, ROLE_CAPABILITIES, can, capabilitiesOf, departsFromRole,
+  CAPABILITIES, CAPABILITY_ORDER, NO_ROLE_CAPABILITIES, ROLE_CAPABILITIES, can, capabilitiesOf,
+  departsFromRole,
 } from '../../src/lib/capabilities.ts'
 import {
   canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
@@ -158,7 +159,7 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 15)
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 17)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:
@@ -232,14 +233,20 @@ const rolesInSql = [...(roleFn ?? '').matchAll(/when '([^']+)' then/g)].map((m) 
 check('the database knows exactly the roles the app does', [...rolesInSql].sort(), [...ROLES].sort())
 
 /*
- * THE CLOSED LIST IS THE ADMINISTRATOR'S TEMPLATE, by definition -- which is what `all_capabilities`
- * returns and what `has_capability` gates on. If a capability is added without giving it to an
- * Administrator it becomes ungrantable to ANYBODY, silently, so it is asserted here.
+ * THE CLOSED LIST IS THE ADMINISTRATOR'S TEMPLATE PLUS THE TICKS NO ROLE IS BORN WITH -- which is
+ * what `all_capabilities` returns and what `has_capability` gates on. It was the template alone
+ * until business.income, which the firm put beyond even the Administrator ("not even for an
+ * administrator"). A capability in neither half is ungrantable to ANYBODY, silently, so the sum is
+ * asserted in both languages.
  */
-check('an administrator has every capability there is',
-  [...ROLE_CAPABILITIES.Administrator].sort(), [...CAPABILITY_ORDER].sort())
+check('an administrator has every capability there is, bar the ones no role is born with',
+  [...ROLE_CAPABILITIES.Administrator, ...NO_ROLE_CAPABILITIES].sort(), [...CAPABILITY_ORDER].sort())
+check('...and no role at all is born with those',
+  ROLES.filter((r) => ROLE_CAPABILITIES[r].some((c) => NO_ROLE_CAPABILITIES.includes(c))), [])
 const allFn = liveFn('all_capabilities')
 ok('...and the database says so the same way', /role_capabilities\('Administrator'\)/.test(allFn ?? ''))
+const extraInSql = [...((allFn ?? '').match(/\|\|\s*array\[([^\]]*)\]/)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1])
+check('...adding exactly the ones no role is born with', [...extraInSql].sort(), [...NO_ROLE_CAPABILITIES].sort())
 
 /* ---------------- the database enforces it, not only the browser ---------------- */
 

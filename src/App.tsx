@@ -15,6 +15,7 @@ import { DashboardRouter } from './pages/DashboardRouter'
 import { RequireClientAccess } from './components/auth/RequireClientAccess'
 import { RequireFinance } from './components/auth/RequireFinance'
 import { RequireBusiness } from './components/auth/RequireBusiness'
+import { RequireIncome } from './components/auth/RequireIncome'
 
 import { CollectorDashboard } from './pages/CollectorDashboard'
 /*
@@ -54,6 +55,8 @@ const TrustLedger = lazy(() => import('./pages/trust/TrustLedger').then((m) => (
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
 const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
+const BusinessIncome = lazy(() => import('./pages/business/BusinessIncome').then((m) => ({ default: m.BusinessIncome })))
+const BusinessDrawings = lazy(() => import('./pages/business/BusinessDrawings').then((m) => ({ default: m.BusinessDrawings })))
 const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
@@ -188,7 +191,9 @@ function App() {
 
               <Route path="/business" element={<RequireBusiness><BusinessLayout /></RequireBusiness>}>
                 <Route index element={<BusinessOverview />} handle={{ title: 'Business overview' }} />
+                <Route path="income" element={<RequireIncome><BusinessIncome /></RequireIncome>} handle={{ title: 'Income' }} />
                 <Route path="expenses" element={<BusinessExpenses />} handle={{ title: 'Expenses' }} />
+                <Route path="drawings" element={<BusinessDrawings />} handle={{ title: 'Drawings' }} />
                 <Route path="back-office" element={<BackOffice />} handle={{ title: 'Back office' }} />
               </Route>
 

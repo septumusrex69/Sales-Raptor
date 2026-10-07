@@ -48,7 +48,10 @@ function liveBody(name) {
   if (at < 0) return null
   const opens = sql.indexOf('as $$', at)
   const ends = sql.indexOf('$$;', opens)
-  return opens < 0 || ends < 0 ? null : sql.slice(opens, ends)
+  /* COMMENTS STRIPPED FIRST (HANDOFF section 6): a comment is not code, and the sums below are
+     matched on their shape -- a note placed between two terms broke the match on correct SQL. */
+  return opens < 0 || ends < 0 ? null
+    : sql.slice(opens, ends).replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '')
 }
 
 /* -------------------------- 1. made is earned less spent -------------------------- */

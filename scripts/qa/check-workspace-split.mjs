@@ -170,7 +170,9 @@ const businessTargets = railTargets(businessLayout)
 /* Read the count first: a loop over an empty list passes vacuously, which is this file's
    sibling-check trap written down. */
 check('the trust rail has its six, settings and the door', trustTargets.length, 8)
-check('the business rail has its three and the door', businessTargets.length, 4)
+/* FIVE AND THE DOOR: overview, income (drawn only for whoever holds business.income), expenses,
+   drawings, back office -- and the door to the trust. */
+check('the business rail has its five and the door', businessTargets.length, 6)
 
 const routeExists = (to) => {
   if (to === '/trust') return /<Route path="\/trust"/.test(app)

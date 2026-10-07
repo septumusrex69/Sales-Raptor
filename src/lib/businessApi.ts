@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import type { BusinessExpense, BusinessMonth, ExpenseCategory } from './businessMonth'
+import { toIncomeRow, type IncomeRow } from './businessIncome'
 
 /** The firm's own books, read and written. Split from businessMonth.ts so a check can import that. */
 
@@ -61,5 +62,37 @@ export async function cancelExpense(id: string, reason: string): Promise<void> {
   const { error } = await supabase.from('business_expenses')
     .update({ cancelled_at: new Date().toISOString(), cancelled_reason: reason })
     .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * WHAT THE FIRM EARNED IN A PERIOD, client by client. Empty for anybody without business.income --
+ * the guard is the function's own `where`, so a refusal is no rows rather than zeroes.
+ */
+export async function fetchIncome(from: string, to: string): Promise<IncomeRow[]> {
+  const { data, error } = await supabase.rpc('business_income', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map(toIncomeRow)
+}
+
+export interface Drawing { id: string; at: string; amount: number; reference: string; drawnBy: string | null }
+
+/** The drawings out of trust in a period, newest first. */
+export async function fetchDrawings(from: string, to: string): Promise<Drawing[]> {
+  const { data, error } = await supabase.rpc('business_drawings', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id), at: String(r.entry_at), amount: n(r.amount),
+    reference: String(r.reference ?? ''), drawnBy: (r.drawn_by as string | null) ?? null,
+  }))
+}
+
+/**
+ * MOVE THE FIRM'S EARNINGS OUT OF TRUST. draw_from_trust refuses more than the firm holds -- a
+ * drawing against anybody else's money is a trust shortfall -- and refuses anybody without both
+ * the trust and the business ticks.
+ */
+export async function drawFromTrust(amount: number, reference: string): Promise<void> {
+  const { error } = await supabase.rpc('draw_from_trust', { p_amount: amount, p_reference: reference })
   if (error) throw new Error(error.message)
 }

@@ -68,6 +68,7 @@ export type Capability =
   /* ---- money: Swordfish's "Access Permissions: Data", which is the panel worth copying ---- */
   | 'finance.view'
   | 'business.view'
+  | 'business.income'
   | 'payment.record'
   | 'payment.approve'
   | 'payment.reverse'
@@ -151,6 +152,24 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
     label: "See the firm's own accounts",
     blurb: 'The business account: what the firm earned, what it spent, and which clients owe it. '
       + 'Separate from the trust account, which is money held for other people and is a different tick.',
+    group: 'Money',
+    inDatabase: true,
+  },
+  /*
+   * WHAT THE FIRM EARNED, AND THE ONE TICK NO ROLE IS BORN WITH -- the Administrator's included.
+   *
+   * THE FIRM, OF EXACTLY THIS: "we're not going to be disclosing commission and income from the
+   * Annexure B fees. We'll do that on another place, which is not even for an administrator."
+   * So the Income screen is behind its own tick and it is granted person by person (7 Oct 2026).
+   * Enforced by business_income itself, which answers nobody without it.
+   *
+   * IT LIVES IN NO_ROLE_CAPABILITIES BELOW, which is what keeps it out of the Administrator's
+   * template while leaving it grantable -- all_capabilities() is that template plus this list.
+   */
+  'business.income': {
+    label: 'See what the firm earned',
+    blurb: 'Commission, interest, Annexure B fees and client charges, client by client. In no '
+      + 'role by default, not even the Administrator’s — the firm: "not even for an administrator".',
     group: 'Money',
     inDatabase: true,
   },
@@ -279,6 +298,14 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
 export const CAPABILITY_ORDER = Object.keys(CAPABILITIES) as Capability[]
 
 /**
+ * THE TICKS NO ROLE IS BORN WITH, the Administrator's template included, and granted only person by
+ * person. The database's all_capabilities() is the Administrator's template PLUS this list -- held
+ * against it by check-capabilities -- because a tick outside all_capabilities is unknown to
+ * has_capability and therefore ungrantable to anybody, silently.
+ */
+export const NO_ROLE_CAPABILITIES: Capability[] = ['business.income']
+
+/**
  * WHAT EACH ROLE GETS BEFORE ANYBODY CHANGES ANYTHING -- Swordfish's "template", written out.
  *
  * TRANSCRIBED FROM THE THIRTEEN PREDICATES THIS REPLACES, deliberately without improving any of
@@ -290,9 +317,10 @@ export const CAPABILITY_ORDER = Object.keys(CAPABILITIES) as Capability[]
  * `canViewLibrary` already gave it.
  */
 export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
-  /* Everything. The only role for which that is true, and the reason a grant exists at all is so
-     it stops being the only way to give somebody one extra thing. */
-  Administrator: [...CAPABILITY_ORDER],
+  /* Everything but what no role is born with. The only role for which "everything" is nearly true,
+     and the reason a grant exists at all is so it stops being the only way to give somebody one
+     extra thing. */
+  Administrator: CAPABILITY_ORDER.filter((c) => !NO_ROLE_CAPABILITIES.includes(c)),
   'Sales Manager': ['book.hand_out', 'book.reassign', 'client.view', 'library.view'],
   'Sales Representative': ['client.view', 'library.view'],
   'Liaison Manager': [

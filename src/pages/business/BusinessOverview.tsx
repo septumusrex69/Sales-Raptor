@@ -17,10 +17,11 @@ import { fetchBusinessMonth } from '../../lib/businessApi'
  * exist Raptor can say what the firm earned but not what it made, and the panel below says that
  * in words rather than drawing an empty table, which would read as a firm that spent nothing.
  *
- * THE EARNINGS FIGURE IS READ FROM THE TRUST SIDE ON PURPOSE. It is the same `owed_to_firm` the
- * trust overview shows as "Yours to draw" -- one number, one function, two screens. Summed again
- * here the two pages would quietly disagree about how much the firm may take, which is the exact
- * failure the payover arithmetic was centralised to avoid.
+ * THE EARNINGS FIGURE IS READ FROM THE TRUST SIDE ON PURPOSE. It is the firm's balance on the trust
+ * ledger -- the sum of its entries -- which is also what Drawings shows as the most the firm may
+ * draw and what draw_from_trust refuses past. Three readers of one sum (check-business-income holds
+ * them to the same expression); summed differently, the screens would quietly disagree about how
+ * much the firm may take, which is the exact failure the payover arithmetic was centralised to avoid.
  */
 export function BusinessOverview() {
   const [debts, setDebts] = useState<ClientDebt[]>([])

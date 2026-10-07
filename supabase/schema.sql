@@ -28867,3 +28867,240 @@ grant execute on function public.propose_settlement(uuid, numeric, numeric, text
 grant execute on function public.approve_settlement(uuid, date, text, numeric) to authenticated;
 grant execute on function public.close_settlement_offer(uuid, text, text) to authenticated;
 grant execute on function public.close_as_settled(uuid) to authenticated;
+
+-- =====================================================================================
+-- THE BUSINESS WORKSPACE GETS INCOME AND DRAWINGS
+-- =====================================================================================
+--
+-- The rail's own comment said it: "Income and the drawing out of trust are still to come and are
+-- still absent." draw_from_trust has existed since the trust ledger did, and nothing could call it.
+--
+-- WHAT A FIRM ENTRY ON THE TRUST LEDGER IS, which both screens read -- one place, so they agree:
+--   'Fees, interest and commission earned...'  earned on a receipt: the allocation's interest +
+--        costs + commission + commission VAT, exactly (trust_creditors_on_allocation builds the
+--        entry from those four, so the split below sums back to it to the cent)
+--   'Parked credit taken to the firm...' / '...returned to the debtor...'   unclaimed credit
+--   'Charges recovered from payover...'   a client charge SET OFF -- the charge was income when it
+--        was raised (client_charges), so this is it being PAID, not more income
+--   'Drawn to the business account - <ref>'   a drawing: the firm moving its own money out
+--
+-- AND A DOUBLE COUNT THIS FIXES. business_month called every positive firm entry "earned" and
+-- every negative one "drawn". So a charge recovered from a payover was counted in `earned` AND in
+-- `invoiced` (made = earned + invoiced - spent counted it twice), and a parked credit given back to
+-- a debtor read as the firm drawing money. Earned is now every firm entry that is neither a drawing
+-- nor a charge recovery, net; drawn is the drawings and nothing else.
+--
+-- WHO MAY SEE WHAT, as the firm decided (7 Oct 2026):
+--   Income   business.income -- in NO role's template, not even the Administrator's: "we're not
+--            going to be disclosing commission and income from the Annexure B fees. We'll do that
+--            on another place, which is not even for an administrator." Granted person by person.
+--   Drawings business.view to see; a drawing moves TRUST money, so making one needs finance.view
+--            as well. Either tick alone is refused.
+-- =====================================================================================
+
+-- THE ONE CLASSIFIER. Every reader below asks it rather than matching the text itself, so a reason
+-- reworded in its writer is one change here, and check-business-income holds the prefixes against
+-- the writers.
+create or replace function public.firm_entry_kind(p_reason text)
+returns text
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case
+    when p_reason like 'Drawn to the business account - %' then 'drawing'
+    when p_reason like 'Charges recovered from payover %' then 'charge_recovered'
+    when p_reason like 'Fees, interest and commission earned%' then 'earned'
+    when p_reason like 'Parked credit taken to the firm%'
+      or p_reason like 'Parked credit returned to the debtor%' then 'credit'
+    else 'other'
+  end
+$$;
+
+create or replace function public.draw_from_trust(p_amount numeric, p_reference text, p_company uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_held numeric;
+  v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  -- BOTH TICKS. A drawing is made from the business side and moves trust money, so it needs the
+  -- business workspace AND the trust account -- the firm's ruling of 7 Oct 2026. A capability, not
+  -- a role name, so a grant reaches it.
+  if not (public.has_capability('finance.view') and public.has_capability('business.view')) then
+    raise exception 'Drawing from the trust account needs both the trust and the business ticks.'
+      using errcode = '42501';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A drawing is an amount, so it has to be more than nothing.' using errcode = '22023';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which transfer this is.' using errcode = '22023';
+  end if;
+
+  -- THE FIRM CANNOT DRAW MORE THAN IT HAS EARNED. Drawing against another party's money is a
+  -- trust shortfall, which is the single most serious thing that can happen in this account --
+  -- so it is refused here rather than found at a reconciliation three weeks later.
+  select coalesce(sum(amount), 0) into v_held
+    from public.trust_creditor_entries
+   where party = 'firm' and (p_company is null or company_id = p_company);
+  if p_amount > v_held then
+    raise exception 'The firm has % in trust and this would draw %. Drawing more than is earned is a trust shortfall.',
+      to_char(v_held, 'FM999999990.00'), to_char(p_amount, 'FM999999990.00')
+      using errcode = '22023';
+  end if;
+
+  insert into public.trust_creditor_entries (party, company_id, amount, reason, created_by)
+  values ('firm', p_company, -round(p_amount, 2),
+          'Drawn to the business account - ' || v_ref, auth.uid())
+  returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function public.business_month(p_from date, p_to date)
+returns table(earned numeric, drawn numeric, still_in_trust numeric, invoiced numeric,
+              invoices_paid numeric, owed_by_clients numeric, expenses numeric, expenses_vat numeric,
+              made numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    /* EARNED: every firm entry that is neither a drawing nor a charge being paid, NET -- so a
+       reversed receipt takes its earnings back off, and a parked credit returned to the debtor is
+       not a drawing. DRAWN: the drawings, and nothing else. See firm_entry_kind. */
+    select coalesce(sum(amount) filter (where public.firm_entry_kind(reason) not in ('drawing', 'charge_recovered')), 0) as earned,
+           coalesce(-sum(amount) filter (where public.firm_entry_kind(reason) = 'drawing'), 0) as drawn
+      from public.trust_creditor_entries
+     where party = 'firm'
+       and (entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  held as (
+    /* Not period-bound: what is sitting in trust right now, whenever it was earned. */
+    select coalesce(sum(amount), 0) as bal from public.trust_creditor_entries where party = 'firm'
+  ),
+  charges as (
+    select coalesce(sum(amount + vat) filter (where cancelled_at is null), 0) as invoiced,
+           coalesce(sum(amount + vat) filter (where cancelled_at is null and paid_at is not null), 0) as paid
+      from public.client_charges
+     where raised_on between p_from and p_to
+  ),
+  owing as (
+    select coalesce(sum(amount + vat), 0) as bal from public.client_charges
+     where cancelled_at is null and paid_at is null
+  ),
+  spent as (
+    select coalesce(sum(amount), 0) as ex, coalesce(sum(vat), 0) as vat
+      from public.business_expenses
+     where cancelled_at is null and incurred_on between p_from and p_to
+  )
+  select f.earned, f.drawn, h.bal, c.invoiced, c.paid, o.bal, s.ex, s.vat,
+         /* WHAT THE FIRM MADE: earned less spent. Not "drawn less spent" -- money earned and still
+            sitting in trust has been earned, and a month read on drawings would say the firm made
+            nothing in any month it chose not to transfer. */
+         f.earned + c.invoiced - s.ex
+    from firm f, held h, charges c, owing o, spent s
+   where public.has_capability('business.view')
+$$;
+
+-- THE DRAWINGS IN A PERIOD, newest first, with who made each and the transfer it names.
+create or replace function public.business_drawings(p_from date, p_to date)
+returns table(id uuid, entry_at timestamptz, amount numeric, reference text, drawn_by text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select e.id, e.entry_at, -e.amount,
+         substring(e.reason from length('Drawn to the business account - ') + 1),
+         p.name
+    from public.trust_creditor_entries e
+    left join public.profiles p on p.id = e.created_by
+   where e.party = 'firm'
+     and public.firm_entry_kind(e.reason) = 'drawing'
+     and (e.entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+     and public.has_capability('business.view')
+   order by e.entry_at desc
+$$;
+
+-- WHAT THE FIRM EARNED IN A PERIOD, client by client, in parts that sum to the whole.
+--
+-- THE SPLIT IS EXACT FOR WHAT A RECEIPT EARNED: the entry IS interest + costs + commission +
+-- commission VAT off its own allocation, so joining back to the allocation splits it to the cent,
+-- reversals included (a reversing allocation carries the negative parts). Anything else is its own
+-- line rather than guessed into one of the four. CHARGES are counted when RAISED (client_charges),
+-- which is why the ledger's 'Charges recovered' entries are not counted a second time.
+--
+-- This is what the firm EARNED over a period. It is not the split of the BALANCE held in trust
+-- (HANDOFF section 4, item 4) -- that one cannot sum, because drawings are not by component.
+create or replace function public.business_income(p_from date, p_to date)
+returns table(company_id uuid, company_name text, interest numeric, costs numeric,
+              commission numeric, commission_vat numeric, credit_taken numeric,
+              charges_raised numeric, other numeric, total numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(e.company_id, d.company_id) as company_id,
+           public.firm_entry_kind(e.reason) as kind, e.amount, a.id as alloc_id,
+           a.to_interest, a.to_costs, a.commission, a.commission_vat
+      from public.trust_creditor_entries e
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'firm'
+       and (e.entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  lines as (
+    select company_id,
+           -- A RECEIPT'S EARNINGS ARE SPLIT ONLY WHERE THE ALLOCATION IS THERE TO SPLIT THEM BY;
+           -- an earned entry with none falls to `other`, whole, rather than being guessed apart.
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_interest, 0) else 0 end) as interest,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_costs, 0) else 0 end) as costs,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission, 0) else 0 end) as commission,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission_vat, 0) else 0 end) as commission_vat,
+           sum(case when kind = 'credit' then amount else 0 end) as credit_taken,
+           0::numeric as charges_raised,
+           sum(case when kind = 'other' or (kind = 'earned' and alloc_id is null) then amount else 0 end)
+             -- AND WHATEVER THE SPLIT DID NOT ACCOUNT FOR, so the parts always sum to the ledger.
+             + sum(case when kind = 'earned' and alloc_id is not null
+                        then amount - (coalesce(to_interest, 0) + coalesce(to_costs, 0)
+                                       + coalesce(commission, 0) + coalesce(commission_vat, 0))
+                        else 0 end) as other
+      from firm
+     where kind not in ('drawing', 'charge_recovered')
+     group by company_id
+    union all
+    select c.company_id, 0, 0, 0, 0, 0, sum(c.amount + c.vat), 0
+      from public.client_charges c
+     where c.cancelled_at is null and c.raised_on between p_from and p_to
+     group by c.company_id
+  )
+  select l.company_id, co.name,
+         sum(l.interest), sum(l.costs), sum(l.commission), sum(l.commission_vat),
+         sum(l.credit_taken), sum(l.charges_raised), sum(l.other),
+         sum(l.interest + l.costs + l.commission + l.commission_vat + l.credit_taken
+             + l.charges_raised + l.other)
+    from lines l
+    left join public.companies co on co.id = l.company_id
+   where public.has_capability('business.income')
+   group by l.company_id, co.name
+   order by 10 desc
+$$;
+
+revoke all on function public.firm_entry_kind(text) from public, anon;
+revoke all on function public.draw_from_trust(numeric, text, uuid) from public, anon;
+revoke all on function public.business_month(date, date) from public, anon;
+revoke all on function public.business_drawings(date, date) from public, anon;
+revoke all on function public.business_income(date, date) from public, anon;
+grant execute on function public.firm_entry_kind(text) to authenticated;
+grant execute on function public.draw_from_trust(numeric, text, uuid) to authenticated;
+grant execute on function public.business_month(date, date) to authenticated;
+grant execute on function public.business_drawings(date, date) to authenticated;
+grant execute on function public.business_income(date, date) to authenticated;
