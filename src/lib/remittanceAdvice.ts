@@ -22,6 +22,7 @@
  *     with no explanation, which reads like a mistake and is not one.
  *   - A reversal is a negative line and says what it is, rather than silently reducing a total.
  */
+import { paymentReference } from './paymentsOut.ts'
 import type { RunPayment } from './payover'
 import { rand } from './money.js'
 import { buildXlsx, type Cell } from './xlsxWrite.js'
@@ -236,7 +237,9 @@ export function buildRemittanceAdvice(input: {
 
   const paidNote = run.paidAt
     ? `Paid by EFT${run.eftReference ? ` ${run.eftReference}` : ''} on ${advDate(run.paidAt)}`
-    : 'To be paid by EFT to your nominated account'
+    /* WITH THE REFERENCE IT WILL CARRY, so the client can find it on their own statement (the firm,
+       8 Oct: a payover goes out "with a client unique reference"). */
+    : `To be paid by EFT to your nominated account${paymentReference(run.invoiceNumber) ? `, reference ${paymentReference(run.invoiceNumber)}` : ''}`
 
   const workings: { label: string; amount: number; emphasis?: boolean }[] = [
     { label: 'Capital collected on your behalf', amount: run.trustCapital },

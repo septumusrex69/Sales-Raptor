@@ -1,0 +1,96 @@
+/**
+ * PAYMENTS TO MAKE OUT OF TRUST, EACH WITH THE REFERENCE IT GOES OUT ON.
+ *
+ * THE FIRM, 8 Oct: a refund "should go to a place for payments that we have to make"; a payover
+ * "should go out with a client unique reference. For example, BF for Bredell Ferreira"; a payment
+ * out "should be matched ... by means of a reference number".
+ *
+ * WHAT THIS HOLDS:
+ *   1. ONE REFERENCE RULE IN TWO PLACES. 'BF ' + the run's number or the debtor's case number, in
+ *      payment_out_reference (SQL) and paymentReference (TS). If they drift, the firm pays on one
+ *      string and Raptor looks for another, and the match never happens.
+ *   2. THE MATCH. A debit carrying a payment's reference AND its exact amount is that payment even
+ *      where another payment is the same amount; a reference with the wrong amount is not.
+ *   3. THE LIST: approved and sent runs, refunds not yet paid or cancelled, behind finance.view.
+ *   4. The page is in the Trust rail, and the run and the client's advice carry the reference.
+ *
+ * Proved on staging: BF PO-SMT-2610 and BF PO-BPM-2610 due 11 Nov, BF RAP-124059 for the refund;
+ * anon gets no row.
+ *
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-payments-out.mjs
+ */
+import { readFileSync } from 'node:fs'
+import { paymentReference, referenceIn, totalToPay, toPaymentToMake } from '../../src/lib/paymentsOut.ts'
+import { suggestAllocation } from '../../src/lib/bankLineAllocation.ts'
+
+let pass = 0
+const failures = []
+const check = (name, actual, expected) => {
+  const a = JSON.stringify(actual); const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
+}
+const ok = (name, actual) => check(name, actual, true)
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+const sql = read('supabase/schema.sql')
+const liveFn = (name) => {
+  const at = Math.max(sql.lastIndexOf(`create or replace function public.${name}(`), sql.lastIndexOf(`create function public.${name}(`))
+  if (at < 0) return ''
+  const m = /\bas \$(\w*)\$([\s\S]*?)\$\1\$/.exec(sql.slice(at))
+  return strip(m?.[2] ?? '')
+}
+
+/* ---- 1. one reference rule ---- */
+const refSql = liveFn('payment_out_reference')
+ok('the database writes BF + the code, upper-cased and trimmed', /'BF ' \|\| upper\(btrim\(p_code\)\)/.test(refSql))
+ok('...and nothing for no code', /nullif\(btrim\(coalesce\(p_code, ''\)\), ''\) is null then null/.test(refSql))
+check('the browser writes the same', paymentReference(' po-lvm-2610 '), 'BF PO-LVM-2610')
+check('...a refund on the case number', paymentReference('RAP-124059'), 'BF RAP-124059')
+check('...and nothing for no code', paymentReference('  '), null)
+ok('a payover is referenced by its run number', /payment_out_reference\('payover', r\.invoice_number\)/.test(liveFn('payments_to_make')))
+ok('...a refund by the debtor\'s case number', /payment_out_reference\('refund', coalesce\(d\.case_number, d\.account_number\)\)/.test(liveFn('payments_to_make')))
+ok('the match screen is given the same references', /payment_out_reference\('payover', r\.invoice_number\)/.test(liveFn('bank_allocation_candidates'))
+  && /payment_out_reference\('refund', coalesce\(d\.case_number, d\.account_number\)\)/.test(liveFn('bank_allocation_candidates')))
+ok('...and the browser reads them', /reference: r\.reference === null/.test(read('src/lib/bankAllocationApi.ts')))
+
+/* ---- 2. the match ---- */
+ok('a reference is found run into the payee\'s name', referenceIn('PAYOVER POLVM2610 LOWVELD', 'BF PO-LVM-2610'))
+ok('...with the BF cut off', referenceIn('PO-LVM-2610', 'BF PO-LVM-2610'))
+check('...and not in a different run', referenceIn('PAYOVER POLVM2609', 'BF PO-LVM-2610'), false)
+check('a code too short to mean anything is not trusted', referenceIn('ABC12 PAYMENT', 'BF AB1'), false)
+const line = (amount, description) => ({ id: 'l', txnDate: '2026-10-12', amount, description, direction: 'debit', reference: null, bankAccount: '62700201255', bankAccountLabel: null })
+const RUNS = [
+  { kind: 'payover', id: 'run-lvm', amount: 4000, label: 'PO-LVM-2610 - Lowveld', reference: 'BF PO-LVM-2610' },
+  { kind: 'payover', id: 'run-smt', amount: 4000, label: 'PO-SMT-2610 - Summit', reference: 'BF PO-SMT-2610' },
+  { kind: 'refund', id: 'ref-1', amount: 490.42, label: 'Refund to Sizwe Dlamini', reference: 'BF RAP-124059' },
+]
+check('two runs of the same amount and no reference: a question for a person', suggestAllocation(line(-4000, 'PAYOVER LOWVELD'), RUNS), null)
+check('...the reference decides it', suggestAllocation(line(-4000, 'BF PO-SMT-2610 SUMMIT FITNESS'), RUNS)?.targetId, 'run-smt')
+check('a reference with the wrong amount is not that payment', suggestAllocation(line(-3999, 'BF PO-SMT-2610'), RUNS), null)
+check('a refund on the debtor\'s case number', suggestAllocation(line(-490.42, 'BF RAP124059 S DLAMINI'), RUNS)?.targetId, 'ref-1')
+ok('...saying why', /carries the reference BF RAP-124059/.test(suggestAllocation(line(-490.42, 'BF RAP124059'), RUNS)?.why ?? ''))
+
+/* ---- 3. the list ---- */
+const list = liveFn('payments_to_make')
+ok('approved and sent runs are to pay', /r\.status in \('approved', 'sent'\)/.test(list))
+ok('...and refunds not yet paid or cancelled', /o\.paid_at is null and o\.cancelled_at is null/.test(list))
+ok('...behind the trust tick', (list.match(/public\.has_capability\('finance\.view'\)/g) ?? []).length === 2)
+ok('...due on the 11th, the lag after the cycle closes', /\(r\.period_end \+ make_interval\(months => coalesce\(f\.payover_lag_months, 1\)\)\)::date \+ 1/.test(list))
+for (const sig of ['payment_out_reference(text, text)', 'payments_to_make()', 'bank_allocation_candidates()']) {
+  ok(`${sig} is revoked from public and anon`, sql.includes(`revoke all on function public.${sig} from public, anon;`))
+}
+const rows = [toPaymentToMake({ kind: 'payover', id: 'a', payee: 'X', amount: '8426.07' }), toPaymentToMake({ kind: 'refund', id: 'b', payee: 'Y', amount: 490.42 })]
+check('the total is the sum, to the cent', totalToPay(rows), 8916.49)
+
+/* ---- 4. where it shows ---- */
+ok('Payments to make is in the Trust rail', /to: '\/trust\/payments-out', label: 'Payments to make'/.test(read('src/pages/trust/TrustLayout.tsx')))
+ok('...and routed', /path="payments-out" element=\{<TrustPaymentsOut \/>\}/.test(read('src/App.tsx')))
+const run = strip(read('src/pages/finance/RunDetail.tsx'))
+ok('the run says which reference to pay it on', /Pay with reference/.test(run) && /paymentReference\(run\.invoice_number\)/.test(run))
+ok('...and Mark paid starts from it', /suggested=\{paymentReference\(run\.invoice_number\) \?\? ''\}/.test(run) && /useState\(suggested\)/.test(run))
+ok('the client\'s advice says it will carry it', /reference \$\{paymentReference\(run\.invoiceNumber\)\}/.test(read('src/lib/remittanceAdvice.ts')))
+
+if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
+console.log(`check-payments-out: ${pass} passed, ${failures.length} failed`)
+process.exit(failures.length ? 1 : 0)

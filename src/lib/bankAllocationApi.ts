@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { toPaymentToMake, type PaymentToMake } from './paymentsOut.ts'
 import { toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
 
 /**
@@ -22,7 +23,15 @@ export async function fetchAllocationCandidates(): Promise<Candidate[]> {
     id: String(r.id),
     amount: Number(r.amount),
     label: String(r.label ?? ''),
+    reference: r.reference === null || r.reference === undefined ? null : String(r.reference),
   }))
+}
+
+/** Every payment still to be made out of trust: approved runs and refunds due (payments_to_make). */
+export async function fetchPaymentsToMake(): Promise<PaymentToMake[]> {
+  const { data, error } = await supabase.rpc('payments_to_make')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map(toPaymentToMake)
 }
 
 export async function allocateBankLine(

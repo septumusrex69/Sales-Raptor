@@ -12,6 +12,7 @@ import {
 } from '../../lib/payover'
 import { adviceBody, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
 import { remittancePdf } from '../../lib/remittancePdf'
+import { paymentReference } from '../../lib/paymentsOut'
 import { sendRemittanceAdvice } from '../../lib/remittanceEmail'
 
 /**
@@ -209,6 +210,12 @@ export function RunDetail() {
               {run.invoice_number} · {fmtDay(run.period_start)} – {fmtDay(run.period_end)}
               {client?.code ? ` · client ${client.code}` : ''}
             </p>
+            {/* THE REFERENCE TO PAY IT ON (the firm, 8 Oct): the one the statement match looks for. */}
+            {paymentReference(run.invoice_number) && run.status !== 'paid' && (
+              <p className="text-[12.5px] text-slate-500 mt-0.5" data-testid="run-pay-reference">
+                Pay with reference <span className="font-mono text-slate-700">{paymentReference(run.invoice_number)}</span>
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className={clsx('rounded-full px-2.5 py-1 text-[11.5px] font-semibold', STATUS_TONE[run.status])}>
@@ -357,6 +364,7 @@ export function RunDetail() {
       )}
       {payModal && run && (
         <MarkPaidModal
+          suggested={paymentReference(run.invoice_number) ?? ''}
           onClose={() => setPayModal(false)}
           onSave={async (ref, date) => {
             await act(() => markRunPaid(run.id, ref, new Date(`${date}T12:00:00`).toISOString()))
@@ -464,8 +472,13 @@ function PaymentPanel({ row, audit, onClose }: {
 
 /** 'Mark paid' asks for the EFT reference and the date — the firm's own instruction. The
  *  reference is what reconciles this invoice to the bank statement, so it is required. */
-function MarkPaidModal({ onClose, onSave }: { onClose: () => void; onSave: (ref: string, date: string) => Promise<void> }) {
-  const [ref, setRef] = useState('')
+function MarkPaidModal({ suggested, onClose, onSave }: {
+  /** The reference it should have gone out on; still editable, because the bank's wins. */
+  suggested: string
+  onClose: () => void
+  onSave: (ref: string, date: string) => Promise<void>
+}) {
+  const [ref, setRef] = useState(suggested)
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [busy, setBusy] = useState(false)
   return (

@@ -11,6 +11,7 @@
  *
  * PURE, no Supabase: the rules have to be assertable. The calls are in bankAllocationApi.ts.
  */
+import { referenceIn } from './paymentsOut.ts'
 
 export type OutKind = 'payover' | 'refund' | 'business_transfer' | 'bank_charge' | 'other'
 export type InKind = 'bank_interest' | 'business_transfer_in' | 'other'
@@ -34,6 +35,8 @@ export interface Candidate {
   id: string
   amount: number
   label: string
+  /** The reference it was paid out on ('BF PO-LVM-2610', 'BF RAP-124059'); none for a drawing. */
+  reference?: string | null
 }
 
 /** The firm's words for each kind, and what it does, as the picker shows them. */
@@ -116,6 +119,17 @@ export function suggestAllocation(
   }
 
   if (CHARGE.test(text)) return { kind: 'bank_charge', targetId: null, why: 'The bank calls it a charge or a fee.' }
+  /*
+   * THE REFERENCE IT WENT OUT ON, AND THE AMOUNT. The firm, 8 Oct: a payment out "should be matched
+   * ... by means of a reference number". A line that carries a payment's reference AND its exact
+   * amount is that payment, even where another payment is the same amount -- which is the case the
+   * amount alone has to leave for a person. The amount still has to agree: the database settles a
+   * payment only on the exact amount, and a reference with the wrong amount is a question.
+   */
+  const byRef = candidates.filter((c) => Math.round(c.amount * 100) === amt && referenceIn(text, c.reference))
+  if (byRef.length === 1) {
+    return { kind: byRef[0].kind, targetId: byRef[0].id, why: `It carries the reference ${byRef[0].reference} and the amount matches: ${byRef[0].label}.` }
+  }
   for (const kind of ['payover', 'refund', 'business_transfer'] as const) {
     const same = candidates.filter((c) => c.kind === kind && Math.round(c.amount * 100) === amt)
     if (same.length === 1) {

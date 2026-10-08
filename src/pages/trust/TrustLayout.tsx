@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CheckCheck, CircleGauge, Scale, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CheckCheck, CircleGauge, Scale, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -12,7 +12,7 @@ import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceR
  * we have one place where we manage the trust and we have another place outside where we manage
  * the business."
  *
- * SIX ITEMS, AND AT SIX IT NEEDS NO HEADINGS. The strip this replaced carried six too, of which one
+ * SEVEN ITEMS (Payments to make joined on 8 Oct), AND STILL NO HEADINGS. The strip this replaced carried six too, of which one
  * -- Back office -- is the firm's OWN income and was held apart from the rest by nothing but a
  * comment. Under a workspace that names itself Trust it is visibly in the wrong room, and it has
  * moved to the other one.
@@ -33,6 +33,9 @@ const ITEMS: RailItem[] = [
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
   { to: '/trust/check', label: 'Check', icon: CheckCheck },
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
+  /* What still has to go out, and on which reference (the firm, 8 Oct). After the runs, because an
+     approved run is what lands here. */
+  { to: '/trust/payments-out', label: 'Payments to make', icon: Send },
   { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
   { to: '/trust/exceptions', label: 'Exceptions', icon: TriangleAlert },
 ]

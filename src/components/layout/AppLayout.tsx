@@ -28,6 +28,8 @@ const TITLES: { test: RegExp; title: string }[] = [
    * The rail says which workspace you are in and this bar says which screen -- the two halves of
    * "where am I", and the reason the rail keeps the workspace's name even when it is folded.
    */
+  /* payments-out BEFORE payments: /^\/trust\/payments/ matches it too, and headed it "Payments in". */
+  { test: /^\/trust\/payments-out/, title: 'Payments to make' },
   { test: /^\/trust\/payments/, title: 'Payments in' },
   { test: /^\/trust\/check/, title: 'Check what has gone through' },
   { test: /^\/trust\/payover/, title: 'Payover runs' },

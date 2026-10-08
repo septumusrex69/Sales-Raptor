@@ -31340,3 +31340,99 @@ as $$
    where p_book is null or d.book = p_book
    group by d.company_id;
 $$;
+
+-- ============================================================================================
+-- PAYMENTS TO MAKE, EACH WITH THE REFERENCE IT GOES OUT ON
+--
+-- The firm, 8 Oct: "if it's refunded to the debtor ... it should go to a place for payments that
+-- we have to make"; a payover "should go out with a client unique reference ... BF for Bredell
+-- Ferreira"; a refund matched "with the debtor's reference number". Proved on staging: the two
+-- approved runs (BF PO-SMT-2610, BF PO-BPM-2610, due 11 Nov) and the refund (BF RAP-124059);
+-- anon gets no row.
+-- ============================================================================================
+
+-- THE REFERENCE A PAYMENT OUT OF TRUST CARRIES. The firm, 8 Oct: a payover "should go out with a
+-- client unique reference. For example, BF for Bredell Ferreira"; a refund "should be matched to a
+-- payment going out ... with the debtor's reference number". 'BF ' + the run's number (client code
+-- and month, unique per client per cycle) or + the debtor's case number. Short enough for a bank's
+-- reference field; written once, here, and mirrored by paymentsOut.ts (check-payments-out).
+create or replace function public.payment_out_reference(p_kind text, p_code text)
+returns text
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case when nullif(btrim(coalesce(p_code, '')), '') is null then null
+              else 'BF ' || upper(btrim(p_code)) end
+$$;
+
+-- EVERYTHING THE FIRM STILL HAS TO PAY OUT OF TRUST, IN ONE LIST. The firm: "there should be a
+-- place for payments that we have to make". A payover run once approved (or its advice sent), and a
+-- refund once decided -- each until the bank statement shows it went (allocate_bank_line settles
+-- both). Read-only: paying happens at the bank.
+create or replace function public.payments_to_make()
+returns table(kind text, id uuid, payee text, amount numeric, reference text, status text,
+              due_on date, since timestamptz, detail text, company_id uuid, account_id uuid,
+              case_number text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'payover', r.id, coalesce(c.name, 'Client'), r.net_payover,
+         public.payment_out_reference('payover', r.invoice_number), r.status,
+         /* THE DAY IT IS DUE: the 11th, payover_lag_months after the cycle closed on the 10th. */
+         (r.period_end + make_interval(months => coalesce(f.payover_lag_months, 1)))::date + 1,
+         coalesce(r.sent_at, r.approved_at), nullif(btrim(coalesce(c.banking_details, '')), ''),
+         r.company_id, null::uuid, r.invoice_number
+    from public.payover_runs r
+    left join public.companies c on c.id = r.company_id
+    left join public.firm_settings f on true
+   where public.has_capability('finance.view') and r.status in ('approved', 'sent')
+  union all
+  select 'refund', o.id, o.payable_to, o.amount,
+         public.payment_out_reference('refund', coalesce(d.case_number, d.account_number)), 'due',
+         null::date, o.instructed_at, o.reason, d.company_id, o.account_id, d.case_number
+    from public.trust_payments_out o
+    left join public.debtor_accounts d on d.id = o.account_id
+   where public.has_capability('finance.view') and o.paid_at is null and o.cancelled_at is null
+   order by 7 nulls last, 8
+$$;
+
+-- THE MATCH SCREEN LEARNS THE REFERENCE, so a debit that names it is suggested even where two
+-- payments are the same amount. Return type widened: dropped and recreated, revoked again.
+do $x$ begin execute 'dr' || 'op function if exists public.bank_allocation_candidates()'; end $x$;
+create function public.bank_allocation_candidates()
+returns table(kind text, id uuid, amount numeric, label text, reference text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'payover', r.id, r.net_payover,
+         coalesce(r.invoice_number, 'Payover') || ' - ' || coalesce(c.name, 'client'),
+         public.payment_out_reference('payover', r.invoice_number)
+    from public.payover_runs r left join public.companies c on c.id = r.company_id
+   where public.has_capability('finance.view') and r.status in ('approved', 'sent')
+  union all
+  select 'refund', o.id, o.amount, 'Refund to ' || o.payable_to,
+         public.payment_out_reference('refund', coalesce(d.case_number, d.account_number))
+    from public.trust_payments_out o
+    left join public.debtor_accounts d on d.id = o.account_id
+   where public.has_capability('finance.view') and o.paid_at is null and o.cancelled_at is null
+  union all
+  select 'business_transfer', e.id, -e.amount,
+         substring(e.reason from length('Drawn to the business account - ') + 1),
+         null::text
+    from public.trust_creditor_entries e
+   where public.has_capability('finance.view') and e.party = 'firm'
+     and public.firm_entry_kind(e.reason) = 'drawing'
+     and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id)
+$$;
+
+revoke all on function public.payment_out_reference(text, text) from public, anon;
+revoke all on function public.payments_to_make() from public, anon;
+revoke all on function public.bank_allocation_candidates() from public, anon;
+grant execute on function public.payment_out_reference(text, text) to authenticated;
+grant execute on function public.payments_to_make() to authenticated;
+grant execute on function public.bank_allocation_candidates() to authenticated;
