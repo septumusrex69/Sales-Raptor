@@ -433,7 +433,7 @@ ok('...and keeps no copy of its own',
   const groupRow = thead.slice(0, thead.indexOf('</tr>'))
   const headRow = thead.slice(thead.indexOf('</tr>') + 5)
   const lead = [...groupRow.matchAll(/colSpan=\{(\d+)\}/g)].map((m) => Number(m[1]))
-  const groups = [...groupRow.matchAll(/<GroupHead span=\{(\d+)\}>([^<]+)</g)].map((m) => [m[2], Number(m[1])])
+  const groups = [...groupRow.matchAll(/<GroupHead span=\{(\d+)\}(?: note="[^"]*")?>([^<]+)</g)].map((m) => [m[2], Number(m[1])])
   check('the approval queue: the six column groups, in the order the money is spent',
     groups.map(([n]) => n), ['Payment', 'Interest and fees', 'Capital', 'Commission', 'Final split', 'Review'])
   const cols = (headRow.match(/<th\b/g) ?? []).length + (headRow.match(/<Th\b/g) ?? []).length
