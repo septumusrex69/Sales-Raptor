@@ -51,7 +51,8 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| (this) | **Payover runs read in cycles** (the firm: "this month to process / previous month pending"). `groupRunsByCycle` (`payoverGroups.ts`) groups the queue relative to the open cycle: the cycle that ended the day before it opened is "This month to process", older and unpaid is "Earlier, still pending", one built inside the open cycle is "Built early"; Paid groups by cycle. Each heading has its period, client count and total. `check-payover-groups` (10), `e2e/payover-sends` +3. |
+| (this) | **Check happens before approval** (the firm: "the check should happen before the payment is done"). The queue always ran Check's formulas but only marked rows; Approve all posted them anyway. `splitForBatch` (`paymentsQueue.ts`): a row breaking a formula is held out of both batch buttons (labels and the confirm say how many), and is approved alone from its breakdown once "I have checked these figures" is ticked. Held, not refused. `check-payments-queue` +3, `e2e/payments-in` +5. |
+| `4ab3370` | **Payover runs read in cycles** (the firm: "this month to process / previous month pending"). `groupRunsByCycle` (`payoverGroups.ts`) groups the queue relative to the open cycle: the cycle that ended the day before it opened is "This month to process", older and unpaid is "Earlier, still pending", one built inside the open cycle is "Built early"; Paid groups by cycle. Each heading has its period, client count and total. `check-payover-groups` (10), `e2e/payover-sends` +3. |
 | `22b6902` | **Trust ledger: the firm is ONE row, and every balance opens to its entries** (the firm: "what is this? ... for which payover runs"). `trust_balances` grouped the firm per account (39 rows on staging); now one (R24 055.36, 42 entries). New `trust_entries(party, who)`: date, reason, account, payover run, statement date, running balance (window in SQL; latest 500 carry the earlier total). Each ledger row has a chevron. `check-firm-held` +4, `e2e/workspace-split` +7. |
 | `89a069a` | **Client record → Payovers tab** (the firm: "which clients were paid what ... save in the client folder ... the PDFs"). Every run for the client, newest first, with its stage (`clientPayovers.ts`: a run marked paid by hand is "Paid, waiting for the statement", only a statement line makes it "on the statement"), the reference paid with, and under it every advice actually sent with its stored PDF and schedule. Paid out / still to pay totals. Trust-gated like Account. `check-payover-sends` +5, `e2e/payover-sends` +7. |
 | `971bbe2` | **Every payover advice sent is kept as it went** (the firm: "whatever is paid and what has been sent to a client should always stick there ... you can revise one and then send it again"). New table `payover_run_sends` (select policy only; trigger `payover_run_sends_frozen` refuses update and removal even for the owner) and private bucket `payover-advice` (read and insert policies only, uploads with upsert off). `sendRemittanceAdvice` now: store PDF + xlsx → email → `record_payover_send` (whole advice as jsonb, next version) → mark sent only if approved. Sent and paid runs get **Send again** (a new version beside the old). The run page lists every copy ("Sent to the client"). **Staging's three PO-*-2610 runs were sent before this and have no copy** -- the screen says so. Probed on staging, rolled back. `check-payover-sends` (21), `e2e/payover-sends`. |
@@ -259,8 +260,17 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   them (FK, append-only ledger), so the whole reversal errors. That is the **Reverse** button on
   Trust → Check. Probed with a plain R500 payment, no move involved. Needs a ledger-design fix
   (reversing entries instead of removing the allocation), and the firm's eye on it before it ships.
-- **The firm wants Check moved before approval** ("the check should happen before the payment is
-  done") and will ask for it; nothing built.
+- **Check now happens before approval** (built 8 Oct, §2). A payment breaking a formula is held out
+  of Approve all / Approve selected and approved alone from its breakdown after a "checked" tick.
+  **The hold is in the browser only**: the formulas live in `allocationRules.ts`, not SQL, so
+  `approve_payments` itself does not refuse. Trust → Check stays: it is still where a posted
+  payment is read and reversed. Whether to retire it is the firm's call once reversal moves.
+- **Reversal fix, proposed to the user on 8 Oct, not built:** stop `reallocate_account` deleting
+  allocations; mark them `reversed` (make `payment_allocations_one_per_payment` partial, `where
+  status <> 'reversed'`), write negating `trust_creditor_entries` for each superseded allocation's
+  entries, then replay. Cost: 34 functions and 2 views read `payment_allocations`, 15 already
+  mention `reversed`; the other ~21 need auditing so a superseded row is never counted. Any
+  replay (not only a reversal) hits the same FK today.
 - **A test-data prompt** for another session (two Swordfish clients, all six import files, trust
   statements in and out) was written on 8 Oct; its formats are the importers' own column lists.
 - **The dashboard's R0 (8 Oct) is answered** (§2): staging's company figures now include the R58 300

@@ -23,7 +23,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  batchReconciliation, batchTotals, checkedRow, exceptionsOf, ptcDueToBf, queueFigures, totalsByClient,
+  batchReconciliation, batchTotals, checkedRow, exceptionsOf, ptcDueToBf, queueFigures, splitForBatch, totalsByClient,
 } from '../../src/lib/paymentsQueue.ts'
 import { allocationOf, checkAllocation } from '../../src/lib/allocationRules.ts'
 
@@ -252,6 +252,18 @@ const month = sql.slice(sql.lastIndexOf('create or replace function public.payme
 ok('the processed tiles are summed in the database, behind finance.view',
   /has_capability\('finance\.view'\)/.test(month.slice(0, 1200)) && /reversed_at is null/.test(month.slice(0, 1200)))
 ok('...and not reachable by anon', sql.includes('revoke all on function public.payments_in_month(date, date) from public, anon;'))
+
+/* THE CHECK BEFORE THE APPROVAL (the firm, 8 Oct): a row breaking a formula never rides a batch. */
+const split = splitForBatch([
+  { row: { paymentId: 'ok' }, problems: [] },
+  { row: { paymentId: 'bad' }, problems: [{ rule: 'r', detail: 'd' }] },
+])
+check('a batch carries only rows that add up', JSON.stringify(split), JSON.stringify({ clean: ['ok'], held: ['bad'] }))
+const queuePage = stripTs(read('src/pages/finance/AwaitingApproval.tsx'))
+check('Approve all and Approve selected send the clean ids only',
+  /approve\(batchAll\.clean\)/.test(queuePage) && /approve\(batchPicked\.clean\)/.test(queuePage)
+  && !/approve\(rows\.map\(/.test(queuePage) && !/approve\(\[\.\.\.picked\]\)/.test(queuePage), true)
+check('a held row is approved alone, after the tick', /disabled=\{!checkedIt \|\| busy\}/.test(queuePage), true)
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payments-queue: ${pass} passed, ${failures.length} failed`)

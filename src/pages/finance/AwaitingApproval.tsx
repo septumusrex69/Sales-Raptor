@@ -14,7 +14,7 @@ import {
 } from '../../lib/payover'
 import type { Allocation, Violation } from '../../lib/allocationRules'
 import {
-  batchReconciliation, batchTotals, checkedRow, totalsByClient,
+  batchReconciliation, batchTotals, checkedRow, splitForBatch, totalsByClient,
   type QueueException, type QueueFigures,
 } from '../../lib/paymentsQueue'
 import { cycleStartOn, shortDate } from '../../lib/trustCycles'
@@ -139,13 +139,18 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
    * the screen does not merely draw what the engine said -- it checks it, on every row, every
    * time the list loads, and says so where it does not hold.
    *
-   * THE CHECK DOES NOT STOP THE APPROVAL, and that is deliberate. The money has arrived either
-   * way; a screen that refused to show a receipt it could not reconcile would leave the firm with
-   * nothing to act on. It is marked, named and approvable.
+   * AND THE CHECK COMES BEFORE THE APPROVAL (the firm, 8 Oct: "the check should happen before the
+   * payment is done"). A row that breaks a formula is held out of Approve selected and Approve all
+   * and is approved on its own from its breakdown, by somebody ticking that they checked it. Held,
+   * not refused: the money has arrived either way. See splitForBatch.
    */
   const checked = useMemo(() => rows.map((r) =>
     checkedRow(r, awaitingAllocation(r), handovers.get(r.accountId) ?? null)), [rows, handovers])
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
+  /* What a batch may carry: never a row that breaks a formula. */
+  const batchAll = useMemo(() => splitForBatch(checked), [checked])
+  const batchPicked = useMemo(() => splitForBatch(checked.filter((c) => picked.has(c.row.paymentId))), [checked, picked])
+  const cleanTotal = useMemo(() => rows.filter((r) => batchAll.clean.includes(r.paymentId)).reduce((n, r) => n + r.amount, 0), [rows, batchAll])
   const totals = useMemo(() => batchTotals(rows), [rows])
   const total = totals.total
   useEffect(() => { if (!loading) onLoaded?.(rows.length, total) }, [loading, rows.length, total, onLoaded])
@@ -245,11 +250,14 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
           Nothing has moved yet. These are the figures each one would post if you approve it.
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" disabled={busy || picked.size === 0}
-            onClick={() => void approve([...picked])}
+          <button type="button" disabled={busy || batchPicked.clean.length === 0}
+            onClick={() => void approve(batchPicked.clean)}
             className="text-xs font-medium px-2.5 py-1.5 rounded-md border border-slate-200
               text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
-            Approve selected · {picked.size} · {rand(pickedTotal)}
+            Approve selected · {batchPicked.clean.length} · {rand(batchPicked.held.length > 0
+              ? rows.filter((r) => batchPicked.clean.includes(r.paymentId)).reduce((n, r) => n + r.amount, 0)
+              : pickedTotal)}
+            {batchPicked.held.length > 0 && ` (${batchPicked.held.length} held to check)`}
           </button>
           {/*
             AND THE OTHER WAY OFF THE LIST, beside the one that was there.
@@ -263,11 +271,11 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
               text-slate-600 hover:border-negative-300 hover:bg-negative-50 disabled:opacity-40">
             Reject selected · {picked.size}
           </button>
-          <button type="button" disabled={busy} onClick={() => setConfirmAll(true)}
+          <button type="button" disabled={busy || batchAll.clean.length === 0} onClick={() => setConfirmAll(true)}
             className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-lg
               border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 disabled:opacity-40">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-            Approve all {rows.length} · {rand(total)}
+            Approve all {batchAll.clean.length} · {rand(cleanTotal)}
           </button>
         </div>
       </div>
@@ -292,7 +300,8 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
           <p className="flex items-center gap-1.5 font-medium">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             {broken.length === 1 ? 'One payment does not' : `${broken.length} payments do not`} obey
-            the allocation formulas. Nothing is blocked — check these before approving.
+            the allocation formulas. {broken.length === 1 ? 'It is' : 'They are'} held out of
+            Approve all: open each one, check it, and approve it on its own.
           </p>
           <ul className="mt-1 ml-5 list-disc space-y-0.5">
             {broken.slice(0, 4).map((c) => (
@@ -459,13 +468,15 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
       )}
 
       {open && (
-        <Breakdown row={open.row} a={open.a} f={open.f} problems={open.problems}
-          exceptions={open.exceptions} onClose={() => setOpened(null)} />
+        <Breakdown key={open.row.paymentId} row={open.row} a={open.a} f={open.f} problems={open.problems}
+          exceptions={open.exceptions} onClose={() => setOpened(null)}
+          busy={busy} onApprove={async () => { await approve([open.row.paymentId]); setOpened(null) }} />
       )}
       {confirmAll && (
-        <ApproveAllModal count={rows.length} total={total} trust={totals.direct} ptc={totals.ptc}
+        <ApproveAllModal count={batchAll.clean.length} total={cleanTotal} trust={totals.direct} ptc={totals.ptc}
+          held={batchAll.held.length}
           busy={busy} onClose={() => setConfirmAll(false)}
-          onConfirm={async () => { await approve(rows.map((r) => r.paymentId)); setConfirmAll(false) }} />
+          onConfirm={async () => { await approve(batchAll.clean); setConfirmAll(false) }} />
       )}
       {moving && (
         <MoveAccountModal
@@ -676,21 +687,27 @@ function Figure({ label, value, note, emph, wide }: { label: string; value: stri
 /* ---------------------------------------------------------------- approve all */
 
 /** "ALL" IS THE WHOLE QUEUE, said before it is pressed -- including the rows on other pages. */
-function ApproveAllModal({ count, total, trust, ptc, busy, onClose, onConfirm }: {
-  count: number; total: number
+function ApproveAllModal({ count, total, trust, ptc, held, busy, onClose, onConfirm }: {
+  count: number; total: number; held: number
   trust: { count: number; amount: number }; ptc: { count: number; amount: number }
   busy: boolean; onClose: () => void; onConfirm: () => Promise<void>
 }) {
   return (
     <Modal title={`Approve all ${count} payments`} subtitle={rand(total)} onClose={onClose} width={460}>
       <p className="text-sm text-slate-600">
-        Every payment in the queue, not only the ones on this page: {trust.count} into trust
-        ({rand(trust.amount)}) and {ptc.count} paid to clients directly ({rand(ptc.amount)}).
+        Every payment in the queue that adds up, not only the ones on this page
+        {held === 0 ? `: ${trust.count} into trust (${rand(trust.amount)}) and ${ptc.count} paid to clients directly (${rand(ptc.amount)}).` : '.'}
       </p>
       <p className="text-[12px] text-slate-400 mt-2">
         Each is split as shown and posted. A payment that cannot go through is named and the rest
         still are.
       </p>
+      {held > 0 && (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" data-testid="held-note">
+          {held === 1 ? 'One payment that does not' : `${held} payments that do not`} obey the formulas
+          {held === 1 ? ' is' : ' are'} left out. Open {held === 1 ? 'it' : 'each'} and approve it on its own once checked.
+        </p>
+      )}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose}
           className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600">Cancel</button>
@@ -719,10 +736,12 @@ function ApproveAllModal({ count, total, trust, ptc, busy, onClose, onConfirm }:
  * items 1-7 cap is NOT reported per payment by the engine, and the drawer says that rather than
  * calling the payment within the limit.
  */
-function Breakdown({ row: r, a, f, problems, exceptions, onClose }: {
+function Breakdown({ row: r, a, f, problems, exceptions, onClose, busy, onApprove }: {
   row: AwaitingPayment; a: Allocation; f: QueueFigures; problems: Violation[]
   exceptions: QueueException[]; onClose: () => void
+  busy: boolean; onApprove: () => Promise<void>
 }) {
+  const [checkedIt, setCheckedIt] = useState(false)
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', k)
@@ -870,6 +889,18 @@ function Breakdown({ row: r, a, f, problems, exceptions, onClose }: {
                     <span className="tabular-nums text-slate-600">{v.detail}</span></li>
                 ))}
               </ul>
+              {/* THE CHECK, BEFORE THE MONEY MOVES: held out of every batch, approved only here. */}
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3" data-testid="approve-checked">
+                <label className="flex items-start gap-2 text-[12.5px] text-amber-900">
+                  <input type="checkbox" checked={checkedIt} onChange={(e) => setCheckedIt(e.target.checked)} className="mt-0.5" />
+                  I have checked these figures and this payment is right to post as shown.
+                </label>
+                <button type="button" disabled={!checkedIt || busy} onClick={() => void onApprove()}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-gold-500 bg-gold-400 px-3 py-1.5 text-[12.5px] font-medium text-navy-950 hover:bg-gold-500 disabled:opacity-40">
+                  {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                  Approve this payment
+                </button>
+              </div>
             </Section>
           )}
         </div>

@@ -58,6 +58,11 @@ const LOWVELD = ROW({
   rf_total: 230, fees_total: 28.75, costs_before: 28.75, costs_after: 0, commission_rate: 0.2,
 })
 
+/* FIGURES THAT DO NOT ADD UP: capital R1 250 less R1 250 taken is not R100 left. */
+const BROKEN = { ...LOWVELD, payment_id: 'broken', account_id: 'acct-b', case_number: 'RAP-200009',
+  debtor: 'Sipho Broken', capital_after: 100 }
+let queue = [NANDI, NANDI_PTC, LOWVELD]
+
 const POSTED = {
   payment_id: 'pay-7', allocation_id: 'alloc-7', account_id: 'acct-7',
   case_number: 'RAP-123856', account_number: 'RRC00007', debtor: 'Lebo Swakamisa', client: 'Rinda Roo Company',
@@ -83,7 +88,7 @@ const handlers = [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rest\/v1\/firm_settings/.test(u), () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
   [(u) => /\/rest\/v1\/debtor_accounts/.test(u), () => ({ body: [] })],
-  [(u) => /\/rpc\/payments_awaiting_approval/.test(u), () => ({ body: [NANDI, NANDI_PTC, LOWVELD] })],
+  [(u) => /\/rpc\/payments_awaiting_approval/.test(u), () => ({ body: queue })],
   [(u) => /\/rpc\/payments_in_month/.test(u),
     () => ({ body: [{ trust_count: 12, trust_amount: 34500, ptc_count: 2, ptc_amount: 1800 }] })],
   [(u) => /\/rpc\/approve_payments/.test(u), (_u, req) => {
@@ -192,6 +197,30 @@ try {
   t.ok('...and the one that failed is named', /2 approved, 1 could not be: RAP-200003/.test(await page.getByTestId('queue-error').innerText()))
   t.check('...once', sent.filter((s) => s.approve).length, 1)
   await t.shot(page, 'payments-in')
+
+  /* ---- THE CHECK COMES BEFORE THE APPROVAL (the firm, 8 Oct) ---- */
+  queue = [NANDI, BROKEN]
+  sent.length = 0
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await rows.first().waitFor({ timeout: 15000 })
+  t.ok('a payment that breaks a formula is held out of Approve all', await page.getByRole('button', { name: /^Approve all 1 / }).isVisible().catch(() => false))
+  await page.getByRole('button', { name: /^Approve all 1 / }).click()
+  t.ok('...and the confirmation says so', /One payment that does not obey the formulas is left out/.test(await page.getByTestId('held-note').innerText().catch(() => '')))
+  await page.getByRole('dialog').getByRole('button', { name: /^Approve all 1$/ }).click()
+    .catch(async () => { await page.getByRole('button', { name: /^Approve all 1$/ }).click() })
+  await page.waitForTimeout(500)
+  t.check('...so the batch sends only the payment that adds up',
+    JSON.stringify(sent.find((x) => x.approve)?.approve), JSON.stringify({ p_payments: ['nandi'] }))
+  sent.length = 0
+  await page.getByText('Sipho Broken').first().click()
+  const gate = page.getByTestId('approve-checked')
+  await gate.waitFor({ timeout: 5000 }).catch(() => {})
+  const one = gate.getByRole('button', { name: 'Approve this payment' })
+  t.ok('it is approved on its own, from its breakdown, only once ticked as checked', await one.isDisabled().catch(() => false))
+  await gate.getByRole('checkbox').check()
+  await one.click()
+  await page.waitForTimeout(500)
+  t.check('...and then goes through alone', JSON.stringify(sent.find((x) => x.approve)?.approve), JSON.stringify({ p_payments: ['broken'] }))
 
   /* ---- reverse, on Check ---- */
   await page.goto(`http://127.0.0.1:${PORT}/trust/check`, { waitUntil: 'domcontentloaded' })

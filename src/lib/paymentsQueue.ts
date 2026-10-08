@@ -326,3 +326,24 @@ export function totalsByClient(rows: QueueInput[]): ClientTotals[] {
     .map(([client, rs]) => ({ client, ...batchTotals(rs) }))
     .sort((a, b) => b.total - a.total)
 }
+
+/**
+ * THE CHECK HAPPENS BEFORE THE APPROVAL, NOT AFTER IT.
+ *
+ * The firm, 8 Oct: "the check should happen before the payment is done." The queue always ran the
+ * same formulas as Check, but only to MARK a row -- Approve all posted a payment that broke one
+ * along with everything else, and the first time anybody looked properly was on Check, after the
+ * money had moved. Now a payment whose figures break a formula is HELD OUT of every batch approval
+ * and can be approved only on its own, from its breakdown, by somebody saying they checked it.
+ *
+ * HELD, NOT REFUSED. The money has arrived either way; a payment nobody could approve would sit in
+ * the queue for ever with the client never paid. One deliberate press, after reading it, is the
+ * check -- the batch is what can no longer carry it through unread.
+ */
+export function splitForBatch<T extends { row: { paymentId: string }; problems: Violation[] }>(
+  items: T[],
+): { clean: string[]; held: string[] } {
+  const clean: string[] = []; const held: string[] = []
+  for (const c of items) (c.problems.length > 0 ? held : clean).push(c.row.paymentId)
+  return { clean, held }
+}
