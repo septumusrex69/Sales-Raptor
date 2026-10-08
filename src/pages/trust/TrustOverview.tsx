@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import {
-  fetchFirmHeld, fetchTrustCycles, fetchTrustPosition, fetchUnreconciledPayouts,
+  fetchFirmHeld, fetchOverpaymentsKept, fetchTrustCycles, fetchTrustPosition, fetchUnreconciledPayouts,
   type TrustCycle, type TrustPosition, type UnreconciledPayout,
 } from '../../lib/trust'
 import {
@@ -54,6 +54,7 @@ export function TrustOverview() {
   const [cycles, setCycles] = useState<TrustCycle[]>([])
   const [payouts, setPayouts] = useState<UnreconciledPayout[]>([])
   const [firmHeld, setFirmHeld] = useState<FirmHeld | null>(null)
+  const [kept, setKept] = useState<{ amount: number; accounts: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -64,8 +65,10 @@ export function TrustOverview() {
       /* THE SPLIT IS AN EXPLANATION, NOT THE RECONCILIATION: if it cannot be read, the rest of the
          page still answers "does it balance?" and the split is simply not drawn. */
       fetchFirmHeld().catch(() => null),
+      /* Same: a split of the debtors' line, never needed for the arithmetic. */
+      fetchOverpaymentsKept().catch(() => null),
     ])
-      .then(([p, u, c, f]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f) } })
+      .then(([p, u, c, f, k]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -203,8 +206,19 @@ export function TrustOverview() {
             */}
             <Owner who="Clients" what="Awaiting client payover" amount={position.owedToClients} lead />
             <Owner who="Bredell Ferreira" what="Earned and still held in trust" amount={position.owedToFirm} />
-            <Owner who="Debtors" what="Overpayments / refunds outstanding" amount={position.owedToDebtors} />
+            {/*
+              OVERPAYMENTS KEPT ARE PART OF THE DEBTORS' MONEY, drawn apart (the firm, 8 Oct: "under
+              the suspense account ... just to say overpayments kept"). Taken out of the debtors'
+              line by the same amount, so the total accounted for does not move.
+            */}
+            <Owner who="Debtors" what="Overpayments / refunds outstanding"
+              amount={position.owedToDebtors - (kept?.amount ?? 0)} />
             <Owner who="Unallocated receipts" what="Owner not yet identified" amount={position.unidentified} />
+            {kept && kept.amount > 0 && (
+              <Owner who="Overpayments kept"
+                what={`Too small to refund; the debtor's until taken (${kept.accounts} ${kept.accounts === 1 ? 'account' : 'accounts'})`}
+                amount={kept.amount} />
+            )}
             {/*
               THE OTHER DIRECTION, ONLY WHEN THERE IS ONE. A client in debit to the trust (a debtor
               paid them direct, so the firm's fees on it are owed back) reduces what is accounted

@@ -55,6 +55,17 @@ export async function fetchFirmHeld(): Promise<FirmHeld | null> {
   return row ? toFirmHeld(row) : null
 }
 
+/**
+ * OVERPAYMENTS KEPT: parked, and not yet taken by the firm (overpayments_kept). Still the debtors'
+ * money, so it is a PART of owedToDebtors, drawn as its own line. Null where the function refused.
+ */
+export async function fetchOverpaymentsKept(): Promise<{ amount: number; accounts: number } | null> {
+  const { data, error } = await supabase.rpc('overpayments_kept')
+  if (error) throw new Error(error.message)
+  const row = (data as Record<string, unknown>[] | null)?.[0]
+  return row ? { amount: Number(row.amount ?? 0), accounts: Number(row.accounts ?? 0) } : null
+}
+
 export async function fetchTrustPosition(): Promise<TrustPosition | null> {
   const { data, error } = await supabase.rpc('trust_position')
   if (error) throw new Error(error.message)

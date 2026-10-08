@@ -102,6 +102,19 @@ ok('the overview draws the split', /<FirmHeldCard held=\{firmHeld\} owedToFirm=\
 ok('...and says so when it does not tie to the firm\'s row', /\{!ties && \(/.test(page))
 ok('...and a failed read leaves the rest of the page standing', /fetchFirmHeld\(\)\.catch\(\(\) => null\)/.test(page))
 
+/* ---- overpayments kept (the firm, 8 Oct: "just to say overpayments kept") ---- */
+const kept = liveFn('overpayments_kept')
+ok('overpayments kept are the parked ones', /a\.excess_disposal = 'parked'/.test(kept))
+ok('...not reversed', /a\.status <> 'reversed'/.test(kept))
+ok('...and not yet taken by the firm (one given back counts again)', /a\.excess_taken_at is null/.test(kept))
+ok('...behind the trust tick, as no row rather than nought', /having public\.has_capability\('finance\.view'\)/.test(kept))
+ok('...revoked from public and anon', sql.includes('revoke all on function public.overpayments_kept() from public, anon;'))
+ok('the overview takes them out of the debtors\' line', /amount=\{position\.owedToDebtors - \(kept\?\.amount \?\? 0\)\}/.test(page))
+ok('...and draws them as their own line, under unallocated receipts',
+  page.indexOf('who="Unallocated receipts"') > 0 && page.indexOf('who="Overpayments kept"') > page.indexOf('who="Unallocated receipts"'))
+ok('...while the total accounted for is still the debtors\' whole balance',
+  /const accounted = r2\(position\.owedToClients \+ position\.owedToFirm \+ position\.owedToDebtors/.test(page))
+
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-firm-held: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length > 0 ? 1 : 0)

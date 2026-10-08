@@ -31436,3 +31436,27 @@ revoke all on function public.bank_allocation_candidates() from public, anon;
 grant execute on function public.payment_out_reference(text, text) to authenticated;
 grant execute on function public.payments_to_make() to authenticated;
 grant execute on function public.bank_allocation_candidates() to authenticated;
+
+-- OVERPAYMENTS KEPT: THE PARKED ONES, ON THE OVERVIEW AS THEIR OWN LINE. The firm, 8 Oct: "if the
+-- payment is left, for example, because it's too small to refund ... that account should live under
+-- the suspense account on ... the overview as well, just to say overpayments kept". Parked writes
+-- nothing to the ledger -- the credit is still the debtor's -- so this is the part of the debtors'
+-- balance that is parked and not yet taken by the firm (a credit given back counts again: return
+-- clears excess_taken_at). The overview takes it OUT of the debtors line, so the total is unchanged.
+create or replace function public.overpayments_kept()
+returns table(amount numeric, accounts integer)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select coalesce(sum(a.excess_credit), 0), count(distinct a.account_id)::integer
+    from public.payment_allocations a
+   where a.excess_disposal = 'parked'
+     and a.status <> 'reversed'
+     and a.excess_taken_at is null
+  having public.has_capability('finance.view')
+$$;
+
+revoke all on function public.overpayments_kept() from public, anon;
+grant execute on function public.overpayments_kept() to authenticated;

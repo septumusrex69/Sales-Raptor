@@ -143,6 +143,8 @@ function handlersFor(profile) {
       () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
     [(u) => /\/rpc\/firm_held_parts/.test(u), () => ({ body: [FIRM_HELD] })],
+    /* R100 of the debtors' R410.63 is parked: drawn as its own line, out of the debtors' line. */
+    [(u) => /\/rpc\/overpayments_kept/.test(u), () => ({ body: [{ amount: 100, accounts: 1 }] })],
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
     [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
     [(u) => /\/rpc\/trust_by_cycle/.test(u), () => ({ body: CYCLES })],
@@ -244,6 +246,11 @@ try {
       t.ok(`...and ${owner.toLowerCase()} is one of the answers`, body.includes(owner))
     }
     t.ok('...summing to a total accounted for', /Total accounted for/i.test(body))
+    /* THE FIRM, 8 Oct: overpayments kept "under the suspense account ... just to say overpayments
+       kept". A split of the debtors' money, so the total accounted for does not move. */
+    t.ok('overpayments kept have their own line', /Overpayments kept[\s\S]{0,120}R[\s\u00a0]100\.00/.test(body))
+    t.ok('...taken out of the debtors\' line', /Overpayments \/ refunds outstanding[\s\S]{0,40}R[\s\u00a0]310\.63/.test(body))
+    t.ok('...and the total is unchanged', /TOTAL ACCOUNTED FOR[\s\S]{0,40}R[\s\u00a0]7[\s\u00a0]873\.60/i.test(body))
 
     /* ---- the firm's share, by what it is: "BF funds held: Commission + Fees + VAT" ---- */
     const held = page.getByTestId('firm-held')

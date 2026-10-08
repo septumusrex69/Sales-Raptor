@@ -51,7 +51,11 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| (this) | **An overpayment can be decided, and once decided it leaves Exceptions** (the firm, 8 Oct: "I don't know how to fix anything ... there's no option"). `finance_exceptions` only ever left out `with_client`, so a refund/move/release/park stayed listed with "Decide it" (staging: RAP-124059 had been refunded and was still there) while `payover_run_blockers` had already let the run go. Now `excess_disposal IS NULL`, the blocker's own rule. And "move it to another of their accounts" asked for "the account's id"; it now lists the debtor's other OPEN accounts by identity number (`fetchMoveTargets`), or says there are none. All three disposals proved on staging in a rolled-back probe. `check-payments-queue` 78, new `e2e/excess-credit` (10). |
+| (this) | **Overpayments kept: their own line on the Trust overview** (the firm: "under the suspense account ... just to say overpayments kept"). `overpayments_kept()` = parked, not reversed, not taken by the firm (a credit given back counts again); the overview draws it under Unallocated receipts and takes it out of the Debtors line, so "Total accounted for" does not move. Staging: R490.42 kept of the debtors' R980.84 (the rest is Sizwe Dlamini's refund still due). `check-firm-held` +8, `e2e/workspace-split` +3. |
+| `7083ef6` | **Payments to make, each with its reference.** Reference = `'BF ' + run number` (BF PO-LVM-2610) or `'BF ' + case number` for a refund (BF RAP-124059), in `payment_out_reference` (SQL) and `paymentReference` (TS), held together by `check-payments-out`. `payments_to_make()` lists approved/sent runs (due the 11th, lag after the cycle) and refunds not paid/cancelled; Trust → **Payments to make** (new rail item, 7 now) totals them and copies a reference. A payment leaves the list only when its statement debit is allocated to it. `bank_allocation_candidates` returns the reference (dropped/recreated), and a debit carrying a reference AND the exact amount is suggested even when two payments are the same amount. The run page and the client's advice say which reference it is paid on; Mark paid starts from it. Fixed on the way: the top bar on that page said "Payments in". |
+| `c31af26` | **"Move to another account" moves the money.** It used to note the target and do nothing. Now: a negative debtor entry takes the credit off the first account, and an approved `account_payments` row (source `'moved'`, `moved_from_allocation_id`) on the second is split there by the engine. **No second receipt fee** (the firm's ruling, 8 Oct). Not counted twice: `collector_performance`, `collector_daily`, `payments_in_month`, `client_book_totals` leave `'moved'` out (`account_settlement` keeps it). `reverse_payment` refuses a payment whose overpayment moved. Probed: R769.35 moved, trust total unchanged, fee nil. `check-moved-overpayment` (17). |
+| `97531c1` | **A released overpayment and a set-off charge each get a line** on the run page and the client's advice (PDF section "Overpayments paid over to you in full — no commission", .xlsx, workings). Both were already in `net_payover` and on no line, so the advice did not add up (Baobab: lines R9 209.11 vs R9 699.53 paid). `payover_run_payments` returns `excess_disposal` (dropped/recreated). `check-remittance-advice` +8. |
+| `7f45fcb` | **An overpayment can be decided, and once decided it leaves Exceptions** (the firm, 8 Oct: "I don't know how to fix anything ... there's no option"). `finance_exceptions` only ever left out `with_client`, so a refund/move/release/park stayed listed with "Decide it" (staging: RAP-124059 had been refunded and was still there) while `payover_run_blockers` had already let the run go. Now `excess_disposal IS NULL`, the blocker's own rule. And "move it to another of their accounts" asked for "the account's id"; it now lists the debtor's other OPEN accounts by identity number (`fetchMoveTargets`), or says there are none. All three disposals proved on staging in a rolled-back probe. `check-payments-queue` 78, new `e2e/excess-credit` (10). |
 | `cc308ea` | **An imported account goes to its Swordfish clerk; unknown clerks are flagged; money no desk held is the firm's** (the firm, 8 Oct). The import matches "Assigned To" to an ACTIVE user on the whole name (`clerkKey`: case and spaces ignored, never a first name alone) and sets `assigned_to` and the diary owner; unknown and inactive names are PROBLEMS counted per name ("3 accounts are with 2 Swordfish clerks who are not a Raptor user: ..."), people on actions who are not users a note, their history kept under their name. `record_account_desk_change` dates an imported account WITH a clerk from its handover date (SAST), so the month's receipts are theirs. `collector_performance` gains one no-user row of money no desk held; `splitUncredited` keeps it out of every person and `useCollectionsMonth` adds it to the FIRM's figures only (not a team's), and the hero says "Includes R x not on anybody's desk". `check-import-clerks` (36), `e2e/performance` (102). |
 | `c904e61` | **"Current month", not "Current Sales Month"** (the firm: "it's not a sales month ... just current month"). Every option in `SalesMonthPicker` and `PeriodFilter`, the arrows' names, a span's label ("Last 3 months") and the Communications export. The period is unchanged (11th to 10th). The sales dashboard's own "Last Six Sales Months" card is about sales and stays. `check-company-dashboard` holds it. |
 | `6e78ea3` | **Folded, the widen button stays at the bottom** (the firm: "the narrow option is at the bottom, but then it moves to the top. Keep it at the bottom"). It now sits under the door, where Narrow is on the open menu; the workspace's name stays on top as a plain label. `check-workspace-split` and `e2e/workspace-split` hold the position; the old layout fails both. |
@@ -237,6 +241,16 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
     staging over HTTP was refused by the safety check and removed — use the Supabase tools.
   - Once `Main` deploys, the daily workflow run and 5-minute mail sync act on production data, and
     `CRON_SECRET` was marked "rotate before real client traffic".
+- **FOUND, NOT FIXED: reversing an approved payment fails on staging** unless it is already on an
+  issued run. `reverse_payment` → `reverse_payment_allocation` → `reallocate_account` removes the
+  account's un-invoiced allocations, and `trust_creditor_entries.allocation_id` still references
+  them (FK, append-only ledger), so the whole reversal errors. That is the **Reverse** button on
+  Trust → Check. Probed with a plain R500 payment, no move involved. Needs a ledger-design fix
+  (reversing entries instead of removing the allocation), and the firm's eye on it before it ships.
+- **The firm wants Check moved before approval** ("the check should happen before the payment is
+  done") and will ask for it; nothing built.
+- **A test-data prompt** for another session (two Swordfish clients, all six import files, trust
+  statements in and out) was written on 8 Oct; its formats are the importers' own column lists.
 - **The dashboard's R0 (8 Oct) is answered** (§2): staging's company figures now include the R58 300
   no desk held. **The accounts already imported on staging were NOT re-assigned** -- they went in
   before the rule; re-run the import (or assign them) to see clerks credited. Of the 20 Swordfish
@@ -244,9 +258,12 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   Masalesa"); the rest need adding as users first.
 - **Not built: assigning an account LATER when its clerk is added as a user afterwards.** Today a
   leader does it by hand; the name is on the account (`swordfish_assigned_to`) to do it from.
-- **Fourth session, staging only:** `business_income` (new `bank_interest` column),
-  `firm_held_parts()`, `record_account_desk_change` (imported accounts from handover) and
-  `collector_performance` (the no-user row) -- the last four blocks of `schema.sql`.
+- **Fourth session, staging only** (all at the end of `schema.sql`): `business_income` (bank_interest),
+  `firm_held_parts`, `record_account_desk_change`, `collector_performance` (no-user row, then 'moved'
+  left out), the `finance_exceptions` view, `payover_run_payments` (excess_disposal),
+  `account_payments.moved_from_allocation_id` + `allocate_payment`, `reverse_payment`,
+  `dispose_excess_credit`, `collector_daily`, `payments_in_month`, `client_book_totals`,
+  `payment_out_reference`, `payments_to_make`, `bank_allocation_candidates`, `overpayments_kept`.
 - **Prompts 10–12 are on staging only:** `client_needs_mandate` + the `handovers_need_a_mandate`
   trigger; `debtor_accounts.default_date`; the five allocation columns on `bank_statement_lines`,
   `allocate_bank_line`, `bank_lines_to_allocate`, `bank_allocation_candidates`, and new versions of
