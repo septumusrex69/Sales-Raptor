@@ -52,6 +52,7 @@ import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
 import { canBeClientLiaison, canEditOwned, canViewTrust } from '../../lib/permissions'
 import { ClientAccountPanel } from '../../components/companies/ClientAccountPanel'
+import { ClientPayoversPanel } from '../../components/companies/ClientPayoversPanel'
 import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
@@ -63,7 +64,7 @@ import { supabase } from '../../lib/supabase'
  * statement -- which is payovers, commission taken off them and what the client is invoiced --
  * cannot simply sit in the Overview's scroll.
  */
-type ClientTab = 'Overview' | 'Account' | 'Emails' | 'Notes' | 'Tasks'
+type ClientTab = 'Overview' | 'Account' | 'Payovers' | 'Emails' | 'Notes' | 'Tasks'
 
 export function CompanyDetail() {
   const focusedEmailId = useFocusedEmailId()
@@ -805,6 +806,8 @@ export function CompanyDetail() {
              the commission that came off it. Hidden rather than refusing, like every other
              money screen -- the tab is a courtesy and canViewTrust is the rule. */
           ...(canViewTrust(currentUser) ? [{ id: 'Account' as const, label: 'Account' }] : []),
+          /* The client's payover folder: every run and the copies that were sent (the firm, 8 Oct). */
+          ...(canViewTrust(currentUser) ? [{ id: 'Payovers' as const, label: 'Payovers' }] : []),
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
           { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
@@ -819,6 +822,9 @@ export function CompanyDetail() {
 
       {tab === 'Account' && company && (
         <ClientAccountPanel companyId={company.id} />
+      )}
+      {tab === 'Payovers' && company && (
+        <ClientPayoversPanel companyId={company.id} />
       )}
 
       {tab === 'Overview' && (

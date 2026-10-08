@@ -13,6 +13,8 @@
  *   3. THE ORDER: copies stored, then the email, then the record, then the status. A record with no
  *      copy behind it, or a record of an email that never went, is the failure this prevents.
  *   4. SENDING AGAIN IS A NEW VERSION: the next number, and a sent or paid run keeps its status.
+ *   5. THE CLIENT'S FOLDER: a run marked paid by hand is waiting for the statement, not done, and
+ *      only paid runs count as paid out.
  *
  * Proved on staging in a rolled-back probe: two sends gave versions 1 and 2; an update was refused
  * with "kept exactly as it was sent"; a send with no PDF path was refused.
@@ -21,6 +23,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { adviceCopyPaths } from '../../src/lib/remittanceAdvice.ts'
+import { payoverStage, payoverTotals } from '../../src/lib/clientPayovers.ts'
 
 let pass = 0
 const failures = []
@@ -80,6 +83,19 @@ ok('only an approved run is moved to sent', /if \(run\.status === 'approved'\) a
 const detail = strip(read('src/pages/finance/RunDetail.tsx'))
 ok('a sent or paid run offers Send again', /\(run\.status === 'sent' \|\| run\.status === 'paid'\) && \([\s\S]{0,400}Send again/.test(detail))
 ok('the run shows what went', /<SentCopies sends=\{sends\}/.test(detail) && /fetchAdviceSends\(\{ runId: id \}\)/.test(detail))
+
+/* ---- 5. the client's folder ---- */
+const run = (status, statementDate = null) => ({ id: 'r', invoiceNumber: 'PO-X', status, periodStart: '2026-08-11',
+  periodEnd: '2026-09-10', netPayover: 100, paidAt: null, eftReference: null, statementDate })
+check('paid by hand is not done', payoverStage(run('paid')), { label: 'Paid, waiting for the statement', tone: 'todo' })
+check('...on the statement is', payoverStage(run('paid', '2026-09-16')), { label: 'Paid, on the statement 16 Sep 2026', tone: 'done' })
+check('sent is still owed', payoverStage(run('sent')).label, 'Advice sent, not paid yet')
+check('paid out counts paid runs; still to pay counts approved and sent; review and void count nowhere',
+  payoverTotals([run('paid'), run('paid', '2026-09-16'), run('sent'), run('approved'), run('ready'), run('void')]), { paid: 200, owed: 200 })
+const company = strip(read('src/pages/companies/CompanyDetail.tsx'))
+ok('the client record has a Payovers tab, for who may see trust only',
+  /canViewTrust\(currentUser\) \? \[\{ id: 'Payovers' as const, label: 'Payovers' \}\] : \[\]/.test(company)
+  && /<ClientPayoversPanel companyId=\{company\.id\} \/>/.test(company))
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payover-sends: ${pass} passed, ${failures.length} failed`)

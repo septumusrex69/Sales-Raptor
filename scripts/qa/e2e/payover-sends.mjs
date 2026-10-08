@@ -29,9 +29,22 @@ const SENDS = [
     subject: 'Remittance advice', net_payover: 8275, pdf_path: 'c2/PO-BPM-2610/a.pdf', xlsx_path: 'c2/PO-BPM-2610/a.xlsx' },
 ]
 let sends = SENDS
+/* Three stages: on the statement, paid by hand and not yet on it, and still owed. */
+const CLIENT_RUNS = [
+  { id: 'run-2', invoice_number: 'PO-BPM-2611', status: 'sent', period_start: '2026-09-11', period_end: '2026-10-10',
+    net_payover: 1200, paid_at: null, eft_reference: null },
+  { id: 'run-1', invoice_number: 'PO-BPM-2610', status: 'paid', period_start: '2026-08-11', period_end: '2026-09-10',
+    net_payover: 8275, paid_at: '2026-10-08T10:00:00Z', eft_reference: 'BF PO-BPM-2610' },
+  { id: 'run-0', invoice_number: 'PO-BPM-2609', status: 'paid', period_start: '2026-07-11', period_end: '2026-08-10',
+    net_payover: 500, paid_at: '2026-09-15T10:00:00Z', eft_reference: 'BF PO-BPM-2609' },
+]
 const handlers = [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
+  /* The client's list asks by company; the run page asks for one. */
+  [(u) => /\/rest\/v1\/payover_runs\?.*company_id=eq/.test(u), () => ({ body: CLIENT_RUNS })],
   [(u) => /\/rest\/v1\/payover_runs\?/.test(u), () => ({ body: RUN })],
+  [(u) => /\/rest\/v1\/bank_statement_lines\?/.test(u), () => ({ body: [{ payover_run_id: 'run-0', txn_date: '2026-09-16' }] })],
+  [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [{ id: 'c2', name: 'Baobab Property Managers (Pty) Ltd', owner_id: ADMIN.id }] })],
   [(u) => /\/rest\/v1\/payover_run_sends\?/.test(u), () => ({ body: sends })],
   [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
@@ -61,7 +74,25 @@ try {
     && (await page.getByText(/What was sent before is kept as it was/).count()) > 0)
   await page.getByRole('button', { name: 'Cancel' }).click()
 
+  /* ---- THE CLIENT'S FOLDER: every run, where it has got to, and what was sent ---- */
+  await page.goto(`http://127.0.0.1:${PORT}/companies/c2`, { waitUntil: 'domcontentloaded' })
+  const tab = page.getByRole('button', { name: 'Payovers', exact: true })
+  await tab.waitFor({ timeout: 15000 })
+  await tab.click()
+  const runsOn = page.getByTestId('client-payover')
+  await runsOn.first().waitFor({ timeout: 15000 })
+  t.check('the client lists every run', await runsOn.count(), 3)
+  const folder = (await page.locator('main').innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.ok('a run paid by hand is waiting for the statement', /PO-BPM-2610[\s\S]*Paid, waiting for the statement/.test(folder))
+  t.ok('...one on the statement says when', /Paid, on the statement 16 Sep 2026/.test(folder))
+  t.ok('...a sent one is still owed', /Advice sent, not paid yet/.test(folder))
+  t.ok('...with what it was paid with', folder.includes('reference BF PO-BPM-2610'))
+  t.ok('the copies sent sit under their run', (await runsOn.filter({ hasText: 'PO-BPM-2610' }).getByRole('button', { name: 'Statement (PDF)' }).count()) === 2)
+  t.ok('paid out and still to pay are added up', /Paid out R 8 775\.00/.test(folder) && /Still to pay R 1 200\.00/.test(folder))
+  await t.shot(page, 'client-payovers')
+
   sends = []
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-1`, { waitUntil: 'domcontentloaded' })
   await page.reload({ waitUntil: 'domcontentloaded' })
   const none = page.getByTestId('no-sent-copy')
   await none.waitFor({ timeout: 15000 }).catch(() => {})
