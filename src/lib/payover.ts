@@ -420,6 +420,26 @@ export async function approveRun(runId: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+/**
+ * APPROVED BEFORE THE CYCLE CLOSES, WITH THE REASON (the firm, 8 Oct: a large PTC where the client
+ * owes the firm and the advice is needed now -- "there should be a good reason"). The reason and
+ * who gave it are kept on the run; a payment processed later in the cycle goes to the next run.
+ */
+export async function approveRunEarly(runId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('approve_payover_run_early', { p_run: runId, p_reason: reason })
+  if (error) throw new Error(error.message)
+}
+
+/** Today in Johannesburg, which is the date the database closes a cycle on. */
+export function todaySast(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+}
+
+/** The cycle has not ended yet, so approving now needs a reason. */
+export function cycleStillOpen(periodEnd: string, today: string = todaySast()): boolean {
+  return periodEnd >= today
+}
+
 export async function markRunSent(runId: string): Promise<void> {
   const { error } = await supabase.rpc('mark_payover_run_sent', { p_run: runId })
   if (error) throw new Error(error.message)

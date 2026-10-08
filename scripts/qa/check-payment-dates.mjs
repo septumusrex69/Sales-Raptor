@@ -124,7 +124,7 @@ ok('...and re-reads the plan when it changes',
 
 const build = fn('build_payover_run')
 ok('the run function was found', build.length > 2000)
-ok('a run claims on the allocation date', /and p\.allocated_on >= p_period_start/.test(build))
+ok('a run claims on the allocation date', /and \(p\.allocated_on >= p_period_start/.test(build))
 ok('...bounded by the cycle it is for', /and p\.allocated_on <= v_end/.test(build))
 /*
  * AND NOT ON created_at ANY MORE. Left in beside the new clause it would be an AND that quietly

@@ -201,7 +201,7 @@ check('...which it does exactly once, in that one function',
  * should be running in the payment run."
  */
 ok('a run claims a cycle by the date the payment was allocated',
-  /and p\.allocated_on >= p_period_start\s*\n\s*and p\.allocated_on <= v_end/.test(build ?? ''))
+  /and p\.allocated_on <= v_end\s*\n\s*and \(p\.allocated_on >= p_period_start/.test(build ?? ''))
 no('...not by the date somebody typed on it',
   /received_at >= p_period_start/.test(build ?? ''))
 no('...and not by when the row happened to be written',
@@ -266,8 +266,17 @@ ok('...never touching an approved, sent, paid or voided run',
   /and not public\.payover_run_is_open\(status\)\) then\s+continue;/.test(refresh))
 ok('...and is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(refresh))
 const approveRun = liveBody('approve_payover_run') ?? ''
-ok('a run cannot be approved before its cycle has closed, outside staging',
-  /if v_end >= \(now\(\) at time zone 'Africa\/Johannesburg'\)::date and not public\.is_staging_database\(\) then\s+raise exception/.test(approveRun))
+ok('a run cannot be approved before its cycle has closed without a reason -- on staging too',
+  /if v_end >= \(now\(\) at time zone 'Africa\/Johannesburg'\)::date and nullif\(btrim\(coalesce\(v_early, ''\)\), ''\) is null then\s+raise exception/.test(approveRun)
+  && !/is_staging_database/.test(approveRun))
+const early = liveBody('approve_payover_run_early') ?? ''
+ok('approving early demands a real reason and keeps who gave it',
+  /length\(btrim\(coalesce\(p_reason, ''\)\)\) < 10/.test(early) && /early_by = auth\.uid\(\)/.test(early)
+  && /perform public\.approve_payover_run\(p_run\)/.test(early))
+const buildLive = liveBody('build_payover_run') ?? ''
+ok('money processed after an early approval rides the next run, not none',
+  /or exists \(select 1 from public\.payover_runs e\s+where e\.company_id = p_company\s+and e\.status in \('approved', 'sent', 'paid'\)\s+and p\.allocated_on between e\.period_start and e\.period_end\)/.test(buildLive))
+ok('...and refresh looks for it', /p\.allocated_on between e\.period_start and e\.period_end/.test(refresh))
 ok('...opening a box that asks which cycle', /function BuildRunModal\(/.test(queue))
 ok('...defaulting to the one running now', /useState\(cycle\.periodStart\)/.test(queue))
 /* FORWARD AS WELL AS BACK, which is not a mistake: nothing waits for a period to end, and

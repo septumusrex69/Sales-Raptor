@@ -145,10 +145,9 @@ export function FinanceWorkQueue() {
     }
   }
 
-  /* A RUN WHOSE CYCLE IS STILL OPEN IS NOT APPROVED YET: a payment processed later in the cycle
-     would belong to it and never be paid over. The database refuses; this says so first. Staging
-     tests open cycles on purpose and the database lets it. */
-  const stillOpen = (r: WorkQueueRow) => !staging && !!cycle && r.periodEnd >= cycle.today
+  /* A RUN WHOSE CYCLE IS STILL OPEN IS APPROVED ONLY WITH A REASON, from the run itself (the firm,
+     8 Oct). So a bulk approval leaves it out, and its row says where to do it. */
+  const stillOpen = (r: WorkQueueRow) => !!cycle && r.periodEnd >= cycle.today
 
   async function bulkApprove(ids: string[]) {
     setBusy('bulk'); setError(null); setNote(null)
@@ -374,7 +373,7 @@ export function FinanceWorkQueue() {
                   <td className="px-4 py-3">
                     {r.nextStep === 'approve' && stillOpen(r) ? (
                       <span className="whitespace-nowrap text-xs text-slate-400" data-testid="still-open">
-                        Open until {fmtDay(r.periodEnd)}
+                        Open until {fmtDay(r.periodEnd)} · approve early from the run
                       </span>
                     ) : r.nextStep && (
                       <button

@@ -29,6 +29,10 @@ const SENDS = [
     subject: 'Remittance advice', net_payover: 8275, pdf_path: 'c2/PO-BPM-2610/a.pdf', xlsx_path: 'c2/PO-BPM-2610/a.xlsx' },
 ]
 let sends = SENDS
+let runShown = RUN
+/* Ready, in a cycle that has not closed (far off, so the test does not age). */
+const OPEN_RUN = { ...RUN, id: 'run-open', status: 'ready', period_start: '2099-12-11', period_end: '2099-12-31',
+  approved_at: null, sent_at: null, paid_at: null, eft_reference: null }
 const q = (id, client, start, end, net, status) => ({ run_id: id, company_id: id, client, client_code: null,
   invoice_number: `PO-${id}`, period_start: start, period_end: end, payments: 1, trust_capital: net,
   ptc_set_off: 0, net_payover: net, exceptions: 0, status, next_step: 'mark_paid', approved_at: null,
@@ -55,14 +59,14 @@ const handlers = [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   /* The client's list asks by company; the run page asks for one. */
   [(u) => /\/rest\/v1\/payover_runs\?.*company_id=eq/.test(u), () => ({ body: CLIENT_RUNS })],
-  [(u) => /\/rest\/v1\/payover_runs\?/.test(u), () => ({ body: RUN })],
+  [(u) => /\/rest\/v1\/payover_runs\?/.test(u), () => ({ body: runShown })],
   [(u) => /\/rest\/v1\/bank_statement_lines\?/.test(u), () => ({ body: [{ payover_run_id: 'run-0', txn_date: '2026-09-16' }] })],
   [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [{ id: 'c2', name: 'Baobab Property Managers (Pty) Ltd', owner_id: ADMIN.id }] })],
   [(u) => /\/rest\/v1\/payover_run_sends\?/.test(u), () => ({ body: sends })],
   [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
   [(u) => /\/rpc\/payover_cycle_now/.test(u), () => ({ body: [{ period_start: '2026-09-11', period_end: '2026-10-10', days_left: 2, today: '2026-10-08' }] })],
   [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: QUEUE })],
-  [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run)/.test(u),
+  [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run_early|approve_payover_run)/.test(u),
     (u, req) => { calls.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...(req.postDataJSON() ?? {}) }); return { body: 0 } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
@@ -119,6 +123,27 @@ try {
   t.check('...and approves the ready one whose cycle has closed, and nothing else',
     JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['E']))
   t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
+
+  /* ---- APPROVING BEFORE THE CYCLE CLOSES, WITH A REASON (the firm, 8 Oct) ---- */
+  runShown = OPEN_RUN
+  sends = []
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-open`, { waitUntil: 'domcontentloaded' })
+  const early = page.getByRole('button', { name: 'Approve early…' })
+  await early.waitFor({ timeout: 15000 })
+  t.check('a run whose cycle is open offers Approve early, not Approve', await page.getByRole('button', { name: 'Approve', exact: true }).count(), 0)
+  await early.click()
+  const now = page.getByRole('button', { name: 'Approve now' })
+  await page.getByLabel('Why now?').fill('too short')
+  t.ok('...which wants a real reason', await now.isDisabled())
+  await page.getByLabel('Why now?').fill('Large PTC: the client owes us our share and needs the advice')
+  await now.click()
+  await page.waitForTimeout(500)
+  const sentEarly = calls.find((c) => c.fn === 'approve_payover_run_early')
+  t.check('...and approves through the early function, with the reason',
+    JSON.stringify(sentEarly ? { p_run: sentEarly.p_run, p_reason: sentEarly.p_reason } : null),
+    JSON.stringify({ p_run: 'run-open', p_reason: 'Large PTC: the client owes us our share and needs the advice' }))
+  runShown = RUN
+  sends = SENDS
 
   /* ---- THE CLIENT'S FOLDER: every run, where it has got to, and what was sent ---- */
   await page.goto(`http://127.0.0.1:${PORT}/companies/c2`, { waitUntil: 'domcontentloaded' })

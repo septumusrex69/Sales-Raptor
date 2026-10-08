@@ -7,7 +7,7 @@ import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand, ratePercent } from '../../lib/money'
 import { supabase } from '../../lib/supabase'
 import {
-  RUN_STATUS_LABEL, approveRun, fetchPaymentAudit, fetchRunPayments, markRunPaid,
+  RUN_STATUS_LABEL, approveRun, approveRunEarly, cycleStillOpen, fetchPaymentAudit, fetchRunPayments, markRunPaid,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
 import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
@@ -54,6 +54,8 @@ interface RunRow {
   paid_at: string | null
   eft_reference: string | null
   company_id: string
+  early_reason?: string | null
+  early_at?: string | null
 }
 
 const STATUS_TONE: Record<RunStatus, string> = {
@@ -82,6 +84,7 @@ export function RunDetail() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [payModal, setPayModal] = useState(false)
+  const [earlyModal, setEarlyModal] = useState(false)
   const [emailModal, setEmailModal] = useState(false)
   const [sends, setSends] = useState<AdviceSend[]>([])
   const [firm, setFirm] = useState<{ name: string; address: string | null; phone: string | null; email: string | null; vatNumber: string | null } | null>(null)
@@ -210,10 +213,17 @@ export function RunDetail() {
             <span className={clsx('rounded-full px-2.5 py-1 text-[11.5px] font-semibold', STATUS_TONE[run.status])}>
               {RUN_STATUS_LABEL[run.status]}
             </span>
-            {run.status === 'ready' && (
+            {run.status === 'ready' && !cycleStillOpen(run.period_end) && (
               <button type="button" disabled={busy} onClick={() => void act(() => approveRun(run.id))}
                 className="rounded-lg bg-navy-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
                 Approve
+              </button>
+            )}
+            {/* THE CYCLE IS STILL OPEN: approving now is allowed, with a reason (the firm, 8 Oct). */}
+            {run.status === 'ready' && cycleStillOpen(run.period_end) && (
+              <button type="button" disabled={busy} onClick={() => setEarlyModal(true)}
+                className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-[13px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50">
+                Approve early…
               </button>
             )}
             <button type="button" disabled={busy || !advice} onClick={() => void openPdf()}
@@ -287,6 +297,11 @@ export function RunDetail() {
             Debtors paid the client {rand(run.ptc_received)} directly this cycle. BF recovered
             {' '}{rand(run.ptc_fees_taken)} of its Annexure B fees and interest from it, and
             {' '}{rand(run.ptc_commission)} commission on the {rand(run.ptc_capital)} capital portion.
+          </p>
+        )}
+        {run.early_reason && (
+          <p className="mt-2 text-xs text-amber-800" data-testid="early-reason">
+            Approved before the cycle closed{run.early_at ? ` on ${fmtDay(run.early_at.slice(0, 10))}` : ''}: {run.early_reason}
           </p>
         )}
         {run.eft_reference && (
@@ -367,6 +382,10 @@ export function RunDetail() {
           onClose={() => setEmailModal(false)}
           onSent={async () => { setEmailModal(false); await load() }}
         />
+      )}
+      {earlyModal && run && (
+        <EarlyApproveModal periodEnd={run.period_end} onClose={() => setEarlyModal(false)}
+          onSave={async (reason) => { await act(() => approveRunEarly(run.id, reason)); setEarlyModal(false) }} />
       )}
       {payModal && run && (
         <MarkPaidModal
@@ -478,6 +497,42 @@ function PaymentPanel({ row, audit, onClose }: {
 
 /** 'Mark paid' asks for the EFT reference and the date — the firm's own instruction. The
  *  reference is what reconciles this invoice to the bank statement, so it is required. */
+/**
+ * APPROVING BEFORE THE CUT-OFF. The firm, 8 Oct: "you shouldn't just do it" -- so it asks why, and
+ * says plainly what happens to a payment processed later in the cycle.
+ */
+function EarlyApproveModal({ periodEnd, onClose, onSave }: {
+  periodEnd: string; onClose: () => void; onSave: (reason: string) => Promise<void>
+}) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const enough = reason.trim().length >= 10
+  return (
+    <Modal title="Approve before the cycle closes" onClose={onClose} width={480}>
+      <div className="space-y-3">
+        <p className="text-[13px] text-slate-600">
+          This cycle runs until {fmtDay(periodEnd)}. A payment processed for this client after you
+          approve goes into the next cycle&rsquo;s run, not this one.
+        </p>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="early-reason">Why now?</label>
+          <textarea id="early-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
+            className={inputClass} placeholder="e.g. a large PTC: the client owes us our share and needs the advice to pay it" />
+          <p className="mt-1 text-[11.5px] text-slate-400">Kept on the run with your name.</p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" disabled={busy || !enough}
+            onClick={() => { setBusy(true); void onSave(reason.trim()).finally(() => setBusy(false)) }}
+            className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
+            Approve now
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 function MarkPaidModal({ suggested, onClose, onSave }: {
   /** The reference it should have gone out on; still editable, because the bank's wins. */
   suggested: string

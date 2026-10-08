@@ -32264,3 +32264,358 @@ begin
     end;
   end loop;
 end $$;
+
+-- ============================================================================================
+-- A RUN MAY BE APPROVED BEFORE ITS CYCLE CLOSES, WITH A REASON, AND NOTHING IS LOST BY IT
+--
+-- The firm, 8 Oct: "sometimes ... the debtor paid the client, like for example, two hundred
+-- thousand. And now the client needs to pay our portion. So we want to issue the remittance advice
+-- quicker ... make it possible ... for all ones to be run before, but however, there should be a
+-- good reason. They should give a reason ... you shouldn't just do it."
+--
+--   - approve_payover_run_early(run, reason) records WHY and WHO on the run, then approves it the
+--     ordinary way (blockers still refuse). A reason under 10 characters is not a reason.
+--   - approve_payover_run refuses a run whose cycle is still open unless that reason is on it.
+--     There is NO staging exemption any more: staging approves early the same way, with a reason.
+--   - THE MONEY THAT ARRIVES AFTER AN EARLY APPROVAL IS NOT STRANDED. An allocation processed in a
+--     cycle whose run for that client is already approved, sent or paid is claimed by the next run
+--     built -- build_payover_run claims it, and refresh_payover_runs looks for it. Without this it
+--     would belong to an approved run that claims nothing more and never be paid over.
+-- ============================================================================================
+alter table public.payover_runs add column if not exists early_reason text;
+alter table public.payover_runs add column if not exists early_by uuid references public.profiles (id);
+alter table public.payover_runs add column if not exists early_at timestamptz;
+
+create or replace function public.approve_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+  v_end date;
+  v_early text;
+  v_why text;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select status, period_end, early_reason into v_status, v_end, v_early from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if not public.payover_run_is_open(v_status) then
+    raise exception 'That run is already %.', v_status;
+  end if;
+  /* NOT BEFORE THE CYCLE HAS CLOSED WITHOUT A REASON (the firm, 8 Oct: "there should be a good
+     reason"). approve_payover_run_early writes one; anything arriving later in the cycle goes to
+     the next run (build_payover_run). */
+  if v_end >= (now() at time zone 'Africa/Johannesburg')::date and nullif(btrim(coalesce(v_early, '')), '') is null then
+    raise exception 'This cycle runs until %. To approve it before then, give the reason.',
+      to_char(v_end, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  select string_agg(b.detail, '; ') into v_why from public.payover_run_blockers(p_run) b;
+  if v_why is not null then
+    raise exception 'This run cannot be approved yet: %', v_why;
+  end if;
+
+  update public.payover_runs
+     set status = 'approved', approved_by = auth.uid(), approved_at = now()
+   where id = p_run;
+end $$;
+
+create or replace function public.approve_payover_run_early(p_run uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) < 10 then
+    raise exception 'Say why this run is being approved before its cycle closes.' using errcode = '22023';
+  end if;
+  update public.payover_runs
+     set early_reason = btrim(p_reason), early_by = auth.uid(), early_at = now()
+   where id = p_run and public.payover_run_is_open(status);
+  if not found then raise exception 'That run is not open to approve.' using errcode = '22023'; end if;
+  /* The ordinary approval, blockers and all. If it refuses, the reason goes with it. */
+  perform public.approve_payover_run(p_run);
+end $$;
+
+revoke all on function public.approve_payover_run_early(uuid, text) from public, anon;
+grant execute on function public.approve_payover_run_early(uuid, text) to authenticated;
+
+-- build_payover_run: claim money that arrived after its own cycle's run was approved early.
+-- (Applied on staging by patching the live text in place; written out in full here so the file's
+-- last definition is the live one.)
+create or replace function public.build_payover_run(p_company uuid, p_period_start date)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_end date := public.payover_cycle_end(p_period_start);
+  v_run uuid;
+  v_status text;
+  v_prev record;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select id, status into v_run, v_status
+    from public.payover_runs where company_id = p_company and period_start = p_period_start;
+
+  -- A VOIDED RUN IS NOT AN ISSUED ONE, SO IT DOES NOT HOLD THE CYCLE.
+  -- Voiding threw the working document away: it released every allocation, dropped every line and
+  -- went out to nobody. But UNIQUE (company_id, period_start) means the row still occupies the
+  -- slot, and this used to refuse it alongside approved and sent -- so a client whose run was
+  -- voided could never be paid over for that cycle again, and protect_payover_run refuses to
+  -- remove the row as well. Pressing Void was irreversible and nobody was warned.
+  -- The number goes with it, or payover_invoice_number hands out the next one and leaves a gap
+  -- in a sequence the client reads.
+  if v_run is not null and v_status = 'void' then
+    delete from public.payover_runs where id = v_run;
+    v_run := null;
+  end if;
+
+  if v_run is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'The % run for this client is already %; a correction belongs in the next run.',
+      to_char(p_period_start, 'DD Mon YYYY'), v_status;
+  end if;
+
+  if v_run is null then
+    insert into public.payover_runs (company_id, period_start, period_end, invoice_number)
+    values (p_company, p_period_start, v_end, public.payover_invoice_number(p_company, v_end))
+    returning id into v_run;
+  else
+    /* Let go of everything it was holding before it claims again, so a rebuild is not an append. */
+    update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
+    update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
+    update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    /* AND THE CLIENT CHARGES IT WAS CARRYING, or a rebuild leaves them pointing at a run whose
+       lines have gone and they are never set off against anything. */
+    update public.client_charges set payover_run_id = null where payover_run_id = v_run;
+    delete from public.payover_run_lines where run_id = v_run;
+  end if;
+
+  /* 1. THIS CYCLE'S OWN ALLOCATIONS. Claimed and drawn in one statement so an allocation cannot be
+        claimed by a run that then fails to list it. Demo money is excluded here as well as in the
+        engine -- R23,6m nobody paid, sitting in the same table as money somebody did. */
+  with claimed as (
+    update public.payment_allocations a
+       set payover_run_id = v_run
+      from public.account_payments p, public.debtor_accounts d
+     where p.id = a.payment_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       /* MONEY SWORDFISH ALREADY PAID OVER IS NEVER CLAIMED. It has no allocation, so the
+          join already excludes it -- this is the rule said out loud beside the dates, because
+          the day somebody allocates an imported receipt by hand is the day the client is
+          paid twice for money they were remitted years ago. */
+       and not p.paid_over_in_swordfish
+       /* CLAIMED ON THE ALLOCATION DATE, NOT ON created_at.
+          THE FIRM: "it's important to capture the payment date and basically the allocation
+          date of a payment. For example, if a payment was made a PTC, let's say on the 5th of
+          September and only processed today, it will only be processed with this import
+          date... or if a payment was in suspense... it missed the first payment run in which
+          it was supposed to be. So it should be running in the payment run."
+          created_at was standing in for this and is not it: it is when the ROW was written,
+          which for an imported book is the day of the import for every receipt in it, and
+          which nothing may move because it is the audit trail. allocated_on is set at
+          approval -- the moment a payment is processed -- so a receipt released from suspense
+          in October goes out in October's run however long it sat, and the day the debtor
+          paid stays on received_at where it belongs.
+          A DATE against the cycle's own dates, so no timezone can push a receipt into the
+          neighbouring cycle at midnight. */
+       and p.allocated_on <= v_end
+       and (p.allocated_on >= p_period_start
+            /* LATE FOR A RUN APPROVED EARLY: processed in a cycle whose run for this client
+               had already gone, so it rides the next run rather than none (8 Oct). */
+            or exists (select 1 from public.payover_runs e
+                        where e.company_id = p_company
+                          and e.status in ('approved', 'sent', 'paid')
+                          and p.allocated_on between e.period_start and e.period_end))
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat,
+    excess_credit, needs_rate
+  )
+  select v_run, c.id, c.account_id,
+         case when c.paid_to_client then 'ptc' else 'trust' end,
+         c.paid_to_client,
+         coalesce(c.payment_amount, 0), c.to_interest, coalesce(c.to_costs, 0), c.to_capital,
+         c.commission, c.commission_vat, c.excess_credit, c.status = 'needs_rate'
+    from claimed c;
+
+  /* 2. REVERSALS OF PAYMENTS ALREADY INVOICED. The firm's decision 6: never edited in the run that
+        went out -- it becomes a negative line in the next one. */
+  with carried as (
+    update public.payment_allocations a
+       set reversal_carried_run_id = v_run
+      from public.payover_runs r, public.debtor_accounts d
+     where r.id = a.payover_run_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat, excess_credit
+  )
+  select v_run, c.id, c.account_id, 'reversal', c.paid_to_client,
+         -coalesce(c.payment_amount, 0), -c.to_interest, -coalesce(c.to_costs, 0), -c.to_capital,
+         -c.commission, -c.commission_vat, -c.excess_credit
+    from carried c;
+
+  /* 3. LAST RUN'S SHORTFALL, from the most recent INVOICED run rather than merely last month. */
+  select r.id, r.net_payover, r.invoice_number into v_prev
+    from public.payover_runs r
+   where r.company_id = p_company
+     and r.period_start < p_period_start
+     and r.status in ('approved', 'sent', 'paid')
+     and r.net_payover < 0
+     and r.carried_out_run_id is null
+   order by r.period_start desc limit 1;
+
+  if v_prev.id is not null then
+    insert into public.payover_run_lines (run_id, line_kind, carried_amount)
+    values (v_run, 'carried', v_prev.net_payover);
+    update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
+  end if;
+
+  /* 4. WHAT THE CLIENT OWES THE FIRM, taken off this payover. The firm, on withdrawing an
+        account: "withdrawal fee subtracted from payover". A charge is claimed by the first run
+        built after it was raised -- not by the cycle it falls in -- because it is not a receipt
+        and has no cycle of its own; what matters is that it comes off the next money that goes
+        out. `settlement = 'invoice'` is the other half of the firm's example and is deliberately
+        NOT claimed: that one the client pays directly. */
+  with taken as (
+    update public.client_charges c
+       set payover_run_id = v_run
+     where c.company_id = p_company
+       and c.settlement = 'set_off'
+       and c.payover_run_id is null
+       and c.cancelled_at is null
+       and c.paid_at is null
+       and c.raised_on <= v_end
+    returning c.*
+  )
+  insert into public.payover_run_lines (
+    run_id, account_id, line_kind, client_charge_id, charge_amount)
+  select v_run, t.account_id, 'charge', t.id, t.amount + t.vat from taken t;
+
+  perform public.recompute_payover_run(v_run);
+  return v_run;
+end $$;
+
+create or replace function public.refresh_payover_runs()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_open date := public.payover_cycle_start(now());
+  v_last date := public.payover_cycle_start(((v_open - 1)::timestamp) at time zone 'Africa/Johannesburg');
+  v_cycle date;
+  v_end date;
+  v_company uuid;
+  v_count integer := 0;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  foreach v_cycle in array array[v_last, v_open] loop
+    v_end := public.payover_cycle_end(v_cycle);
+    for v_company in
+      select distinct d.company_id
+        from public.payment_allocations a
+        join public.account_payments p on p.id = a.payment_id
+        join public.debtor_accounts d on d.id = a.account_id
+       where a.payover_run_id is null
+         and a.status <> 'reversed'
+         and not p.is_demo
+         and not p.paid_over_in_swordfish
+         and p.allocated_on <= v_end
+         and (p.allocated_on >= v_cycle
+              /* late for a run approved early: build_payover_run claims it into this one */
+              or exists (select 1 from public.payover_runs e
+                          where e.company_id = d.company_id
+                            and e.status in ('approved', 'sent', 'paid')
+                            and p.allocated_on between e.period_start and e.period_end))
+      union
+      select r.company_id from public.payover_runs r
+       where r.period_start = v_cycle and public.payover_run_is_open(r.status)
+    loop
+      if exists (select 1 from public.payover_runs
+                  where company_id = v_company and period_start = v_cycle
+                    and not public.payover_run_is_open(status)) then
+        continue;
+      end if;
+      perform public.build_payover_run(v_company, v_cycle);
+      v_count := v_count + 1;
+    end loop;
+  end loop;
+  return v_count;
+end $$;
+
+-- THE FINANCE REVOKE LIST, RESTATED WITH approve_payover_run_early (8 Oct). The last block is the
+-- live one. (The function also carries its own revoke where it is created.)
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;
