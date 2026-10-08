@@ -13,6 +13,7 @@ import {
 import { adviceBody, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
+import { fetchPayoutsStatementOnly } from '../../lib/trust'
 import { sendRemittanceAdvice } from '../../lib/remittanceEmail'
 
 /**
@@ -75,6 +76,9 @@ export function RunDetail() {
   const [filter, setFilter] = useState('')
   const [onlyExceptions, setOnlyExceptions] = useState(false)
   const [loading, setLoading] = useState(true)
+  /* Payments out confirmed from the statement only (Trust settings): then there is no Mark paid. */
+  const [statementOnly, setStatementOnly] = useState(false)
+  useEffect(() => { fetchPayoutsStatementOnly().then(setStatementOnly).catch(() => {}) }, [])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [payModal, setPayModal] = useState(false)
@@ -237,7 +241,12 @@ export function RunDetail() {
                 Email advice
               </button>
             )}
-            {(run.status === 'approved' || run.status === 'sent') && (
+            {(run.status === 'approved' || run.status === 'sent') && statementOnly && (
+              <span className="text-[12px] text-slate-500" data-testid="paid-from-statement">
+                Paid when its line on the bank statement is allocated
+              </span>
+            )}
+            {(run.status === 'approved' || run.status === 'sent') && !statementOnly && (
               <button type="button" disabled={busy} onClick={() => setPayModal(true)}
                 className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                 Mark paid

@@ -66,6 +66,16 @@ export async function fetchOverpaymentsKept(): Promise<{ amount: number; account
   return row ? { amount: Number(row.amount ?? 0), accounts: Number(row.accounts ?? 0) } : null
 }
 
+/**
+ * PAYMENTS OUT CONFIRMED FROM THE STATEMENT ONLY (firm_settings.payouts_statement_only). Read on
+ * its own so a screen can hide Mark paid without loading the firm's whole row. A failed read is
+ * "off": the database refuses a manual mark when the switch is on whatever the screen showed.
+ */
+export async function fetchPayoutsStatementOnly(): Promise<boolean> {
+  const { data } = await supabase.from('firm_settings').select('payouts_statement_only').limit(1).maybeSingle()
+  return Boolean((data as { payouts_statement_only?: boolean } | null)?.payouts_statement_only)
+}
+
 export async function fetchTrustPosition(): Promise<TrustPosition | null> {
   const { data, error } = await supabase.rpc('trust_position')
   if (error) throw new Error(error.message)

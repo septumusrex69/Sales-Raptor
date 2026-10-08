@@ -7,7 +7,7 @@ import { Modal, FormField, inputClass, controlClass } from '../../components/ui/
 import { rand } from '../../lib/money'
 import { fetchPaymentsOutPaid, fetchPaymentsToMake, markRefundPaid } from '../../lib/bankAllocationApi'
 import { markRunPaid } from '../../lib/payover'
-import { fetchTrustPosition } from '../../lib/trust'
+import { fetchPayoutsStatementOnly, fetchTrustPosition } from '../../lib/trust'
 import { drawFromTrust } from '../../lib/businessApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
@@ -41,18 +41,21 @@ export function TrustPaymentsOut() {
   const [copied, setCopied] = useState<string | null>(null)
   const [paying, setPaying] = useState<Paying | null>(null)
   const [drawing, setDrawing] = useState(false)
+  /* Payments out confirmed from the statement only (Trust settings): then there is no Mark paid. */
+  const [statementOnly, setStatementOnly] = useState(false)
 
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
   const since = new Date(Date.now() - 90 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 
   const load = useCallback(async () => {
     try {
-      const [due, gone, pos] = await Promise.all([
+      const [due, gone, pos, only] = await Promise.all([
         fetchPaymentsToMake(), fetchPaymentsOutPaid(since),
         /* The firm's share is shown to say what MAY be drawn; the list stands without it. */
         fetchTrustPosition().catch(() => null),
+        fetchPayoutsStatementOnly().catch(() => false),
       ])
-      setRows(due); setPaid(gone); setFirmHeld(pos ? pos.owedToFirm : null)
+      setRows(due); setPaid(gone); setFirmHeld(pos ? pos.owedToFirm : null); setStatementOnly(only)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -119,9 +122,10 @@ export function TrustPaymentsOut() {
               </div>
             </div>
             <p className="mt-3 max-w-3xl text-[12.5px] leading-relaxed text-slate-500">
-              Pay each one at the bank <strong className="font-medium text-slate-700">with the reference shown</strong>, then
-              mark it paid here or on its run. When it appears on the trust statement, allocate the line under
-              Exceptions — Raptor suggests the match from the reference — and it reads as confirmed under Paid.
+              Pay each one at the bank <strong className="font-medium text-slate-700">with the reference shown</strong>
+              {statementOnly ? '. ' : ', then mark it paid here or on its run. '}
+              When it appears on the trust statement, allocate the line under Exceptions — Raptor suggests the
+              match from the reference — and it reads as confirmed under Paid.
             </p>
           </Card>
 
@@ -195,11 +199,15 @@ export function TrustPaymentsOut() {
                       <td className="px-3 py-3 text-slate-600 whitespace-nowrap">{p.dueOn ? `Due ${shortDate(p.dueOn)}` : 'As soon as paid'}</td>
                       <td className="px-3 py-3 text-right font-semibold tabular-nums text-slate-800 whitespace-nowrap">{rand(p.amount)}</td>
                       <td className="px-5 py-3 text-right">
+                        {statementOnly ? (
+                          <span className="text-[11.5px] text-slate-400 whitespace-nowrap">Paid from the statement</span>
+                        ) : (
                         <button type="button"
                           onClick={() => setPaying({ kind: p.kind, id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap">
                           Mark paid
                         </button>
+                        )}
                       </td>
                     </tr>
                   ))}

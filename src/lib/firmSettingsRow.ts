@@ -34,7 +34,7 @@ export const COLUMNS = 'firm_name, registration_number, vat_number, council_numb
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
   + 'email_font, email_size_pt, vat_rate, time_zone, finance_cutover_at, parked_credit_months, '
-  + 'payover_lag_months, '
+  + 'payover_lag_months, payouts_statement_only, '
   + 'updated_at'
 
 export interface Row {
@@ -68,6 +68,7 @@ export interface Row {
   time_zone: string
   parked_credit_months: number | null
   payover_lag_months: number | null
+  payouts_statement_only: boolean | null
   finance_cutover_at: string | null
   updated_at: string
 }
@@ -154,6 +155,11 @@ export interface FirmSettings {
    */
   payoverLagMonths: number
   /**
+   * PAYMENTS OUT CONFIRMED FROM THE BANK STATEMENT ONLY. The firm, 8 Oct: on staging both, "when we
+   * go live ... just work from the statement". On, Mark paid is gone and the database refuses it.
+   */
+  payoutsStatementOnly: boolean
+  /**
    * WHEN THE ALLOCATION ENGINE STARTS SPLITTING PAYMENTS, AND NULL UNTIL THE FIRM SAYS SO.
    *
    * Payments CAPTURED on or after this are split by Raptor; everything earlier keeps the outcome
@@ -208,6 +214,8 @@ export const FIRM_UNSET: FirmSettings = {
   timeZone: 'Africa/Johannesburg',
   parkedCreditMonths: 6,
   payoverLagMonths: 1,
+  /* Off: staging marks payments paid by hand as well. Turned on at go-live. */
+  payoutsStatementOnly: false,
   /* Off. An engine that switched itself on across the whole book would not be undoable. */
   financeCutoverAt: null,
   updatedAt: '',
@@ -253,6 +261,7 @@ export function toSettings(r: Row): FirmSettings {
     timeZone: r.time_zone || 'Africa/Johannesburg',
     parkedCreditMonths: r.parked_credit_months ?? 6,
     payoverLagMonths: r.payover_lag_months ?? 1,
+    payoutsStatementOnly: r.payouts_statement_only ?? false,
     financeCutoverAt: r.finance_cutover_at ?? null,
     updatedAt: r.updated_at,
   }

@@ -36,7 +36,9 @@ const PAID = [
 const POSITION = { trust_cash: 0, creditors: 0, debtors: 0, net_owed: 0, difference: 0, owed_to_clients: 0,
   owed_to_debtors: 0, owed_to_firm: 24055.36, unidentified: 0, owed_by_clients: 0 }
 let sent = []
+let statementOnly = false
 const handlers = [
+  [(u) => /\/rest\/v1\/firm_settings\?.*payouts_statement_only/.test(u), () => ({ body: { payouts_statement_only: statementOnly } })],
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rpc\/payments_to_make/.test(u), () => ({ body: answer })],
   [(u) => /\/rpc\/payments_out_paid/.test(u), () => ({ body: PAID })],
@@ -108,6 +110,16 @@ try {
   t.ok('...a payment marked paid waits for the statement', /Waiting for the statement/.test(await gone.filter({ hasText: 'Lowveld' }).innerText()))
   t.ok('...and one the statement confirmed says so', /On the statement 16 Sep 2026/.test(await gone.filter({ hasText: 'business account' }).innerText()))
   await t.shot(page, 'payments-out-paid')
+
+  /* ---- AT GO-LIVE: FROM THE STATEMENT ONLY (the firm, 8 Oct) ---- */
+  statementOnly = true
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await rows.first().waitFor({ timeout: 15000 })
+  await page.getByText('Paid from the statement').first().waitFor({ timeout: 10000 }).catch(() => {})
+  t.check('with the switch on there is no Mark paid', await page.getByRole('button', { name: 'Mark paid' }).count(), 0)
+  t.ok('...each row says it is paid from the statement', (await page.getByText('Paid from the statement').count()) === 3)
+  t.ok('...and recording the firm\'s transfer still works', await page.getByRole('button', { name: 'Record a transfer' }).isVisible())
+  statementOnly = false
 
   answer = []
   await page.reload({ waitUntil: 'domcontentloaded' })

@@ -31862,3 +31862,74 @@ revoke all on function public.payments_out_paid(date) from public, anon;
 grant execute on function public.mark_refund_paid(uuid, text, timestamptz) to authenticated;
 grant execute on function public.payments_out_paid(date) to authenticated;
 
+
+-- ============================================================================================
+-- FOR GO-LIVE: PAYMENTS OUT CONFIRMED FROM THE BANK STATEMENT ONLY, BY A SWITCH
+--
+-- The firm, 8 Oct: on staging, mark paid by hand AND let the statement confirm, "but when we go
+-- live, I think it would be better if we just work from the statement". firm_settings gains
+-- payouts_statement_only (off by default); on, mark_payover_run_paid and mark_refund_paid refuse,
+-- and the screens hide Mark paid. Recording a transfer to the business account stays: that is the
+-- instruction, and the statement still confirms it. Turned on in Trust settings at go-live.
+-- Proved on staging, rolled back: with it on, both refused.
+-- ============================================================================================
+
+alter table public.firm_settings
+  add column if not exists payouts_statement_only boolean not null default false;
+comment on column public.firm_settings.payouts_statement_only is
+  'On: a payment out of trust is settled only by its line on the bank statement -- no Mark paid by hand. The firm, 8 Oct: on staging both, "when we go live ... just work from the statement".';
+
+create or replace function public.mark_payover_run_paid(
+  p_run uuid, p_reference text, p_paid_at timestamptz default now())
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  /* WHEN THE STATEMENT IS THE ONLY WAY (the firm, for go-live): nothing is paid until the bank says so. */
+  if coalesce((select payouts_statement_only from public.firm_settings limit 1), false) then
+    raise exception 'Payments out are confirmed from the bank statement only. Import the statement and allocate the line under Exceptions.' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(p_reference, '')), '') is null then
+    raise exception 'Say which EFT paid it -- the reference is what reconciles this invoice to the bank.';
+  end if;
+  update public.payover_runs
+     set status = 'paid', paid_at = p_paid_at, eft_reference = btrim(p_reference)
+   where id = p_run and status in ('approved', 'sent');
+  if not found then raise exception 'Only an approved or sent run can be marked paid.'; end if;
+end $$;
+
+create or replace function public.mark_refund_paid(p_refund uuid, p_reference text, p_paid_at timestamptz)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Paying out of the trust account is not yours to record.' using errcode = '42501';
+  end if;
+  /* WHEN THE STATEMENT IS THE ONLY WAY (the firm, for go-live): nothing is paid until the bank says so. */
+  if coalesce((select payouts_statement_only from public.firm_settings limit 1), false) then
+    raise exception 'Payments out are confirmed from the bank statement only. Import the statement and allocate the line under Exceptions.' using errcode = '42501';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which EFT paid it -- the reference is what ties it to the bank statement.' using errcode = '22023';
+  end if;
+  update public.trust_payments_out
+     set paid_at = coalesce(p_paid_at, now()), paid_reference = v_ref
+   where id = p_refund and paid_at is null and cancelled_at is null;
+  if not found then
+    raise exception 'Only a refund that is still due can be marked paid.' using errcode = '22023';
+  end if;
+end $$;

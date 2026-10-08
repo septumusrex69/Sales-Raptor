@@ -121,6 +121,19 @@ ok('the page marks a run paid with the run\'s own call, and a refund with its ow
   /if \(paying\.kind === 'payover'\) await markRunPaid\(paying\.id, ref, at\)\s*else await markRefundPaid\(paying\.id, ref, at\)/.test(pageSrc))
 ok('...a transfer is offered only to whoever may draw', /const mayDraw = canDrawFromTrust\(currentUser\)/.test(pageSrc))
 
+/* ---- 6. at go-live, from the statement only (the firm, 8 Oct) ---- */
+ok('the switch is a column, off by default', /add column if not exists payouts_statement_only boolean not null default false/.test(sql))
+for (const fn of ['mark_payover_run_paid', 'mark_refund_paid']) {
+  const body = liveFn(fn)
+  ok(`${fn} refuses while the switch is on`, /if coalesce\(\(select payouts_statement_only from public\.firm_settings limit 1\), false\) then\s*raise exception 'Payments out are confirmed from the bank statement only/.test(body))
+  ok(`...before it writes anything`, body.indexOf('payouts_statement_only') >= 0 && body.indexOf('payouts_statement_only') < body.search(/\bupdate public\./))
+}
+const runPage = strip(read('src/pages/finance/RunDetail.tsx'))
+ok('the run offers Mark paid only while the switch is off', /\(run\.status === 'approved' \|\| run\.status === 'sent'\) && !statementOnly && \(/.test(runPage))
+ok('...and says how it will be paid when it is on', /Paid when its line on the bank statement is allocated/.test(runPage))
+ok('Payments to make offers Mark paid only while the switch is off', /\{statementOnly \? \(\s*<span[^>]*>Paid from the statement<\/span>/.test(strip(read('src/pages/trust/TrustPaymentsOut.tsx'))))
+ok('Trust settings carries the switch', /saveStatementOnly\(e\.target\.checked\)/.test(strip(read('src/pages/finance/FinanceSettings.tsx'))))
+
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payments-out: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

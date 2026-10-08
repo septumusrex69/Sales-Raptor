@@ -46,6 +46,7 @@ export function FinanceSettings() {
   const [vatRate, setVatRate] = useState<number | null>(null)
   const [cutover, setCutover] = useState<string | null>(null)
   const [lag, setLag] = useState<number>(1)
+  const [statementOnly, setStatementOnly] = useState(false)
   const [allocations, setAllocations] = useState(0)
   const [changes, setChanges] = useState<SettingChange[]>([])
   const [rates, setRates] = useState<RateRow[]>([])
@@ -59,16 +60,17 @@ export function FinanceSettings() {
     try {
       const [t, f, a, c] = await Promise.all([
         supabase.from('annexure_b_tariffs').select('*').order('item').order('effective_from', { ascending: false }),
-        supabase.from('firm_settings').select('vat_rate, finance_cutover_at, payover_lag_months').limit(1).maybeSingle(),
+        supabase.from('firm_settings').select('vat_rate, finance_cutover_at, payover_lag_months, payouts_statement_only').limit(1).maybeSingle(),
         supabase.from('payment_allocations').select('id', { count: 'exact', head: true }),
         supabase.from('companies').select('id, name, code, commission_rate, commission_bands, commission_bands_source, commission_bands_dated, commission_tiers'),
       ])
       if (t.error) throw new Error(t.error.message)
       setTariffs((t.data ?? []) as unknown as Tariff[])
-      const fs = f.data as { vat_rate: number | string; finance_cutover_at: string | null; payover_lag_months: number | null } | null
+      const fs = f.data as { vat_rate: number | string; finance_cutover_at: string | null; payover_lag_months: number | null; payouts_statement_only: boolean | null } | null
       setVatRate(fs ? Number(fs.vat_rate) : null)
       setCutover(fs?.finance_cutover_at ?? null)
       setLag(fs?.payover_lag_months ?? 1)
+      setStatementOnly(Boolean(fs?.payouts_statement_only))
       setAllocations(a.count ?? 0)
       /* HOW MANY ACCOUNTS A RATE WOULD MOVE, counted in the database rather than by loading the
          book: this screen must not become the thing that pulls 23 000 rows into a browser. */
@@ -119,6 +121,26 @@ export function FinanceSettings() {
     })
     await load()
   }, [lag, load])
+
+  /*
+   * PAYMENTS OUT CONFIRMED FROM THE STATEMENT ONLY. The firm, 8 Oct: on staging both, "when we go
+   * live ... just work from the statement". Written straight, like the lag, and logged: "who
+   * stopped us marking payments paid by hand" is a question somebody will ask.
+   */
+  const saveStatementOnly = useCallback(async (on: boolean) => {
+    const before = statementOnly
+    setStatementOnly(on)
+    const { error: e } = await supabase.from('firm_settings')
+      .update({ payouts_statement_only: on }).eq('id', true)
+    if (e) { setStatementOnly(before); setError(e.message); return }
+    await logSettingChange({
+      setting: 'payouts_statement_only',
+      oldValue: before ? 'Bank statement only' : 'By hand or from the statement',
+      newValue: on ? 'Bank statement only' : 'By hand or from the statement',
+      reason: 'Changed on the trust settings screen',
+    })
+    await load()
+  }, [statementOnly, load])
 
   const frozen = allocations > 0
 
@@ -204,6 +226,24 @@ export function FinanceSettings() {
                 guessed this one &mdash; it is the date the trust overview quotes beside every
                 cycle still holding money.
               </p>
+            </Card>
+            <Card>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
+                How a payment out is settled
+              </div>
+              <label className="mt-2 flex items-start gap-2.5 text-[13.5px] text-slate-800">
+                <input type="checkbox" className="mt-1" checked={statementOnly}
+                  data-testid="statement-only"
+                  onChange={(e) => { void saveStatementOnly(e.target.checked) }} />
+                <span>
+                  <span className="font-medium">From the bank statement only</span>
+                  <span className="block text-xs text-slate-400 mt-0.5">
+                    {statementOnly
+                      ? 'A payover or refund is paid only when its line on the trust statement is allocated. Mark paid is switched off.'
+                      : 'Off: a payment can also be marked paid by hand, and the statement confirms it later. Turn on at go-live.'}
+                  </span>
+                </span>
+              </label>
             </Card>
           </div>
 
