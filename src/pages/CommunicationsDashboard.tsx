@@ -210,7 +210,7 @@ export function CommunicationsDashboard() {
 
   function handleExport() {
     downloadCsv(`communications-dashboard-${period.key}`, [
-      { metric: 'Sales Month', value: period.label },
+      { metric: 'Month', value: period.label },
       { metric: 'Courtesy Calls', value: kpis.curr.courtesyCalls },
       { metric: 'Handovers Received', value: kpis.curr.handovers },
       { metric: 'Meetings Held', value: kpis.curr.meetings },

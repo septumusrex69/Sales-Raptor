@@ -51,7 +51,8 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| (this) | **Folded, the widen button stays at the bottom** (the firm: "the narrow option is at the bottom, but then it moves to the top. Keep it at the bottom"). It now sits under the door, where Narrow is on the open menu; the workspace's name stays on top as a plain label. `check-workspace-split` and `e2e/workspace-split` hold the position; the old layout fails both. |
+| (this) | **"Current month", not "Current Sales Month"** (the firm: "it's not a sales month ... just current month"). Every option in `SalesMonthPicker` and `PeriodFilter`, the arrows' names, a span's label ("Last 3 months") and the Communications export. The period is unchanged (11th to 10th). The sales dashboard's own "Last Six Sales Months" card is about sales and stays. `check-company-dashboard` holds it. |
+| `6e78ea3` | **Folded, the widen button stays at the bottom** (the firm: "the narrow option is at the bottom, but then it moves to the top. Keep it at the bottom"). It now sits under the door, where Narrow is on the open menu; the workspace's name stays on top as a plain label. `check-workspace-split` and `e2e/workspace-split` hold the position; the old layout fails both. |
 | `0f3fd73` | **The firm's answers of 8 Oct, built.** (1) **The Swordfish cut-off default is a month earlier**: "import today [8 Oct] ... all payments recovered up until the 10th of August have been paid out. Money collected from 11 August until 10 September will be paid out on 11 October." A CLOSED cycle is not a PAID one; `settledThroughDefault(today, lagMonths = 1)` now answers 10 Aug for 8 Oct (it said 10 Sep, which would have marked a month as remitted and never paid it), and 10 Sep from the payover day (11th) on. (2) **Bank interest is the firm's interest income** ("the regulator said that we can take it"): `business_income` gains a `bank_interest` column (dropped and recreated -- return type widened -- then revoked again), Income shows "Bank interest on the trust account". (3) **"BF funds held: Commission + Fees + VAT"** is drawn on the trust overview, from the new **`firm_held_parts()`** (finance.view, HAVING so a refusal is no row): what the firm's share earned part by part, less bank charges and drawings as their own lines -- adds up to `owed_to_firm` by construction; staging 24 055.36 both ways. Display only, ledger unchanged. (4) **R502 stays**, recorded in `check-fees`. New `check-firm-held` (33); `check-payment-dates`, `check-business-income`, `check-bank-line-allocation`, `e2e/business-income`, `e2e/workspace-split` updated, each break-tested. |
 | `efc059b` | **The folded Trust/Business menu is narrower** (the firm: "still quite big ... a little bit smaller"). Rail 56 → 48px, and the gap after it is now the rail's own margin — 12px folded, 24 open — so the page starts 60px from the rail's edge instead of 80. `e2e/workspace-split` holds both (rail ≤ 48, page ≤ 64 from it); the old layout fails it. |
 
@@ -234,6 +235,15 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
     staging over HTTP was refused by the safety check and removed — use the Supabase tools.
   - Once `Main` deploys, the daily workflow run and 5-minute mail sync act on production data, and
     `CRON_SECRET` was marked "rotate before real client traffic".
+- **OPEN, asked 8 Oct: the dashboard shows R0 collected though staging has 41 payments (R57 900)
+  in the period.** `collector_performance` credits a payment to whoever held the account's desk
+  (`account_desk_history`) on the day it was RECEIVED, and the company total is the sum of the
+  collectors -- so a payment nobody held the desk for vanishes, from the firm figure too. Two
+  causes on staging: 28 payments (R44 100) dated 6 Oct on accounts handed over (and first put on a
+  desk) on 7 Oct; 13 (R13 800) on imported accounts, which the import leaves unassigned on
+  purpose (`assigned_to: null`, Swordfish's name kept in `swordfish_assigned_to` -- 20 names, only
+  Itumeleng and Vusi Maringa exist as Raptor users). Waiting on the firm: should the import put
+  accounts on the Swordfish clerk's desk, and who gets credit for a payment before the first desk.
 - **Fourth session, staging only:** `business_income` (new `bank_interest` column) and
   `firm_held_parts()` -- the last two blocks of `schema.sql`.
 - **Prompts 10–12 are on staging only:** `client_needs_mandate` + the `handovers_need_a_mandate`

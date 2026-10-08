@@ -186,6 +186,18 @@ ok('figures that have not arrived are not drawn as nought',
 ok('...and a failure says so rather than showing zeroes',
   /These figures could not be counted/.test(page))
 
+/*
+ * "MONTH", NOT "SALES MONTH". The firm, of the period picker over the photograph: "Don't call this
+ * the current sales month because it's not a sales month ... just current month." Read with
+ * comments stripped, so the note explaining the rule cannot satisfy or fail it.
+ */
+for (const f of ['../../src/components/ui/SalesMonthPicker.tsx', '../../src/components/ui/PeriodFilter.tsx']) {
+  ok(`${f.split('/').pop()} says "month", not "sales month"`, !/sales months?/i.test(strip(read(f))))
+}
+ok('the picker offers the current month by that name', /current: 'Current month'/.test(read('../../src/components/ui/SalesMonthPicker.tsx')))
+ok('...and a span of months is not called sales months either',
+  !/Sales Months/.test(strip(read('../../src/lib/salesMonth.ts'))))
+
 /* ------------------------------------------------------------------ */
 
 for (const f of failures) console.error(`  ✗ ${f}`)

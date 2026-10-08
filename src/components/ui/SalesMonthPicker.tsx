@@ -13,16 +13,22 @@ import {
 
 type PresetKey = 'allTime' | 'current' | 'previous' | 'historical' | 'last3' | 'last6' | 'last12' | 'ytd' | 'custom'
 
+/*
+ * "MONTH", NOT "SALES MONTH". The firm, of this picker on the company dashboard: "Don't call this
+ * the current sales month because it's not a sales month ... just current month." The period is
+ * still the 11th to the 10th -- the bar beside it prints the dates -- but the screen it sits on is
+ * everybody's, collections included, and a collector's month is not a sales month.
+ */
 const PRESET_LABELS: Record<PresetKey, string> = {
-  allTime: 'All Time',
-  current: 'Current Sales Month',
-  previous: 'Previous Sales Month',
-  historical: 'Select Historical Sales Month',
-  last3: 'Last 3 Sales Months',
-  last6: 'Last 6 Sales Months',
-  last12: 'Last 12 Sales Months',
-  ytd: 'Year to Date',
-  custom: 'Custom Date Range',
+  allTime: 'All time',
+  current: 'Current month',
+  previous: 'Previous month',
+  historical: 'Choose an earlier month',
+  last3: 'Last 3 months',
+  last6: 'Last 6 months',
+  last12: 'Last 12 months',
+  ytd: 'Year to date',
+  custom: 'Custom dates',
 }
 
 function formatDateInput(d: Date) {
@@ -106,7 +112,7 @@ export function SalesMonthPicker({
                   'p-1.5 rounded-lg border',
                   dark ? 'bg-white/10 border-white/20 text-white hover:bg-white/15' : 'border-slate-200 text-slate-500 hover:bg-slate-50',
                 )}
-                aria-label="Previous Sales Month"
+                aria-label="Previous month"
               >
                 <ChevronLeft size={15} />
               </button>
@@ -118,7 +124,7 @@ export function SalesMonthPicker({
                   'p-1.5 rounded-lg border disabled:opacity-30 disabled:pointer-events-none',
                   dark ? 'bg-white/10 border-white/20 text-white hover:bg-white/15' : 'border-slate-200 text-slate-500 hover:bg-slate-50',
                 )}
-                aria-label="Next Sales Month"
+                aria-label="Next month"
               >
                 <ChevronRight size={15} />
               </button>

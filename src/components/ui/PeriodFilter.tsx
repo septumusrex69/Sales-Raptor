@@ -15,9 +15,9 @@ import { getToday, getThisWeek, buildCustomDateRange } from '../../lib/dateRange
 type PresetKey = 'all-time' | 'today' | 'this-week' | 'this-month' | 'last-month' | 'last-3-months' | 'ytd' | 'month' | 'custom'
 
 const PRESETS: { key: PresetKey; label: string }[] = [
-  { key: 'this-month', label: 'This Sales Month' },
-  { key: 'last-month', label: 'Last Sales Month' },
-  { key: 'last-3-months', label: 'Last 3 Sales Months' },
+  { key: 'this-month', label: 'This month' },
+  { key: 'last-month', label: 'Last month' },
+  { key: 'last-3-months', label: 'Last 3 months' },
   { key: 'ytd', label: 'Year to Date' },
   { key: 'today', label: 'Today' },
   { key: 'this-week', label: 'This Week' },
@@ -130,7 +130,7 @@ export function PeriodFilter({
               onChange(getPreviousSalesMonth(period))
             }}
             className="px-1.5 py-2 text-slate-400 hover:text-slate-600 rounded-l-lg hover:bg-slate-50"
-            aria-label="Previous sales month"
+            aria-label="Previous month"
           >
             <ChevronLeft size={15} />
           </button>
@@ -153,7 +153,7 @@ export function PeriodFilter({
               onChange(getNextSalesMonth(period))
             }}
             className="px-1.5 py-2 text-slate-400 hover:text-slate-600 rounded-r-lg hover:bg-slate-50"
-            aria-label="Next sales month"
+            aria-label="Next month"
           >
             <ChevronRight size={15} />
           </button>
@@ -203,7 +203,7 @@ export function PeriodFilter({
 
           <div className="mt-1.5 pt-2 border-t border-slate-100 px-3">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Pick a sales month</span>
+              <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Pick a month</span>
               <span className="inline-flex items-center gap-0.5">
                 <button type="button" onClick={() => setYear((y) => y - 1)} className="p-1 rounded text-slate-400 hover:bg-slate-100" aria-label="Previous year">
                   <ChevronLeft size={13} />
@@ -239,7 +239,7 @@ export function PeriodFilter({
               })}
             </div>
             <p className="text-[10.5px] text-slate-400 pb-2 leading-snug">
-              A sales month runs the 11th to the 10th, and is named for the month it ends in.
+              A month runs the 11th to the 10th, and is named for the month it ends in.
             </p>
           </div>
         </div>

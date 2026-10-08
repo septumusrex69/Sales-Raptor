@@ -79,7 +79,7 @@ export function getLastNSalesMonthsRange(referenceDate: Date, count: number): Sa
   return {
     start,
     end,
-    label: `Last ${count} Sales Months`,
+    label: `Last ${count} months`,
     rangeLabel: `${format(start, 'd MMM yyyy')} – ${format(end, 'd MMM yyyy')}`,
     key: `last-${count}`,
   }
