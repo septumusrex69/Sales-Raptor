@@ -31933,3 +31933,93 @@ begin
     raise exception 'Only a refund that is still due can be marked paid.' using errcode = '22023';
   end if;
 end $$;
+
+-- WHAT WAS SENT TO A CLIENT STAYS EXACTLY AS IT WAS SENT. The firm, 8 Oct: "whatever is paid and what
+-- has been sent to a client should always stick there ... It couldn't change ... you can revise one
+-- and then send it again, but if something was sent, there should be ... a record of ... the data
+-- that was sent." The advice used to be rebuilt from the run every time it was opened, and a rebuilt
+-- statement is NOT the one sent once the firm's address, a client's VAT number or the layout moves.
+-- So every send keeps its own copy: the whole advice as data, and the PDF and spreadsheet exactly as
+-- attached. Append-only: a send is never changed and never removed; sending again is a new version.
+create table if not exists public.payover_run_sends (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.payover_runs (id),
+  company_id uuid references public.companies (id),
+  version integer not null,
+  sent_at timestamptz not null default now(),
+  sent_by uuid references public.profiles (id),
+  sent_to text not null,
+  subject text not null,
+  net_payover numeric(12,2) not null,
+  snapshot jsonb not null,
+  pdf_path text not null,
+  xlsx_path text not null,
+  unique (run_id, version)
+);
+create index if not exists payover_run_sends_company_idx on public.payover_run_sends (company_id, sent_at desc);
+
+alter table public.payover_run_sends enable row level security;
+drop policy if exists "payover_run_sends_select" on public.payover_run_sends;
+create policy "payover_run_sends_select" on public.payover_run_sends
+  for select using (public.has_capability('finance.view'));
+-- NO insert, update or delete policy: record_payover_send is the only writer, and nothing edits one.
+
+-- AND NOT EVEN THE DATABASE OWNER EDITS ONE QUIETLY: the trigger refuses an update or a removal.
+create or replace function public.protect_payover_run_sends()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  raise exception 'A payover advice that was sent is kept exactly as it was sent. Send a revised one instead.'
+    using errcode = '42501';
+end $$;
+
+create or replace trigger payover_run_sends_frozen
+  before update or delete on public.payover_run_sends
+  for each row execute function public.protect_payover_run_sends();
+
+create or replace function public.record_payover_send(
+  p_run uuid, p_sent_to text, p_subject text, p_snapshot jsonb, p_pdf_path text, p_xlsx_path text)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_run public.payover_runs%rowtype; v_version integer;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Recording a payover advice is not yours to do.' using errcode = '42501';
+  end if;
+  select * into v_run from public.payover_runs where id = p_run;
+  if not found then raise exception 'No such payover run.' using errcode = 'P0002'; end if;
+  if v_run.status not in ('approved', 'sent', 'paid') then
+    raise exception 'Only an approved run is sent to a client.' using errcode = '22023';
+  end if;
+  if nullif(btrim(coalesce(p_pdf_path, '')), '') is null or nullif(btrim(coalesce(p_xlsx_path, '')), '') is null then
+    raise exception 'The copy of what was sent has to be kept with it.' using errcode = '22023';
+  end if;
+  select coalesce(max(version), 0) + 1 into v_version from public.payover_run_sends where run_id = p_run;
+  insert into public.payover_run_sends (run_id, company_id, version, sent_by, sent_to, subject,
+                                        net_payover, snapshot, pdf_path, xlsx_path)
+  values (p_run, v_run.company_id, v_version, auth.uid(), btrim(p_sent_to), p_subject,
+          v_run.net_payover, p_snapshot, p_pdf_path, p_xlsx_path);
+  return v_version;
+end $$;
+
+revoke all on function public.record_payover_send(uuid, text, text, jsonb, text, text) from public, anon;
+grant execute on function public.record_payover_send(uuid, text, text, jsonb, text, text) to authenticated;
+revoke all on function public.protect_payover_run_sends() from public, anon;
+
+-- THE FILES, IN A PRIVATE BUCKET THAT CAN BE ADDED TO AND READ, AND NOTHING ELSE. No update and no
+-- delete policy, so an object written here stays the object that was attached to the email.
+insert into storage.buckets (id, name, public)
+values ('payover-advice', 'payover-advice', false)
+on conflict (id) do nothing;
+
+drop policy if exists "payover_advice_read" on storage.objects;
+create policy "payover_advice_read" on storage.objects
+  for select using (bucket_id = 'payover-advice' and public.has_capability('finance.view'));
+drop policy if exists "payover_advice_insert" on storage.objects;
+create policy "payover_advice_insert" on storage.objects
+  for insert with check (bucket_id = 'payover-advice' and public.has_capability('finance.view'));

@@ -14,7 +14,7 @@ import { adviceBody, adviceSubject, buildRemittanceAdvice } from '../../lib/remi
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
-import { sendRemittanceAdvice } from '../../lib/remittanceEmail'
+import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
 
 /**
  * ONE PAYOVER RUN, AND THE PAYMENTS UNDER IT.
@@ -83,6 +83,7 @@ export function RunDetail() {
   const [busy, setBusy] = useState(false)
   const [payModal, setPayModal] = useState(false)
   const [emailModal, setEmailModal] = useState(false)
+  const [sends, setSends] = useState<AdviceSend[]>([])
   const [firm, setFirm] = useState<{ name: string; address: string | null; phone: string | null; email: string | null; vatNumber: string | null } | null>(null)
 
   const load = useCallback(async () => {
@@ -116,6 +117,7 @@ export function RunDetail() {
         email: f.email, vatNumber: f.vat_number,
       } : null)
       setRows(await fetchRunPayments(id))
+      setSends(await fetchAdviceSends({ runId: id }).catch(() => []))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load that run.')
     } finally {
@@ -241,6 +243,13 @@ export function RunDetail() {
                 Email advice
               </button>
             )}
+            {/* A revision goes BESIDE what was sent, never over it (the firm, 8 Oct). */}
+            {(run.status === 'sent' || run.status === 'paid') && (
+              <button type="button" disabled={busy || !advice} onClick={() => setEmailModal(true)}
+                className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+                Send again
+              </button>
+            )}
             {(run.status === 'approved' || run.status === 'sent') && statementOnly && (
               <span className="text-[12px] text-slate-500" data-testid="paid-from-statement">
                 Paid when its line on the bank statement is allocated
@@ -301,6 +310,10 @@ export function RunDetail() {
           <p className="mt-2 text-xs text-slate-400">Paid by EFT {run.eft_reference}{run.paid_at ? ` on ${fmtDay(run.paid_at.slice(0, 10))}` : ''}.</p>
         )}
       </Card>
+
+      {(sends.length > 0 || run.status === 'sent' || run.status === 'paid') && (
+        <SentCopies sends={sends} onError={setError} />
+      )}
 
       <Card padded={false}>
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
@@ -365,7 +378,8 @@ export function RunDetail() {
       {emailModal && advice && run && (
         <EmailAdviceModal
           advice={advice}
-          runId={run.id}
+          run={{ id: run.id, companyId: run.company_id, status: run.status }}
+          again={run.status !== 'approved'}
           defaultTo={client?.email ?? ''}
           onClose={() => setEmailModal(false)}
           onSent={async () => { setEmailModal(false); await load() }}
@@ -524,9 +538,10 @@ function MarkPaidModal({ suggested, onClose, onSave }: {
  * receives statements is often not the person on the client record. The body is the one the
  * client will actually get -- blank lines and all -- rather than a summary of it.
  */
-function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
+function EmailAdviceModal({ advice, run, again, defaultTo, onClose, onSent }: {
   advice: ReturnType<typeof buildRemittanceAdvice>
-  runId: string
+  run: { id: string; companyId: string; status: string }
+  again: boolean
   defaultTo: string
   onClose: () => void
   onSent: () => Promise<void>
@@ -535,7 +550,7 @@ function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   return (
-    <Modal title="Email the remittance advice" onClose={onClose} width={520}>
+    <Modal title={again ? 'Send the remittance advice again' : 'Email the remittance advice'} onClose={onClose} width={520}>
       <div className="space-y-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600">To</label>
@@ -561,7 +576,9 @@ function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
           {advice.run.invoiceNumber}.pdf and the same detail as a spreadsheet are attached —
           {' '}{advice.collections.length} collection{advice.collections.length === 1 ? '' : 's'}
           {advice.direct.length > 0 ? ` and ${advice.direct.length} paid to you directly` : ''}.
-          The run is marked sent only once the message has actually gone.
+          {again
+            ? ' What was sent before is kept as it was; this goes beside it as a new copy.'
+            : ' The run is marked sent only once the message has actually gone, and a copy of exactly what went is kept with it.'}
         </p>
         {advice.problems.length > 0 && (
           <div className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
@@ -574,7 +591,7 @@ function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
           <button type="button" disabled={busy || !to.trim()}
             onClick={() => {
               setBusy(true); setError(null)
-              void sendRemittanceAdvice(advice, to.trim(), runId)
+              void sendRemittanceAdvice(advice, to.trim(), run)
                 .then(onSent)
                 .catch((e: unknown) => setError(e instanceof Error ? e.message : 'It would not send.'))
                 .finally(() => setBusy(false))
@@ -585,6 +602,40 @@ function EmailAdviceModal({ advice, runId, defaultTo, onClose, onSent }: {
         </div>
       </div>
     </Modal>
+  )
+}
+
+/**
+ * WHAT WENT TO THE CLIENT, AS IT WENT. Each row opens the very PDF and spreadsheet attached that
+ * day -- not a statement rebuilt now -- and nothing here can be edited or removed.
+ */
+function SentCopies({ sends, onError }: { sends: AdviceSend[]; onError: (m: string) => void }) {
+  const open = (path: string) => { void openAdviceCopy(path).catch((e: unknown) => onError(e instanceof Error ? e.message : 'That copy could not be opened.')) }
+  return (
+    <Card>
+      <h2 className="text-[13px] font-semibold text-slate-800">Sent to the client</h2>
+      {sends.length === 0 ? (
+        <p className="mt-2 text-[13px] text-slate-500" data-testid="no-sent-copy">
+          This run was sent before copies were kept, so there is no copy of what went. Sending it again keeps one from now on.
+        </p>
+      ) : (
+        <ul className="mt-2 divide-y divide-slate-100" data-testid="sent-copies">
+          {sends.map((x) => (
+            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[13px]">
+              <span className="text-slate-700">
+                <span className="font-medium">{x.version === 1 ? 'Sent' : `Sent again (${x.version})`}</span>
+                {' '}{fmtStamp(x.sentAt)} to {x.sentTo}
+                <span className="ml-2 tabular-nums text-slate-500">{rand(x.netPayover)}</span>
+              </span>
+              <span className="flex gap-3">
+                <button type="button" onClick={() => open(x.pdfPath)} className="font-medium text-navy-700 underline">Statement (PDF)</button>
+                <button type="button" onClick={() => open(x.xlsxPath)} className="font-medium text-navy-700 underline">Schedule</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
 

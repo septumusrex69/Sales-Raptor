@@ -394,3 +394,9 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
 
   return buildXlsx('Remittance', rows)
 }
+
+/** Where one send's copies live: the client's folder, then the invoice, then this send. */
+export function adviceCopyPaths(companyId: string, invoiceNumber: string, stamp: string): { pdf: string; xlsx: string } {
+  const base = `${companyId}/${invoiceNumber.replace(/[^A-Za-z0-9._-]/g, '_')}/${stamp}`
+  return { pdf: `${base}.pdf`, xlsx: `${base}.xlsx` }
+}

@@ -197,7 +197,8 @@ ok('...and a statement that cannot be drawn is not emailed',
 /* THE RUN IS MARKED SENT ONLY AFTER THE MESSAGE HAS GONE. The other order leaves a client never
    chased for a statement they never received, with the queue showing the job as done. */
 ok('the run is marked sent after the send, not before',
-  emailSrc.indexOf('await markRunSent(runId)') > emailSrc.indexOf("fetch('/api/email/send'"))
+  emailSrc.indexOf('await markRunSent(run.id)') > 0
+  && emailSrc.indexOf('await markRunSent(run.id)') > emailSrc.indexOf("fetch('/api/email/send'"))
 /* NO NEW ENDPOINT: api/ is at Vercel Hobby's cap of twelve functions. */
 ok('it reuses the existing send endpoint', /fetch\('\/api\/email\/send'/.test(emailSrc))
 /* BLANK LINES ARE PARAGRAPHS, which is the firm's rule after a final notice went out as one block. */
