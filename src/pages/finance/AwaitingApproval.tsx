@@ -333,10 +333,12 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
             <tr className="text-slate-400">
               <th colSpan={2} className={`${STICKY_HEAD} left-0 z-20`} />
               <GroupHead span={3}>Payment</GroupHead>
-              <GroupHead span={4}>Interest and fees</GroupHead>
+              {/* "INCL. VAT" ONCE, ON THE GROUP, not on every column under it (the firm, 8 Oct: the long
+                  headings did not sit with the rest). Every figure under these two groups includes it. */}
+              <GroupHead span={4} note="incl. VAT">Interest and fees</GroupHead>
               <GroupHead span={3}>Capital</GroupHead>
               <GroupHead span={3}>Commission</GroupHead>
-              <GroupHead span={4}>Final split</GroupHead>
+              <GroupHead span={4} note="incl. VAT">Final split</GroupHead>
               <GroupHead span={3}>Review</GroupHead>
             </tr>
             <tr>
@@ -352,12 +354,12 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                 Debtor
               </th>
               <Th first>Received</Th><Th right>Amount</Th><Th>Route</Th>
-              <Th first right>Interest</Th><Th right>Receipt fee incl. VAT</Th>
-              <Th right>Earlier fees incl. VAT</Th><Th right>Unused half A → capital</Th>
+              <Th first right>Interest</Th><Th right>Receipt fee</Th>
+              <Th right>Earlier fees</Th><Th right>Unused → capital</Th>
               <Th first right>Outstanding before</Th><Th right>Paid</Th><Th right>Remaining</Th>
               <Th first right>Rate</Th><Th right>Amount</Th><Th right>VAT on commission</Th>
-              <Th first right>To client</Th><Th right>BF keeps incl. VAT</Th>
-              <Th right>Debtor credit</Th><Th right>PTC due to BF incl. VAT</Th>
+              <Th first right>To client</Th><Th right>BF keeps</Th>
+              <Th right>Debtor credit</Th><Th right>PTC due to BF</Th>
               <Th first>Exceptions</Th><Th>Reference</Th><Th>Actions</Th>
             </tr>
           </thead>
@@ -534,11 +536,12 @@ const STICKY_HEAD = 'sticky bg-[var(--color-card-solid,var(--color-card))]'
 const TICK_COL = 'w-10 min-w-10 max-w-10 px-0 text-center'
 const STICKY_CELL = 'sticky z-10 bg-[var(--color-card-solid,var(--color-card))] border-b border-slate-100 border-r-slate-200'
 
-function GroupHead({ span, children }: { span: number; children: string }) {
+function GroupHead({ span, children, note }: { span: number; children: string; note?: string }) {
   return (
     <th colSpan={span}
       className="px-2 pt-2 pb-1 text-left font-semibold tracking-wider border-l border-slate-200">
       {children}
+      {note && <span className="ml-1.5 font-normal normal-case tracking-normal text-slate-400">· {note}</span>}
     </th>
   )
 }
@@ -609,16 +612,16 @@ function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
         <Figure wide label="Total awaiting" value={rand(t.total)}
           note={`${rand(t.direct.amount)} into trust · ${rand(t.ptc.amount)} paid to clients`} />
         <Figure label="To pay clients" value={rand(t.toClients)} note="From trust, on direct receipts" emph />
-        <Figure label="BF share incl. VAT" value={rand(t.bfShare)}
-          note={t.ptc.count > 0 ? `Includes ${rand(t.ptc.dueToBf)} due from clients on PTCs` : 'Fees, interest, commission and its VAT'} emph />
+        <Figure label="BF share" value={rand(t.bfShare)}
+          note={t.ptc.count > 0 ? `Incl. VAT · includes ${rand(t.ptc.dueToBf)} due from clients on PTCs` : 'Fees, interest, commission and its VAT'} emph />
         {/* HELD IN TRUST ONLY. A debtor who overpaid the CLIENT is the client's to sort out (the
             firm, 7 Oct), so it is named under the figure and never counted as money the firm holds. */}
         <Figure label="Debtor credit" value={rand(t.direct.credit)}
           note={t.ptc.credit > 0
             ? `Held in trust · plus ${rand(t.ptc.credit)} overpaid to clients, theirs to sort out`
             : 'Held for the debtor, never paid over'} />
-        <Figure label="PTC due to BF incl. VAT" value={rand(t.ptc.dueToBf)}
-          note={`${t.ptc.count} PTC${t.ptc.count === 1 ? '' : 's'} · client already holds ${rand(t.ptc.clientShareHeld)}`} />
+        <Figure label="PTC due to BF" value={rand(t.ptc.dueToBf)}
+          note={`Incl. VAT · ${t.ptc.count} PTC${t.ptc.count === 1 ? '' : 's'} · client already holds ${rand(t.ptc.clientShareHeld)}`} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px]" data-testid="batch-checks">
         {checks.map((c) => (
@@ -646,7 +649,7 @@ function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
                 <th className="px-2 py-1 text-right font-medium">Into trust</th>
                 <th className="px-2 py-1 text-right font-medium">Paid to client</th>
                 <th className="px-2 py-1 text-right font-medium">To pay client</th>
-                <th className="px-2 py-1 text-right font-medium">BF share incl. VAT</th>
+                <th className="px-2 py-1 text-right font-medium">BF share <span className="normal-case tracking-normal text-slate-300">incl. VAT</span></th>
                 <th className="px-2 py-1 text-right font-medium">Credit</th>
                 <th className="px-2 py-1 text-right font-medium">PTC due to BF</th>
               </tr>

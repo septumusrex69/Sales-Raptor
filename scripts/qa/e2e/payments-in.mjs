@@ -142,10 +142,15 @@ try {
   t.ok('...badged capital paid off, never settled', /Capital paid off/.test(await page.locator('[data-payment="lowveld"]').innerText())
     && !/\bSettled\b/.test(await page.locator('[data-payment="lowveld"]').innerText()))
 
+  /* "INCL. VAT" ONCE ON THE GROUP, not on every heading under it (the firm, 8 Oct). */
+  const head = (await page.locator('[data-testid="queue-scroll"] thead').innerText()).replace(/\s+/g, ' ')
+  t.ok('the group heading says incl. VAT once', /Interest and fees ?· incl\. VAT/i.test(head) && /Final split ?· incl\. VAT/i.test(head))
+  t.check('...and no column heading repeats it', /incl\. VAT/i.test(head.replace(/· incl\. VAT/gi, '')), false)
+
   /* ---- the batch ---- */
   const summary = await page.getByTestId('batch-summary').innerText()
   t.ok('the batch is labelled a projection', /Projected on approval/i.test(summary))
-  t.ok('...BF share across both routes, with the PTC due inside it', money(summary).includes('R7090.08') && money(summary).includes('IncludesR3271.50'))
+  t.ok('...BF share across both routes, with the PTC due inside it', money(summary).includes('R7090.08') && money(summary).toLowerCase().includes('includesr3271.50'))
   t.check('...and all three reconciliations hold',
     await page.getByTestId('batch-checks').locator('.text-negative-700').count(), 0)
   await page.getByRole('button', { name: 'By client' }).click()
