@@ -120,6 +120,18 @@ export interface Violation {
  */
 export const CENT = 0.005
 
+/**
+ * TO THE CENT, HALF UP, THE WAY THE DATABASE DOES IT. Postgres rounds an exact numeric: 463.50 ×
+ * 15% is 69.525 and becomes 69.53. In floating point the same product is 69.52499999999999, and a
+ * plain Math.round(x * 100) / 100 makes it 69.52 -- so the check accused correct engine arithmetic
+ * of a one-cent error (seen by the firm on RAP-124119, 8 Oct). Snapping the product to a few
+ * decimals first throws away the binary noise and leaves the real half cent to round up.
+ */
+export function cents(x: number): number {
+  const c = Number((Math.abs(x) * 100).toFixed(6))
+  return Math.sign(x) * Math.round(c) / 100
+}
+
 const near = (a: number, b: number) => Math.abs(a - b) <= CENT
 /*
  * WRITTEN THE WAY THE FIRM WRITES MONEY, through the one formatter.
@@ -145,7 +157,7 @@ const money = (n: number) => amount(n)
  * row.
  */
 export function receiptFeeInclusive(excl: number, vatRate: number): number {
-  return Math.round((excl + excl * vatRate) * 100) / 100
+  return cents(excl + excl * vatRate)
 }
 
 /** The three lines of the fees side, in the order they are paid. */
@@ -353,7 +365,7 @@ export function checkAllocation(a: Allocation): Violation[] {
    * is given -- and where it takes less, everything it could have paid must be settled. A fees
    * side under half with something still outstanding on it is the roll going the wrong way.
    */
-  const half = Math.round((a.payment / 2) * 100) / 100
+  const half = cents(a.payment / 2)
   if (side > half + CENT) {
     say('The fees side never takes more than half',
       `fees side ${money(side)} of a payment of ${money(a.payment)} (half is ${money(half)})`)
@@ -366,7 +378,7 @@ export function checkAllocation(a: Allocation): Violation[] {
     }
   }
   /* AND CAPITAL NEVER TAKES LESS THAN ITS OWN HALF. The roll only ever moves money TOWARDS it. */
-  const otherHalf = Math.round((a.payment - half) * 100) / 100
+  const otherHalf = cents(a.payment - half)
   if (a.capitalBefore > CENT && a.toCapital < Math.min(otherHalf, a.capitalBefore) - CENT) {
     say('Capital takes at least its half',
       `capital took ${money(a.toCapital)} of a half worth ${money(otherHalf)}`)
@@ -390,12 +402,12 @@ export function checkAllocation(a: Allocation): Violation[] {
    * whole receipt would charge the client for recovering the firm's own fees.
    */
   if (a.commissionRate !== null
-    && !near(a.commission, Math.round(a.toCapital * a.commissionRate * 100) / 100)) {
+    && !near(a.commission, cents(a.toCapital * a.commissionRate))) {
     say('Commission is the rate on capital recovered',
       `${money(a.toCapital)} × ${(a.commissionRate * 100).toFixed(2)}% = `
       + `${money(a.toCapital * a.commissionRate)}, got ${money(a.commission)}`)
   }
-  if (!near(a.commissionVat, Math.round(a.commission * a.vatRate * 100) / 100)) {
+  if (!near(a.commissionVat, cents(a.commission * a.vatRate))) {
     say('VAT is the rate on the commission',
       `${money(a.commission)} × ${(a.vatRate * 100).toFixed(0)}% = ${money(a.commission * a.vatRate)}, `
       + `got ${money(a.commissionVat)}`)

@@ -30,7 +30,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  allocationOf, checkAllocation, derivedComponent, feesSideTaking, receiptFeeInclusive,
+  allocationOf, cents, checkAllocation, derivedComponent, feesSideTaking, receiptFeeInclusive,
 } from '../../src/lib/allocationRules.ts'
 
 let pass = 0
@@ -527,6 +527,12 @@ ok('the commission column is called Commission',
 check('the check screen writes nothing',
   ['supabase.from', 'supabase.rpc', '.update(', '.insert(', '.delete(']
     .filter((w) => checkScreen.includes(w)), [])
+
+/* HALF A CENT ROUNDS UP, AS THE DATABASE ROUNDS IT. RAP-124119 (8 Oct): 463.50 × 15% is 69.525,
+   the engine wrote 69.53, and the check said 69.52 because the float is 69.52499999999999. */
+check('the firm\'s one-cent case: 463.50 at 15% is 69.53', cents(463.5 * 0.15), 69.53)
+check('...a negative half cent rounds away from nought, as Postgres does', cents(-0.125), -0.13)
+check('...and an ordinary figure is untouched', cents(1250 * 0.2), 250)
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} failed, ${pass} passed\n`)
