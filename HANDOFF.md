@@ -243,6 +243,12 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
     staging over HTTP was refused by the safety check and removed — use the Supabase tools.
   - Once `Main` deploys, the daily workflow run and 5-minute mail sync act on production data, and
     `CRON_SECRET` was marked "rotate before real client traffic".
+- **DECIDED 8 Oct, FOR GO-LIVE: payments out are confirmed from the bank statement only.** The firm:
+  on staging keep both (mark paid by hand, and the statement confirms), "but when we go live, I
+  think it would be better if we just work from the statement". Not built yet: proposed as a Trust
+  settings switch -- on, Mark paid disappears from the run page and Payments to make and
+  `mark_payover_run_paid` / `mark_refund_paid` refuse; Record a transfer stays (it is the
+  instruction; the statement confirms it). Turn it on as part of the production go-live.
 - **FOUND, NOT FIXED: reversing an approved payment fails on staging** unless it is already on an
   issued run. `reverse_payment` → `reverse_payment_allocation` → `reallocate_account` removes the
   account's un-invoiced allocations, and `trust_creditor_entries.allocation_id` still references
