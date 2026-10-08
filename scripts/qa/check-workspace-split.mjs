@@ -209,7 +209,10 @@ for (const f of [
 ok('the rail folds', /useCollapsed\('crm\.workspaceNav\.collapsed'\)/.test(rail))
 /* Folded, it must still say WHICH workspace you are in: that is the single thing the split exists
    to keep clear, and a bare icon would throw it away to save 224px. */
-ok('...and folded it still names the workspace', /PanelLeftOpen[\s\S]{0,120}\{title\}/.test(rail))
+ok('...and folded it still names the workspace', /if \(collapsed\)[\s\S]*?text-slate-500">\s*\{title\}\s*<\/div>/.test(rail))
+/* The firm, 8 Oct: the narrow option is at the bottom; folded, the widen option must be too. */
+ok('...with the widen button at the bottom, after the door',
+  /<door\.icon size=\{16\} \/>[\s\S]*?aria-expanded="false"[\s\S]*?<PanelLeftOpen/.test(rail))
 
 /* ------------------------- 6. the new tick claims nothing extra ------------------------- */
 

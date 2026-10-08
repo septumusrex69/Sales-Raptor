@@ -79,17 +79,17 @@ export function WorkspaceRail({
      * big ... it can just be a little bit smaller." 48px holds the 16px icons and "Business" at
      * 10.5px; the gap is the rail's own margin, so folded it can close to 12px while the open menu
      * keeps its 24.
+     *
+     * THE WIDEN BUTTON STAYS WHERE THE NARROW ONE WAS -- at the bottom, under the door. The firm
+     * (8 Oct): "the narrow option is at the bottom, but then it moves to the top. Keep it at the
+     * bottom to keep consistency." The name stays on top as a plain label: it is there to say which
+     * book this is, not to be pressed.
      */
     return (
       <nav aria-label={`${title} menu`} className="w-12 mr-3 shrink-0 flex flex-col items-center">
-        <button
-          type="button" onClick={toggle} aria-expanded="false" title={`Show the ${title} menu`}
-          className="w-full flex flex-col items-center gap-0.5 pb-2 mb-1 rounded-lg
-            text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-        >
-          <PanelLeftOpen size={15} />
-          <span className="text-[10.5px] font-semibold leading-tight">{title}</span>
-        </button>
+        <div className="w-full pb-2 mb-1 text-center text-[10.5px] font-semibold leading-tight text-slate-500">
+          {title}
+        </div>
 
         <div className="space-y-0.5 w-full">
           {items.map((item) => <RailLink key={item.to} {...item} folded />)}
@@ -112,6 +112,15 @@ export function WorkspaceRail({
             </NavLink>
           </div>
         )}
+
+        <button
+          type="button" onClick={toggle} aria-expanded="false"
+          title={`Show the ${title} menu`} aria-label={`Show the ${title} menu`}
+          className={clsx('w-full flex items-center justify-center mt-2 py-2 rounded-lg',
+            'text-slate-400 hover:bg-slate-100 hover:text-slate-600', !door && 'mt-auto')}
+        >
+          <PanelLeftOpen size={15} />
+        </button>
       </nav>
     )
   }

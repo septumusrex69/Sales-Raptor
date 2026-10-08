@@ -359,7 +359,14 @@ try {
      * reclaim the width and leave somebody unable to tell the trust account from the business one.
      */
     t.ok('...but it still says Trust',
-      (await page.getByRole('button', { name: 'Trust', exact: true }).count()) > 0)
+      await page.getByRole('navigation', { name: 'Trust menu' }).getByText('Trust', { exact: true }).isVisible())
+    /* THE FIRM, 8 Oct: "the narrow option is at the bottom, but then it moves to the top. Keep it
+       at the bottom." Folded, the widen button sits under the door, where Narrow was. */
+    const widen = await page.getByRole('button', { name: 'Show the Trust menu' }).boundingBox({ timeout: 5000 }).catch(() => null)
+    const door = await page.getByRole('navigation', { name: 'Trust menu' })
+      .getByRole('link', { name: 'Business account', exact: true }).boundingBox({ timeout: 5000 }).catch(() => null)
+    t.ok(`...and the widen button is at the bottom, under the door (${Math.round(widen?.y ?? 0)} vs ${Math.round(door?.y ?? 0)})`,
+      !!widen && !!door && widen.y > door.y)
     /*
      * AND EVERY PLACE IS STILL AN ICON YOU CAN CLICK. The firm: "when you narrow this menu, you
      * can't click on the business account or you can't see any of the icons." It folded into the
@@ -375,6 +382,7 @@ try {
     const pageBox = await page.locator('nav[aria-label="Trust menu"] + div').boundingBox()
     const reach = foldedBox && pageBox ? pageBox.x - foldedBox.x : Infinity
     t.ok(`...and the page starts close beside it (${Math.round(reach)}px from the rail's edge)`, reach <= 64)
+    await page.evaluate(() => document.querySelectorAll('*').forEach((el) => { if (el.scrollTop) el.scrollTop = 0 }))
     await t.shot(page, 'trust-rail-folded')
     /* THE DOOR, which is exactly what the firm could not reach. */
     await folded.getByRole('link', { name: 'Business account', exact: true }).click()
