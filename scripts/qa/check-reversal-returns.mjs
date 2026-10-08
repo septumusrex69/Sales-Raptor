@@ -89,7 +89,14 @@ ok('...and it hands back the copy rather than nothing',
 ok('an approved receipt is raised again', /if v_pay\.approved_at is not null then/.test(rev ?? ''))
 ok('...as a new row on account_payments',
   /insert into public\.account_payments \([\s\S]{0,400}?replaces_payment_id/.test(rev ?? ''))
-ok('...pointing back at the one that was reversed', /v_pay\.id\s*\n\s*\)\s*\n\s*returning id into v_copy/.test(rev ?? ''))
+ok('...pointing back at the one that was reversed',
+  /v_pay\.id,?\s*\n(\s*v_pay\.moved_from_allocation_id\s*\n)?\s*\)\s*\n\s*returning id into v_copy/.test(rev ?? ''))
+/* A MOVED OVERPAYMENT (the firm, 8 Oct): the copy of a moved payment is still a moved payment -- no
+   second receipt fee -- and a payment whose overpayment was moved is not reversed at all, because
+   the re-split copy would be a second credit of money already on the other account. */
+ok('...and a moved payment\'s copy keeps the marker', /v_pay\.id,\s*\n\s*v_pay\.moved_from_allocation_id\s*\n\s*\)/.test(rev ?? ''))
+ok('a payment whose overpayment was moved is refused',
+  /a\.excess_disposal = 'moved'\) then\s*\n\s*raise exception 'Its overpayment was moved/.test(rev ?? ''))
 /*
  * THE LOOP GUARD. `approved_at is not null` is the whole of it: reversing something still sitting
  * in the queue takes it out, which is how the copy of a cheque that bounced is got rid of. Without

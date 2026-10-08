@@ -30655,3 +30655,688 @@ as $$
 $$;
 revoke all on function public.payover_run_payments(uuid) from public, anon;
 grant execute on function public.payover_run_payments(uuid) to authenticated;
+
+-- ============================================================================================
+-- AN OVERPAYMENT MOVED TO ANOTHER OF THE DEBTOR'S ACCOUNTS IS MOVED, NOT JUST NOTED
+--
+-- The firm, 8 Oct: "If it's being moved to another account, then that will be allocated." The
+-- 'moved' disposal recorded excess_moved_to and did nothing else. Now dispose_excess_credit takes
+-- the credit off the first account (a negative debtor entry in the trust ledger) and puts it on
+-- the second as an approved account_payments row, source 'moved', moved_from_allocation_id set,
+-- dated as the debtor paid it -- and the engine splits it there like any receipt.
+--   - NO SECOND RECEIPT FEE (the firm's ruling, 8 Oct): allocate_payment charges item 9 at nil and
+--     writes no fee row for a moved payment.
+--   - NOT COUNTED TWICE: collector_performance, collector_daily, payments_in_month and
+--     client_book_totals leave source 'moved' out. account_settlement keeps it: on the account it
+--     is a real reduction of that debt.
+--   - reverse_payment refuses a payment whose overpayment was moved (the re-split copy would be a
+--     second credit of the same money), and a reversed moved payment's copy keeps the marker.
+-- Proved on staging in rolled-back probes: R769.35 moved; trust total 44 839.92 before and after;
+-- the first account's credit nil; on the second R766.12 capital + R3.23 interest, fee nil, no fee
+-- row; "processed into trust" unchanged. Built from the LIVE bodies with replace() (several had
+-- drifted from this file in comments only); verified here by md5 with comments stripped.
+-- ============================================================================================
+
+alter table public.account_payments
+  add column if not exists moved_from_allocation_id uuid references public.payment_allocations (id) on delete set null;
+comment on column public.account_payments.moved_from_allocation_id is
+  'A debtor overpayment moved here from another of their accounts (dispose_excess_credit ''moved''). Not new money: no second receipt fee, and left out of collection totals.';
+
+create or replace function public.allocate_payment(p_payment_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_acct public.debtor_accounts%rowtype;
+  v_cutover timestamptz;
+  v_vat numeric;
+  v_fee_rate numeric;
+  v_fee_cap numeric;
+  v_tariff_from date;
+  b record;
+  o record;
+  k record;
+  v_rate numeric;
+  v_bands jsonb;
+  v_cumulative numeric;
+  v_mandate timestamptz;
+  s record;
+  v_commission numeric;
+  v_commission_vat numeric;
+  v_status text := 'allocated';
+  v_to_client numeric;
+  v_due_to_bf numeric;
+  v_id uuid;
+  v_day date;
+  v_accrued numeric;
+  v_recoverable numeric;
+  v_interest_retained numeric;
+  v_costs_taken numeric;
+begin
+  select * into v_pay from public.account_payments where id = p_payment_id;
+  if not found then return null; end if;
+
+  /* THREE REASONS NOT TO TOUCH IT, and none of them is an error: invented data, money already
+     given back, and history that Swordfish settled and a client has been paid on. */
+  /*
+   * SWORDFISH ALREADY PAID THIS ONE OVER, AND THAT IS THE FIRST GATE -- before the interest is
+   * brought up to date, before the receipt fee, before anything is posted at all.
+   *
+   * The comment below always named this reason and the code never asked it. The import writes a
+   * settled receipt already approved, the insert trigger called straight in here, and every one
+   * was split: a second receipt fee on top of the one Swordfish charged, the whole of the imported
+   * history posted to trust as money still owed to clients, and the open-period interest the
+   * engine posts first collided with the Swordfish interest rows the import wrote next, which is
+   * what stopped it (prompt 8, staging, 6 Oct 2026). Every path that splits comes through here --
+   * the insert trigger, approve_payment, reallocate_account -- so this one line covers them all.
+   */
+  if v_pay.paid_over_in_swordfish then return null; end if;
+
+  if v_pay.is_demo or v_pay.reversed_at is not null then return null; end if;
+
+  /*
+   * A FOURTH REASON, AND IT IS THE ORDINARY ONE: not approved yet.
+   *
+   * THE FIRM: "there should be a state of payments and payments that should be approved... on a
+   * daily basis." Until now a receipt was live the instant it landed -- the balance moved and the
+   * payover run could carry it to a client before anybody had looked.
+   *
+   * AND THE PAYOVER RUN NEEDS NO SECOND FILTER, which is why the gate is here. A run gathers
+   * ALLOCATIONS; an unapproved payment has none, so it is invisible to remittance by construction
+   * rather than by a rule somebody has to remember in two places.
+   */
+  if v_pay.approved_at is null then return null; end if;
+
+  select vat_rate, finance_cutover_at into v_vat, v_cutover from public.firm_settings limit 1;
+  if v_cutover is null or v_pay.created_at < v_cutover then return null; end if;
+
+  select * into v_acct from public.debtor_accounts where id = v_pay.account_id;
+  if not found then return null; end if;
+
+  v_day := (v_pay.received_at at time zone 'Africa/Johannesburg')::date;
+
+  /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. */
+  select rate, cap_excl_vat, effective_from into v_fee_rate, v_fee_cap, v_tariff_from
+    from public.annexure_b_tariffs
+   where item = '9'
+     and v_pay.received_at::date >= effective_from
+     and (effective_to is null or v_pay.received_at::date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then
+    raise exception 'No Annexure B item 9 tariff covers %', v_pay.received_at::date;
+  end if;
+  /* AN OVERPAYMENT MOVED FROM ANOTHER OF THE DEBTOR'S ACCOUNTS IS NOT A NEW RECEIPT. The fee was
+     taken on the payment the debtor actually made; the firm, 8 Oct: no second receipt fee. */
+  if v_pay.moved_from_allocation_id is not null then v_fee_rate := 0; end if;
+
+  /*
+   * POST THE OPEN PERIOD FIRST, OR THERE IS NOTHING FOR THE SPLIT TO GIVE INTEREST TO.
+   *
+   * THE FIRM: "there was zero interest captured... I don't even know if the interest is actually
+   * running." It ran on the SCREEN and nowhere else. `engine_balances` adds up
+   * account_interest_accruals and nothing else, so an account whose interest has only ever been
+   * COMPUTED has no row there, `finance_split` was handed an interest balance of nought, and every
+   * cent of every payment went to costs and capital.
+   *
+   * TO THE PAYMENT'S OWN DAY, never to today, and EXCLUDING THIS PAYMENT: the accrual is what the
+   * debt earned UP TO the moment the money arrived, not after it.
+   *
+   * AND IT IS WHY engine_balances IS ASKED WITH NOTHING PENDING BELOW: by this line the open
+   * period is real rows, so the in duplum ceiling already counts it. Only the dry run has to say
+   * so explicitly.
+   */
+  perform public.accrue_interest_to(v_acct.id, v_day, p_payment_id);
+
+  select * into b from public.engine_balances(v_acct.id, p_payment_id);
+
+  select * into s from public.finance_split(
+    v_pay.amount, b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  if v_fee_rate > 0 then
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description,
+    amount_excl_vat, vat_rate, vat_amount, counts_toward_fee_cap,
+    incurred_at, source, payment_id, billed, action_code
+  ) values (
+    v_acct.id, '9', v_tariff_from, 'Receipt of instalment',
+    s.fee_excl, v_vat * 100, s.fee_vat, false,
+    v_pay.received_at, 'raptor', p_payment_id, true, 'receipt'
+  ) on conflict do nothing;
+  end if;
+
+  /*
+   * THE FIVE FIGURES BEHIND EACH LINE OF THE FEES SIDE, WRITTEN ONTO THE ALLOCATION.
+   *
+   * THE FIRM: "you can add whatever you need for the administrator to ensure that we can double
+   * check every single thing that comes in." A posted allocation used to carry the four takings
+   * and nothing they came out of, so the only way to check one afterwards was to re-derive it
+   * against a book that had moved -- which answers a different question every day.
+   *
+   * `open_interest` IS ASKED AGAIN AND THAT IS NOT A SECOND OPINION: accrue_interest_to has just
+   * written the open period as real rows, so this call returns what is still open, which is
+   * nought. It is here for the `accrued` figure on an account whose ceiling clipped it.
+   */
+  select * into o from public.open_interest(v_acct.id, v_day, p_payment_id);
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = v_acct.id;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+
+  select coalesce(sum(a.to_interest), 0), coalesce(sum(a.to_costs), 0)
+    into v_interest_retained, v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = v_acct.id and a.status <> 'reversed'
+     and a.payment_id is distinct from p_payment_id;
+
+  /*
+   * WHICH FEE THE COSTS HALF ACTUALLY PAID. `to_receipt_fee` and `to_fees` have been columns on
+   * this table since it was built and were written as 0, 0 ever since -- so every payment the firm
+   * would ever have approved recorded no answer at all to "did this pay its own receipt fee?"
+   * fee_split is the one place that is worked out, shared with preview_allocation so the approval
+   * screen and the ledger cannot disagree. NOTHING PENDING: the accrual is already a row.
+   */
+  select * into k from public.fee_split(
+    v_acct.id, p_payment_id, s.fee_excl + s.fee_vat, v_day, v_costs_taken, s.to_costs, 0);
+
+  /* THE RATE IS THE ACCOUNT'S, DECIDED ONCE (prompt 9): its own stamped rate, else its client's band
+     on the capital handed over, else the client's flat rate -- account_commission_rate. Never
+     marginal on the client's cumulative capital, which is what this read before. */
+  v_rate := public.account_commission_rate(v_acct.id);
+  v_bands := null;
+
+  v_cumulative := 0;
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_acct.company_id
+       and a.status <> 'reversed'
+       and a.payment_id <> p_payment_id
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  v_commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+
+  if v_commission is null then
+    v_status := 'needs_rate';
+    v_commission := 0;
+  end if;
+  v_commission_vat := round(v_commission * v_vat, 2);
+
+  if v_pay.paid_to_client then
+    v_to_client := 0;
+    v_due_to_bf := s.to_interest + s.to_costs + v_commission;
+  else
+    v_to_client := s.to_capital - v_commission - v_commission_vat;
+    v_due_to_bf := 0;
+  end if;
+
+  insert into public.payment_allocations (
+    payment_id, account_id, payment_amount, half_a,
+    receipt_fee_excl, receipt_fee_vat,
+    to_interest, to_costs, to_capital, excess_credit,
+    to_receipt_fee, to_fees,
+    commission, commission_vat, to_client, due_to_bf,
+    capital_before, capital_after, commission_rate, vat_rate,
+    paid_to_client, status, engine_version, computed_at, excess_disposal,
+    interest_total, interest_cant, interest_retained, interest_before, interest_after,
+    rf_total, rf_cant, rf_retained,
+    fees_total, fees_cant, fees_retained,
+    costs_before, costs_after
+  ) values (
+    p_payment_id, v_acct.id, v_pay.amount, s.half_a,
+    s.fee_excl, s.fee_vat,
+    s.to_interest, s.to_costs, s.to_capital, s.excess,
+    k.to_receipt_fees, k.to_fees,
+    v_commission, v_commission_vat, v_to_client, v_due_to_bf,
+    b.capital, b.capital - s.to_capital, v_rate, v_vat,
+    v_pay.paid_to_client, v_status, 'v2-5050-split', now(),
+    /* A PTC OVERPAYMENT IS THE CLIENT'S TO SORT OUT -- the firm: "we only process the amount that
+       is due. The client should sort that out." The money never reached the trust. */
+    case when v_pay.paid_to_client and s.excess > 0 then 'with_client' end,
+    v_accrued, greatest(v_accrued - v_recoverable, 0), v_interest_retained,
+    b.interest, b.interest - s.to_interest,
+    k.rf_total, k.rf_cant, k.rf_retained,
+    k.fees_total, k.fees_cant, k.fees_retained,
+    b.costs, b.costs + s.fee_excl + s.fee_vat - s.to_costs
+  ) returning id into v_id;
+
+  update public.debtor_accounts
+     set capital_outstanding = greatest(b.capital - s.to_capital, 0),
+         last_payment_at = greatest(coalesce(last_payment_at, v_pay.received_at), v_pay.received_at)
+   where id = v_acct.id;
+
+  return v_id;
+end $$;
+
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') then
+    raise exception 'You are not allowed to reverse a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+  /*
+   * NOR ONE SWORDFISH ALREADY PAID OVER. Reversing writes a fresh copy of an approved payment for
+   * the engine to split, and the copy does not carry the flag -- so this would have turned frozen
+   * history into a Raptor receipt, fees, trust and all. Imported history is frozen at what was
+   * imported (CLAUDE.md); a correction to it is the firm's decision, made case by case.
+   */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It is history and cannot be reversed here.'
+      using errcode = '22023';
+  end if;
+
+  /* NOR ONE WHOSE OVERPAYMENT WAS MOVED. Reversing re-splits a copy, which would make a second
+     undecided overpayment of money already sitting on the other account -- free to be moved
+     or refunded twice. */
+  if exists (select 1 from public.payment_allocations a where a.payment_id = p_payment
+               and a.status <> 'reversed' and a.excess_disposal = 'moved') then
+    raise exception 'Its overpayment was moved to another of the debtor''s accounts. Reversing it here would count that money twice.'
+      using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id,
+      moved_from_allocation_id
+    ) values (
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo, v_pay.bank_line_id, auth.uid(), v_pay.id,
+      v_pay.moved_from_allocation_id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+create or replace function public.dispose_excess_credit(
+  p_allocation uuid, p_disposal text, p_reason text,
+  p_payable_to text default null, p_move_to uuid default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_status text;
+  v_out uuid;
+  v_months integer;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_until date;
+  v_company uuid;
+  v_from_case text;
+  v_to_case text;
+  v_received timestamptz;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to decide what happens to an overpayment.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is going that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if coalesce(v_a.excess_credit, 0) <= 0 then
+    raise exception 'There is no overpayment on that receipt to decide about.' using errcode = '22023';
+  end if;
+  if v_a.excess_disposal is not null then
+    raise exception 'That overpayment has already been dealt with.' using errcode = '22023';
+  end if;
+
+  -- IT IS DECIDED BEFORE THE PAYOVER GOES OUT, NOT AFTER. The excess is what holds the run on
+  -- needs_review; once the run is issued its figures are an invoice the client has, and moving the
+  -- money then would be changing what they were told.
+  if v_a.payover_run_id is not null then
+    select status into v_status from public.payover_runs where id = v_a.payover_run_id;
+    if not public.payover_run_is_open(coalesce(v_status, 'paid')) then
+      raise exception 'That receipt is on a payover that has gone out. The credit belongs in the next run.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  if p_disposal = 'refund' then
+    if nullif(btrim(coalesce(p_payable_to, '')), '') is null then
+      raise exception 'Say who the refund is payable to.' using errcode = '22023';
+    end if;
+    insert into public.trust_payments_out (
+      account_id, kind, amount, payable_to, reason, instructed_by)
+    values (v_a.account_id, 'refund', v_a.excess_credit, btrim(p_payable_to), v_why, auth.uid())
+    returning id into v_out;
+
+  elsif p_disposal = 'moved' then
+    if p_move_to is null then
+      raise exception 'Say which account it moves to.' using errcode = '22023';
+    end if;
+    if p_move_to = v_a.account_id then
+      raise exception 'That is the account it is already on.' using errcode = '22023';
+    end if;
+    if not exists (select 1 from public.debtor_accounts where id = p_move_to) then
+      raise exception 'That account no longer exists.' using errcode = '22023';
+    end if;
+
+  elsif p_disposal = 'parked' then
+    /*
+     * PARKED IS A DECISION TO WAIT, NOT A DECISION ABOUT THE MONEY.
+     *
+     * The firm, on the small ones: "who are we going to pay five rand to? We're going to give the
+     * guy a call, and the costs are going to be already more than 20 rand." Refunding a sum smaller
+     * than the phone call costs more than it returns -- but the money is still the DEBTOR'S until
+     * somebody says otherwise, so nothing moves in the trust ledger here. It simply stops holding
+     * the payover run and gets a date to come back on.
+     */
+    select coalesce(parked_credit_months, 6) into v_months from public.firm_settings limit 1;
+    v_until := current_date + (coalesce(v_months, 6) || ' months')::interval;
+
+  elsif p_disposal <> 'released' then
+    raise exception 'An overpayment is refunded, moved to another account, released to the client, or parked.'
+      using errcode = '22023';
+  end if;
+
+  update public.payment_allocations
+     set excess_disposal = p_disposal,
+         excess_decided_at = now(),
+         excess_decided_by = auth.uid(),
+         excess_moved_to = case when p_disposal = 'moved' then p_move_to end,
+         excess_parked_until = v_until,
+         excess_payment_out_id = v_out
+   where id = p_allocation;
+
+  /*
+   * A MOVE MOVES THE MONEY. It used to record where it should go and do nothing else: the credit
+   * stayed on the first account and nothing reached the second. The firm, 8 Oct: "If it's being
+   * moved to another account, then that will be allocated." So: the credit comes off the first
+   * account in the trust ledger, and lands on the second as an approved payment that the engine
+   * splits there like any other -- interest, costs, capital, commission. It is not new money: no
+   * second receipt fee (the firm's ruling) and no collection total counts it twice. Dated as the
+   * debtor paid it; the trust total does not move, because the money never left the bank.
+   */
+  if p_disposal = 'moved' then
+    select d.company_id, d.case_number into v_company, v_from_case
+      from public.debtor_accounts d where d.id = v_a.account_id;
+    select d.case_number into v_to_case from public.debtor_accounts d where d.id = p_move_to;
+    select p.received_at into v_received from public.account_payments p where p.id = v_a.payment_id;
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('debtor', v_company, v_a.account_id, -v_a.excess_credit,
+      'Overpayment moved to ' || coalesce(v_to_case, 'another of the debtor''s accounts'),
+      v_a.payment_id, v_a.id);
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, created_by,
+      approved_at, approved_by, allocated_on, moved_from_allocation_id
+    ) values (
+      p_move_to, coalesce(v_received, now()), v_a.excess_credit, 'Moved overpayment', v_from_case,
+      'moved', 'Overpayment moved from ' || coalesce(v_from_case, 'another account') || ': ' || v_why,
+      auth.uid(), now(), auth.uid(), (now() at time zone 'Africa/Johannesburg')::date, v_a.id
+    );
+  end if;
+
+  if v_a.payover_run_id is not null then
+    perform public.recompute_payover_run(v_a.payover_run_id);
+  end if;
+  return v_out;
+end $$;
+
+create or replace function public.collector_performance(p_from timestamptz, p_to timestamptz)
+returns table(user_id uuid, in_play_accounts integer, in_play_value numeric, collected numeric, payments integer, calls integer, calls_answered integer, emails_sent integer, sms_sent integer, notes_written integer, promises_made integer, promises_kept integer, promises_broken integer, accounts_touched integer, traces_pulled integer, trace_leads integer, traces_worked integer, traces_verified integer)
+language sql
+stable
+set search_path to 'public'
+as $$
+  with book as (
+    select assigned_to as uid,
+           count(*) filter (where status ilike 'Active%')::integer as in_play,
+           coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0) as value
+      from public.debtor_accounts
+     where assigned_to is not null
+     group by assigned_to
+  ),
+  paid as (
+    select h.user_id as uid,
+           coalesce(sum(p.amount), 0) as collected,
+           count(*)::integer as payments
+      from public.account_payments p
+      cross join lateral (
+        select dh.user_id
+          from public.account_desk_history dh
+         where dh.account_id = p.account_id
+           and dh.effective_from <= p.received_at
+         order by dh.effective_from desc
+         limit 1
+      ) h
+     where p.reversed_at is null
+       and p.received_at >= p_from and p.received_at < p_to and p.source <> 'moved'
+       and h.user_id is not null
+     group by h.user_id
+  ),
+  rang as (
+    select placed_by as uid,
+           count(*)::integer as calls,
+           count(*) filter (where answered_at is not null)::integer as answered
+      from public.account_calls
+     where placed_by is not null and placed_at >= p_from and placed_at < p_to
+     group by placed_by
+  ),
+  mailed as (
+    select sent_by as uid, count(*)::integer as emails
+      from public.account_emails
+     where sent_by is not null and direction = 'out'
+       and occurred_at >= p_from and occurred_at < p_to
+     group by sent_by
+  ),
+  texted as (
+    select created_by as uid, count(*)::integer as sms
+      from public.sms_messages
+     where created_by is not null and account_id is not null and direction = 'outbound'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  wrote as (
+    select created_by as uid, count(*)::integer as notes
+      from public.account_notes
+     where created_by is not null and source = 'manual'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  promised as (
+    select created_by as uid,
+           count(*)::integer as made,
+           count(*) filter (where status = 'kept')::integer as kept,
+           count(*) filter (where status = 'broken')::integer as broken
+      from public.promises_to_pay
+     where created_by is not null
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  touched as (
+    select uid, count(distinct account_id)::integer as accounts
+      from (
+        select placed_by as uid, account_id from public.account_calls
+         where placed_by is not null and placed_at >= p_from and placed_at < p_to
+        union all
+        select sent_by, account_id from public.account_emails
+         where sent_by is not null and direction = 'out'
+           and occurred_at >= p_from and occurred_at < p_to
+        union all
+        select created_by, account_id from public.account_notes
+         where created_by is not null and source = 'manual'
+           and created_at >= p_from and created_at < p_to
+      ) t
+     group by uid
+  ),
+  -- Traces this person pulled, and what those traces gave them to work with.
+  traced as (
+    select t.pulled_by as uid,
+           count(distinct t.id)::integer as traces,
+           count(i.id)::integer as leads
+      from public.account_traces t
+      left join public.account_trace_items i on i.trace_id = t.id
+     where t.pulled_by is not null
+       and t.created_at >= p_from and t.created_at < p_to
+     group by t.pulled_by
+  ),
+  -- Findings this person actually tried, whoever pulled the trace. Counted on the day the outcome
+  -- was recorded, because that is the day the work happened -- a trace bought in August and worked
+  -- in September is September's effort.
+  trace_work as (
+    select outcome_by as uid,
+           count(*)::integer as worked,
+           count(*) filter (where outcome = 'verified')::integer as verified
+      from public.account_trace_items
+     where outcome_by is not null
+       and outcome_at >= p_from and outcome_at < p_to
+     group by outcome_by
+  )
+  select
+    pr.id, coalesce(b.in_play, 0), coalesce(b.value, 0),
+    coalesce(pd.collected, 0), coalesce(pd.payments, 0),
+    coalesce(r.calls, 0), coalesce(r.answered, 0),
+    coalesce(m.emails, 0), coalesce(tx.sms, 0), coalesce(w.notes, 0),
+    coalesce(pm.made, 0), coalesce(pm.kept, 0), coalesce(pm.broken, 0),
+    coalesce(tc.accounts, 0),
+    coalesce(tr.traces, 0), coalesce(tr.leads, 0),
+    coalesce(tw.worked, 0), coalesce(tw.verified, 0)
+  from public.profiles pr
+  left join book b on b.uid = pr.id
+  left join paid pd on pd.uid = pr.id
+  left join rang r on r.uid = pr.id
+  left join mailed m on m.uid = pr.id
+  left join texted tx on tx.uid = pr.id
+  left join wrote w on w.uid = pr.id
+  left join promised pm on pm.uid = pr.id
+  left join touched tc on tc.uid = pr.id
+  left join traced tr on tr.uid = pr.id
+  left join trace_work tw on tw.uid = pr.id
+  where pr.collector_grade is not null or b.in_play > 0 or pd.payments > 0
+  -- MONEY NOBODY HELD THE DESK FOR, AS ONE ROW WITH NO USER. The firm, 8 Oct: money that arrives
+  -- before anyone has the account "goes to the firm". Every figure on the company dashboard is the
+  -- sum of these rows, so without this one a payment on an unheld account vanished from the FIRM'S
+  -- total too, not only from everybody's own. Only the money columns: it is nobody's work.
+  union all
+  select null::uuid, 0, 0::numeric, coalesce(sum(p.amount), 0), count(*)::integer,
+         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    from public.account_payments p
+    left join lateral (
+      select dh.user_id
+        from public.account_desk_history dh
+       where dh.account_id = p.account_id
+         and dh.effective_from <= p.received_at
+       order by dh.effective_from desc
+       limit 1
+    ) h on true
+   where p.reversed_at is null
+     and p.received_at >= p_from and p.received_at < p_to and p.source <> 'moved'
+     and h.user_id is null
+  having count(*) > 0;
+$$;
+
+create or replace function public.collector_daily(
+  p_user uuid, p_from timestamptz, p_to timestamptz
+)
+returns table (on_day date, collected numeric, payments integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- THE FIRM'S OWN DAY, not UTC. A payment at half past one in the morning in Johannesburg is
+    -- still yesterday in UTC, and a day's total that disagrees with the bank statement by one
+    -- payment is a day's total nobody will trust again.
+    (p.received_at at time zone 'Africa/Johannesburg')::date as on_day,
+    sum(p.amount) as collected,
+    count(*)::integer as payments
+  from public.account_payments p
+  cross join lateral (
+    select dh.user_id
+      from public.account_desk_history dh
+     where dh.account_id = p.account_id
+       and dh.effective_from <= p.received_at
+     order by dh.effective_from desc
+     limit 1
+  ) h
+  where p.reversed_at is null
+    and p.received_at >= p_from and p.received_at < p_to and p.source <> 'moved'
+    and h.user_id is not null
+    and (p_user is null or h.user_id = p_user)
+  group by 1
+  order by 1;
+$$;
+
+create or replace function public.payments_in_month(p_from date, p_to date)
+returns table(trust_count integer, trust_amount numeric, ptc_count integer, ptc_amount numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select
+    count(*) filter (where not p.paid_to_client)::integer,
+    coalesce(sum(p.amount) filter (where not p.paid_to_client), 0),
+    count(*) filter (where p.paid_to_client)::integer,
+    coalesce(sum(p.amount) filter (where p.paid_to_client), 0)
+  from public.account_payments p
+  where public.has_capability('finance.view')
+    and not p.is_demo
+    and p.approved_at is not null
+    and p.reversed_at is null
+    and p.source <> 'moved'
+    and (p.approved_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+$$;
+
+create or replace function public.client_book_totals(p_book text default null)
+returns table (company_id uuid, accounts integer, capital numeric,
+               outstanding numeric, paid numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  /*
+   * WHAT THE CLIENT ACTUALLY HAS, NOT WHAT THE REGISTER SAYS THEY HAVE.
+   *
+   * THE FIRM, after the first test import: "The Accounts, Handover Amount and Payments to Date
+   * columns read the figures typed into the client register. The real Meridian test client showed
+   * 277 accounts while it held 6. Summit Fitness showed '-' while it had 5."
+   *
+   * companies.account_count / handover_amount / payments_to_date are what Swordfish's own summary
+   * said at the moment of import. They are worth keeping and worth labelling as that; they are not
+   * the book. Counted here from the accounts themselves, in the database, because a clients list
+   * that loads the book to count it stops working the month it matters.
+   */
+  select d.company_id,
+         count(*)::integer,
+         coalesce(sum(d.capital_handed_over), 0),
+         coalesce(sum(d.capital_outstanding), 0),
+         coalesce(sum((select sum(p.amount) from public.account_payments p
+                        where p.account_id = d.id and p.reversed_at is null and p.source <> 'moved')), 0)
+    from public.debtor_accounts d
+   where p_book is null or d.book = p_book
+   group by d.company_id;
+$$;
