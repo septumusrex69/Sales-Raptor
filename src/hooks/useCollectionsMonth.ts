@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
-import { fetchCollectorPerformance } from '../lib/collectorStats.ts'
-import { scoreCollector, totalStats, type CollectorScore, type CollectorStats } from '../lib/collectorScore.ts'
+import { fetchCollectionsPeriod } from '../lib/collectorStats.ts'
+import { scoreCollector, totalStats, type CollectorScore, type CollectorStats, type Uncredited } from '../lib/collectorScore.ts'
 import { monthTargetFor } from '../lib/collectorGrade.ts'
 import { getCurrentSalesMonth, getPreviousSalesMonth, type SalesMonthPeriod } from '../lib/salesMonth'
 import { resolveTarget } from '../lib/targets'
@@ -73,6 +73,8 @@ export interface CollectionsMonth {
   figures: HeroFigures
   /** What to call the day being read, for anything else that needs to say it. */
   asAtLabel: string
+  /** Of the period's collected, what no desk held: the firm's, nobody's work. Nil under a team filter. */
+  uncredited: Uncredited
 }
 
 export function useCollectionsMonth(): CollectionsMonth {
@@ -87,6 +89,8 @@ export function useCollectionsMonth(): CollectionsMonth {
   const [todayRows, setTodayRows] = useState<CollectorStats[] | null>(null)
   const [previous, setPrevious] = useState<CollectorStats[] | null>(null)
   const [beforeRows, setBeforeRows] = useState<CollectorStats[] | null>(null)
+  /* Money no desk held, per window: [period, day, prior period, day before]. See below. */
+  const [unheld, setUnheld] = useState<Uncredited[]>([])
   const [error, setError] = useState<string | null>(null)
 
   /*
@@ -134,19 +138,21 @@ export function useCollectionsMonth(): CollectionsMonth {
     let cancelled = false
     setRows(null); setError(null)
     const prior = getPreviousSalesMonth(period)
+    const none = { rows: [] as CollectorStats[], uncredited: { collected: 0, payments: 0 } }
     void Promise.all([
-      fetchCollectorPerformance(period.start, asAtEnd),
+      fetchCollectionsPeriod(period.start, asAtEnd),
       /* The day on its own, for "collected today". The firm's sheet leads with it and so does
          theirs: the first question every morning is what came in yesterday. */
-      fetchCollectorPerformance(dayStart, asAtEnd),
-      fetchCollectorPerformance(prior.start, prior.end),
+      fetchCollectionsPeriod(dayStart, asAtEnd),
+      fetchCollectionsPeriod(prior.start, prior.end),
       beforeDay
-        ? fetchCollectorPerformance(beforeDay.start, beforeDay.end)
-        : Promise.resolve([] as CollectorStats[]),
+        ? fetchCollectionsPeriod(beforeDay.start, beforeDay.end)
+        : Promise.resolve(none),
     ])
       .then(([now, day, before, dayBefore]) => {
         if (cancelled) return
-        setRows(now); setTodayRows(day); setPrevious(before); setBeforeRows(dayBefore)
+        setRows(now.rows); setTodayRows(day.rows); setPrevious(before.rows); setBeforeRows(dayBefore.rows)
+        setUnheld([now.uncredited, day.uncredited, before.uncredited, dayBefore.uncredited])
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
@@ -188,19 +194,30 @@ export function useCollectionsMonth(): CollectionsMonth {
 
   const mine = rows?.find((r) => r.userId === currentUser?.id) ?? null
 
-  const shown = rows ? totalStats(shownRows) : null
-  const shownPrior = previous ? totalStats(previous) : null
+  /*
+   * MONEY NO DESK HELD IS THE FIRM'S, AND ONLY THE FIRM'S. The firm, 8 Oct: money that arrives
+   * before anyone has the account "goes to the firm". So it is added to the totals when the whole
+   * floor is shown and to nothing else: it is no team's and nobody's, and a team leader filtered
+   * to their own people must not find it in their figure. Without it, a book of receipts on
+   * accounts not yet on a desk read as R 0 collected for the whole firm.
+   */
+  const firmWide = !teamId
+  const unheldOf = (i: number) => (firmWide ? unheld[i] ?? { collected: 0, payments: 0 } : { collected: 0, payments: 0 })
+  const withUnheld = (t: CollectorStats, u: Uncredited): CollectorStats =>
+    ({ ...t, collected: t.collected + u.collected, payments: t.payments + u.payments })
+  const shown = rows ? withUnheld(totalStats(shownRows), unheldOf(0)) : null
+  const shownPrior = previous ? withUnheld(totalStats(previous), unheldOf(2)) : null
   const score = shown ? scoreCollector(shown) : null
   const priorScore = shownPrior ? scoreCollector(shownPrior) : null
 
-  const collectedToday = shownToday.reduce((t, r) => t + r.collected, 0)
+  const collectedToday = shownToday.reduce((t, r) => t + r.collected, 0) + unheldOf(1).collected
   /*
    * The day before, through the same team filter as everything else — otherwise a team leader
    * filtered to one team would see their team's day compared with the whole floor's.
    */
   const collectedBefore = (beforeRows ?? [])
     .filter((r) => !teamId || teamOf(r.userId) === teamId)
-    .reduce((t, r) => t + r.collected, 0)
+    .reduce((t, r) => t + r.collected, 0) + unheldOf(3).collected
 
   /*
    * The target the headline is read against: the sum of the people's own, never a figure typed in
@@ -244,6 +261,7 @@ export function useCollectionsMonth(): CollectionsMonth {
     expectedByNow: line?.target == null ? null : line.target * line.expected,
     neededADay: line?.neededADay ?? null,
     stillNeeded: line?.stillNeeded ?? null,
+    uncredited: unheldOf(0).collected,
   }
 
   return {
@@ -251,6 +269,8 @@ export function useCollectionsMonth(): CollectionsMonth {
     rows, error, shownRows, shownToday, score, priorScore, mine,
     pace, floor, line, myLine, collectedToday, targetFor, teamOf,
     figures, asAtLabel,
+    /** Of the period's total, what no desk held -- shown where the firm's total is. */
+    uncredited: unheldOf(0),
   }
 }
 

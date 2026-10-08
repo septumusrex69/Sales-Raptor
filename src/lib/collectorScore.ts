@@ -183,3 +183,21 @@ export function totalStats(all: CollectorStats[]): CollectorStats {
     tracesVerified: sum((s) => s.tracesVerified),
   }
 }
+
+/** Money received in a period that no desk held. Nobody's work; still the firm's collection. */
+export interface Uncredited { collected: number; payments: number }
+
+/**
+ * Pure, so a check can hold it: the no-user row from collector_performance out of the people, into
+ * `uncredited` (the firm, 8 Oct: money before anyone has the account "goes to the firm").
+ */
+export function splitUncredited(all: CollectorStats[]): { rows: CollectorStats[]; uncredited: Uncredited } {
+  const uncredited: Uncredited = { collected: 0, payments: 0 }
+  const rows: CollectorStats[] = []
+  for (const r of all) {
+    if (r.userId) { rows.push(r); continue }
+    uncredited.collected += r.collected
+    uncredited.payments += r.payments
+  }
+  return { rows, uncredited }
+}

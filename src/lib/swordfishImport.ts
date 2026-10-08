@@ -287,7 +287,25 @@ export interface BuildOptions {
    * point and the import screen lets them change it.
    */
   settledThrough?: string
+  /**
+   * RAPTOR'S USERS, so an account can go to the clerk Swordfish had it with. The firm, 8 Oct: "when
+   * an account is imported, it should go automatically to its swordfish clerk." Matched on the
+   * whole name only (see `clerkKey`); an unknown or inactive name is FLAGGED, never guessed at.
+   */
+  clerks?: { id: string; name: string; active: boolean }[]
 }
+
+/**
+ * A NAME AS A KEY: case and runs of spaces ignored, nothing else. Swordfish has "Leanette  Mathebe"
+ * with two spaces; that is the same person. "Itumeleng" is NOT "Itumeleng Masalesa" -- a first
+ * name is somebody's guess, and an account put on the wrong desk is worked by the wrong person.
+ */
+export function clerkKey(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+/** Swordfish's word for an account on nobody's desk. */
+const NO_CLERK = new Set(['(none)', 'none', 'unassigned'])
 
 const newId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -310,6 +328,16 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
    * See settledThroughDefault for why this is a date somebody states rather than one we work out.
    */
   const settledThrough = options.settledThrough ?? settledThroughDefault(today)
+
+  /*
+   * WHOSE DESK. Active users by whole name; an inactive one is known but cannot work an account,
+   * so it is flagged with the unknown ones. Counted per name for the report, which is what lets
+   * the firm see a clerk who has left (or who was never added) before the accounts go unworked.
+   */
+  const clerkByKey = new Map((options.clerks ?? []).map((c) => [clerkKey(c.name), c]))
+  const unknownClerks = new Map<string, number>()
+  const inactiveClerks = new Map<string, number>()
+  let assignedToClerk = 0
 
   const problems: string[] = []
   const notes: string[] = []
@@ -665,6 +693,15 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       prescriptionDate = d.toISOString().slice(0, 10)
     }
 
+    const sfClerk = text(r['Assigned To'])
+    let clerkId: string | null = null
+    if (sfClerk && !NO_CLERK.has(clerkKey(sfClerk))) {
+      const c = clerkByKey.get(clerkKey(sfClerk))
+      if (c?.active) { clerkId = c.id; assignedToClerk++ }
+      else if (c) inactiveClerks.set(sfClerk, (inactiveClerks.get(sfClerk) ?? 0) + 1)
+      else unknownClerks.set(sfClerk, (unknownClerks.get(sfClerk) ?? 0) + 1)
+    }
+
     const a: DebtorAccountRow = {
       id: newId(),
       company_id: companyId,
@@ -732,7 +769,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       status: text(r['Status']) ?? 'Active',
       sub_status: text(r['Sub-status']),
       bucket: text(r['Account Bucket']),
-      assigned_to: null,
+      assigned_to: clerkId,
       diary_date: isoDate(r['Diary Date']) ?? null,
 
       in_duplum: r['In Duplum'] === 'Yes',
@@ -762,9 +799,9 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
      *
      * The date alone was never enough to work from — that is the whole reason diary_entries
      * exists. What can be recovered is carried: the day, and the agent's name as Swordfish
-     * spelled it, so a leader handing the pile out can see whose it was. The owner is left null
-     * because Swordfish stores a NAME and Raptor needs a user; mapping the two is a decision a
-     * person makes once, in Settings, not something an importer should guess at.
+     * spelled it, so a leader handing the pile out can see whose it was. The owner is the clerk
+     * the account went to, where the name matched an active user exactly; otherwise null, and the
+     * name is flagged rather than guessed at (see `clerkKey`).
      *
      * Written as 'review' rather than a kind we cannot know, and marked 'swordfish' so nothing
      * in this firm is ever blamed for a date it did not choose.
@@ -773,7 +810,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       diaryEntries.push({
         id: newId(),
         account_id: a.id,
-        owner_id: null,
+        owner_id: clerkId,
         due_on: a.diary_date,
         kind: 'review',
         reason: text(r['Diary Note']) ?? text(r['Main Comment']) ?? null,
@@ -1141,6 +1178,39 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     if (withoutDetails > 0) {
       notes.push(`${withoutDetails.toLocaleString('en-ZA')} accounts got no debtor details — they are not in that export.`)
     }
+  }
+
+  /*
+   * A NAME RAPTOR DOES NOT KNOW IS FLAGGED. The firm: "there's a user mentioned here that's not on
+   * the system ... specifically valuable for old clerks that have already left the firm, or if we
+   * forget to upload their details." Their accounts arrive unassigned for a team leader; their
+   * history keeps their name as Swordfish wrote it (actions, notes, diary), so nothing they did is
+   * lost or credited to somebody else.
+   */
+  const named = (m: Map<string, number>) => [...m].sort((x, y) => y[1] - x[1])
+    .map(([n, k]) => `${n.replace(/\s+/g, ' ')} (${k})`).join(', ')
+  if (unknownClerks.size > 0) {
+    const n = [...unknownClerks.values()].reduce((x, y) => x + y, 0)
+    problem(`${n} ${n === 1 ? 'account is' : 'accounts are'} with ${unknownClerks.size === 1 ? 'a Swordfish clerk who is' : `${unknownClerks.size} Swordfish clerks who are`} not a Raptor user: `
+      + `${named(unknownClerks)}. Imported unassigned, with the clerk's name kept. Add them as users if they are still with the firm, then give the accounts to them.`)
+  }
+  if (inactiveClerks.size > 0) {
+    const n = [...inactiveClerks.values()].reduce((x, y) => x + y, 0)
+    problem(`${n} ${n === 1 ? 'account is' : 'accounts are'} with ${inactiveClerks.size === 1 ? 'a clerk whose' : 'clerks whose'} Raptor user is no longer active: `
+      + `${named(inactiveClerks)}. Imported unassigned for a team leader to hand out.`)
+  }
+  if (assignedToClerk > 0) {
+    notes.push(`${assignedToClerk.toLocaleString('en-ZA')} ${assignedToClerk === 1 ? 'account went to the clerk Swordfish had it' : 'accounts went to the clerk Swordfish had them'} with.`)
+  }
+  /* People named on imported actions who are not users: their history keeps their name. */
+  const actors = new Set<string>()
+  for (const f of fees) {
+    const who = f.performed_by
+    if (who && !NO_CLERK.has(clerkKey(who)) && !clerkByKey.has(clerkKey(who))) actors.add(who.replace(/\s+/g, ' '))
+  }
+  if (actors.size > 0) {
+    notes.push(`Actions name ${actors.size} ${actors.size === 1 ? 'person who is not a Raptor user' : 'people who are not Raptor users'}: `
+      + `${[...actors].sort().slice(0, 30).join(', ')}${actors.size > 30 ? ', …' : ''}. Their history is kept under their name.`)
   }
 
   return {

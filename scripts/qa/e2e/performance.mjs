@@ -65,17 +65,26 @@ const perfRow = (id, collected) => ({
   accounts_touched: 120,
 })
 
-/** The period to date: R127 500 across the floor. */
+/*
+ * MONEY NO DESK HELD comes back as one row with no user (the firm, 8 Oct: it "goes to the firm").
+ * It is in the FIRM'S total and in nobody's: R2 500 of the period, R1 000 of the day.
+ */
+const UNHELD = (collected) => ({ ...perfRow(null, collected), in_play_accounts: 0, in_play_value: 0, payments: 1,
+  calls: 0, calls_answered: 0, emails_sent: 0, sms_sent: 0, notes_written: 0, promises_made: 0,
+  promises_kept: 0, promises_broken: 0, accounts_touched: 0 })
+/** The period to date: R127 500 across the people, R130 000 for the firm. */
 const PERIOD = [
   perfRow(USER_ID, 120_000),
   perfRow(COLLEAGUE.id, 500),
   perfRow(LOOSE.id, 7_000),
+  UNHELD(2_500),
 ]
-/** The day being read: R27 000, and nothing like the period total. */
+/** The day being read: R28 000 for the firm, and nothing like the period total. */
 const DAY = [
   perfRow(USER_ID, 20_000),
   perfRow(COLLEAGUE.id, 0),
   perfRow(LOOSE.id, 7_000),
+  UNHELD(1_000),
 ]
 /** Last period, for the comparisons on the secondary tiles. */
 const PRIOR = [perfRow(USER_ID, 90_000)]
@@ -274,9 +283,9 @@ try {
    */
   const floorFigures = await page.locator('[data-qa="collections-figures"]').innerText()
   t.ok(`the day's own figure is on the floor (${floorFigures.replace(/\n/g, ' ').slice(0, 60)})`,
-    /27[,\s\u00a0]000/.test(floorFigures))
+    /28[,\s\u00a0]000/.test(floorFigures))
   t.ok('...beside the period\u2019s, and they are not the same number',
-    /127[,\s\u00a0]500/.test(floorFigures))
+    /130[,\s\u00a0]000/.test(floorFigures))
   /* And the photograph is NOT here. One special page; a second one makes the first ordinary. */
   t.check('the floor does not wear the company hero',
     await page.locator('.collections-hero').count(), 0)
@@ -598,9 +607,12 @@ try {
   ).trim()
 
   const todayTile = await tile('Collected today')
-  t.ok(`the day's own figure leads (${todayTile})`, /27[,\s\u00a0]000/.test(todayTile))
+  t.ok(`the day's own figure leads, money no desk held included (${todayTile})`, /28[,\s\u00a0]000/.test(todayTile))
   const periodTile = await tile('Collected this period')
-  t.ok(`...beside the period's (${periodTile})`, /127[,\s\u00a0]500/.test(periodTile))
+  t.ok(`...beside the period's (${periodTile})`, /130[,\s\u00a0]000/.test(periodTile))
+  /* The firm, 8 Oct: money before anyone has the account "goes to the firm" -- and says so. */
+  const unheldLine = await page.getByTestId('uncredited').innerText().catch(() => '')
+  t.ok(`...and says how much of it is on nobody's desk (${unheldLine})`, /2[,\s\u00a0]500/.test(unheldLine) && /not on anybody/.test(unheldLine))
   t.check('...and they are not the same number', todayTile === periodTile, false)
 
   /* ---------- the month on one bar ---------- */

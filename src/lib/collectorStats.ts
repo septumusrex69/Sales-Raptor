@@ -2,7 +2,7 @@
  * Fetching collector figures. The arithmetic lives in collectorScore.ts, which is pure.
  */
 import { supabase } from './supabase'
-import type { CollectorStats } from './collectorScore.ts'
+import { splitUncredited, type CollectorStats, type Uncredited } from './collectorScore.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- untyped JSON from PostgREST. */
 const toStats = (r: any): CollectorStats => ({
@@ -39,13 +39,25 @@ const toStats = (r: any): CollectorStats => ({
  * months cannot both claim a payment that landed on the boundary.
  */
 export async function fetchCollectorPerformance(from: Date, to: Date): Promise<CollectorStats[]> {
+  return (await fetchCollectionsPeriod(from, to)).rows
+}
+
+/**
+ * THE PEOPLE, AND APART FROM THEM THE MONEY NOBODY HELD THE DESK FOR. collector_performance sends
+ * the second as one row with no user (the firm, 8 Oct: it "goes to the firm"). Split here, once,
+ * so no table of people ever draws a row for nobody and no firm total ever leaves it out.
+ */
+export async function fetchCollectionsPeriod(
+  from: Date, to: Date,
+): Promise<{ rows: CollectorStats[]; uncredited: Uncredited }> {
   const { data, error } = await supabase.rpc('collector_performance', {
     p_from: from.toISOString(),
     p_to: to.toISOString(),
   })
   if (error) throw new Error(error.message)
-  return ((data ?? []) as unknown[]).map(toStats)
+  return splitUncredited(((data ?? []) as unknown[]).map(toStats))
 }
+
 
 /** One day's takings. The shape src/lib/collectorTrend.ts buckets into the firm's months. */
 export interface DailyTake {

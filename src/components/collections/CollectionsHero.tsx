@@ -55,6 +55,11 @@ export interface HeroFigures {
   expectedByNow: number | null
   neededADay: number | null
   stillNeeded: number | null
+  /**
+   * Of `collected`, what no desk held -- the firm's, nobody's work (the firm, 8 Oct). Said under
+   * the figure so a total bigger than the people's own adds up to somebody reading both.
+   */
+  uncredited?: number
 }
 
 export function CollectionsHero({ figures, filters, action, progress }: {
@@ -192,6 +197,11 @@ export function CollectionsHero({ figures, filters, action, progress }: {
                   Target <span className="text-white/85">{money(figures.target)}</span>
                 </span>
               </>
+            )}
+            {(figures.uncredited ?? 0) > 0 && (
+              <span className="mt-1.5 block" data-testid="uncredited">
+                Includes <span className="text-white/85">{money(figures.uncredited ?? 0)}</span> not on anybody’s desk
+              </span>
             )}
           </Tile>
 

@@ -30357,3 +30357,202 @@ $$;
 
 revoke all on function public.firm_held_parts() from public, anon;
 grant execute on function public.firm_held_parts() to authenticated;
+
+-- ============================================================================================
+-- AN IMPORTED ACCOUNT GOES TO ITS SWORDFISH CLERK, AND HAS BEEN THEIRS SINCE IT WAS LOADED
+--
+-- The firm, 8 Oct: "when an account is imported, it should go automatically to its swordfish
+-- clerk." swordfishImport now sets assigned_to where "Assigned To" matches an active user by whole
+-- name. Dated from now(), as every insert was, the receipts already in the month fell before the
+-- desk and were credited to nobody -- so on INSERT of an imported account WITH a clerk, the desk
+-- runs from its handover date (SAST). Proved on staging in a rolled-back probe: imported+clerk
+-- 2024-05-06 00:00; by hand and imported-without-clerk both now().
+-- ============================================================================================
+
+create or replace function public.record_account_desk_change() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  -- `is distinct from` rather than <>, so a move to or from NULL (unallocated) is recorded. With
+  -- <> those two transitions are silently dropped -- exactly the ones a team leader performs
+  -- when somebody leaves.
+  if tg_op = 'INSERT' or (new.assigned_to is distinct from old.assigned_to) then
+    insert into public.account_desk_history (account_id, user_id, effective_from, source, changed_by)
+    values (new.id, new.assigned_to,
+            -- AN ACCOUNT IMPORTED ONTO ITS SWORDFISH CLERK'S DESK HAS BEEN THEIRS SINCE IT WAS LOADED,
+            -- not since the import: the receipts already in the month are their work, and dated from
+            -- now() they belonged to nobody (the firm, 8 Oct: the clerks could not see it under
+            -- their names). The same assumption the original backfill made, from the handover date,
+            -- on the firm's own day (SAST midnight, or a payment early that morning falls before it).
+            case when tg_op = 'INSERT' and new.import_batch_id is not null
+                      and new.assigned_to is not null and new.handover_date is not null
+                 then least(now(), new.handover_date::timestamp at time zone 'Africa/Johannesburg')
+                 else now() end,
+            case when tg_op = 'INSERT' then 'import' else 'change' end, auth.uid());
+  end if;
+  return new;
+end;
+$$;
+
+-- ============================================================================================
+-- MONEY NOBODY HELD THE DESK FOR STILL COUNTS AS THE FIRM'S
+--
+-- The firm, 8 Oct, on a company dashboard reading R0 with R57 900 received: money that arrives
+-- before anyone has the account "goes to unallocated something or like goes to the firm".
+-- collector_performance gains one row with user_id NULL carrying only the money no desk held;
+-- the browser keeps it out of every person's figures and adds it to the firm's (useCollectionsMonth).
+-- Built on staging from the LIVE body (which had drifted from the copy above) with replace(), so
+-- this text and the database are the same: md5 e2270708e92f855c2d4305d49d704eea.
+-- ============================================================================================
+
+create or replace function public.collector_performance(p_from timestamptz, p_to timestamptz)
+returns table(user_id uuid, in_play_accounts integer, in_play_value numeric, collected numeric, payments integer, calls integer, calls_answered integer, emails_sent integer, sms_sent integer, notes_written integer, promises_made integer, promises_kept integer, promises_broken integer, accounts_touched integer, traces_pulled integer, trace_leads integer, traces_worked integer, traces_verified integer)
+language sql
+stable
+set search_path to 'public'
+as $$
+  with book as (
+    select assigned_to as uid,
+           count(*) filter (where status ilike 'Active%')::integer as in_play,
+           coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0) as value
+      from public.debtor_accounts
+     where assigned_to is not null
+     group by assigned_to
+  ),
+  paid as (
+    select h.user_id as uid,
+           coalesce(sum(p.amount), 0) as collected,
+           count(*)::integer as payments
+      from public.account_payments p
+      cross join lateral (
+        select dh.user_id
+          from public.account_desk_history dh
+         where dh.account_id = p.account_id
+           and dh.effective_from <= p.received_at
+         order by dh.effective_from desc
+         limit 1
+      ) h
+     where p.reversed_at is null
+       and p.received_at >= p_from and p.received_at < p_to
+       and h.user_id is not null
+     group by h.user_id
+  ),
+  rang as (
+    select placed_by as uid,
+           count(*)::integer as calls,
+           count(*) filter (where answered_at is not null)::integer as answered
+      from public.account_calls
+     where placed_by is not null and placed_at >= p_from and placed_at < p_to
+     group by placed_by
+  ),
+  mailed as (
+    select sent_by as uid, count(*)::integer as emails
+      from public.account_emails
+     where sent_by is not null and direction = 'out'
+       and occurred_at >= p_from and occurred_at < p_to
+     group by sent_by
+  ),
+  texted as (
+    select created_by as uid, count(*)::integer as sms
+      from public.sms_messages
+     where created_by is not null and account_id is not null and direction = 'outbound'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  wrote as (
+    select created_by as uid, count(*)::integer as notes
+      from public.account_notes
+     where created_by is not null and source = 'manual'
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  promised as (
+    select created_by as uid,
+           count(*)::integer as made,
+           count(*) filter (where status = 'kept')::integer as kept,
+           count(*) filter (where status = 'broken')::integer as broken
+      from public.promises_to_pay
+     where created_by is not null
+       and created_at >= p_from and created_at < p_to
+     group by created_by
+  ),
+  touched as (
+    select uid, count(distinct account_id)::integer as accounts
+      from (
+        select placed_by as uid, account_id from public.account_calls
+         where placed_by is not null and placed_at >= p_from and placed_at < p_to
+        union all
+        select sent_by, account_id from public.account_emails
+         where sent_by is not null and direction = 'out'
+           and occurred_at >= p_from and occurred_at < p_to
+        union all
+        select created_by, account_id from public.account_notes
+         where created_by is not null and source = 'manual'
+           and created_at >= p_from and created_at < p_to
+      ) t
+     group by uid
+  ),
+  -- Traces this person pulled, and what those traces gave them to work with.
+  traced as (
+    select t.pulled_by as uid,
+           count(distinct t.id)::integer as traces,
+           count(i.id)::integer as leads
+      from public.account_traces t
+      left join public.account_trace_items i on i.trace_id = t.id
+     where t.pulled_by is not null
+       and t.created_at >= p_from and t.created_at < p_to
+     group by t.pulled_by
+  ),
+  -- Findings this person actually tried, whoever pulled the trace. Counted on the day the outcome
+  -- was recorded, because that is the day the work happened -- a trace bought in August and worked
+  -- in September is September's effort.
+  trace_work as (
+    select outcome_by as uid,
+           count(*)::integer as worked,
+           count(*) filter (where outcome = 'verified')::integer as verified
+      from public.account_trace_items
+     where outcome_by is not null
+       and outcome_at >= p_from and outcome_at < p_to
+     group by outcome_by
+  )
+  select
+    pr.id, coalesce(b.in_play, 0), coalesce(b.value, 0),
+    coalesce(pd.collected, 0), coalesce(pd.payments, 0),
+    coalesce(r.calls, 0), coalesce(r.answered, 0),
+    coalesce(m.emails, 0), coalesce(tx.sms, 0), coalesce(w.notes, 0),
+    coalesce(pm.made, 0), coalesce(pm.kept, 0), coalesce(pm.broken, 0),
+    coalesce(tc.accounts, 0),
+    coalesce(tr.traces, 0), coalesce(tr.leads, 0),
+    coalesce(tw.worked, 0), coalesce(tw.verified, 0)
+  from public.profiles pr
+  left join book b on b.uid = pr.id
+  left join paid pd on pd.uid = pr.id
+  left join rang r on r.uid = pr.id
+  left join mailed m on m.uid = pr.id
+  left join texted tx on tx.uid = pr.id
+  left join wrote w on w.uid = pr.id
+  left join promised pm on pm.uid = pr.id
+  left join touched tc on tc.uid = pr.id
+  left join traced tr on tr.uid = pr.id
+  left join trace_work tw on tw.uid = pr.id
+  where pr.collector_grade is not null or b.in_play > 0 or pd.payments > 0
+  -- MONEY NOBODY HELD THE DESK FOR, AS ONE ROW WITH NO USER. The firm, 8 Oct: money that arrives
+  -- before anyone has the account "goes to the firm". Every figure on the company dashboard is the
+  -- sum of these rows, so without this one a payment on an unheld account vanished from the FIRM'S
+  -- total too, not only from everybody's own. Only the money columns: it is nobody's work.
+  union all
+  select null::uuid, 0, 0::numeric, coalesce(sum(p.amount), 0), count(*)::integer,
+         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    from public.account_payments p
+    left join lateral (
+      select dh.user_id
+        from public.account_desk_history dh
+       where dh.account_id = p.account_id
+         and dh.effective_from <= p.received_at
+       order by dh.effective_from desc
+       limit 1
+    ) h on true
+   where p.reversed_at is null
+     and p.received_at >= p_from and p.received_at < p_to
+     and h.user_id is null
+  having count(*) > 0;
+$$;

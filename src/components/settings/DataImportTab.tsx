@@ -236,14 +236,18 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           clients: parsed.clients,
           debtors: parsed.debtors,
         },
-        { ownerId, only: only.trim() || undefined, settledThrough },
+        {
+          ownerId, only: only.trim() || undefined, settledThrough,
+          /* Every user, active or not: an inactive match is flagged rather than treated as unknown. */
+          clerks: users.map((u) => ({ id: u.id, name: u.name, active: u.status === 'Active' })),
+        },
       ))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setReading(false); setPhase(null)
     }
-  }, [files, ownerId, only, settledThrough])
+  }, [files, ownerId, only, settledThrough, users])
 
   const runImport = useCallback(async () => {
     if (!plan) return
