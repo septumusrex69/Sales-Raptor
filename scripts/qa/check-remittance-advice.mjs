@@ -248,6 +248,38 @@ ok('the email carries both attachments',
   /\$\{adv\.run\.invoiceNumber\}\.pdf/.test(emailSrc)
   && /\$\{adv\.run\.invoiceNumber\} schedule\.xlsx/.test(emailSrc))
 
+/* ---------------- a released overpayment and a charge set off: every rand of the net has a line ---------------- */
+/*
+ * THE FIRM, 8 Oct: an overpayment released to the client should say so on the payover report,
+ * "paid over to you directly without any commission". Both it and a charge set off were already in
+ * the run's net and on no line above it, so the client's workings did not add up to what was paid.
+ */
+const withExtras = build([
+  line(),
+  line({ lineId: 'l2', caseNumber: 'DCR2002', clientReference: '7001', debtor: 'Yolandi Nel',
+    excessCredit: 490.42, excessDisposal: 'released' }),
+  line({ lineId: 'l3', caseNumber: 'DCR3003', debtor: 'Parked Person', excessCredit: 12.5, excessDisposal: 'parked' }),
+], { chargesSetOff: 115, excessReleased: 490.42, netPayover: 38958.32 - 115 + 490.42 })
+const body = withExtras.workings.filter((w) => !w.emphasis)
+check('the workings add up to the net, a release and a set-off included',
+  Math.round(body.reduce((t, w) => t + w.amount, 0) * 100) / 100, Math.round((38958.32 - 115 + 490.42) * 100) / 100)
+ok('...the charge set off has its own line',
+  withExtras.workings.some((w) => /charges set off/.test(w.label) && w.amount === -115))
+ok('...and the release its own, saying there is no commission on it',
+  withExtras.workings.some((w) => /overpayments paid over to you in full \(no commission\)/.test(w.label) && w.amount === 490.42))
+check('the released overpayment is named, debtor and amount',
+  (withExtras.released ?? []).map((r) => [r.debtor, r.ourRef, r.amount]), [['Yolandi Nel', 'DCR2002', 490.42]])
+check('...and a parked one is not', (withExtras.released ?? []).some((r) => r.debtor === 'Parked Person'), false)
+check('a run with neither has neither line', build([line()]).workings.some((w) => /set off|overpayments paid/.test(w.label)), false)
+const extrasXml = new TextDecoder().decode(adviceSchedule(withExtras))
+ok('the schedule lists it', extrasXml.includes('Overpayments paid over to you in full') && extrasXml.includes('Yolandi Nel'))
+ok('...and the PDF draws it as its own section',
+  /title: 'Overpayments paid over to you in full — no commission'/.test(pdfSrc) && /adv\.released\.map/.test(pdfSrc))
+const runPage = readFileSync(new URL('../../src/pages/finance/RunDetail.tsx', import.meta.url), 'utf8')
+ok('the run page shows both lines too',
+  /label="Charges set off against this payover"/.test(runPage) && /label="Overpayments released to the client, no commission"/.test(runPage))
+ok('...and hands both to the advice', /chargesSetOff: Number\(run\.charges_set_off \?\? 0\), excessReleased: Number\(run\.excess_released \?\? 0\)/.test(runPage))
+
 console.log(`\ncheck-remittance-advice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

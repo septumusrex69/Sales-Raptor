@@ -44,6 +44,8 @@ interface RunRow {
   due_to_bf: number
   commission_vat: number
   carried_in: number
+  charges_set_off: number
+  excess_released: number
   net_payover: number
   approved_at: string | null
   sent_at: string | null
@@ -155,6 +157,7 @@ export function RunDetail() {
         ptcFeesTaken: run.ptc_fees_taken, ptcCapital: run.ptc_capital,
         ptcCommission: run.ptc_commission, dueToBf: run.due_to_bf,
         commissionVat: run.commission_vat, carriedIn: run.carried_in,
+        chargesSetOff: Number(run.charges_set_off ?? 0), excessReleased: Number(run.excess_released ?? 0),
         netPayover: run.net_payover, commissionRate: client.rate,
         paidAt: run.paid_at, eftReference: run.eft_reference,
       },
@@ -261,6 +264,9 @@ export function RunDetail() {
             <Line label="Set-off: debtors paid the client directly" value={-run.due_to_bf} sub />
             <Line label="VAT on commission" value={-run.commission_vat} sub />
             {run.carried_in !== 0 && <Line label="Brought forward from last run" value={run.carried_in} sub />}
+            {/* Both already in "Amount to pay" and on no line above it (the firm, 8 Oct). */}
+            {Number(run.charges_set_off) !== 0 && <Line label="Charges set off against this payover" value={-run.charges_set_off} sub />}
+            {Number(run.excess_released) !== 0 && <Line label="Overpayments released to the client, no commission" value={run.excess_released} sub />}
             <tr className="border-t-2 border-slate-800">
               <td className="py-2 font-semibold text-slate-800">Amount to pay</td>
               <td className="py-2 text-right font-semibold tabular-nums text-slate-800">{rand(run.net_payover)}</td>

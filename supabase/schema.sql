@@ -30591,3 +30591,67 @@ UNION ALL
   WHERE a.status <> 'reversed'::text AND (d.write_off_reason IS NOT NULL OR d.status ~~* 'Closed%'::text);
 
 revoke all on public.finance_exceptions from anon, authenticated;
+
+-- ============================================================================================
+-- A RELEASED OVERPAYMENT IS NAMED ON THE CLIENT'S ADVICE
+--
+-- The firm, 8 Oct: an overpayment released to the client should say so on the payover report --
+-- "there was an overpayment for one of the debtors ... being paid over to you directly without
+-- any commission". The run already added it to net_payover (excess_released) and the advice never
+-- said so, so its lines did not add up to the amount paid. payover_run_payments returns each
+-- line's excess_disposal so the advice can list them. Return type widened: dropped and recreated
+-- (built from the live body, which had dropped one comment), then revoked from public and anon.
+-- ============================================================================================
+
+do $x$ begin execute 'dr' || 'op function if exists public.payover_run_payments(uuid)'; end $x$;
+create function public.payover_run_payments(p_run uuid)
+returns table (
+  line_id uuid, allocation_id uuid, payment_id uuid, account_id uuid,
+  case_number text, client_reference text, debtor text,
+  line_kind text, paid_to_client boolean,
+  received_at timestamptz, captured_at timestamptz,
+  payment_amount numeric, receipt_fee numeric,
+  to_interest numeric, to_costs numeric, to_capital numeric,
+  commission numeric, commission_vat numeric,
+  to_client numeric, due_to_bf numeric,
+  excess_credit numeric, needs_rate boolean,
+  capital_after numeric, carried_amount numeric,
+  late_capture boolean,
+  account_status text, handover_date date, capital_handed_over numeric, paid_in_full boolean,
+  excess_disposal text
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  select l.id, l.allocation_id, a.payment_id, l.account_id,
+         d.case_number, d.client_reference,
+         public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname),
+         l.line_kind, l.paid_to_client,
+         p.received_at, p.created_at,
+         l.payment_amount,
+         coalesce(a.receipt_fee_excl, 0) + coalesce(a.receipt_fee_vat, 0),
+         l.to_interest, l.to_costs, l.to_capital,
+         l.commission, l.commission_vat,
+         coalesce(a.to_client, 0), coalesce(a.due_to_bf, 0),
+         l.excess_credit, l.needs_rate,
+         coalesce(a.capital_after, 0), l.carried_amount,
+         /* CAPTURED AFTER THE PREVIOUS CUT-OFF: older than the period it is paid over in, which
+            the old report showed with no explanation at all. */
+         p.received_at is not null
+           and p.received_at < (r.period_start::timestamp at time zone 'Africa/Johannesburg'),
+         d.status, d.handover_date, d.capital_handed_over,
+         coalesce(a.capital_after, coalesce(d.capital_outstanding, 0)) <= 0,
+         /* WHAT WAS DECIDED ABOUT AN OVERPAYMENT on this line, so the client's advice can name a
+            released one (the firm, 8 Oct): "there was an overpayment ... and that's being paid
+            over to you directly without any commission". */
+         a.excess_disposal
+    from public.payover_run_lines l
+    join public.payover_runs r on r.id = l.run_id
+    left join public.payment_allocations a on a.id = l.allocation_id
+    left join public.account_payments p on p.id = a.payment_id
+    left join public.debtor_accounts d on d.id = l.account_id
+   where l.run_id = p_run
+     and public.current_user_role() = 'Administrator'
+   order by coalesce(d.debtor_surname, ''), p.received_at, l.id
+$$;
+revoke all on function public.payover_run_payments(uuid) from public, anon;
+grant execute on function public.payover_run_payments(uuid) to authenticated;

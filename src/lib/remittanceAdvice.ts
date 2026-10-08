@@ -55,10 +55,28 @@ export interface RemittanceRun {
   dueToBf: number
   commissionVat: number
   carriedIn: number
+  /** Client charges taken off this payover (the run's own figure). Absent reads as nil. */
+  chargesSetOff?: number
+  /** Debtor overpayments released to the client: paid over whole, no commission. Absent reads as nil. */
+  excessReleased?: number
   netPayover: number
   commissionRate: number | null
   paidAt: string | null
   eftReference: string | null
+}
+
+/**
+ * AN OVERPAYMENT RELEASED TO THE CLIENT, named. The firm, 8 Oct: the payover report should say
+ * "there was an overpayment for one of the debtors, and this overpayment is this, and that's being
+ * paid over to you directly without any commission". Before this it was in the net and nowhere
+ * else, so the workings did not add up to what the client was paid.
+ */
+export interface ReleasedRow {
+  yourRef: string
+  ourRef: string
+  debtor: string
+  paid: string
+  amount: number
 }
 
 export interface CollectionRow {
@@ -108,6 +126,7 @@ export interface RemittanceAdvice {
   workings: { label: string; amount: number; emphasis?: boolean }[]
   collections: CollectionRow[]
   direct: DirectRow[]
+  released: ReleasedRow[]
   /** Anything a tax invoice needs and does not have. Reported, never silently blank. */
   problems: string[]
 }
@@ -205,6 +224,16 @@ export function buildRemittanceAdvice(input: {
       reversal: l.lineKind === 'reversal',
     }))
 
+  const released: ReleasedRow[] = lines
+    .filter((l) => l.excessDisposal === 'released' && l.excessCredit > 0.004)
+    .map((l) => ({
+      yourRef: l.clientReference ?? '',
+      ourRef: l.caseNumber ?? '',
+      debtor: l.debtor,
+      paid: advDate(l.receivedAt),
+      amount: l.excessCredit,
+    }))
+
   const paidNote = run.paidAt
     ? `Paid by EFT${run.eftReference ? ` ${run.eftReference}` : ''} on ${advDate(run.paidAt)}`
     : 'To be paid by EFT to your nominated account'
@@ -225,6 +254,16 @@ export function buildRemittanceAdvice(input: {
   if (run.carriedIn !== 0) {
     workings.push({ label: 'Brought forward from your previous statement', amount: run.carriedIn })
   }
+  /* BOTH WERE ALREADY IN THE NET AND IN NO LINE ABOVE IT, so the workings did not add up to what
+     the client was paid. Now every rand of the net has a line. */
+  const setOff = run.chargesSetOff ?? 0
+  const releasedTotal = run.excessReleased ?? 0
+  if (setOff !== 0) {
+    workings.push({ label: 'Less our charges set off against this payment', amount: -setOff })
+  }
+  if (releasedTotal !== 0) {
+    workings.push({ label: 'Add debtor overpayments paid over to you in full (no commission)', amount: releasedTotal })
+  }
   workings.push({ label: 'Net amount we are paying you', amount: run.netPayover, emphasis: true })
 
   return {
@@ -244,6 +283,7 @@ export function buildRemittanceAdvice(input: {
     workings,
     collections,
     direct,
+    released,
     problems,
   }
 }
@@ -336,6 +376,13 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
         { n: d.capitalOutstanding }, d.reversal ? 'reversal' : '',
       ])
     }
+    rows.push([])
+  }
+
+  if (adv.released.length) {
+    rows.push([head('Overpayments paid over to you in full')])
+    rows.push([head('Your ref'), head('Our ref'), head('Debtor'), head('Paid'), head('Overpayment, no commission')])
+    for (const r of adv.released) rows.push([r.yourRef, r.ourRef, r.debtor, r.paid, { n: r.amount }])
     rows.push([])
   }
 

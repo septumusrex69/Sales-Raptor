@@ -106,6 +106,8 @@ export interface RunPayment {
   toClient: number
   dueToBf: number
   excessCredit: number
+  /** What was decided about this line's overpayment: refund, moved, released, parked, with_client. */
+  excessDisposal: string | null
   needsRate: boolean
   capitalAfter: number
   carriedAmount: number
@@ -295,6 +297,7 @@ export async function fetchRunPayments(runId: string): Promise<RunPayment[]> {
     handoverDate: s(r.handover_date),
     capitalHandedOver: n(r.capital_handed_over),
     paidInFull: Boolean(r.paid_in_full),
+    excessDisposal: s(r.excess_disposal),
   }))
 }
 

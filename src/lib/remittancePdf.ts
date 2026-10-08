@@ -215,6 +215,19 @@ export async function remittancePdf(adv: RemittanceAdvice): Promise<RemittancePd
     })
   }
 
+  if (adv.released.length) {
+    sections.push({
+      title: 'Overpayments paid over to you in full — no commission',
+      cols: [
+        { head: 'Your ref', width: 70 }, { head: 'Our ref', width: 80 }, { head: 'Debtor', width: 220 },
+        { head: 'Paid', width: 70 }, { head: 'Overpayment', width: 90, right: true },
+      ],
+      rows: adv.released.map((r) => [r.yourRef, r.ourRef, r.debtor, r.paid, r.amount]),
+      flags: adv.released.map(() => false),
+      notes: adv.released.map(() => 'the debtor paid more than the account owed'),
+    })
+  }
+
   const LW = A4.h
   const LH = A4.w
   let page = null as ReturnType<typeof doc.addPage> | null
