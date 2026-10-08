@@ -163,8 +163,10 @@ ok('a payment out can settle a run', rec !== null)
 ok('...asks for the trust capability', /has_capability\('finance\.view'\)/.test(rec ?? ''))
 ok('...rather than naming the role', !/current_user_role\(\)/.test(rec ?? ''))
 ok('...only money that actually left', /direction <> 'debit'/.test(rec ?? ''))
-ok('...only a run that was approved or sent',
-  /v_status not in \('approved', 'sent'\)/.test(rec ?? ''))
+/* AND A RUN MARKED PAID BY HAND, not yet on the statement (8 Oct): the statement confirms it, once. */
+ok('...only a run that was approved, sent, or marked paid and not yet on the statement',
+  /v_status not in \('approved', 'sent', 'paid'\)/.test(rec ?? '')
+  && /v_status = 'paid' and exists \(select 1 from public\.bank_statement_lines x where x\.payover_run_id = p_run\)/.test(rec ?? ''))
 /*
  * THE AMOUNTS MUST AGREE EXACTLY, and this is the sharpest assertion here. A tolerance would let
  * the firm record a client as settled for a figure that never left the trust account -- and the

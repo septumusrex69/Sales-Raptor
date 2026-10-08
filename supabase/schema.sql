@@ -31559,3 +31559,306 @@ as $$
      and round(b.bal, 2) <> 0
    order by abs(b.bal) desc
 $$;
+
+-- ============================================================================================
+-- EVERY PAYMENT OUT CAN BE COMPLETED BY HAND OR FROM THE STATEMENT, AND THE STATEMENT STILL CONFIRMS IT
+--
+-- The firm, 8 Oct: "every payment should be [in] payments to make ... a queue for ... what should go
+-- out, and what has gone out", completed "from two places": Payments to make and the payover run.
+-- A run marked paid by hand could never be matched to its debit afterwards (reconcile_bank_debit
+-- took approved or sent only, and the candidates left paid runs out), and a refund could only be
+-- settled from the statement. Now:
+--   - mark_refund_paid marks a refund paid by hand (its debtor entry is written once, on paid_at);
+--   - a run or refund marked paid and not yet on the statement is still a candidate ("marked paid")
+--     and its debit is tied to it without settling it twice;
+--   - payments_out_paid lists what has gone out -- runs, refunds, transfers to the business
+--     account -- each saying whether the statement has confirmed it.
+-- Proved on staging in a rolled-back probe: the refund marked paid (one entry), all four shown as
+-- waiting for the statement, both matched from statement lines (still one entry, both confirmed),
+-- a second match refused.
+-- ============================================================================================
+
+create or replace function public.reconcile_bank_debit(p_line uuid, p_run uuid)
+returns void language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_status text;
+  v_net numeric;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to reconcile.' using errcode = '42501';
+  end if;
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  if v_line.direction <> 'debit' then
+    raise exception 'Only money paid out can settle a payover run.';
+  end if;
+  if v_line.payover_run_id is not null then
+    raise exception 'That payment out is already against a run.';
+  end if;
+  select status, net_payover into v_status, v_net from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  /* A RUN MARKED PAID BY HAND IS STILL MATCHED WHEN ITS DEBIT ARRIVES (the firm, 8 Oct: a payment
+     can be completed from the run or from Payments to make, and the statement confirms it) --
+     once. Its paid_at and reference are kept; only the line is tied to it. */
+  if v_status not in ('approved', 'sent', 'paid') then
+    raise exception 'Only an approved, sent or paid run can be settled, and that one is %.', v_status;
+  end if;
+  if v_status = 'paid' and exists (select 1 from public.bank_statement_lines x where x.payover_run_id = p_run) then
+    raise exception 'That run is already on the statement.';
+  end if;
+  /*
+   * THE AMOUNTS MUST AGREE. The statement's debit is negative and the run's net payover is
+   * positive, so they are compared as magnitudes. A mismatch is not something to round past: it
+   * means either the wrong run was picked or the firm paid a different figure from the one on the
+   * remittance advice the client received, and both are worth stopping for.
+   */
+  if abs(v_line.amount) <> v_net then
+    raise exception 'That payment out is % and the run is %. Pick the run that matches, or ask why they differ.',
+      to_char(abs(v_line.amount), 'FM999999990.00'), to_char(v_net, 'FM999999990.00');
+  end if;
+  update public.bank_statement_lines
+     set payover_run_id = p_run, status = 'reconciled',
+         placed_at = now(), placed_by = auth.uid()
+   where id = p_line;
+  /* AND THE RUN IS PAID, witnessed rather than asserted. Only from sent/approved -- the same
+     transition mark_payover_run_paid allows, so the two routes cannot disagree. */
+  update public.payover_runs
+     set status = 'paid', paid_at = coalesce(paid_at, (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg')),
+         eft_reference = coalesce(eft_reference, left(v_line.description, 80))
+   where id = p_run and status in ('approved', 'sent');
+end $$;
+
+create or replace function public.allocate_bank_line(
+  p_line uuid, p_kind text, p_reason text default null, p_target uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_l public.bank_statement_lines%rowtype;
+  v_amt numeric;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+  v_entry uuid;
+  v_out public.trust_payments_out%rowtype;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to allocate.' using errcode = '42501';
+  end if;
+  select * into v_l from public.bank_statement_lines where id = p_line for update;
+  if not found then raise exception 'That statement line no longer exists.' using errcode = 'P0002'; end if;
+  if v_l.allocation_kind is not null or v_l.status in ('allocated', 'reconciled') then
+    raise exception 'That line is already allocated.' using errcode = '22023';
+  end if;
+  v_amt := abs(v_l.amount);
+  v_desc := coalesce(nullif(btrim(v_l.description), ''), 'statement line ' || to_char(v_l.txn_date, 'DD Mon YYYY'));
+
+  if v_l.direction = 'debit' then
+    if p_kind not in ('payover', 'refund', 'business_transfer', 'bank_charge', 'other') then
+      raise exception 'Money out is a payover, a refund, a transfer to the business account, a bank charge or other.'
+        using errcode = '22023';
+    end if;
+  elsif v_l.direction = 'credit' then
+    if p_kind not in ('bank_interest', 'business_transfer_in', 'other') then
+      raise exception 'Money in from a debtor is placed on their account; otherwise it is bank interest, a transfer from the business account, or other.'
+        using errcode = '22023';
+    end if;
+  else
+    raise exception 'A note on the statement moves no money and is not allocated.' using errcode = '22023';
+  end if;
+  if p_kind = 'other' and v_why is null then
+    raise exception 'Say what it was -- "other" needs a reason.' using errcode = '22023';
+  end if;
+
+  if p_kind = 'payover' then
+    if p_target is null then raise exception 'Choose the payover run it paid.' using errcode = '22023'; end if;
+    -- The existing match: the run must be approved or sent and its net payover exactly this amount.
+    -- Its trigger writes the client's ledger entry when the run is marked paid.
+    perform public.reconcile_bank_debit(p_line, p_target);
+
+  elsif p_kind = 'refund' then
+    select * into v_out from public.trust_payments_out where id = p_target for update;
+    if not found then raise exception 'Choose the refund it paid.' using errcode = '22023'; end if;
+    /* Marked paid by hand and not yet on the statement is still this line's to confirm. */
+    if v_out.bank_line_id is not null or v_out.cancelled_at is not null then
+      raise exception 'That refund is already on the statement, or cancelled.' using errcode = '22023';
+    end if;
+    if round(v_out.amount, 2) <> round(v_amt, 2) then
+      raise exception 'That refund is R % and this line is R %.', to_char(v_out.amount, 'FM999999990.00'),
+        to_char(v_amt, 'FM999999990.00') using errcode = '22023';
+    end if;
+    -- Settling it fires trust_creditors_on_payment_out, which writes the debtor's entry.
+    update public.trust_payments_out
+       set paid_at = coalesce(paid_at, (v_l.txn_date::timestamp at time zone 'Africa/Johannesburg')),
+           paid_reference = coalesce(paid_reference, v_desc), bank_line_id = p_line
+     where id = p_target;
+    select id into v_entry from public.trust_creditor_entries where payment_out_id = p_target
+     order by entry_at desc limit 1;
+
+  elsif p_kind = 'business_transfer' then
+    if p_target is not null then
+      -- A DRAWING ALREADY RECORDED on the Drawings screen, now found on the statement.
+      select e.id into v_entry from public.trust_creditor_entries e
+       where e.id = p_target and e.party = 'firm'
+         and public.firm_entry_kind(e.reason) = 'drawing'
+         and round(-e.amount, 2) = round(v_amt, 2)
+         and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id);
+      if v_entry is null then
+        raise exception 'That drawing is not one of this amount, or is already on the statement.' using errcode = '22023';
+      end if;
+    else
+      -- NOT RECORDED YET: the money has left, so it is written now. Not refused for want of
+      -- earnings the way draw_from_trust is -- that refusal is for money about to move, and this
+      -- has moved; a firm balance below nought then shows as the business owing the trust.
+      insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+      values ('firm', -v_amt, 'Drawn to the business account - ' || coalesce(v_why, v_desc), p_line, auth.uid())
+      returning id into v_entry;
+    end if;
+
+  elsif p_kind = 'bank_charge' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', -v_amt, 'Bank charges - ' || v_desc, p_line, auth.uid())
+    returning id into v_entry;
+
+  elsif p_kind = 'bank_interest' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', v_amt, 'Bank interest received - ' || v_desc, p_line, auth.uid())
+    returning id into v_entry;
+
+  elsif p_kind = 'business_transfer_in' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', v_amt, 'Paid in from the business account - ' || coalesce(v_why, v_desc), p_line, auth.uid())
+    returning id into v_entry;
+
+  else -- other
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('unidentified', case when v_l.direction = 'debit' then -v_amt else v_amt end,
+            case when v_l.direction = 'debit' then 'Paid out - ' else 'Received - ' end || v_why,
+            p_line, auth.uid())
+    returning id into v_entry;
+  end if;
+
+  update public.bank_statement_lines
+     set allocation_kind = p_kind, allocation_reason = v_why, trust_entry_id = v_entry,
+         allocated_at = now(), allocated_by = auth.uid(),
+         status = case when p_kind = 'payover' then 'reconciled' else 'allocated' end
+   where id = p_line;
+  return v_entry;
+end
+$$;
+
+create or replace function public.bank_allocation_candidates()
+returns table(kind text, id uuid, amount numeric, label text, reference text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'payover', r.id, r.net_payover,
+         coalesce(r.invoice_number, 'Payover') || ' - ' || coalesce(c.name, 'client')
+           || case when r.status = 'paid' then ' (marked paid)' else '' end,
+         public.payment_out_reference('payover', r.invoice_number)
+    from public.payover_runs r left join public.companies c on c.id = r.company_id
+   where public.has_capability('finance.view')
+     and (r.status in ('approved', 'sent')
+          or (r.status = 'paid' and not exists (select 1 from public.bank_statement_lines x where x.payover_run_id = r.id)))
+  union all
+  select 'refund', o.id, o.amount,
+         'Refund to ' || o.payable_to || case when o.paid_at is not null then ' (marked paid)' else '' end,
+         public.payment_out_reference('refund', coalesce(d.case_number, d.account_number))
+    from public.trust_payments_out o
+    left join public.debtor_accounts d on d.id = o.account_id
+   where public.has_capability('finance.view') and o.bank_line_id is null and o.cancelled_at is null
+  union all
+  select 'business_transfer', e.id, -e.amount,
+         substring(e.reason from length('Drawn to the business account - ') + 1),
+         null::text
+    from public.trust_creditor_entries e
+   where public.has_capability('finance.view') and e.party = 'firm'
+     and public.firm_entry_kind(e.reason) = 'drawing'
+     and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id)
+$$;
+
+-- A REFUND CAN BE MARKED PAID BY HAND, like a payover run. The firm, 8 Oct: a payment can be
+-- completed from Payments to make as well as from the bank statement. Paying it writes the
+-- debtor's "Refunded to" entry (trust_creditors_on_payment_out, first paid_at only); the statement
+-- line, when it arrives, is then tied to it without paying it twice (allocate_bank_line).
+create or replace function public.mark_refund_paid(p_refund uuid, p_reference text, p_paid_at timestamptz)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Paying out of the trust account is not yours to record.' using errcode = '42501';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which EFT paid it -- the reference is what ties it to the bank statement.' using errcode = '22023';
+  end if;
+  update public.trust_payments_out
+     set paid_at = coalesce(p_paid_at, now()), paid_reference = v_ref
+   where id = p_refund and paid_at is null and cancelled_at is null;
+  if not found then
+    raise exception 'Only a refund that is still due can be marked paid.' using errcode = '22023';
+  end if;
+end $$;
+
+-- WHAT HAS GONE OUT OF TRUST: payover runs paid, refunds paid, transfers to the business account --
+-- each saying whether the bank statement has confirmed it yet. Everything not yet confirmed, plus
+-- whatever was confirmed since p_since.
+create or replace function public.payments_out_paid(p_since date)
+returns table(kind text, id uuid, payee text, amount numeric, reference text, paid_at timestamptz,
+              paid_reference text, confirmed boolean, statement_date date, company_id uuid,
+              account_id uuid, case_number text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with out_rows as (
+    select 'payover'::text as kind, r.id, coalesce(c.name, 'Client') as payee, r.net_payover as amount,
+           public.payment_out_reference('payover', r.invoice_number) as reference, r.paid_at,
+           r.eft_reference as paid_reference, x.txn_date as statement_date,
+           r.company_id, null::uuid as account_id, r.invoice_number as case_number
+      from public.payover_runs r
+      left join public.companies c on c.id = r.company_id
+      left join lateral (select min(l.txn_date) as txn_date from public.bank_statement_lines l
+                          where l.payover_run_id = r.id) x on true
+     where r.status = 'paid'
+    union all
+    select 'refund', o.id, o.payable_to, o.amount,
+           public.payment_out_reference('refund', coalesce(d.case_number, d.account_number)), o.paid_at,
+           o.paid_reference, l.txn_date, d.company_id, o.account_id, d.case_number
+      from public.trust_payments_out o
+      left join public.debtor_accounts d on d.id = o.account_id
+      left join public.bank_statement_lines l on l.id = o.bank_line_id
+     where o.paid_at is not null and o.cancelled_at is null
+    union all
+    select 'business_transfer', e.id, 'Bredell Ferreira (business account)', -e.amount,
+           substring(e.reason from length('Drawn to the business account - ') + 1), e.entry_at,
+           substring(e.reason from length('Drawn to the business account - ') + 1),
+           coalesce(l1.txn_date, l2.txn_date), null::uuid, null::uuid, null::text
+      from public.trust_creditor_entries e
+      left join public.bank_statement_lines l1 on l1.id = e.bank_line_id
+      left join lateral (select min(x.txn_date) as txn_date from public.bank_statement_lines x
+                          where x.trust_entry_id = e.id) l2 on true
+     where e.party = 'firm' and public.firm_entry_kind(e.reason) = 'drawing'
+  )
+  select o.kind, o.id, o.payee, o.amount, o.reference, o.paid_at, o.paid_reference,
+         o.statement_date is not null, o.statement_date, o.company_id, o.account_id, o.case_number
+    from out_rows o
+   where public.has_capability('finance.view')
+     and (o.statement_date is null or o.statement_date >= p_since)
+   order by (o.statement_date is not null), o.paid_at desc nulls last
+$$;
+
+revoke all on function public.mark_refund_paid(uuid, text, timestamptz) from public, anon;
+revoke all on function public.payments_out_paid(date) from public, anon;
+grant execute on function public.mark_refund_paid(uuid, text, timestamptz) to authenticated;
+grant execute on function public.payments_out_paid(date) to authenticated;
+

@@ -25,9 +25,24 @@ const DUE = [
     account_id: 'acc-1', case_number: 'RAP-124059' },
 ]
 let answer = DUE
+const PAID = [
+  { kind: 'payover', id: 'run-lvm', payee: 'Lowveld Motors (Pty) Ltd', amount: 12879.45, reference: 'BF PO-LVM-2610',
+    paid_at: '2026-10-08T10:00:00Z', paid_reference: 'BF PO-LVM-2610', confirmed: false, statement_date: null,
+    company_id: 'c4', account_id: null, case_number: 'PO-LVM-2610' },
+  { kind: 'business_transfer', id: 'draw-1', payee: 'Bredell Ferreira (business account)', amount: 5000,
+    reference: 'BF FEES-2609', paid_at: '2026-09-15T10:00:00Z', paid_reference: 'BF FEES-2609', confirmed: true,
+    statement_date: '2026-09-16', company_id: null, account_id: null, case_number: null },
+]
+const POSITION = { trust_cash: 0, creditors: 0, debtors: 0, net_owed: 0, difference: 0, owed_to_clients: 0,
+  owed_to_debtors: 0, owed_to_firm: 24055.36, unidentified: 0, owed_by_clients: 0 }
+let sent = []
 const handlers = [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   [(u) => /\/rpc\/payments_to_make/.test(u), () => ({ body: answer })],
+  [(u) => /\/rpc\/payments_out_paid/.test(u), () => ({ body: PAID })],
+  [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
+  [(u) => /\/rpc\/(mark_payover_run_paid|mark_refund_paid|draw_from_trust)/.test(u),
+    (u, req) => { sent.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...req.postDataJSON() }); return { body: null } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
@@ -54,8 +69,45 @@ try {
   t.ok('a client with no banking details is said to have none', /No banking details on the client/.test(body))
   t.ok('a refund says why', /Why: The debtor asked for it back/.test(body))
   t.ok('the total is the sum', /18[\s,.]?616[.,]02/.test(await page.getByTestId('to-pay-total').innerText()))
-  t.ok('it says how a payment leaves the list', /allocate the line under Exceptions/.test(body))
+  t.ok('it says how a payment is confirmed', /allocate the line under\s+Exceptions/.test(body))
   await t.shot(page, 'payments-out')
+
+  /* ---- MARK PAID FROM HERE (the firm, 8 Oct: completed "from two places") ---- */
+  await rows.filter({ hasText: 'Sizwe Dlamini' }).getByRole('button', { name: 'Mark paid' }).click()
+  const refBox = page.getByLabel(/Reference it was paid with/)
+  await refBox.waitFor({ timeout: 10000 })
+  t.check('the box starts from the payment\'s own reference', await refBox.inputValue(), 'BF RAP-124059')
+  await page.getByRole('button', { name: 'Mark paid' }).last().click()
+  await page.waitForTimeout(500)
+  t.check('a refund is marked paid with its reference', JSON.stringify({ fn: sent[0]?.fn, id: sent[0]?.p_refund, ref: sent[0]?.p_reference }),
+    JSON.stringify({ fn: 'mark_refund_paid', id: 'ref-1', ref: 'BF RAP-124059' }))
+  await rows.filter({ hasText: 'Summit Fitness' }).getByRole('button', { name: 'Mark paid' }).click()
+  await page.getByLabel(/Reference it was paid with/).waitFor({ timeout: 10000 })
+  await page.getByRole('button', { name: 'Mark paid' }).last().click()
+  await page.waitForTimeout(500)
+  t.check('a run is marked paid with the run\'s own call', JSON.stringify({ fn: sent[1]?.fn, id: sent[1]?.p_run, ref: sent[1]?.p_reference }),
+    JSON.stringify({ fn: 'mark_payover_run_paid', id: 'run-smt', ref: 'BF PO-SMT-2610' }))
+
+  /* ---- THE FIRM'S OWN TRANSFER ---- */
+  const firm = page.getByTestId('firm-to-draw')
+  t.ok('what the firm may draw is shown with its reference', /24[\s,.]?055[.,]36/.test(await firm.innerText()) && /BF FEES-\d{4}/.test(await firm.innerText()))
+  await firm.getByRole('button', { name: 'Record a transfer' }).click()
+  await page.getByRole('button', { name: 'Record transfer' }).waitFor({ timeout: 10000 })
+  await page.getByRole('button', { name: 'Record transfer' }).click()
+  await page.waitForTimeout(500)
+  t.check('a transfer records the whole share by default, with the reference', JSON.stringify({ fn: sent[2]?.fn, amount: sent[2]?.p_amount, ok: /^BF FEES-\d{4}$/.test(sent[2]?.p_reference ?? '') }),
+    JSON.stringify({ fn: 'draw_from_trust', amount: 24055.36, ok: true }))
+
+  /* ---- WHAT HAS GONE OUT ---- */
+  await page.getByRole('button', { name: /^Paid/ }).click()
+  const gone = page.getByTestId('paid-out')
+  await gone.first().waitFor({ timeout: 10000 })
+  t.check('Paid lists what has gone out', await gone.count(), 2)
+  t.check('...and the Paid tab is the one marked chosen', await page.getByRole('button', { name: /^Paid/ }).getAttribute('aria-pressed'), 'true')
+  t.check('...not To pay', await page.getByRole('button', { name: /^To pay/ }).getAttribute('aria-pressed'), 'false')
+  t.ok('...a payment marked paid waits for the statement', /Waiting for the statement/.test(await gone.filter({ hasText: 'Lowveld' }).innerText()))
+  t.ok('...and one the statement confirmed says so', /On the statement 16 Sep 2026/.test(await gone.filter({ hasText: 'business account' }).innerText()))
+  await t.shot(page, 'payments-out-paid')
 
   answer = []
   await page.reload({ waitUntil: 'domcontentloaded' })

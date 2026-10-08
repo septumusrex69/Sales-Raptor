@@ -73,3 +73,46 @@ export function toPaymentToMake(r: Record<string, unknown>): PaymentToMake {
 export function totalToPay(list: PaymentToMake[]): number {
   return list.reduce((t, p) => t + Math.round(p.amount * 100), 0) / 100
 }
+
+/** Something that has gone out of trust, and whether the bank statement has confirmed it yet. */
+export interface PaidOut {
+  kind: 'payover' | 'refund' | 'business_transfer'
+  id: string
+  payee: string
+  amount: number
+  reference: string | null
+  paidAt: string | null
+  /** The reference it was marked paid with, or the statement's description. */
+  paidReference: string | null
+  /** The statement has a line tied to it. Until then it is "paid, waiting for the statement". */
+  confirmed: boolean
+  statementDate: string | null
+  accountId: string | null
+  caseNumber: string | null
+}
+
+export function toPaidOut(r: Record<string, unknown>): PaidOut {
+  const s = (v: unknown) => (v === null || v === undefined ? null : String(v))
+  return {
+    kind: r.kind === 'refund' ? 'refund' : r.kind === 'business_transfer' ? 'business_transfer' : 'payover',
+    id: String(r.id),
+    payee: String(r.payee ?? ''),
+    amount: Number(r.amount ?? 0),
+    reference: s(r.reference),
+    paidAt: s(r.paid_at),
+    paidReference: s(r.paid_reference),
+    confirmed: Boolean(r.confirmed),
+    statementDate: s(r.statement_date),
+    accountId: s(r.account_id),
+    caseNumber: s(r.case_number),
+  }
+}
+
+/**
+ * THE FIRM'S OWN TRANSFER TO ITS BUSINESS ACCOUNT, referenced like every other payment out: 'BF
+ * FEES-' + the year and month it is drawn in ('BF FEES-2610'). One a month is the usual rhythm; a
+ * second in the same month is the firm's to tell apart, and the box stays editable for that.
+ */
+export function transferReference(todayIso: string): string {
+  return `BF FEES-${todayIso.slice(2, 4)}${todayIso.slice(5, 7)}`
+}

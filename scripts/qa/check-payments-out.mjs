@@ -20,7 +20,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-payments-out.mjs
  */
 import { readFileSync } from 'node:fs'
-import { paymentReference, referenceIn, totalToPay, toPaymentToMake } from '../../src/lib/paymentsOut.ts'
+import { paymentReference, referenceIn, totalToPay, toPaymentToMake, toPaidOut, transferReference } from '../../src/lib/paymentsOut.ts'
 import { suggestAllocation } from '../../src/lib/bankLineAllocation.ts'
 
 let pass = 0
@@ -90,6 +90,36 @@ const run = strip(read('src/pages/finance/RunDetail.tsx'))
 ok('the run says which reference to pay it on', /Pay with reference/.test(run) && /paymentReference\(run\.invoice_number\)/.test(run))
 ok('...and Mark paid starts from it', /suggested=\{paymentReference\(run\.invoice_number\) \?\? ''\}/.test(run) && /useState\(suggested\)/.test(run))
 ok('the client\'s advice says it will carry it', /reference \$\{paymentReference\(run\.invoiceNumber\)\}/.test(read('src/lib/remittanceAdvice.ts')))
+
+/* ---- 5. completed from two places, confirmed by the statement (the firm, 8 Oct) ---- */
+const reconcile = liveFn('reconcile_bank_debit')
+ok('a run marked paid by hand can still be matched to its debit', /if v_status not in \('approved', 'sent', 'paid'\) then/.test(reconcile))
+ok('...once', /if v_status = 'paid' and exists \(select 1 from public\.bank_statement_lines x where x\.payover_run_id = p_run\) then/.test(reconcile))
+ok('...keeping the date and reference it was marked with', /paid_at = coalesce\(paid_at,/.test(reconcile) && /eft_reference = coalesce\(eft_reference,/.test(reconcile))
+const allocate = liveFn('allocate_bank_line')
+ok('a refund marked paid can still be confirmed from the statement', /if v_out\.bank_line_id is not null or v_out\.cancelled_at is not null then/.test(allocate))
+ok('...without paying it twice', /set paid_at = coalesce\(paid_at,/.test(allocate) && /paid_reference = coalesce\(paid_reference, v_desc\)/.test(allocate))
+const cands = liveFn('bank_allocation_candidates')
+ok('the match screen offers runs marked paid and not yet on the statement',
+  /r\.status = 'paid' and not exists \(select 1 from public\.bank_statement_lines x where x\.payover_run_id = r\.id\)/.test(cands))
+ok('...and refunds not yet on the statement', /o\.bank_line_id is null and o\.cancelled_at is null/.test(cands))
+const markRefund = liveFn('mark_refund_paid')
+ok('a refund can be marked paid by hand, with a reference', /if v_ref is null then/.test(markRefund) && /set paid_at = coalesce\(p_paid_at, now\(\)\), paid_reference = v_ref/.test(markRefund))
+ok('...only while it is still due', /where id = p_refund and paid_at is null and cancelled_at is null/.test(markRefund))
+ok('...behind the trust tick', /has_capability\('finance\.view'\)/.test(markRefund))
+const history = liveFn('payments_out_paid')
+ok('what has gone out covers runs, refunds and transfers to the business', /'payover'::text as kind/.test(history) && /select 'refund'/.test(history) && /select 'business_transfer'/.test(history))
+ok('...each saying whether the statement confirmed it', /o\.statement_date is not null/.test(history))
+ok('...always showing what is still waiting', /o\.statement_date is null or o\.statement_date >= p_since/.test(history))
+for (const sig of ['mark_refund_paid(uuid, text, timestamptz)', 'payments_out_paid(date)']) {
+  ok(`${sig} is revoked from public and anon`, sql.includes(`revoke all on function public.${sig} from public, anon;`))
+}
+check('the firm\'s transfer is referenced like the rest', transferReference('2026-10-08'), 'BF FEES-2610')
+check('a paid row reads its confirmation', toPaidOut({ kind: 'refund', id: 'x', confirmed: true, statement_date: '2026-10-12' }).confirmed, true)
+const pageSrc = strip(read('src/pages/trust/TrustPaymentsOut.tsx'))
+ok('the page marks a run paid with the run\'s own call, and a refund with its own',
+  /if \(paying\.kind === 'payover'\) await markRunPaid\(paying\.id, ref, at\)\s*else await markRefundPaid\(paying\.id, ref, at\)/.test(pageSrc))
+ok('...a transfer is offered only to whoever may draw', /const mayDraw = canDrawFromTrust\(currentUser\)/.test(pageSrc))
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payments-out: ${pass} passed, ${failures.length} failed`)

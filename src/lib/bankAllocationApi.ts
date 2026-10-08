@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { toPaymentToMake, type PaymentToMake } from './paymentsOut.ts'
+import { toPaidOut, toPaymentToMake, type PaidOut, type PaymentToMake } from './paymentsOut.ts'
 import { toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
 
 /**
@@ -40,5 +40,18 @@ export async function allocateBankLine(
   const { error } = await supabase.rpc('allocate_bank_line', {
     p_line: lineId, p_kind: kind, p_reason: reason || null, p_target: targetId,
   })
+  if (error) throw new Error(error.message)
+}
+
+/** What has gone out of trust: everything not yet on the statement, and what was confirmed since `since`. */
+export async function fetchPaymentsOutPaid(since: string): Promise<PaidOut[]> {
+  const { data, error } = await supabase.rpc('payments_out_paid', { p_since: since })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map(toPaidOut)
+}
+
+/** A refund paid at the bank, recorded by hand; the statement line confirms it later. */
+export async function markRefundPaid(refundId: string, reference: string, paidAt: string): Promise<void> {
+  const { error } = await supabase.rpc('mark_refund_paid', { p_refund: refundId, p_reference: reference, p_paid_at: paidAt })
   if (error) throw new Error(error.message)
 }
