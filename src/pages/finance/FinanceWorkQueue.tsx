@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
@@ -11,6 +11,7 @@ import {
   type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
+import { groupRunsByCycle, periodLabel } from '../../lib/payoverGroups'
 import { rand as randAmount } from '../../lib/money'
 
 /**
@@ -132,6 +133,8 @@ export function FinanceWorkQueue() {
   const open = rows.filter((r) => r.status !== 'paid')
   const paid = rows.filter((r) => r.status === 'paid')
   const shown = tab === 'paid' ? paid : open
+  /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
+  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tab)
 
   return (
     <div className="space-y-4">
@@ -248,7 +251,24 @@ export function FinanceWorkQueue() {
                     : 'No payovers to work. The cycle closes itself at five past midnight on the 11th.'}
                 </td></tr>
               )}
-              {!loading && shown.map((r) => (
+              {!loading && groups.map((g) => (
+                <Fragment key={g.key}>
+                <tr className="border-b border-slate-100 bg-slate-50" data-testid="cycle-group">
+                  <td colSpan={7} className="px-4 py-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className={clsx('text-[12.5px] font-semibold',
+                        g.tone === 'late' ? 'text-amber-800' : g.tone === 'now' ? 'text-slate-800' : 'text-slate-500')}>
+                        {g.title}
+                        <span className="ml-2 font-normal text-slate-400">
+                          {g.tone === 'done' ? '' : `${periodLabel(g.periodStart, g.periodEnd)} · `}
+                          {g.runs.length} {g.runs.length === 1 ? 'client' : 'clients'}
+                        </span>
+                      </span>
+                      <span className="text-[12.5px] font-semibold tabular-nums text-slate-700">{rand(g.total)}</span>
+                    </div>
+                  </td>
+                </tr>
+                {g.runs.map((r) => (
                 <tr
                   key={r.runId}
                   onClick={() => navigate(`/trust/runs/${r.runId}`)}
@@ -292,6 +312,8 @@ export function FinanceWorkQueue() {
                     )}
                   </td>
                 </tr>
+                ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -29,6 +29,15 @@ const SENDS = [
     subject: 'Remittance advice', net_payover: 8275, pdf_path: 'c2/PO-BPM-2610/a.pdf', xlsx_path: 'c2/PO-BPM-2610/a.xlsx' },
 ]
 let sends = SENDS
+const q = (id, client, start, end, net, status) => ({ run_id: id, company_id: id, client, client_code: null,
+  invoice_number: `PO-${id}`, period_start: start, period_end: end, payments: 1, trust_capital: net,
+  ptc_set_off: 0, net_payover: net, exceptions: 0, status, next_step: 'mark_paid', approved_at: null,
+  sent_at: null, paid_at: null, eft_reference: null })
+const QUEUE = [
+  q('A', 'Summit Fitness', '2026-08-11', '2026-09-10', 8426.07, 'sent'),
+  q('B', 'Baobab Property', '2026-08-11', '2026-09-10', 9699.53, 'approved'),
+  q('C', 'Lowveld Motors', '2026-07-11', '2026-08-10', 120, 'sent'),
+]
 /* Three stages: on the statement, paid by hand and not yet on it, and still owed. */
 const CLIENT_RUNS = [
   { id: 'run-2', invoice_number: 'PO-BPM-2611', status: 'sent', period_start: '2026-09-11', period_end: '2026-10-10',
@@ -47,6 +56,8 @@ const handlers = [
   [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [{ id: 'c2', name: 'Baobab Property Managers (Pty) Ltd', owner_id: ADMIN.id }] })],
   [(u) => /\/rest\/v1\/payover_run_sends\?/.test(u), () => ({ body: sends })],
   [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
+  [(u) => /\/rpc\/payover_cycle_now/.test(u), () => ({ body: [{ period_start: '2026-09-11', period_end: '2026-10-10', days_left: 2, today: '2026-10-08' }] })],
+  [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: QUEUE })],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
@@ -73,6 +84,16 @@ try {
   t.ok('Send again says it goes beside what was sent', await title.isVisible()
     && (await page.getByText(/What was sent before is kept as it was/).count()) > 0)
   await page.getByRole('button', { name: 'Cancel' }).click()
+
+  /* ---- THE QUEUE IN CYCLES (the firm, 8 Oct: "this month to process / previous month pending") ---- */
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payover`, { waitUntil: 'domcontentloaded' })
+  const groups = page.getByTestId('cycle-group')
+  await groups.first().waitFor({ timeout: 15000 })
+  const heads = (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
+  t.check('one heading per cycle', heads.length, 2)
+  t.ok('this month first, with its total', /^This month to process[\s\S]*2 clients[\s\S]*R 18 125\.60/.test(heads[0] ?? ''))
+  t.ok('...then the older one still pending', /^Earlier, still pending[\s\S]*1 client/.test(heads[1] ?? ''))
+  await t.shot(page, 'payover-queue-cycles')
 
   /* ---- THE CLIENT'S FOLDER: every run, where it has got to, and what was sent ---- */
   await page.goto(`http://127.0.0.1:${PORT}/companies/c2`, { waitUntil: 'domcontentloaded' })
