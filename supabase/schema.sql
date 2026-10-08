@@ -32023,3 +32023,90 @@ create policy "payover_advice_read" on storage.objects
 drop policy if exists "payover_advice_insert" on storage.objects;
 create policy "payover_advice_insert" on storage.objects
   for insert with check (bucket_id = 'payover-advice' and public.has_capability('finance.view'));
+
+-- ============================================================================================
+-- THE TRUST LEDGER SAYS WHAT EACH BALANCE IS MADE OF
+--
+-- The firm, 8 Oct, looking at the ledger: "what is this? ... no details what this is for ... which
+-- clients were paid what ... for which payover runs". Two things made it unreadable:
+--   - THE FIRM WAS THIRTY-NINE ROWS. Its entries carry the account the fee was earned on, and
+--     trust_balances grouped every party but the client by account, so "Bredell Ferreira" appeared
+--     once per debtor. The firm is one party with one balance; the accounts are its detail.
+--   - A BALANCE WITH NOTHING UNDER IT. trust_entries now lists one party's entries, each dated,
+--     saying what it was, the account and the payover run it belongs to, and the running balance
+--     after it -- the running figure computed here, in one window, like client_account's.
+-- The most recent 500 are returned with the balance carried from everything before them, so a
+-- long history is a long running total rather than a slow page.
+-- ============================================================================================
+
+create or replace function public.trust_balances()
+returns table(party text, who_id text, who_name text, who_detail text,
+              balance numeric, entries bigint, last_at timestamptz)
+language sql stable security definer set search_path to 'public'
+as $$
+  with by_party as (
+    select e.party,
+           case e.party when 'client' then e.company_id::text
+                        when 'debtor' then coalesce(e.account_id::text, e.party)
+                        else e.party end as who,
+           sum(e.amount) as bal,
+           count(*) as n,
+           max(e.entry_at) as last_at
+      from public.trust_creditor_entries e
+     group by 1, 2
+  )
+  select b.party,
+         b.who,
+         case b.party
+           when 'client' then coalesce(c.name, 'Unknown client')
+           when 'debtor' then coalesce(nullif(btrim(coalesce(a.debtor_first_name, a.debtor_initials, '')
+                                     || ' ' || coalesce(a.debtor_surname, '')), ''), 'Unknown debtor')
+           when 'firm' then 'Bredell Ferreira'
+           else 'Not yet identified'
+         end,
+         case b.party
+           when 'client' then coalesce(c.code, '')
+           when 'debtor' then coalesce(a.case_number, '')
+           when 'firm' then 'Fees, interest and commission earned'
+           else 'Receipts nobody has placed'
+         end,
+         round(b.bal, 2), b.n, b.last_at
+    from by_party b
+    left join public.companies c on b.party = 'client' and c.id::text = b.who
+    left join public.debtor_accounts a on b.party = 'debtor' and a.id::text = b.who
+   where public.has_capability('finance.view')
+     and round(b.bal, 2) <> 0
+   order by abs(b.bal) desc
+$$;
+
+create or replace function public.trust_entries(p_party text, p_who text)
+returns table(id uuid, entry_at timestamptz, reason text, amount numeric, balance numeric,
+              account_id uuid, case_number text, debtor_name text,
+              run_id uuid, invoice_number text, on_statement date)
+language sql stable security definer set search_path to 'public'
+as $$
+  with mine as (
+    select e.*,
+           sum(e.amount) over (order by e.entry_at, e.id rows between unbounded preceding and current row) as running,
+           row_number() over (order by e.entry_at desc, e.id desc) as newest
+      from public.trust_creditor_entries e
+     where public.has_capability('finance.view')
+       and e.party = p_party
+       and case p_party when 'client' then e.company_id::text = p_who
+                        when 'debtor' then coalesce(e.account_id::text, e.party) = p_who
+                        else true end
+  )
+  select m.id, m.entry_at, m.reason, round(m.amount, 2), round(m.running, 2),
+         m.account_id, a.case_number,
+         nullif(btrim(coalesce(a.debtor_first_name, a.debtor_initials, '') || ' ' || coalesce(a.debtor_surname, '')), ''),
+         m.payover_run_id, r.invoice_number, l.txn_date
+    from mine m
+    left join public.debtor_accounts a on a.id = m.account_id
+    left join public.payover_runs r on r.id = m.payover_run_id
+    left join public.bank_statement_lines l on l.id = m.bank_line_id
+   where m.newest <= 500
+   order by m.entry_at desc, m.id desc
+$$;
+
+revoke all on function public.trust_entries(text, text) from public, anon;
+grant execute on function public.trust_entries(text, text) to authenticated;

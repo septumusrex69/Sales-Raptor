@@ -175,6 +175,43 @@ export async function fetchTrustBalances(): Promise<TrustBalance[]> {
 }
 
 /**
+ * WHAT ONE BALANCE IS MADE OF: its entries, newest first, each with the running balance after it.
+ * The firm, 8 Oct: "no details what this is for". The running figure is the database's
+ * (`trust_entries`), the most recent 500 carrying the balance from everything before them.
+ */
+export interface TrustEntry {
+  id: string
+  at: string
+  reason: string
+  amount: number
+  balance: number
+  accountId: string | null
+  caseNumber: string | null
+  debtorName: string | null
+  runId: string | null
+  invoiceNumber: string | null
+  onStatement: string | null
+}
+
+export async function fetchTrustEntries(party: TrustParty, who: string): Promise<TrustEntry[]> {
+  const { data, error } = await supabase.rpc('trust_entries', { p_party: party, p_who: who })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    at: String(r.entry_at),
+    reason: String(r.reason ?? ''),
+    amount: n(r.amount),
+    balance: n(r.balance),
+    accountId: (r.account_id as string | null) ?? null,
+    caseNumber: (r.case_number as string | null) ?? null,
+    debtorName: (r.debtor_name as string | null) ?? null,
+    runId: (r.run_id as string | null) ?? null,
+    invoiceNumber: (r.invoice_number as string | null) ?? null,
+    onStatement: (r.on_statement as string | null) ?? null,
+  }))
+}
+
+/**
  * THE SAME MONEY, SPLIT BY THE PAYOVER IT IS WAITING FOR.
  *
  * `trust_position` is timeless -- one running total per party -- and the firm asked the question it

@@ -138,6 +138,14 @@ check('...never as one lump with no account', /values \('debtor', new\.company_i
 const balances = liveFn('trust_balances')
 ok('the ledger page reads every party without forcing a uuid', /c\.id::text = b\.who/.test(balances) && /a\.id::text = b\.who/.test(balances))
 check('...so no row can stop the page', /b\.who::uuid/.test(balances), false)
+/* The firm, 8 Oct: the firm was 39 rows on the ledger, one per account its fees came from. */
+ok('the firm is one party on the ledger, not one row per account',
+  /when 'debtor' then coalesce\(e\.account_id::text, e\.party\)\s+else e\.party end as who/.test(balances))
+const entries = liveFn('trust_entries')
+ok('a balance opens to its entries, the running figure the database\'s',
+  /sum\(e\.amount\) over \(order by e\.entry_at, e\.id rows between unbounded preceding and current row\)/.test(entries))
+ok('...behind finance.view', /public\.has_capability\('finance\.view'\)/.test(entries))
+ok('...with the run each entry belongs to', /left join public\.payover_runs r on r\.id = m\.payover_run_id/.test(entries))
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-firm-held: ${pass} passed, ${failures.length} failed`)

@@ -87,6 +87,18 @@ const CHARGES = [
  * debtor paid the client direct -- is what turns a client from a trust creditor into a trust
  * debtor, and a fixture with only positives cannot tell the two tabs apart.
  */
+/* Rinda Roo's balance, entry by entry: a payover paid out, and what was collected for it. */
+const ENTRIES = [
+  { id: 'e3', entry_at: '2026-10-05T09:00:00Z', reason: 'Capital recovered, less commission, held for the client',
+    amount: 2557.90, balance: 2557.90, account_id: 'a1', case_number: 'RAP-123850', debtor_name: 'L Swakamisa',
+    run_id: null, invoice_number: null, on_statement: null },
+  { id: 'e2', entry_at: '2026-09-15T09:00:00Z', reason: 'Payover PO-RRC-2609 paid to the client',
+    amount: -1225.00, balance: 0, account_id: null, case_number: null, debtor_name: null,
+    run_id: 'r2', invoice_number: 'PO-RRC-2609', on_statement: '2026-09-16' },
+  { id: 'e1', entry_at: '2026-09-02T09:00:00Z', reason: 'Capital recovered, less commission, held for the client',
+    amount: 1225.00, balance: 1225.00, account_id: 'a2', case_number: 'RAP-123001', debtor_name: null,
+    run_id: 'r2', invoice_number: 'PO-RRC-2609', on_statement: null },
+]
 const BALANCES = [
   { party: 'firm', who_id: 'firm', who_name: 'Bredell Ferreira',
     who_detail: 'Fees, interest and commission earned', balance: 4420.07, entries: 14,
@@ -147,6 +159,7 @@ function handlersFor(profile) {
     [(u) => /\/rpc\/overpayments_kept/.test(u), () => ({ body: [{ amount: 100, accounts: 1 }] })],
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
     [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
+    [(u) => /\/rpc\/trust_entries/.test(u), () => ({ body: ENTRIES })],
     [(u) => /\/rpc\/trust_by_cycle/.test(u), () => ({ body: CYCLES })],
     [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: [MONTH] })],
@@ -422,6 +435,24 @@ try {
     t.check('the client who OWES the trust is not on this side',
       /Mielie Meal Co/.test(body), false)
     t.ok('the creditors total', /R 7 388\.60/.test(body))
+
+    /* THE FIRM, 8 Oct: "what is this? ... no details what this is for ... for which payover runs".
+       A balance opens to its entries, each with its account, its run and the balance after it. */
+    t.check('the firm is ONE row, not one per account',
+      await page.getByTestId('ledger-row').filter({ hasText: 'Bredell Ferreira' }).count(), 1)
+    await page.getByRole('button', { name: "What makes up Rinda Roo Company's balance" }).click()
+    const entries = page.getByTestId('ledger-entries')
+    await entries.waitFor({ timeout: 10000 }).catch(() => {})
+    t.check('a balance opens to its entries', await entries.locator('tbody tr').count(), 3)
+    const what = plain(await entries.innerText().catch(() => ''))
+    t.ok('...each saying what it was', what.includes('Payover PO-RRC-2609 paid to the client'))
+    t.check('...the running balance after it, as the database gave it',
+      (await entries.locator('tbody tr td:last-child').allInnerTexts()).map((x) => plain(x).trim()).join(' | '),
+      'R 2 557.90 | R 0.00 | R 1 225.00')
+    t.ok('...the payover run opens its page', (await entries.locator('a[href="/trust/runs/r2"]').count()) === 2)
+    t.ok('...and the account opens the account', (await entries.locator('a[href="/accounts/a1"]').count()) === 1)
+    t.ok('...and what the statement confirmed says so', /on the statement 16 Sept 2026/.test(what))
+    await t.shot(page, 'trust-ledger-entries')
 
     /*
      * AND THE LEDGER'S TOTAL IS EXPLAINED AGAINST THE OVERVIEW'S. They differ by the unplaced
