@@ -280,9 +280,11 @@ try {
     /* ---- and it is EXPLAINED: both debits named, with the right action on each ---- */
     t.ok('the unmatched payout is named', /R 962\.50/.test(body))
     t.ok('...with the run it probably belongs to', /Match to PO-RRC-2610/.test(body))
-    /* A bank charge has no run to match, so it must NOT offer to match it to one. */
+    /* A bank charge has no run to match: it is the firm's cost, booked as one (the firm, 8 Oct:
+       "I can't match this with anything ... that means the company owes the trust"). */
     t.ok('the bank charge is named', /Bank charge/.test(body))
-    t.ok('...and is offered no run to match', /Find its run/.test(body))
+    t.ok('...and is offered to be booked as a bank charge, not matched to a run',
+      /Book as a bank charge/.test(body) && !/Find its run/.test(body))
 
     /* ---- the two cycles in the account at once ---- */
     /*

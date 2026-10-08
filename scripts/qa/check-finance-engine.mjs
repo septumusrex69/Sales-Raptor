@@ -274,7 +274,9 @@ ok('a payment can only be split once',
  * rate would have replayed nothing and the draft would have stayed wrong until the next month.
  */
 check('a replay leaves an invoiced allocation alone',
-  (replay.match(/not public\.allocation_is_invoiced\(a\.payover_run_id\)/g) ?? []).length, 2)
+  /* Three since 8 Oct: the count-back, the removal, and the opposite trust entries written for
+     exactly the allocations the removal takes -- all three scoped alike. */
+  (replay.match(/not public\.allocation_is_invoiced\(a\.payover_run_id\)/g) ?? []).length, 3)
 /* AND LEAVES ITS PAYMENT ALONE WITH IT -- the fee delete and the replay loop. Calling
    allocate_payment on a payment whose allocation survived is refused by the one-per-payment index,
    which would take the reversal that triggered the replay down with it. */

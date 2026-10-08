@@ -230,6 +230,20 @@ ok('...which asks the function', /\.rpc\('set_payment_account'/.test(lib))
    rows and reports success -- see check-financial-immutability, which holds this in general. */
 ok('...rather than writing at the table', !/from\('account_payments'\)[\s\S]{0,80}\.update/.test(screen))
 
+
+/* ---- A REVERSAL UN-DOES THE TRUST LEDGER BY WRITING ITS OPPOSITE (found broken 8 Oct) ---- */
+const realloc = liveFn('reallocate_account')
+const negAt = realloc.indexOf('insert into public.trust_creditor_entries')
+const delAt = realloc.indexOf('delete from public.payment_allocations')
+ok('a re-split answers each outgoing allocation\'s trust entries with their opposite', negAt > 0
+  && /-e\.amount,\s+case when p\.reversed_at is not null then 'Payment reversed: ' else 'Re-split: ' end \|\| e\.reason/.test(realloc))
+ok('...before the allocations go, not after', negAt > 0 && delAt > 0 && negAt < delAt)
+ok('...and only for what the replay redoes (never an invoiced allocation)',
+  /join public\.payment_allocations a on a\.id = e\.allocation_id[\s\S]*?and not public\.allocation_is_invoiced\(a\.payover_run_id\);/.test(realloc))
+const fkGone = sql.lastIndexOf('drop constraint if exists trust_creditor_entries_allocation_id_fkey')
+const fkAdded = sql.lastIndexOf('trust_creditor_entries_allocation_id_fkey foreign key')
+ok('the ledger no longer refuses the removal through a foreign key', fkGone > 0 && fkGone > fkAdded)
+
 console.log(`\ncheck-reversal-returns: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

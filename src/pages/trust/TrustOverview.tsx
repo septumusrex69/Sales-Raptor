@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
+import { unexplainedDebitAction } from '../../lib/bankLineAllocation'
 import { rand } from '../../lib/money'
 import {
   fetchFirmHeld, fetchOverpaymentsKept, fetchTrustCycles, fetchTrustPosition, fetchUnreconciledPayouts,
@@ -285,9 +286,14 @@ export function TrustOverview() {
                     <li key={p.id} className="text-[12.5px] rounded-lg bg-white/70 px-3 py-2">
                       <div className="flex items-baseline justify-between gap-3">
                         <span className="font-semibold tabular-nums text-negative-700">{rand(Math.abs(p.amount))}</span>
-                        <Link to="/trust/payover" className="font-medium text-gold-700 hover:text-gold-800 whitespace-nowrap">
-                          {p.candidateRun ? `Match to ${p.candidateInvoice ?? 'the run'}` : 'Find its run'}
-                        </Link>
+                        {(() => {
+                          const act = unexplainedDebitAction(p.description, p.candidateRun ? (p.candidateInvoice ?? 'the run') : null)
+                          return (
+                            <Link to={act.to} className="font-medium text-gold-700 hover:text-gold-800 whitespace-nowrap">
+                              {act.label}
+                            </Link>
+                          )
+                        })()}
                       </div>
                       <div className="text-slate-500 truncate" title={p.description || undefined}>
                         {p.description || 'No description'}

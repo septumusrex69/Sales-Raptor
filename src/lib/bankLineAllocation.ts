@@ -100,6 +100,21 @@ export interface Suggestion {
  * question for a person, and guessing between them settles the wrong client's run. The business
  * account's own number in the description is the other unambiguous sign.
  */
+/**
+ * WHAT TO DO ABOUT A DEBIT NOTHING ACCOUNTS FOR, as the Trust overview offers it. The firm, 8 Oct,
+ * at two "##BANK CHARGE" lines offered only "Find its run": "I can't match this with anything ...
+ * I think that means the company owes the trust fifty-seven rand." It does: a bank charge is the
+ * firm's cost, booked against the firm under Exceptions. Only a debit that is not a charge is a
+ * payment to find.
+ */
+export function unexplainedDebitAction(
+  description: string | null, candidateInvoice: string | null,
+): { label: string; to: string } {
+  if (CHARGE.test(description ?? '')) return { label: 'Book as a bank charge', to: '/trust/exceptions' }
+  if (candidateInvoice) return { label: `Match to ${candidateInvoice}`, to: '/trust/exceptions' }
+  return { label: 'Allocate it', to: '/trust/exceptions' }
+}
+
 export function suggestAllocation(
   line: StatementLine,
   candidates: Candidate[],

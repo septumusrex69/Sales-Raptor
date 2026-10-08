@@ -32619,3 +32619,111 @@ begin
     end;
   end loop;
 end $$;
+
+
+-- ============================================================================================
+-- REVERSING A PAYMENT THAT IS NOT YET ON AN APPROVED RUN WORKS AGAIN (8 Oct)
+--
+-- reverse_payment -> reverse_payment_allocation -> reallocate_account removes the account's
+-- un-invoiced allocations and replays the rest. Once the trust ledger existed, its entries pointed
+-- at those allocations through a foreign key, so the removal was refused and every such reversal
+-- failed (the Reverse button on Trust -> Check). The ledger may not be edited, so the link could
+-- not be cleared either.
+--
+-- So: the foreign key goes (allocation_id stays on each entry as a plain record of which split it
+-- came from), and before the removal reallocate_account writes an equal and opposite entry for
+-- every entry the outgoing allocations made, marked "Payment reversed:" or "Re-split:". The replay
+-- then writes the new split. The ledger stays append-only and nets correctly.
+-- Proved on staging in a rolled-back probe: R500 approved (+307.50 firm, +192.50 client), reversed,
+-- trust total back to where it started, four entries, no allocation left.
+-- KNOWN EDGE: a parked overpayment the firm had TAKEN on a payment that is re-split comes back to the
+-- debtor with the opposite entry, because the new split parks it afresh.
+-- ============================================================================================
+alter table public.trust_creditor_entries drop constraint if exists trust_creditor_entries_allocation_id_fkey;
+
+create or replace function public.reallocate_account(p_account_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_cutover timestamptz;
+  v_restored numeric := 0;
+  v_count integer := 0;
+  v_payment record;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select finance_cutover_at into v_cutover from public.firm_settings limit 1;
+  if v_cutover is null then return 0; end if;
+
+  select coalesce(sum(a.to_capital), 0) into v_restored
+    from public.payment_allocations a
+    join public.account_payments p on p.id = a.payment_id
+   where a.account_id = p_account_id
+     and p.created_at >= v_cutover
+     and not public.allocation_is_invoiced(a.payover_run_id);
+
+  /* THE TRUST LEDGER IS APPEND-ONLY, SO WHAT A RE-SPLIT UNDOES IS WRITTEN AS ITS OPPOSITE.
+     Every entry the outgoing allocations made is answered by an equal and opposite one, then
+     the replay writes the new split. Before this the removal hit the ledger's link to the
+     allocation and every reversal of an un-invoiced payment failed (found 8 Oct). */
+  insert into public.trust_creditor_entries (party, company_id, account_id, amount, reason, payment_id, allocation_id)
+  select e.party, e.company_id, e.account_id, -e.amount,
+         case when p.reversed_at is not null then 'Payment reversed: ' else 'Re-split: ' end || e.reason,
+         e.payment_id, e.allocation_id
+    from public.trust_creditor_entries e
+    join public.payment_allocations a on a.id = e.allocation_id
+    join public.account_payments p on p.id = a.payment_id
+   where a.account_id = p_account_id
+     and p.created_at >= v_cutover
+     and not public.allocation_is_invoiced(a.payover_run_id);
+
+  delete from public.payment_allocations a
+   using public.account_payments p
+   where a.payment_id = p.id
+     and a.account_id = p_account_id
+     and p.created_at >= v_cutover
+     and not public.allocation_is_invoiced(a.payover_run_id);
+
+  /* THE ENGINE'S OWN RECEIPT FEES GO WITH THEM, so the replay charges them again rather than
+     charging them twice -- and only for the payments the loop below actually replays. A reversed
+     payment is not replayed, so its fee stays on the ledger as the cancelled line the reversal
+     wrote; an invoiced one is not replayed either, so its fee stays as the charge the client was
+     already paid over on. */
+  delete from public.account_fees f
+   using public.account_payments p
+   where f.payment_id = p.id
+     and f.account_id = p_account_id
+     and f.annexure_item = '9'
+     and f.source = 'raptor'
+     and p.created_at >= v_cutover
+     and p.reversed_at is null
+     and not public.payment_is_invoiced(p.id);
+
+  update public.debtor_accounts
+     set capital_outstanding = coalesce(capital_outstanding, 0) + v_restored
+   where id = p_account_id;
+
+  for v_payment in
+    select p.id from public.account_payments p
+     where p.account_id = p_account_id
+       and p.created_at >= v_cutover
+       and not p.is_demo
+       and p.reversed_at is null
+       and not public.payment_is_invoiced(p.id)
+     order by p.created_at, p.id
+  loop
+    perform public.allocate_payment(v_payment.id);
+    v_count := v_count + 1;
+  end loop;
+
+  return v_count;
+end $$;

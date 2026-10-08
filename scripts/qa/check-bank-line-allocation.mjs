@@ -21,7 +21,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  candidatesFor, kindsFor, needsReason, needsTarget, suggestAllocation,
+  candidatesFor, kindsFor, needsReason, needsTarget, suggestAllocation, unexplainedDebitAction,
 } from '../../src/lib/bankLineAllocation.ts'
 
 let pass = 0
@@ -138,6 +138,12 @@ check('the import no longer says money out is not imported', /payments out — n
 ok('...and says each is to be allocated', /each to be allocated/.test(importCard))
 const card = strip(read('src/components/finance/BankLinesToAllocate.tsx'))
 ok('nothing is allocated until a person presses Allocate', /onClick=\{go\}/.test(card) && !/useEffect\([^)]*allocateBankLine/.test(card))
+
+/* THE OVERVIEW'S ACTION ON A DEBIT NOTHING ACCOUNTS FOR (the firm, 8 Oct, at "##BANK CHARGE"). */
+check('a bank charge is booked as one', unexplainedDebitAction('##BANK CHARGE', null).label, 'Book as a bank charge')
+check('...even where a run happens to be the same amount', unexplainedDebitAction('##BANK CHARGE', 'PO-X').label, 'Book as a bank charge')
+check('a payout with a likely run names it', unexplainedDebitAction('FNB APP PAYMENT', 'PO-RRC-2610').label, 'Match to PO-RRC-2610')
+check('...and every action goes where lines are allocated', unexplainedDebitAction('x', null).to, '/trust/exceptions')
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-bank-line-allocation: ${pass} passed, ${failures.length} failed`)
