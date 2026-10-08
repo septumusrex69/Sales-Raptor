@@ -10,7 +10,7 @@ import {
   RUN_STATUS_LABEL, approveRun, fetchPaymentAudit, fetchRunPayments, markRunPaid,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
-import { adviceBody, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
+import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
@@ -152,24 +152,7 @@ export function RunDetail() {
    */
   const advice = useMemo(() => {
     if (!run || !client || !firm) return null
-    return buildRemittanceAdvice({
-      firm,
-      client: { name: client.name, code: client.code, vatNumber: client.vatNumber },
-      run: {
-        invoiceNumber: run.invoice_number,
-        periodStart: run.period_start, periodEnd: run.period_end,
-        issuedOn: (run.approved_at ?? new Date().toISOString()).slice(0, 10),
-        trustCapital: run.trust_capital, trustCommission: run.trust_commission,
-        dueToClient: run.due_to_client, ptcReceived: run.ptc_received,
-        ptcFeesTaken: run.ptc_fees_taken, ptcCapital: run.ptc_capital,
-        ptcCommission: run.ptc_commission, dueToBf: run.due_to_bf,
-        commissionVat: run.commission_vat, carriedIn: run.carried_in,
-        chargesSetOff: Number(run.charges_set_off ?? 0), excessReleased: Number(run.excess_released ?? 0),
-        netPayover: run.net_payover, commissionRate: client.rate,
-        paidAt: run.paid_at, eftReference: run.eft_reference,
-      },
-      lines: rows,
-    })
+    return adviceFromRun(run, client, firm, rows)
   }, [run, client, firm, rows])
 
   async function openPdf() {

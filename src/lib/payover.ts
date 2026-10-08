@@ -432,6 +432,17 @@ export async function markRunPaid(runId: string, reference: string, paidAt: stri
   if (error) throw new Error(error.message)
 }
 
+/**
+ * THE QUEUE BUILDS ITS OWN RUNS (the firm, 8 Oct: "I don't even have to say go and build a run").
+ * Every client with processed money in this cycle or the last gets its run built or brought up to
+ * date; approved, sent, paid and voided runs are left alone. Returns how many it touched.
+ */
+export async function refreshRuns(): Promise<number> {
+  const { data, error } = await supabase.rpc('refresh_payover_runs')
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
+}
+
 export async function rebuildRun(companyId: string, periodStart: string): Promise<void> {
   const { error } = await supabase.rpc('build_payover_run', {
     p_company: companyId, p_period_start: periodStart,

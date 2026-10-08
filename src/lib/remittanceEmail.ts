@@ -37,10 +37,11 @@
 import { supabase } from './supabase'
 import { emailBodyHtml } from './emailStyle'
 import {
-  adviceBody, adviceCopyPaths, adviceSchedule, adviceSubject, type RemittanceAdvice,
+  adviceBody, adviceCopyPaths, adviceFromRun, adviceSchedule, adviceSubject,
+  type AdviceRunRow, type RemittanceAdvice,
 } from './remittanceAdvice'
 import { remittancePdf } from './remittancePdf'
-import { markRunSent } from './payover'
+import { fetchRunPayments, markRunSent } from './payover'
 import { XLSX_MIME, toBase64 } from './xlsxWrite'
 
 export async function sendRemittanceAdvice(
@@ -147,4 +148,53 @@ function base64(bytes: Uint8Array): string {
     s += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
   }
   return btoa(s)
+}
+
+/**
+ * EVERYTHING ONE RUN'S ADVICE NEEDS, READ THE WAY THE RUN PAGE READS IT, so a statement sent in
+ * bulk from the queue is the statement the run page previews. The address is the client's own.
+ */
+export async function loadRunAdvice(runId: string): Promise<{
+  advice: RemittanceAdvice; run: { id: string; companyId: string; status: string }; to: string | null; client: string
+}> {
+  const { data, error } = await supabase.from('payover_runs')
+    .select('*, companies(name, code, commission_rate, vat_number, email)').eq('id', runId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) throw new Error('That payover run is no longer here.')
+  const d = data as unknown as AdviceRunRow & { id: string; company_id: string; status: string
+    companies: { name: string; code: string | null; commission_rate: number | null; vat_number: string | null; email: string | null } | null }
+  const { data: fs } = await supabase.from('firm_settings')
+    .select('firm_name, physical_address, phone, email, vat_number').limit(1).maybeSingle()
+  const f = fs as { firm_name: string; physical_address: string | null; phone: string | null; email: string | null; vat_number: string | null } | null
+  if (!f) throw new Error('The firm settings could not be read.')
+  const lines = await fetchRunPayments(runId)
+  const client = { name: d.companies?.name ?? '', code: d.companies?.code ?? null,
+    vatNumber: d.companies?.vat_number ?? null, rate: d.companies?.commission_rate ?? null }
+  return {
+    advice: adviceFromRun(d, client,
+      { name: f.firm_name, address: f.physical_address, phone: f.phone, email: f.email, vatNumber: f.vat_number }, lines),
+    run: { id: d.id, companyId: d.company_id, status: d.status },
+    to: d.companies?.email?.trim() || null,
+    client: client.name,
+  }
+}
+
+/**
+ * THE QUEUE'S "EMAIL ADVICE" FOR SEVERAL RUNS. One at a time, each through sendRemittanceAdvice --
+ * so each is stored, sent and recorded exactly as a single send is. A client with no address on
+ * file is SKIPPED and named rather than guessed at; one that fails does not stop the rest.
+ */
+export async function sendAdviceForRuns(runIds: string[]): Promise<{ sent: string[]; skipped: string[] }> {
+  const sent: string[] = []; const skipped: string[] = []
+  for (const id of runIds) {
+    try {
+      const { advice, run, to, client } = await loadRunAdvice(id)
+      if (!to) { skipped.push(`${client}: no email address on file`); continue }
+      await sendRemittanceAdvice(advice, to, run)
+      sent.push(client)
+    } catch (e) {
+      skipped.push(e instanceof Error ? e.message : 'could not be sent')
+    }
+  }
+  return { sent, skipped }
 }

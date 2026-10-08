@@ -32110,3 +32110,157 @@ $$;
 
 revoke all on function public.trust_entries(text, text) from public, anon;
 grant execute on function public.trust_entries(text, text) to authenticated;
+
+-- ============================================================================================
+-- PAYOVER RUNS BUILD THEMSELVES, AND ONE CANNOT BE APPROVED BEFORE ITS CYCLE HAS CLOSED
+--
+-- The firm, 8 Oct, at the payover queue: "I don't even have to say go and build a run, because
+-- then it's like just like an extra unnecessary step ... It's basically automatically already
+-- built. And updated when necessary." A client with money in the cycle appears on the queue with
+-- its payments, and the run behind it is rebuilt as payments are processed.
+--
+-- refresh_payover_runs() builds or rebuilds, for the OPEN cycle and the one before it, every
+-- client with processed money no run has claimed, and every run still open (needs review, ready).
+-- A run that is approved, sent or paid is never touched -- build_payover_run refuses one anyway --
+-- and neither is a VOIDED one, exactly as close_payover_cycle skips it: somebody threw it away on
+-- purpose, and rebuilding it the next time the page opened would undo that without a word.
+-- Called by the queue each time it opens; the 11th's close_payover_cycle is unchanged.
+--
+-- AND NOW THAT A RUN EXISTS BEFORE ITS CYCLE ENDS, APPROVING IT EARLY IS A TRAP: a payment
+-- processed later in the same cycle is claimed by the run for that cycle, and an approved run
+-- claims nothing more -- the money would never be paid over. So approve_payover_run refuses a run
+-- whose cycle has not ended (Johannesburg date), except on staging, where the firm tests by
+-- building and approving runs for cycles that are still open.
+-- ============================================================================================
+create or replace function public.refresh_payover_runs()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_open date := public.payover_cycle_start(now());
+  v_last date := public.payover_cycle_start(((v_open - 1)::timestamp) at time zone 'Africa/Johannesburg');
+  v_cycle date;
+  v_end date;
+  v_company uuid;
+  v_count integer := 0;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  foreach v_cycle in array array[v_last, v_open] loop
+    v_end := public.payover_cycle_end(v_cycle);
+    for v_company in
+      select distinct d.company_id
+        from public.payment_allocations a
+        join public.account_payments p on p.id = a.payment_id
+        join public.debtor_accounts d on d.id = a.account_id
+       where a.payover_run_id is null
+         and a.status <> 'reversed'
+         and not p.is_demo
+         and not p.paid_over_in_swordfish
+         and p.allocated_on >= v_cycle
+         and p.allocated_on <= v_end
+      union
+      select r.company_id from public.payover_runs r
+       where r.period_start = v_cycle and public.payover_run_is_open(r.status)
+    loop
+      if exists (select 1 from public.payover_runs
+                  where company_id = v_company and period_start = v_cycle
+                    and not public.payover_run_is_open(status)) then
+        continue;
+      end if;
+      perform public.build_payover_run(v_company, v_cycle);
+      v_count := v_count + 1;
+    end loop;
+  end loop;
+  return v_count;
+end $$;
+
+revoke all on function public.refresh_payover_runs() from public, anon;
+grant execute on function public.refresh_payover_runs() to authenticated;
+
+create or replace function public.approve_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+  v_end date;
+  v_why text;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select status, period_end into v_status, v_end from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if not public.payover_run_is_open(v_status) then
+    raise exception 'That run is already %.', v_status;
+  end if;
+  /* NOT BEFORE THE CYCLE HAS CLOSED: a payment processed later in it would belong to an approved
+     run that claims nothing more, and never be paid over. Staging tests open cycles on purpose. */
+  if v_end >= (now() at time zone 'Africa/Johannesburg')::date and not public.is_staging_database() then
+    raise exception 'This cycle runs until % and more payments may still come into it. Approve it once it has closed.',
+      to_char(v_end, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  select string_agg(b.detail, '; ') into v_why from public.payover_run_blockers(p_run) b;
+  if v_why is not null then
+    raise exception 'This run cannot be approved yet: %', v_why;
+  end if;
+
+  update public.payover_runs
+     set status = 'approved', approved_by = auth.uid(), approved_at = now()
+   where id = p_run;
+end $$;
+
+-- THE WHOLE FINANCE REVOKE LIST, RESTATED WITH refresh_payover_runs (8 Oct). The last block is the
+-- live one, so a block carrying only the new name would leave the others un-revoked on a fresh
+-- database. (The function also carries its own revoke where it is created.)
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

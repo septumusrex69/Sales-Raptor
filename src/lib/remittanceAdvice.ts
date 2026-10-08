@@ -400,3 +400,44 @@ export function adviceCopyPaths(companyId: string, invoiceNumber: string, stamp:
   const base = `${companyId}/${invoiceNumber.replace(/[^A-Za-z0-9._-]/g, '_')}/${stamp}`
   return { pdf: `${base}.pdf`, xlsx: `${base}.xlsx` }
 }
+
+/** A payover_runs row as the run page and the bulk send both read it. */
+export interface AdviceRunRow {
+  invoice_number: string; period_start: string; period_end: string
+  trust_capital: number; trust_commission: number; due_to_client: number
+  ptc_received: number; ptc_fees_taken: number; ptc_capital: number; ptc_commission: number
+  due_to_bf: number; commission_vat: number; carried_in: number
+  charges_set_off?: number | null; excess_released?: number | null
+  net_payover: number; approved_at: string | null; paid_at: string | null; eft_reference: string | null
+}
+
+/**
+ * ONE RUN INTO ONE ADVICE, IN ONE PLACE. The run page and the queue's bulk send both build the
+ * advice a client receives; written twice, the two would drift and a client sent in bulk would get
+ * a different statement from the one the firm previewed.
+ */
+export function adviceFromRun(
+  run: AdviceRunRow,
+  client: { name: string; code: string | null; vatNumber: string | null; rate: number | null },
+  firm: RemittanceFirm,
+  lines: RunPayment[],
+): RemittanceAdvice {
+  return buildRemittanceAdvice({
+    firm,
+    client: { name: client.name, code: client.code, vatNumber: client.vatNumber },
+    run: {
+      invoiceNumber: run.invoice_number,
+      periodStart: run.period_start, periodEnd: run.period_end,
+      issuedOn: (run.approved_at ?? new Date().toISOString()).slice(0, 10),
+      trustCapital: run.trust_capital, trustCommission: run.trust_commission,
+      dueToClient: run.due_to_client, ptcReceived: run.ptc_received,
+      ptcFeesTaken: run.ptc_fees_taken, ptcCapital: run.ptc_capital,
+      ptcCommission: run.ptc_commission, dueToBf: run.due_to_bf,
+      commissionVat: run.commission_vat, carriedIn: run.carried_in,
+      chargesSetOff: Number(run.charges_set_off ?? 0), excessReleased: Number(run.excess_released ?? 0),
+      netPayover: run.net_payover, commissionRate: client.rate,
+      paidAt: run.paid_at, eftReference: run.eft_reference,
+    },
+    lines,
+  })
+}

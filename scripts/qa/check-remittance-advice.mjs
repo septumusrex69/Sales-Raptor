@@ -279,7 +279,13 @@ ok('...and the PDF draws it as its own section',
 const runPage = readFileSync(new URL('../../src/pages/finance/RunDetail.tsx', import.meta.url), 'utf8')
 ok('the run page shows both lines too',
   /label="Charges set off against this payover"/.test(runPage) && /label="Overpayments released to the client, no commission"/.test(runPage))
-ok('...and hands both to the advice', /chargesSetOff: Number\(run\.charges_set_off \?\? 0\), excessReleased: Number\(run\.excess_released \?\? 0\)/.test(runPage))
+const adviceSrc = readFileSync(new URL('../../src/lib/remittanceAdvice.ts', import.meta.url), 'utf8')
+ok('...and hands both to the advice, in the one place a run becomes an advice',
+  /chargesSetOff: Number\(run\.charges_set_off \?\? 0\), excessReleased: Number\(run\.excess_released \?\? 0\)/.test(adviceSrc)
+  && /return adviceFromRun\(run, client, firm, rows\)/.test(runPage))
+const emailSrc2 = readFileSync(new URL('../../src/lib/remittanceEmail.ts', import.meta.url), 'utf8')
+ok('...which the bulk send uses too, so a bulk advice is the previewed one',
+  /advice: adviceFromRun\(d, client,/.test(emailSrc2) && !/buildRemittanceAdvice\(/.test(emailSrc2))
 
 console.log(`\ncheck-remittance-advice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

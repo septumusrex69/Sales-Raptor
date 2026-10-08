@@ -8,8 +8,8 @@
  * Relative to the cycle that is OPEN today (fetchCycle):
  *   - the cycle that ended the day before it opened is THIS MONTH'S payover, the one due now;
  *   - anything older and still in the queue is EARLIER, STILL PENDING -- late by definition;
- *   - a run built inside the open cycle (allowed; build_payover_run never waited for a cut-off)
- *     is said to be early rather than mixed in with the month being paid.
+ *   - the open cycle's own runs build themselves as payments are processed (refresh_payover_runs)
+ *     and are said to be still open rather than mixed in with the month being paid.
  * Paid runs are grouped by their cycle with no urgency in the words: finished is finished.
  *
  * Pure, so a check can import it. Totals add the runs' own net figures; nothing is recomputed.
@@ -43,7 +43,7 @@ export function groupRunsByCycle<T extends GroupableRun>(
       const total = Math.round(list.reduce((s, r) => s + r.netPayover, 0) * 100) / 100
       let title: string; let tone: CycleGroup<T>['tone']
       if (mode === 'paid') { title = `Paid — ${periodLabel(start, end)}`; tone = 'done' }
-      else if (openStart && start >= openStart) { title = 'Built early — the cycle is still open'; tone = 'early' }
+      else if (openStart && start >= openStart) { title = 'This cycle so far — still open'; tone = 'early' }
       else if (dueEnd && end === dueEnd) { title = 'This month to process'; tone = 'now' }
       else { title = 'Earlier, still pending'; tone = 'late' }
       return { key: start, title, tone, periodStart: start, periodEnd: end, runs: list, total }

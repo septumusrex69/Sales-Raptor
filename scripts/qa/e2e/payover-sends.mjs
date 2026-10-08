@@ -37,7 +37,11 @@ const QUEUE = [
   q('A', 'Summit Fitness', '2026-08-11', '2026-09-10', 8426.07, 'sent'),
   q('B', 'Baobab Property', '2026-08-11', '2026-09-10', 9699.53, 'approved'),
   q('C', 'Lowveld Motors', '2026-07-11', '2026-08-10', 120, 'sent'),
+  /* Ready in the cycle being paid now, and ready in the cycle still open (not approvable yet). */
+  { ...q('E', 'Silverleaf Body Corporate', '2026-08-11', '2026-09-10', 500, 'ready'), next_step: 'approve' },
+  { ...q('D', 'Karoo Fleet Hire', '2026-09-11', '2026-10-10', 3031.31, 'ready'), next_step: 'approve' },
 ]
+const calls = []
 /* Three stages: on the statement, paid by hand and not yet on it, and still owed. */
 const CLIENT_RUNS = [
   { id: 'run-2', invoice_number: 'PO-BPM-2611', status: 'sent', period_start: '2026-09-11', period_end: '2026-10-10',
@@ -58,6 +62,8 @@ const handlers = [
   [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
   [(u) => /\/rpc\/payover_cycle_now/.test(u), () => ({ body: [{ period_start: '2026-09-11', period_end: '2026-10-10', days_left: 2, today: '2026-10-08' }] })],
   [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: QUEUE })],
+  [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run)/.test(u),
+    (u, req) => { calls.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...(req.postDataJSON() ?? {}) }); return { body: 0 } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
@@ -90,10 +96,29 @@ try {
   const groups = page.getByTestId('cycle-group')
   await groups.first().waitFor({ timeout: 15000 })
   const heads = (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
-  t.check('one heading per cycle', heads.length, 2)
-  t.ok('this month first, with its total', /^This month to process[\s\S]*2 clients[\s\S]*R 18 125\.60/.test(heads[0] ?? ''))
-  t.ok('...then the older one still pending', /^Earlier, still pending[\s\S]*1 client/.test(heads[1] ?? ''))
+  t.check('one heading per cycle', heads.length, 3)
+  t.ok('the open cycle first, building up', /^This cycle so far — still open[\s\S]*1 client/.test(heads[0] ?? ''))
+  t.ok('...then this month, with its total', /^This month to process[\s\S]*3 clients[\s\S]*R 18 625\.60/.test(heads[1] ?? ''))
+  t.ok('...then the older one still pending', /^Earlier, still pending[\s\S]*1 client/.test(heads[2] ?? ''))
+
+  /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
+  t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
+  t.check('...so there is no Build a run button', await page.getByRole('button', { name: /Build a run/ }).count(), 0)
+  t.ok('a run whose cycle is still open says so instead of offering Approve',
+    /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
+  for (const name of ['Karoo Fleet Hire', 'Silverleaf Body Corporate', 'Baobab Property']) {
+    await page.getByRole('checkbox', { name: `Select ${name}` }).check()
+  }
+  const bar = page.getByTestId('bulk-bar')
+  const barText = await bar.innerText()
+  t.ok('the bulk bar offers only what the picked runs are ready for',
+    /3 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 1/.test(barText))
   await t.shot(page, 'payover-queue-cycles')
+  await bar.getByRole('button', { name: 'Approve 1' }).click()
+  await page.getByTestId('bulk-note').waitFor({ timeout: 10000 }).catch(() => {})
+  t.check('...and approves the ready one whose cycle has closed, and nothing else',
+    JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['E']))
+  t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
 
   /* ---- THE CLIENT'S FOLDER: every run, where it has got to, and what was sent ---- */
   await page.goto(`http://127.0.0.1:${PORT}/companies/c2`, { waitUntil: 'domcontentloaded' })

@@ -7,11 +7,12 @@ import { rand } from '../../lib/money'
 import {
   NEXT_STEP_LABEL, RUN_STATUS_LABEL,
   approveRun, buildRun, fetchBuildable, fetchCycle, fetchTiles, fetchWorkQueue,
-  isStagingDeployment, resetRun,
+  isStagingDeployment, refreshRuns, resetRun,
   type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
 import { groupRunsByCycle, periodLabel } from '../../lib/payoverGroups'
+import { sendAdviceForRuns } from '../../lib/remittanceEmail'
 import { rand as randAmount } from '../../lib/money'
 
 /**
@@ -27,6 +28,14 @@ import { rand as randAmount } from '../../lib/money'
  * it is depends on a ladder that the closer, the approver and this screen all have to agree
  * about. So the ladder is in SQL and this draws what it says. Written here as well, the copy on
  * the button is the one that would go stale, and it is the one somebody presses.
+ *
+ * THE RUNS BUILD THEMSELVES (the firm, 8 Oct: "I don't even have to say go and build a run ...
+ * it's basically automatically already built. And updated when necessary"). Opening the queue
+ * calls refresh_payover_runs, which builds or rebuilds every client's run for this cycle and the
+ * last; there is no Build button (staging keeps one, for testing other cycles).
+ *
+ * AND THEY ARE WORKED IN BULK: tick several, then Approve or Email advice. Each still goes through
+ * the same function a single one does, and a row still opens the run to read before approving.
  *
  * PAID RUNS DROP TO THEIR OWN TAB, on the firm's instruction. A finished payover is not work, and
  * a queue that keeps showing it is a queue people learn to scroll past.
@@ -89,11 +98,16 @@ export function FinanceWorkQueue() {
   const [building, setBuilding] = useState(false)
   /* Only to decide whether to DRAW the reset; every test control refuses on its own. */
   const [staging, setStaging] = useState(false)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [note, setNote] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
+      /* BUILT AND BROUGHT UP TO DATE FIRST, so what is listed is what the payments now say. A
+         refresh that fails still shows the runs as they stand, with the reason. */
+      await refreshRuns().catch((e: unknown) => setError(e instanceof Error ? e.message : 'The runs could not be brought up to date.'))
       const c = await fetchCycle()
       setCycle(c)
       /* THE WHOLE QUEUE, NOT ONE CYCLE. The firm asked for "a run in the current or last closed
@@ -101,6 +115,7 @@ export function FinanceWorkQueue() {
          is working, so filtering to today's period would open the screen empty every month end. */
       const [q, t] = await Promise.all([fetchWorkQueue(null), fetchTiles(c?.periodStart ?? null)])
       setRows(q)
+      setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the payover queue.')
@@ -130,11 +145,45 @@ export function FinanceWorkQueue() {
     }
   }
 
+  /* A RUN WHOSE CYCLE IS STILL OPEN IS NOT APPROVED YET: a payment processed later in the cycle
+     would belong to it and never be paid over. The database refuses; this says so first. Staging
+     tests open cycles on purpose and the database lets it. */
+  const stillOpen = (r: WorkQueueRow) => !staging && !!cycle && r.periodEnd >= cycle.today
+
+  async function bulkApprove(ids: string[]) {
+    setBusy('bulk'); setError(null); setNote(null)
+    const failed: string[] = []
+    for (const id of ids) {
+      try { await approveRun(id) } catch (e) {
+        const r = rows.find((x) => x.runId === id)
+        failed.push(`${r?.client ?? 'A run'}: ${e instanceof Error ? e.message : 'could not be approved'}`)
+      }
+    }
+    setNote(`${ids.length - failed.length} approved${failed.length ? `; ${failed.length} not: ${failed.join('; ')}` : ''}.`)
+    setPicked(new Set())
+    await load()
+    setBusy(null)
+  }
+
+  async function bulkEmail(ids: string[]) {
+    setBusy('bulk'); setError(null); setNote(null)
+    const out = await sendAdviceForRuns(ids)
+    setNote(`Advice sent to ${out.sent.length} ${out.sent.length === 1 ? 'client' : 'clients'}`
+      + `${out.skipped.length ? `; not sent: ${out.skipped.join('; ')}` : ''}.`)
+    setPicked(new Set())
+    await load()
+    setBusy(null)
+  }
+
   const open = rows.filter((r) => r.status !== 'paid')
   const paid = rows.filter((r) => r.status === 'paid')
   const shown = tab === 'paid' ? paid : open
   /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
   const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tab)
+  const pickedRows = rows.filter((r) => picked.has(r.runId))
+  const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r)).map((r) => r.runId)
+  const toEmail = pickedRows.filter((r) => r.status === 'approved').map((r) => r.runId)
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   return (
     <div className="space-y-4">
@@ -175,11 +224,12 @@ export function FinanceWorkQueue() {
               asked because the queue was empty and there was nothing to press -- "where is the
               payover report?" -- and the answer was that the report has no run to hang off.
             */}
-            <button type="button" onClick={() => setBuilding(true)}
-              className="rounded-lg bg-navy-900 px-3 py-1.5 text-[13px] font-medium text-white
-                hover:bg-navy-800">
-              Build a run
-            </button>
+            {staging && (
+              <button type="button" onClick={() => setBuilding(true)}
+                className="text-[12.5px] font-medium text-slate-500 underline hover:text-slate-700">
+                Build for another cycle (staging)
+              </button>
+            )}
           </div>
         </div>
 
@@ -225,10 +275,34 @@ export function FinanceWorkQueue() {
           ))}
         </div>
 
+        {/* THE BULK BAR: only what each picked run is ready for, counted, so a button never offers
+            an action that would be refused. */}
+        {picked.size > 0 && (
+          <div className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[13px]" data-testid="bulk-bar">
+            <span className="text-slate-600">{picked.size} selected</span>
+            <button type="button" disabled={busy !== null || toApprove.length === 0} onClick={() => void bulkApprove(toApprove)}
+              className="rounded-lg bg-navy-900 px-3 py-1.5 font-medium text-white hover:bg-navy-800 disabled:opacity-40">
+              Approve {toApprove.length}
+            </button>
+            <button type="button" disabled={busy !== null || toEmail.length === 0} onClick={() => void bulkEmail(toEmail)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40">
+              Email advice {toEmail.length}
+            </button>
+            <button type="button" onClick={() => setPicked(new Set())} className="text-slate-500 underline">Clear</button>
+            {busy === 'bulk' && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+          </div>
+        )}
+        {note && <p className="mx-4 mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900" data-testid="bulk-note">{note}</p>}
+
         <div className="overflow-x-auto">
           <table className="w-full min-w-[840px]">
             <thead>
               <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+                <th className="w-8 pl-4 py-2.5">
+                  <input type="checkbox" aria-label="Select every run shown"
+                    checked={shown.length > 0 && shown.every((r) => picked.has(r.runId))}
+                    onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((r) => r.runId)) : new Set())} />
+                </th>
                 <th className="px-4 py-2.5">Client</th>
                 <th className="px-4 py-2.5 text-right">Collected by BF</th>
                 <th className="px-4 py-2.5 text-right">PTC set-off</th>
@@ -240,21 +314,21 @@ export function FinanceWorkQueue() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">
                   <Loader2 className="mx-auto w-5 h-5 animate-spin" />
                 </td></tr>
               )}
               {!loading && shown.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">
                   {tab === 'paid'
                     ? 'Nothing has been paid over yet.'
-                    : 'No payovers to work. The cycle closes itself at five past midnight on the 11th.'}
+                    : 'Nothing processed in this cycle or the last yet. A client appears here, with its run built, as soon as a payment for it is approved.'}
                 </td></tr>
               )}
               {!loading && groups.map((g) => (
                 <Fragment key={g.key}>
                 <tr className="border-b border-slate-100 bg-slate-50" data-testid="cycle-group">
-                  <td colSpan={7} className="px-4 py-2">
+                  <td colSpan={8} className="px-4 py-2">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <span className={clsx('text-[12.5px] font-semibold',
                         g.tone === 'late' ? 'text-amber-800' : g.tone === 'now' ? 'text-slate-800' : 'text-slate-500')}>
@@ -273,7 +347,12 @@ export function FinanceWorkQueue() {
                   key={r.runId}
                   onClick={() => navigate(`/trust/runs/${r.runId}`)}
                   className="cursor-pointer border-b border-slate-50 text-sm hover:bg-slate-50"
+                  data-testid="queue-run"
                 >
+                  <td className="w-8 pl-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" aria-label={`Select ${r.client}`} checked={picked.has(r.runId)}
+                      onChange={() => toggle(r.runId)} />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-semibold text-slate-800">{r.client}</div>
                     <div className="text-xs text-slate-400">
@@ -293,7 +372,11 @@ export function FinanceWorkQueue() {
                   </td>
                   <td className="px-4 py-3"><Pill status={r.status} /></td>
                   <td className="px-4 py-3">
-                    {r.nextStep && (
+                    {r.nextStep === 'approve' && stillOpen(r) ? (
+                      <span className="whitespace-nowrap text-xs text-slate-400" data-testid="still-open">
+                        Open until {fmtDay(r.periodEnd)}
+                      </span>
+                    ) : r.nextStep && (
                       <button
                         type="button"
                         disabled={busy === r.runId}

@@ -255,7 +255,19 @@ ok('an unanswerable "is this staging" reads as no',
 
 /* ---------------- the queue can finally make one ---------------- */
 
-ok('the queue has a Build button at last', /Build a run/.test(queue))
+/* THE RUNS NOW BUILD THEMSELVES (the firm, 8 Oct: "I don't even have to say go and build a run"):
+   the queue refreshes them on opening, and the box survives only as a staging test control. */
+ok('the queue builds its own runs on opening', /await refreshRuns\(\)/.test(queue))
+ok('...so there is no Build a run button', !/Build a run/.test(queue))
+ok('...the box is staging-only', /\{staging && \(\s*<button type="button" onClick=\{\(\) => setBuilding\(true\)\}/.test(queue))
+const refresh = liveBody('refresh_payover_runs') ?? ''
+ok('refresh builds this cycle and the last', /foreach v_cycle in array array\[v_last, v_open\]/.test(refresh))
+ok('...never touching an approved, sent, paid or voided run',
+  /and not public\.payover_run_is_open\(status\)\) then\s+continue;/.test(refresh))
+ok('...and is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(refresh))
+const approveRun = liveBody('approve_payover_run') ?? ''
+ok('a run cannot be approved before its cycle has closed, outside staging',
+  /if v_end >= \(now\(\) at time zone 'Africa\/Johannesburg'\)::date and not public\.is_staging_database\(\) then\s+raise exception/.test(approveRun))
 ok('...opening a box that asks which cycle', /function BuildRunModal\(/.test(queue))
 ok('...defaulting to the one running now', /useState\(cycle\.periodStart\)/.test(queue))
 /* FORWARD AS WELL AS BACK, which is not a mistake: nothing waits for a period to end, and
