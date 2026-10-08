@@ -74,9 +74,14 @@ export function WorkspaceRail({
      * the business one, which is the single thing this whole split exists to keep clear -- so it
      * stays, small, as the control that widens the rail again. Each icon carries its label as a
      * tooltip and an accessible name: a row of unlabelled icons is a quiz.
+     *
+     * AND IT IS NARROW. The firm (8 Oct), of the 56px rail and the 24px gap after it: "still quite
+     * big ... it can just be a little bit smaller." 48px holds the 16px icons and "Business" at
+     * 10.5px; the gap is the rail's own margin, so folded it can close to 12px while the open menu
+     * keeps its 24.
      */
     return (
-      <nav aria-label={`${title} menu`} className="w-14 shrink-0 flex flex-col items-center">
+      <nav aria-label={`${title} menu`} className="w-12 mr-3 shrink-0 flex flex-col items-center">
         <button
           type="button" onClick={toggle} aria-expanded="false" title={`Show the ${title} menu`}
           className="w-full flex flex-col items-center gap-0.5 pb-2 mb-1 rounded-lg
@@ -112,7 +117,7 @@ export function WorkspaceRail({
   }
 
   return (
-    <nav className="w-56 shrink-0 flex flex-col">
+    <nav className="w-56 mr-6 shrink-0 flex flex-col">
       <div className="px-3 pb-3">
         <div className="text-[15px] font-semibold text-slate-800 tracking-tight">{title}</div>
         <div className="text-[11.5px] text-slate-400 mt-0.5">{subtitle}</div>

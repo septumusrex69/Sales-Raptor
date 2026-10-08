@@ -28,7 +28,7 @@ the problem to the next session rather than solved it.
 
 | | |
 |---|---|
-| Branch | `claude/sales-raptor-review-p1pzx2` (one branch per session — two sessions on one branch means one force-pushes the other) |
+| Branch | `claude/new-session-ecohkn` from the fourth session (before it, `claude/sales-raptor-review-p1pzx2`; one branch per session — two sessions on one branch means one force-pushes the other) |
 | Staging | `kvkajxpremantdkhmjvb` — work here, data is disposable and the firm has said so |
 | Production | `qcvesjzoiznrvunjrqpv` — **do not write to it casually**. It is NOT "a little behind": see §5, first item |
 | Live app | Vercel project `sales-raptor`, production deploys **`Main` at `acae2c8` (12 Sep)** against the production database. The firm works on this branch's preview, against staging |
@@ -46,6 +46,12 @@ among them**; the three that failed (`check-capabilities`, `check-finance-is-adm
 ## 2. What shipped this session
 
 Newest first. Each commit message carries the full reasoning; this is the index.
+
+**Fourth session (8 October), on `claude/new-session-ecohkn`** (started from `6c19fed`; the firm's preview of THIS branch is a new Vercel URL):
+
+| Commit | What it is |
+|---|---|
+| (this) | **The folded Trust/Business menu is narrower** (the firm: "still quite big ... a little bit smaller"). Rail 56 → 48px, and the gap after it is now the rail's own margin — 12px folded, 24 open — so the page starts 60px from the rail's edge instead of 80. `e2e/workspace-split` holds both (rail ≤ 48, page ≤ 64 from it); the old layout fails it. |
 
 **Third session (7 October):**
 

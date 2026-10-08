@@ -351,7 +351,11 @@ try {
       t.ok(`folded, ${label} is still an icon on screen`, await folded.getByRole('link', { name: label, exact: true }).isVisible())
     }
     const foldedBox = await folded.boundingBox()
-    t.ok(`...in a narrow rail, not the open one (${Math.round(foldedBox?.width ?? 0)}px)`, !!foldedBox && foldedBox.width <= 64)
+    t.ok(`...in a narrow rail, not the open one (${Math.round(foldedBox?.width ?? 0)}px)`, !!foldedBox && foldedBox.width <= 48)
+    /* The firm, 8 Oct: the folded rail was "still quite big". Rail and gap together, not the rail alone. */
+    const pageBox = await page.locator('nav[aria-label="Trust menu"] + div').boundingBox()
+    const reach = foldedBox && pageBox ? pageBox.x - foldedBox.x : Infinity
+    t.ok(`...and the page starts close beside it (${Math.round(reach)}px from the rail's edge)`, reach <= 64)
     await t.shot(page, 'trust-rail-folded')
     /* THE DOOR, which is exactly what the firm could not reach. */
     await folded.getByRole('link', { name: 'Business account', exact: true }).click()

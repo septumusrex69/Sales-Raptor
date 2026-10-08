@@ -39,7 +39,7 @@ export function BusinessLayout() {
   const { currentUser } = useAuth()
   const items = canViewIncome(currentUser) ? [ITEMS[0], INCOME, ...ITEMS.slice(1)] : ITEMS
   return (
-    <div className="flex gap-6 h-full">
+    <div className="flex h-full">
       <WorkspaceRail
         title="Business"
         subtitle="The firm's own money"
