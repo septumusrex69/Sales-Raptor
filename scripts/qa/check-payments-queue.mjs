@@ -182,7 +182,12 @@ ok('the engine marks a PTC overpayment with_client when it allocates',
   && /case when v_pay\.paid_to_client and s\.excess > 0 then 'with_client' end/.test(alloc_))
 ok('...which the disposal check allows', /excess_disposal = any \(array\['refund','moved','released','parked','with_client'\]\)/.test(sql))
 const view = sql.slice(sql.lastIndexOf('create or replace view public.finance_exceptions as'))
-ok('...and the exceptions list leaves out', /excess_disposal IS DISTINCT FROM 'with_client'/.test(view.slice(0, 2000)))
+/* ANY DECISION TAKES IT OFF THE LIST, with_client included. The firm, 8 Oct, after deciding one and
+   watching it stay with "Decide it" beside it: "I don't know how to fix anything". It was only
+   ever with_client that left; a refund, a move, a release or a park sat there looking undone. */
+ok('...and the exceptions list leaves out every decided overpayment',
+  /a\.excess_credit > 0::numeric AND a\.status <> 'reversed'::text\s+AND a\.excess_disposal IS NULL/.test(view.slice(0, 2000)))
+check('...not only the ones with the client', /IS DISTINCT FROM 'with_client'/.test(view.slice(0, 2000)), false)
 const blockers = (() => {
   const at = sql.lastIndexOf('create or replace function public.payover_run_blockers(')
   return at < 0 ? '' : sql.slice(at, sql.indexOf('$$;', at))

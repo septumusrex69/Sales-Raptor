@@ -1,5 +1,7 @@
 import { supabase } from './supabase'
 import type { ExcessDisposal, ParkedCredit } from './excessCredit'
+import { fetchOtherAccounts } from './accountBook'
+import type { OtherAccount } from './sameDebtor'
 
 /**
  * DECIDING AN OVERPAYMENT, THE CALLS.
@@ -57,4 +59,20 @@ export async function returnParkedCredit(allocationId: string, reason: string): 
     p_allocation: allocationId, p_reason: reason,
   })
   if (error) throw new Error(error.message)
+}
+
+/**
+ * WHERE AN OVERPAYMENT CAN BE MOVED: the debtor's other open accounts, found the way the account
+ * page finds them (by the identity number they share). The box used to ask for "the account's id",
+ * a database key nobody at the firm has ever seen -- which made "move it" an option in name only.
+ * Empty where the debtor has no usable identity number or no other open account.
+ */
+export async function fetchMoveTargets(accountId: string): Promise<OtherAccount[]> {
+  const { data, error } = await supabase
+    .from('debtor_accounts').select('debtor_id_number, debtor_kind').eq('id', accountId).maybeSingle()
+  if (error) throw new Error(error.message)
+  const row = data as { debtor_id_number: string | null; debtor_kind: string | null } | null
+  if (!row?.debtor_id_number) return []
+  const kind = row.debtor_kind === 'company' ? 'company' : 'individual'
+  return (await fetchOtherAccounts(accountId, row.debtor_id_number, kind)).filter((a) => !a.writtenOff)
 }

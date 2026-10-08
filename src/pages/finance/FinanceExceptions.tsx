@@ -154,6 +154,7 @@ export function FinanceExceptions() {
       {disposing?.allocationId && (
         <DisposeExcessModal
           allocationId={disposing.allocationId}
+          accountId={disposing.accountId}
           debtor={disposing.debtor}
           caseNumber={disposing.caseNumber}
           amount={disposing.amount ?? 0}

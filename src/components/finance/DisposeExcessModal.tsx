@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Modal, FormField, inputClass, controlClass } from '../ui/Modal'
@@ -6,7 +6,8 @@ import { rand } from '../../lib/money'
 import {
   DISPOSALS, NOT_WORTH_REFUNDING, disposalAdvice, type ExcessDisposal,
 } from '../../lib/excessCredit'
-import { disposeExcessCredit } from '../../lib/excessCreditApi'
+import { disposeExcessCredit, fetchMoveTargets } from '../../lib/excessCreditApi'
+import type { OtherAccount } from '../../lib/sameDebtor'
 
 /**
  * WHAT HAPPENS TO AN OVERPAYMENT.
@@ -23,8 +24,10 @@ import { disposeExcessCredit } from '../../lib/excessCreditApi'
  * A REASON IS ALWAYS REQUIRED. Each of these moves somebody's money or decides not to, and in six
  * months the only account of why will be the sentence typed here.
  */
-export function DisposeExcessModal({ allocationId, debtor, caseNumber, amount, onClose, onDone }: {
+export function DisposeExcessModal({ allocationId, accountId, debtor, caseNumber, amount, onClose, onDone }: {
   allocationId: string
+  /** The account the money came in on, so its debtor's OTHER accounts can be offered for a move. */
+  accountId: string
   debtor: string
   caseNumber: string | null
   amount: number
@@ -38,6 +41,16 @@ export function DisposeExcessModal({ allocationId, debtor, caseNumber, amount, o
   const [moveTo, setMoveTo] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /* Null while reading; a failed read offers nothing rather than a box to type a key into. */
+  const [targets, setTargets] = useState<OtherAccount[] | null>(null)
+
+  useEffect(() => {
+    let live = true
+    fetchMoveTargets(accountId)
+      .then((t) => { if (live) setTargets(t) })
+      .catch(() => { if (live) setTargets([]) })
+    return () => { live = false }
+  }, [accountId])
 
   const chosen = DISPOSALS.find((d) => d.id === disposal)
   const missing = (chosen?.needs === 'payable_to' && payableTo.trim() === '')
@@ -109,10 +122,27 @@ export function DisposeExcessModal({ allocationId, debtor, caseNumber, amount, o
         )}
 
         {chosen?.needs === 'move_to' && (
-          <FormField label="The account it moves to" required>
-            <input className={inputClass} value={moveTo} placeholder="The account's id"
-              onChange={(e) => setMoveTo(e.target.value)} />
-          </FormField>
+          /* A LIST OF THE DEBTOR'S OTHER ACCOUNTS, never a box for a database key (the firm, 8 Oct:
+             "I don't know how to fix anything ... there's no option"). */
+          targets === null ? (
+            <p className="text-[12.5px] text-slate-400">Looking for the debtor&rsquo;s other accounts…</p>
+          ) : targets.length === 0 ? (
+            <p className="text-[12.5px] text-negative-700" data-testid="no-move-target">
+              This debtor has no other open account with us, so there is nowhere to move it.
+            </p>
+          ) : (
+            <FormField label="The account it moves to" required>
+              <select className={inputClass} value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+                <option value="">Choose one of their accounts…</option>
+                {targets.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {[t.reference ?? 'No reference', t.clientName, t.balance === null ? null : `owes ${rand(t.balance)}`]
+                      .filter(Boolean).join(' · ')}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          )
         )}
 
         <FormField label="Why" required>

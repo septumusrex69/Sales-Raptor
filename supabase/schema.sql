@@ -30556,3 +30556,38 @@ as $$
      and h.user_id is null
   having count(*) > 0;
 $$;
+
+-- ============================================================================================
+-- A DECIDED OVERPAYMENT LEAVES THE EXCEPTIONS LIST
+--
+-- The firm, 8 Oct, on three R490.42 overpayments: "I don't know how to fix anything ... there's no
+-- option." One of the three had already been decided (a refund) and was still listed with "Decide
+-- it" beside it: this view only ever left out 'with_client', so a refund, a move, a release or a
+-- park sat on the list looking undone. payover_run_blockers already asked `excess_disposal is null`,
+-- so the run was freed while the list said otherwise. Now the list asks the same.
+-- ============================================================================================
+
+create or replace view public.finance_exceptions as
+ SELECT a.id AS allocation_id, a.payment_id, a.account_id, d.company_id,
+    'needs_rate'::text AS kind,
+    'No commission rate on the account or the client'::text AS problem,
+    a.to_capital AS amount, a.computed_at
+   FROM payment_allocations a JOIN debtor_accounts d ON d.id = a.account_id
+  WHERE a.status = 'needs_rate'::text
+UNION ALL
+ SELECT a.id, a.payment_id, a.account_id, d.company_id,
+    'excess_credit'::text,
+    'Paid more than the account owed; held as a credit'::text,
+    a.excess_credit, a.computed_at
+   FROM payment_allocations a JOIN debtor_accounts d ON d.id = a.account_id
+  WHERE a.excess_credit > 0::numeric AND a.status <> 'reversed'::text
+    AND a.excess_disposal IS NULL
+UNION ALL
+ SELECT a.id, a.payment_id, a.account_id, d.company_id,
+    'closed_account'::text,
+    'Payment received on an account that is closed or written off'::text,
+    a.payment_amount, a.computed_at
+   FROM payment_allocations a JOIN debtor_accounts d ON d.id = a.account_id
+  WHERE a.status <> 'reversed'::text AND (d.write_off_reason IS NOT NULL OR d.status ~~* 'Closed%'::text);
+
+revoke all on public.finance_exceptions from anon, authenticated;
