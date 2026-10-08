@@ -303,7 +303,9 @@ for (const line of ['Total accounted for', 'Ownership reconciliation', 'Trust le
  * that amount on the day a client owes the trust.
  */
 ok('accounted for is summed from the four owners, less clients in debit',
-  /position\.owedToClients \+ position\.owedToFirm \+ position\.owedToDebtors\s*\+ position\.unidentified - position\.owedByClients/
+  /* owedToClientsGross: what is owed TO clients; a client in debit is subtracted once, below (8 Oct). */
+  /const owedToClientsGross = r2\(position\.owedToClients \+ position\.owedByClients\)/.test(page)
+  && /owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*\+ position\.unidentified - position\.owedByClients/
     .test(page))
 ok('...and the unexplained difference is the ledger less that sum',
   /const unexplained = r2\(position\.netOwed - accounted\)/.test(page))

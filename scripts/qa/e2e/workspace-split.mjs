@@ -406,6 +406,9 @@ try {
   {
     const { context, page } = await open(browser, ADMIN, '/trust/ledger')
     await page.waitForSelector('text=Trust ledger', { timeout: 15000 })
+    /* WAIT FOR A ROW, not the heading: "Trust ledger" is also in the rail, so the heading wait could
+       pass before the ledger was read and the next line read an empty page (seen 8 Oct). */
+    await page.locator('main').getByText('Bredell Ferreira').first().waitFor({ timeout: 15000 }).catch(() => {})
 
     /*
      * ONE LEDGER READ IN TWO DIRECTIONS. Positive is owed OUT of trust and negative owes it; a PTC

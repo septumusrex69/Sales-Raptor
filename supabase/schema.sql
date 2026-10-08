@@ -31460,3 +31460,102 @@ $$;
 
 revoke all on function public.overpayments_kept() from public, anon;
 grant execute on function public.overpayments_kept() to authenticated;
+
+-- ============================================================================================
+-- A RELEASED OVERPAYMENT LEAVES THE DEBTOR'S OWN ACCOUNT, AND THE LEDGER PAGE CAN READ IT
+--
+-- Found 8 Oct on staging: Trust -> Trust ledger said "invalid input syntax for type uuid:
+-- "debtor"". trust_creditors_on_run wrote a released overpayment's debtor side as ONE entry with no
+-- account, so the debtor's credit stood on their account with a nameless minus beside it, and
+-- trust_balances (which names a debtor by casting the account to uuid) could not read the nameless
+-- one at all. Now the debtor side is written per released allocation, with its account; the
+-- client side stays one entry (same total). trust_balances compares as text, so no row can stop
+-- the page again.
+--
+-- STAGING DATA, CORRECTED BY HAND, NOT HERE (production must never replay it): the one release
+-- written before the fix (PO-BPM-2610, RAP-124019, R490.42) got a pair of append-only entries that
+-- net to nil -- +490.42 against no account, -490.42 against the account. Afterwards the ledger's
+-- debtors are Ilse Muller R490.42 (parked) and Sizwe Dlamini R490.42 (refund due).
+-- ============================================================================================
+
+create or replace function public.trust_creditors_on_run()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if public.payover_run_is_open(old.status) and not public.payover_run_is_open(new.status)
+     and new.status <> 'void' then
+    /* A charge set off is the firm keeping what the client owed it. */
+    if coalesce(new.charges_set_off, 0) <> 0 then
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('client', new.company_id, -new.charges_set_off,
+              'Charges set off against payover ' || new.invoice_number, new.id),
+             ('firm', new.company_id, new.charges_set_off,
+              'Charges recovered from payover ' || new.invoice_number, new.id);
+    end if;
+    /* A released overpayment stops being the debtor's and becomes the client's. */
+    if coalesce(new.excess_released, 0) <> 0 then
+      /* THE DEBTOR SIDE PER ACCOUNT, because a debtor's credit is held per account: written as one
+         lump with no account it left each debtor's credit standing and a nameless minus beside
+         it -- and the trust ledger page could not read it at all (8 Oct). */
+      insert into public.trust_creditor_entries (party, company_id, account_id, amount, reason,
+                                                payover_run_id, allocation_id, payment_id)
+      select 'debtor', new.company_id, a.account_id, -l.excess_credit,
+             'Overpayment released to the client on ' || new.invoice_number, new.id, a.id, a.payment_id
+        from public.payover_run_lines l
+        join public.payment_allocations a on a.id = l.allocation_id
+       where l.run_id = new.id and a.excess_disposal = 'released' and l.excess_credit <> 0;
+      insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+      values ('client', new.company_id, new.excess_released,
+              'Overpayment released by the debtor, on ' || new.invoice_number, new.id);
+    end if;
+  end if;
+
+  if old.paid_at is null and new.paid_at is not null and coalesce(new.net_payover, 0) <> 0 then
+    insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id)
+    values ('client', new.company_id, -new.net_payover,
+            'Payover ' || new.invoice_number || ' paid to the client', new.id);
+  end if;
+  return new;
+end $$;
+
+create or replace function public.trust_balances()
+returns table(party text, who_id text, who_name text, who_detail text,
+              balance numeric, entries bigint, last_at timestamptz)
+language sql stable security definer set search_path to 'public'
+as $$
+  with by_party as (
+    select e.party,
+           case when e.party = 'client' then e.company_id::text
+                else coalesce(e.account_id::text, e.party) end as who,
+           sum(e.amount) as bal,
+           count(*) as n,
+           max(e.entry_at) as last_at
+      from public.trust_creditor_entries e
+     group by 1, 2
+  )
+  select b.party,
+         b.who,
+         case b.party
+           when 'client' then coalesce(c.name, 'Unknown client')
+           when 'debtor' then coalesce(nullif(btrim(coalesce(a.debtor_first_name, a.debtor_initials, '')
+                                     || ' ' || coalesce(a.debtor_surname, '')), ''), 'Unknown debtor')
+           when 'firm' then 'Bredell Ferreira'
+           else 'Not yet identified'
+         end,
+         case b.party
+           when 'client' then coalesce(c.code, '')
+           when 'debtor' then coalesce(a.case_number, '')
+           when 'firm' then 'Fees, interest and commission earned'
+           else 'Receipts nobody has placed'
+         end,
+         round(b.bal, 2), b.n, b.last_at
+    from by_party b
+    left join public.companies c on b.party = 'client' and c.id::text = b.who
+    left join public.debtor_accounts a on b.party = 'debtor' and a.id::text = b.who
+   where public.has_capability('finance.view')
+     and round(b.bal, 2) <> 0
+   order by abs(b.bal) desc
+$$;

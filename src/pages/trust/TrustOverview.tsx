@@ -139,7 +139,15 @@ export function TrustOverview() {
    * design puts there ("Unallocated receipts still need allocation"), because a reconciliation
    * that only ever reads R 0.00 is worth nothing on the day it should not.
    */
-  const accounted = r2(position.owedToClients + position.owedToFirm + position.owedToDebtors
+  /*
+   * CLIENTS ARE OWED THE POSITIVE PART ONLY. `owedToClients` is the clients' NET balance -- a client
+   * in debit already pulls it down -- and the "owed back" line subtracts that debit again, so the
+   * total came out short by exactly what clients owe back (8 Oct, staging: R321.88 "unexplained"
+   * that was this screen counting it twice). The Clients line draws what is owed TO clients, the
+   * owed-back line what is owed by them, and the two add back to the net.
+   */
+  const owedToClientsGross = r2(position.owedToClients + position.owedByClients)
+  const accounted = r2(owedToClientsGross + position.owedToFirm + position.owedToDebtors
     + position.unidentified - position.owedByClients)
   const unexplained = r2(position.netOwed - accounted)
   const verdict = trustVerdict(checks)
@@ -204,7 +212,7 @@ export function TrustOverview() {
               NAMED AS THE FIRM NAMES THEM -- whose it is first, what the money is waiting for
               beside it. Largest claim first, as their design orders it.
             */}
-            <Owner who="Clients" what="Awaiting client payover" amount={position.owedToClients} lead />
+            <Owner who="Clients" what="Awaiting client payover" amount={owedToClientsGross} lead />
             <Owner who="Bredell Ferreira" what="Earned and still held in trust" amount={position.owedToFirm} />
             {/*
               OVERPAYMENTS KEPT ARE PART OF THE DEBTORS' MONEY, drawn apart (the firm, 8 Oct: "under

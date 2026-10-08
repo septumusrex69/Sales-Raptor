@@ -113,7 +113,31 @@ ok('the overview takes them out of the debtors\' line', /amount=\{position\.owed
 ok('...and draws them as their own line, under unallocated receipts',
   page.indexOf('who="Unallocated receipts"') > 0 && page.indexOf('who="Overpayments kept"') > page.indexOf('who="Unallocated receipts"'))
 ok('...while the total accounted for is still the debtors\' whole balance',
-  /const accounted = r2\(position\.owedToClients \+ position\.owedToFirm \+ position\.owedToDebtors/.test(page))
+  /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors/.test(page))
+
+/* ---- a client in debit is subtracted ONCE ----
+ * owedToClients is the clients' NET balance, already pulled down by a client in debit, and the
+ * "owed back" line subtracts that debit too. Counted twice, staging showed R321.88 "unexplained"
+ * (8 Oct) that was the screen's own arithmetic. Worked on staging's figures: */
+ok('the Clients line is what is owed TO clients', /const owedToClientsGross = r2\(position\.owedToClients \+ position\.owedByClients\)/.test(page)
+  && /who="Clients" what="Awaiting client payover" amount=\{owedToClientsGross\}/.test(page))
+ok('...and the total adds that, less what clients owe back, once',
+  /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*\+ position\.unidentified - position\.owedByClients\)/.test(page))
+{
+  const P = { owedToClients: -321.88, owedByClients: 321.88, owedToFirm: 24055.36, owedToDebtors: 980.84, unidentified: 0, netOwed: 24714.32 }
+  const gross = P.owedToClients + P.owedByClients
+  const accounted = Math.round((gross + P.owedToFirm + P.owedToDebtors + P.unidentified - P.owedByClients) * 100) / 100
+  check('staging\'s 8 Oct figures now reconcile to the ledger, nothing unexplained', Math.round((P.netOwed - accounted) * 100) / 100, 0)
+}
+
+/* ---- a released overpayment leaves the debtor's own account (8 Oct) ---- */
+const onRun = liveFn('trust_creditors_on_run')
+ok('a release takes each debtor\'s credit off their own account',
+  /select 'debtor', new\.company_id, a\.account_id, -l\.excess_credit,/.test(onRun) && /a\.excess_disposal = 'released'/.test(onRun))
+check('...never as one lump with no account', /values \('debtor', new\.company_id, -new\.excess_released/.test(onRun), false)
+const balances = liveFn('trust_balances')
+ok('the ledger page reads every party without forcing a uuid', /c\.id::text = b\.who/.test(balances) && /a\.id::text = b\.who/.test(balances))
+check('...so no row can stop the page', /b\.who::uuid/.test(balances), false)
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-firm-held: ${pass} passed, ${failures.length} failed`)
