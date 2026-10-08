@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import type { TrustCycle } from './trustCycles.ts'
+import { toFirmHeld, type FirmHeld } from './firmHeld.ts'
 
 export type { TrustCycle } from './trustCycles.ts'
 
@@ -41,6 +42,17 @@ export interface TrustPosition {
   unidentified: number
   /** Clients who owe the trust rather than are owed by it. */
   owedByClients: number
+}
+
+/**
+ * THE FIRM'S SHARE, BY WHAT IT IS (firm_held_parts). Null where the function refused, as trust_position below:
+ * no row is a refusal, not an empty share.
+ */
+export async function fetchFirmHeld(): Promise<FirmHeld | null> {
+  const { data, error } = await supabase.rpc('firm_held_parts')
+  if (error) throw new Error(error.message)
+  const row = (data as Record<string, unknown>[] | null)?.[0]
+  return row ? toFirmHeld(row) : null
 }
 
 export async function fetchTrustPosition(): Promise<TrustPosition | null> {

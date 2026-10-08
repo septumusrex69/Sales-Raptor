@@ -121,8 +121,10 @@ ok('...and the business paying the trust back', /like 'Paid in from the business
 ok('business_month leaves both out of earned',
   /not in \('drawing', 'charge_recovered', 'bank_charge', 'transfer_in'\)/.test(liveFn('business_month')))
 ok('...and so does Income', /where kind not in \('drawing', 'charge_recovered', 'bank_charge', 'transfer_in'\)/.test(liveFn('business_income')))
-ok('bank interest credited to the firm lands in Income as "other", not nowhere',
-  /sum\(case when kind not in \('earned', 'credit'\) or \(kind = 'earned' and alloc_id is null\) then amount else 0 end\)/.test(liveFn('business_income')))
+/* The firm, 8 Oct: bank interest on the trust account is the firm's interest income -- its own line
+   on Income, no longer folded into "other". Held in full in check-business-income. */
+ok('bank interest credited to the firm lands in Income on its own line, not nowhere',
+  /when kind = 'bank_interest' then amount else 0 end\) as bank_interest/.test(liveFn('business_income')))
 
 for (const sig of ['allocate_bank_line(uuid, text, text, uuid)', 'bank_lines_to_allocate()', 'bank_allocation_candidates()']) {
   ok(`${sig} is revoked from public and anon`, sql.includes(`revoke all on function public.${sig} from public, anon;`))

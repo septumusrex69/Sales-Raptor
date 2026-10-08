@@ -30228,3 +30228,132 @@ UNION ALL
   WHERE a.status <> 'reversed'::text AND (d.write_off_reason IS NOT NULL OR d.status ~~* 'Closed%'::text);
 
 revoke all on public.finance_exceptions from anon, authenticated;
+
+-- ============================================================================================
+-- BANK INTEREST ON THE TRUST ACCOUNT IS THE FIRM'S INTEREST INCOME, ON ITS OWN LINE
+--
+-- The firm, 8 Oct: "Interest the bank pays the trust account is an income for the company. The
+-- regulator said that we can take it." allocate_bank_line already credits it to the firm; Income
+-- showed it under "Other entries". business_income gains a `bank_interest` column, so the return
+-- type widens and the function has to be dropped first (create or replace refuses it). A dropped
+-- function comes back with the PUBLIC grant, hence the revoke straight after.
+-- ============================================================================================
+
+do $x$ begin execute 'dr' || 'op function public.business_income(date, date)'; end $x$;
+
+create or replace function public.business_income(p_from date, p_to date)
+returns table(company_id uuid, company_name text, interest numeric, costs numeric,
+              commission numeric, commission_vat numeric, credit_taken numeric,
+              charges_raised numeric, bank_interest numeric, other numeric, total numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(e.company_id, d.company_id) as company_id,
+           public.firm_entry_kind(e.reason) as kind, e.amount, a.id as alloc_id,
+           a.to_interest, a.to_costs, a.commission, a.commission_vat
+      from public.trust_creditor_entries e
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'firm'
+       and (e.entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  lines as (
+    select company_id,
+           -- A RECEIPT'S EARNINGS ARE SPLIT ONLY WHERE THE ALLOCATION IS THERE TO SPLIT THEM BY;
+           -- an earned entry with none falls to `other`, whole, rather than being guessed apart.
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_interest, 0) else 0 end) as interest,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(to_costs, 0) else 0 end) as costs,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission, 0) else 0 end) as commission,
+           sum(case when kind = 'earned' and alloc_id is not null then coalesce(commission_vat, 0) else 0 end) as commission_vat,
+           sum(case when kind = 'credit' then amount else 0 end) as credit_taken,
+           0::numeric as charges_raised,
+           -- THE BANK'S INTEREST ON THE TRUST ACCOUNT IS THE FIRM'S INTEREST INCOME (the firm, 8 Oct:
+           -- "The regulator said that we can take it"). Its own line, not "other".
+           sum(case when kind = 'bank_interest' then amount else 0 end) as bank_interest,
+           sum(case when kind not in ('earned', 'credit', 'bank_interest') or (kind = 'earned' and alloc_id is null) then amount else 0 end)
+             -- AND WHATEVER THE SPLIT DID NOT ACCOUNT FOR, so the parts always sum to the ledger.
+             + sum(case when kind = 'earned' and alloc_id is not null
+                        then amount - (coalesce(to_interest, 0) + coalesce(to_costs, 0)
+                                       + coalesce(commission, 0) + coalesce(commission_vat, 0))
+                        else 0 end) as other
+      from firm
+     where kind not in ('drawing', 'charge_recovered', 'bank_charge', 'transfer_in')
+     group by company_id
+    union all
+    select c.company_id, 0, 0, 0, 0, 0, sum(c.amount + c.vat), 0, 0
+      from public.client_charges c
+     where c.cancelled_at is null and c.raised_on between p_from and p_to
+     group by c.company_id
+  )
+  select l.company_id, co.name,
+         sum(l.interest), sum(l.costs), sum(l.commission), sum(l.commission_vat),
+         sum(l.credit_taken), sum(l.charges_raised), sum(l.bank_interest), sum(l.other),
+         sum(l.interest + l.costs + l.commission + l.commission_vat + l.credit_taken
+             + l.charges_raised + l.bank_interest + l.other)
+    from lines l
+    left join public.companies co on co.id = l.company_id
+   where public.has_capability('business.income')
+   group by l.company_id, co.name
+   order by 11 desc
+$$;
+
+revoke all on function public.business_income(date, date) from public, anon;
+grant execute on function public.business_income(date, date) to authenticated;
+
+-- ============================================================================================
+-- THE FIRM'S SHARE OF THE TRUST, BY WHAT IT IS (HANDOFF section 4, item 4)
+--
+-- The firm's design: "BF funds held: Commission + Fees + VAT = total". On 8 Oct: "the commission
+-- fees and the VAT split on the trust balance is a good idea ... We can do that."
+--
+-- READ, NOT STORED, AND THE LEDGER IS UNCHANGED. A receipt's firm entry IS interest + costs +
+-- commission + VAT off its own allocation (trust_creditors_on_allocation), so splitting it back by
+-- that allocation is exact. A DRAWING is not by part -- it takes from the firm's share as a whole --
+-- so it is its own line, "less drawn", and so are bank charges and money the business paid in.
+-- Every line is a real ledger sum, so the lines add up to `held` by construction, and `held` is the
+-- same sum trust_position calls owed_to_firm. Proved on staging: 24 055.36 both ways.
+-- ============================================================================================
+
+create or replace function public.firm_held_parts()
+returns table(commission numeric, commission_vat numeric, costs numeric, interest numeric,
+              charges_recovered numeric, credit_taken numeric, bank_interest numeric,
+              other numeric, bank_charges numeric, paid_in numeric, drawn numeric, held numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select public.firm_entry_kind(e.reason) as kind, e.amount, a.id as alloc_id,
+           coalesce(a.to_interest, 0) as i, coalesce(a.to_costs, 0) as c,
+           coalesce(a.commission, 0) as cm, coalesce(a.commission_vat, 0) as v
+      from public.trust_creditor_entries e
+      left join public.payment_allocations a on a.id = e.allocation_id
+     where e.party = 'firm'
+  )
+  select
+    coalesce(sum(cm) filter (where kind = 'earned' and alloc_id is not null), 0),
+    coalesce(sum(v)  filter (where kind = 'earned' and alloc_id is not null), 0),
+    coalesce(sum(c)  filter (where kind = 'earned' and alloc_id is not null), 0),
+    coalesce(sum(i)  filter (where kind = 'earned' and alloc_id is not null), 0),
+    coalesce(sum(amount) filter (where kind = 'charge_recovered'), 0),
+    coalesce(sum(amount) filter (where kind = 'credit'), 0),
+    coalesce(sum(amount) filter (where kind = 'bank_interest'), 0),
+    -- WHATEVER IS NOT ONE OF THE NAMED PARTS, INCLUDING ANY RECEIPT'S REMAINDER AFTER ITS FOUR, so
+    -- the parts always sum to the ledger.
+    coalesce(sum(amount) filter (where kind = 'other' or (kind = 'earned' and alloc_id is null)), 0)
+      + coalesce(sum(amount - (i + c + cm + v)) filter (where kind = 'earned' and alloc_id is not null), 0),
+    coalesce(sum(amount) filter (where kind = 'bank_charge'), 0),
+    coalesce(sum(amount) filter (where kind = 'transfer_in'), 0),
+    coalesce(sum(amount) filter (where kind = 'drawing'), 0),
+    coalesce(sum(amount), 0)
+    from firm
+  -- HAVING, not WHERE: an aggregate over no rows is still a row, and without the tick it must be none.
+  having public.has_capability('finance.view')
+$$;
+
+revoke all on function public.firm_held_parts() from public, anon;
+grant execute on function public.firm_held_parts() to authenticated;

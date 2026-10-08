@@ -51,7 +51,8 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| (this) | **The folded Trust/Business menu is narrower** (the firm: "still quite big ... a little bit smaller"). Rail 56 → 48px, and the gap after it is now the rail's own margin — 12px folded, 24 open — so the page starts 60px from the rail's edge instead of 80. `e2e/workspace-split` holds both (rail ≤ 48, page ≤ 64 from it); the old layout fails it. |
+| (this) | **The firm's answers of 8 Oct, built.** (1) **The Swordfish cut-off default is a month earlier**: "import today [8 Oct] ... all payments recovered up until the 10th of August have been paid out. Money collected from 11 August until 10 September will be paid out on 11 October." A CLOSED cycle is not a PAID one; `settledThroughDefault(today, lagMonths = 1)` now answers 10 Aug for 8 Oct (it said 10 Sep, which would have marked a month as remitted and never paid it), and 10 Sep from the payover day (11th) on. (2) **Bank interest is the firm's interest income** ("the regulator said that we can take it"): `business_income` gains a `bank_interest` column (dropped and recreated -- return type widened -- then revoked again), Income shows "Bank interest on the trust account". (3) **"BF funds held: Commission + Fees + VAT"** is drawn on the trust overview, from the new **`firm_held_parts()`** (finance.view, HAVING so a refusal is no row): what the firm's share earned part by part, less bank charges and drawings as their own lines -- adds up to `owed_to_firm` by construction; staging 24 055.36 both ways. Display only, ledger unchanged. (4) **R502 stays**, recorded in `check-fees`. New `check-firm-held` (33); `check-payment-dates`, `check-business-income`, `check-bank-line-allocation`, `e2e/business-income`, `e2e/workspace-split` updated, each break-tested. |
+| `efc059b` | **The folded Trust/Business menu is narrower** (the firm: "still quite big ... a little bit smaller"). Rail 56 → 48px, and the gap after it is now the rail's own margin — 12px folded, 24 open — so the page starts 60px from the rail's edge instead of 80. `e2e/workspace-split` holds both (rail ≤ 48, page ≤ 64 from it); the old layout fails it. |
 
 **Third session (7 October):**
 
@@ -126,21 +127,24 @@ will be done later (§5, first item).
 
 Do not guess these. Each one changes money.
 
-1. **R502 or R509?** On 10 September the business confirmed R502 was captured wrongly on their side
-   and the gazette says **R509**. Prompt 7 says make the app match the database, which is **R502**.
-   The database and the app now both say R502, and the conflict is written into `check-fees.mjs`.
-   **Ask before changing either.**
+1. ~~R502 or R509?~~ — **decided 8 Oct: R502 stays.** "The actual fee was 509 as per the Gazette
+   ... they undercharged 7 Rand for years. There's nothing that we can do about that now. So we will
+   leave it like that." Do not move it. Recorded in `check-fees.mjs`.
 
-2. **When did Swordfish last pay its clients over?** The import now asks for this date and defaults
-   to the firm's own worked example (import 6 Oct → settled through 10 Sep). But their example
-   implies the cycle boundary, while Raptor's own lag setting says that cycle pays on 11 October,
-   still in the future. Too early and clients are paid twice; too late and a month is never
-   remitted. **This is the most consequential number in the migration.**
+2. ~~When did Swordfish last pay its clients over?~~ — **decided 8 Oct**: on import day, everything
+   up to the 10th of the month BEFORE last is paid (import 8 Oct → 10 Aug); the cycle that closed last
+   (11 Aug – 10 Sep) is still in trust and goes out on 11 Oct. Built as the import's default. On the
+   11th itself the run counts as made -- the box is still editable for an import that morning.
 
-3. **`payover_lag_months` and `parked_credit_months`** are both placeholders (1 and 6). Same
-   question as 2, from the other side.
+3. **`payover_lag_months` is confirmed at 1** by the same answer (a cycle ending on the 10th pays on
+   the 11th of the next month). **`parked_credit_months` (6) is still a placeholder**: it is how long a
+   debtor's small unclaimed overpayment is parked before the firm may take it as its own (the firm:
+   "who are we going to pay five rand to?"). The firm did not know the term; ask it in those words.
 
-4. **Commission / fees / VAT split of the firm's trust balance.** The firm's sketch asks for it. It
+4. ~~Commission / fees / VAT split of the firm's trust balance~~ — **firm said do it (8 Oct); built**
+   as earned-by-part less drawings (§2). If the firm wants each PART's balance after drawings (e.g.
+   "VAT still held for SARS"), a drawing would have to say what it draws -- a ledger change; ask.
+   Original note: The firm's sketch asks for it. It
    is **not stored** — `trust_creditors_on_allocation` writes interest, costs, commission and VAT as
    one entry with one reason. Rebuilding it reaches allocation-backed rows only and silently misses
    charge recoveries and drawings, so the parts would not sum to the whole. The alternative is
@@ -165,11 +169,14 @@ Do not guess these. Each one changes money.
    Administrator confirms? Also proposed: an "Awaiting approval" row in the overview's ownership
    table for money banked but not yet approved. **Not answered; nothing built.**
 
-8. **Bank interest on the trust account is credited to the FIRM** by prompt 12's allocation. That
+8. ~~Bank interest on the trust account~~ — **confirmed 8 Oct**: the firm's income, the regulator
+   allows it. Now its own line on Income (§2). Original note: **Bank interest on the trust account is credited to the FIRM** by prompt 12's allocation. That
    follows the firm's own words ("interest received ... allocated"), but who trust interest belongs
    to is a regulatory question (Debt Collectors Act / the firm's auditor). **Confirm it**; if it is
    not the firm's, the `bank_interest` branch of `allocate_bank_line` is the one line to change.
-9. **Bank charges are recorded as owed by the business to the trust** (the prompt's rule), and are
+9. **Bank charges: the firm says they are a BUSINESS expense, not the trust's** (8 Oct), and is
+   finding out from the bank whether they leave the trust account and the business pays them back.
+   Wait for that before changing anything. Original note: **Bank charges are recorded as owed by the business to the trust** (the prompt's rule), and are
    left out of the business side's "earned". They do not yet appear as an EXPENSE on the business
    side unless somebody captures them under Expenses, so "made" is overstated by them until then.
 
@@ -226,6 +233,8 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
     staging over HTTP was refused by the safety check and removed — use the Supabase tools.
   - Once `Main` deploys, the daily workflow run and 5-minute mail sync act on production data, and
     `CRON_SECRET` was marked "rotate before real client traffic".
+- **Fourth session, staging only:** `business_income` (new `bank_interest` column) and
+  `firm_held_parts()` -- the last two blocks of `schema.sql`.
 - **Prompts 10–12 are on staging only:** `client_needs_mandate` + the `handovers_need_a_mandate`
   trigger; `debtor_accounts.default_date`; the five allocation columns on `bank_statement_lines`,
   `allocate_bank_line`, `bank_lines_to_allocate`, `bank_allocation_candidates`, and new versions of

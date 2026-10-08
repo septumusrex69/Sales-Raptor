@@ -5,13 +5,14 @@ import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import {
-  fetchTrustCycles, fetchTrustPosition, fetchUnreconciledPayouts,
+  fetchFirmHeld, fetchTrustCycles, fetchTrustPosition, fetchUnreconciledPayouts,
   type TrustCycle, type TrustPosition, type UnreconciledPayout,
 } from '../../lib/trust'
 import {
   cycleCollected, cycleLabel, cycleState, cycleTodo, cycleTotals, overdueCycles,
 } from '../../lib/trustCycles'
 import { trustChecks, trustVerdict } from '../../lib/trustBalance'
+import { firmHeldLines, firmHeldSum, type FirmHeld } from '../../lib/firmHeld'
 
 /**
  * IS THE TRUST ACCOUNT RIGHT, AND WHOSE PAYOVER IS EACH PART OF IT WAITING FOR?
@@ -52,13 +53,19 @@ export function TrustOverview() {
   const [position, setPosition] = useState<TrustPosition | null>(null)
   const [cycles, setCycles] = useState<TrustCycle[]>([])
   const [payouts, setPayouts] = useState<UnreconciledPayout[]>([])
+  const [firmHeld, setFirmHeld] = useState<FirmHeld | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
-    Promise.all([fetchTrustPosition(), fetchUnreconciledPayouts(), fetchTrustCycles()])
-      .then(([p, u, c]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c) } })
+    Promise.all([
+      fetchTrustPosition(), fetchUnreconciledPayouts(), fetchTrustCycles(),
+      /* THE SPLIT IS AN EXPLANATION, NOT THE RECONCILIATION: if it cannot be read, the rest of the
+         page still answers "does it balance?" and the split is simply not drawn. */
+      fetchFirmHeld().catch(() => null),
+    ])
+      .then(([p, u, c, f]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -272,11 +279,14 @@ export function TrustOverview() {
         </div>
         {/*
           THE FIRM'S DESIGN HAS ONE MORE LINE HERE -- "BF funds held: Commission + Fees + VAT" --
-          and it is deliberately not drawn. That split is not stored: the allocation writes the
-          firm's share as one ledger entry, so a breakdown rebuilt from allocations would miss charge
-          recoveries and drawings and the three parts would not sum to the figure above it. It waits
-          on the firm's decision (HANDOFF §4); a line that did not add up would be worse than none.
+          asked for again on 8 October ("We can do that"). Read from firm_held_parts: what the firm's
+          share EARNED, part by part, less what LEFT it. A drawing takes from the share as a whole,
+          so it is its own line rather than shared out by a rule nobody chose; that is what lets the
+          lines add up, by construction, to the Bredell Ferreira figure above. When they do not
+          (the two were read a moment apart and somebody posted between), it says so instead of
+          drawing a total that disagrees with the row it explains.
         */}
+        {firmHeld && <FirmHeldCard held={firmHeld} owedToFirm={position.owedToFirm} />}
       </section>
 
       {/* --------------------------- collections by period --------------------------- */}
@@ -418,6 +428,40 @@ function Owner({ who, what, amount, lead }: {
         {rand(amount)}
       </div>
     </div>
+  )
+}
+
+function FirmHeldCard({ held, owedToFirm }: { held: FirmHeld; owedToFirm: number }) {
+  const lines = firmHeldLines(held)
+  const sum = firmHeldSum(held)
+  const ties = Math.round(sum * 100) === Math.round(owedToFirm * 100)
+  return (
+    <div className="mt-6" data-testid="firm-held"><Card padded={false} className="px-6 py-2">
+      <div className="pt-4 pb-1 text-[15px] font-semibold text-slate-800">Bredell Ferreira funds held</div>
+      <div className="pb-2 text-[13px] text-slate-500">
+        What the firm's share in trust is made of: what it earned, less what has left it.
+      </div>
+      {lines.map((l) => (
+        <div key={l.key} className="grid grid-cols-[1fr_auto] sm:grid-cols-[minmax(9rem,16rem)_1fr_auto] items-baseline
+          gap-x-4 gap-y-0.5 py-2.5 border-b border-slate-100">
+          <div className="text-[14px] text-slate-800">{l.label}</div>
+          <div className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1 text-[12.5px] text-slate-500">{l.note}</div>
+          <div className={clsx('col-start-2 row-start-1 sm:col-start-3 text-right text-[15px] font-semibold tabular-nums whitespace-nowrap',
+            l.amount < 0 ? 'text-gold-800' : 'text-slate-800')}>
+            {rand(l.amount)}
+          </div>
+        </div>
+      ))}
+      <div className="flex items-baseline gap-4 py-4">
+        <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">Total held for the firm</div>
+        <div className="text-lg font-semibold tabular-nums text-slate-800" data-testid="firm-held-total">{rand(sum)}</div>
+      </div>
+      {!ties && (
+        <p className="pb-4 text-[12.5px] text-negative-700">
+          This does not match the {rand(owedToFirm)} above: the ledger changed between the two readings. Reload the page.
+        </p>
+      )}
+    </Card></div>
   )
 }
 

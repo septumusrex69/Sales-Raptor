@@ -18,9 +18,11 @@ const OWNER = { ...ADMIN, grants: ['business.income'] }
 
 const INCOME = [
   { company_id: 'c1', company_name: 'Kestrel Insurance', interest: 0, costs: 115, commission: 177,
-    commission_vat: 26.55, credit_taken: 7, charges_raised: 115, other: 3, total: 443.55 },
+    commission_vat: 26.55, credit_taken: 7, charges_raised: 115, bank_interest: 0, other: 3, total: 443.55 },
   { company_id: 'c2', company_name: 'Rinda Roo', interest: 10, costs: 0, commission: 0,
-    commission_vat: 0, credit_taken: 0, charges_raised: 0, other: 0, total: 10 },
+    commission_vat: 0, credit_taken: 0, charges_raised: 0, bank_interest: 0, other: 0, total: 10 },
+  { company_id: null, company_name: null, interest: 0, costs: 0, commission: 0,
+    commission_vat: 0, credit_taken: 0, charges_raised: 0, bank_interest: 12.34, other: 0, total: 12.34 },
 ]
 const MONTH = [{ earned: 338.55, drawn: 20, still_in_trust: 358.55, invoiced: 115, invoices_paid: 0,
   owed_by_clients: 115, expenses: 0, expenses_vat: 0, made: 453.55 }]
@@ -94,7 +96,8 @@ try {
     const { context, page } = await open(browser, OWNER, '/business/income')
     await page.getByTestId('income-total').waitFor({ timeout: 20000 })
     t.ok('with business.income the rail lists Income', await page.getByRole('link', { name: 'Income' }).first().isVisible())
-    t.ok('...and the month totals the clients', /453[\s,.]55|453.55/.test(await page.getByTestId('income-total').innerText()))
+    t.ok('...and the month totals the clients', /465[\s,.]89|465.89/.test(await page.getByTestId('income-total').innerText()))
+    t.ok('...with the bank\'s interest on its own line', await page.getByText('Bank interest on the trust account').first().isVisible())
     t.ok('...naming each client', await page.getByText('Kestrel Insurance').first().isVisible())
     t.ok('...and says VAT on commission is not kept', await page.getByText('Collected for SARS, not kept').first().isVisible())
     await t.shot(page, 'business-income')

@@ -85,7 +85,12 @@ check('the day they did', receiptFeeInclVat(15000, 0.15, '2026-04-07'), 701.50)
 check('the gazette date itself is still the old cap', receiptFeeInclVat(15000, 0.15, '2026-03-06'), 577.30)
 
 /*
- * R502, AND THIS REVERSES A DECISION. THE FIRM HAS TO SAY WHICH WAY IT GOES.
+ * R502, AND IT STAYS R502 -- DECIDED BY THE FIRM ON 8 OCTOBER 2026.
+ *
+ * "The actual fee charged was 509, as per the Gazette. But ... they made it 502. And they
+ * undercharged 7 Rand for years. Unfortunately, there's nothing that we can do about that now. So
+ * we will leave it like that." Do not move the table or RECEIPT_FEE_CAPS to R509. The history below
+ * is how it came to be asked.
  *
  * 9 Sep 2026: Swordfish charged R577.30 on all sixteen capped payments on AID20001 -- a maximum of
  * R502 excluding VAT, not the gazette's R509 -- and kept doing so until May 2026.
@@ -101,12 +106,9 @@ check('the gazette date itself is still the old cap', receiptFeeInclVat(15000, 0
  * THE INSTRUCTION IS RIGHT WHICHEVER FIGURE IS. `annexure_b_tariffs` is what allocate_payment
  * charges on, so while the two disagreed, Raptor's engine and Raptor's statement priced the same
  * receipt differently -- and that is a defect on any reading of the gazette. So the app now follows
- * the table. WHICH NUMBER BELONGS IN THE TABLE IS STILL THE FIRM'S TO SAY: if R509 is right, it is
- * one row in annexure_b_tariffs and one entry in RECEIPT_FEE_CAPS, changed together, and this
- * expectation with them.
+ * the table. The firm has since said which number belongs in it: R502, as charged (above).
  */
 check('a capped payment is the R502 the firm charged', receiptFeeInclVat(7000, 0.15, '2025-06-01'), 577.30)
-console.log('      NOTE  R502 is the as-charged cap, which reverses the 10 Sep reading of the gazette (R509).')
 
 /* ---------------------------------------------------------------------------------------------
  * AND NOTHING MAY DEFAULT TO A DATE AGAIN

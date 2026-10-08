@@ -47,6 +47,12 @@ const POSITION = {
   owed_by_clients: 0,
 }
 
+/* THE FIRM'S R 4 420,07, BY WHAT IT IS -- adds up to owed_to_firm above, a drawing included. */
+const FIRM_HELD = {
+  commission: 3000, commission_vat: 450, costs: 900, interest: 285.07, charges_recovered: 0,
+  credit_taken: 0, bank_interest: 0, other: 0, bank_charges: -115, paid_in: 0, drawn: -100, held: 4420.07,
+}
+
 /* The two debits nothing accounts for. One is a payout with no run; one is a bank charge, which
    belongs to no creditor at all and cannot be matched to anything. */
 const PAYOUTS = [
@@ -136,6 +142,7 @@ function handlersFor(profile) {
     [(u) => /\/rest\/v1\/firm_settings/.test(u),
       () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
+    [(u) => /\/rpc\/firm_held_parts/.test(u), () => ({ body: [FIRM_HELD] })],
     [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: PAYOUTS })],
     [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
     [(u) => /\/rpc\/trust_by_cycle/.test(u), () => ({ body: CYCLES })],
@@ -237,6 +244,18 @@ try {
       t.ok(`...and ${owner.toLowerCase()} is one of the answers`, body.includes(owner))
     }
     t.ok('...summing to a total accounted for', /Total accounted for/i.test(body))
+
+    /* ---- the firm's share, by what it is: "BF funds held: Commission + Fees + VAT" ---- */
+    const held = page.getByTestId('firm-held')
+    await held.waitFor({ timeout: 10000 }).catch(() => {})
+    const heldText = (await held.isVisible()) ? await held.innerText() : ''
+    t.ok('the firm\'s share is split as the firm drew it',
+      /Commission/.test(heldText) && /Fees and costs/.test(heldText) && /VAT on commission/.test(heldText))
+    t.ok('...a drawing is its own line, not shared out', /Less: drawn to the business account/.test(heldText))
+    t.ok('...and a part with nothing in it is not drawn', !/Bank interest/.test(heldText))
+    t.ok('...adding up to the firm\'s row above',
+      /4[\s,.]?420[.,]07/.test(await page.getByTestId('firm-held-total').innerText().catch(() => '')))
+    t.ok('...without a warning that it does not', !/does not match/.test(heldText))
 
     /* ---- and it is EXPLAINED: both debits named, with the right action on each ---- */
     t.ok('the unmatched payout is named', /R 962\.50/.test(body))

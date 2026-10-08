@@ -67,17 +67,22 @@ check('March does not land on 31 February', cycleStartOn('2026-03-01'), '2026-02
 /* ------------------------------------------ 2. where the old books stop --------------------- */
 
 /*
- * THE FIRM'S OWN WORKED EXAMPLE, to the day. Import on 6 October and everything up to 10 September
- * is history; the 11th onwards needs a decision.
+ * THE FIRM'S RULE, 8 October: "if we import today ... all payments recovered up until the 10th of
+ * August have been paid out. Money collected from the eleventh of August until the tenth of
+ * September will be paid out on the eleventh of October." A CLOSED cycle is not yet a PAID one.
  */
-check('importing on 6 October settles through 10 September',
-  settledThroughDefault('2026-10-06'), '2026-09-10')
-check('...and on the 11th it is the same answer',
-  settledThroughDefault('2026-09-11'), '2026-09-10')
-check('...while the 10th is a month earlier',
-  settledThroughDefault('2026-09-10'), '2026-08-10')
-check('a January import reaches back into December',
-  settledThroughDefault('2026-01-05'), '2025-12-10')
+check('importing on 8 October settles through 10 August',
+  settledThroughDefault('2026-10-08'), '2026-08-10')
+check('...not through 10 September, which is paid over on 11 October',
+  settledThroughDefault('2026-10-08') < '2026-08-11', true)
+check('on the payover day itself the run counts as made',
+  settledThroughDefault('2026-10-11'), '2026-09-10')
+check('...and the day before it does not',
+  settledThroughDefault('2026-10-10'), '2026-08-10')
+check('a January import reaches back across the year',
+  settledThroughDefault('2026-01-05'), '2025-11-10')
+check('a longer payover lag reaches back one more cycle',
+  settledThroughDefault('2026-10-08', 2), '2026-07-10')
 
 const imp = read('src/lib/swordfishImport.ts')
 /*

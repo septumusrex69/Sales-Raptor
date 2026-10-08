@@ -24,6 +24,8 @@ export interface IncomeRow {
   commissionVat: number
   creditTaken: number
   chargesRaised: number
+  /** The bank's interest on the trust account: the firm's interest income (the regulator allows it). */
+  bankInterest: number
   other: number
   total: number
 }
@@ -37,6 +39,7 @@ export const INCOME_PARTS: { key: IncomePart; label: string; note?: string }[] =
   { key: 'costs', label: 'Annexure B fees and costs', note: 'Including VAT' },
   { key: 'interest', label: 'Interest' },
   { key: 'chargesRaised', label: 'Charges to clients', note: 'Withdrawals and listings, including VAT' },
+  { key: 'bankInterest', label: 'Bank interest on the trust account', note: 'Paid by the bank; the firm\'s to keep' },
   { key: 'creditTaken', label: 'Unclaimed credit taken', note: 'Less any given back' },
   { key: 'other', label: 'Other entries', note: 'On the trust ledger but not one of the above' },
 ]
@@ -48,13 +51,13 @@ export function toIncomeRow(r: Record<string, unknown>): IncomeRow {
     companyName: (r.company_name as string | null) ?? null,
     interest: n(r.interest), costs: n(r.costs), commission: n(r.commission),
     commissionVat: n(r.commission_vat), creditTaken: n(r.credit_taken),
-    chargesRaised: n(r.charges_raised), other: n(r.other), total: n(r.total),
+    chargesRaised: n(r.charges_raised), bankInterest: n(r.bank_interest), other: n(r.other), total: n(r.total),
   }
 }
 
 /** Every client's parts added up, and the total -- which is the sum of the parts, by construction. */
 export function incomeTotals(rows: IncomeRow[]): Record<IncomePart | 'total', number> {
-  const out = { interest: 0, costs: 0, commission: 0, commissionVat: 0, creditTaken: 0, chargesRaised: 0, other: 0, total: 0 }
+  const out = { interest: 0, costs: 0, commission: 0, commissionVat: 0, creditTaken: 0, chargesRaised: 0, bankInterest: 0, other: 0, total: 0 }
   for (const r of rows) {
     for (const p of INCOME_PARTS) out[p.key] += r[p.key]
     out.total += r.total

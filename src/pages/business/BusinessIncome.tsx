@@ -110,7 +110,7 @@ export function BusinessIncome() {
                     <tbody>
                       {rows.map((r) => (
                         <tr key={r.companyId ?? 'none'} className="border-t border-slate-100">
-                          <td className="px-4 py-3 text-slate-800">{r.companyName ?? 'No client'}</td>
+                          <td className="px-4 py-3 text-slate-800">{r.companyName ?? 'Not from a client'}</td>
                           <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.commission + r.commissionVat)}</td>
                           <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.costs)}</td>
                           <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.interest)}</td>
@@ -122,7 +122,7 @@ export function BusinessIncome() {
                   </table>
                 </div>
                 <p className="px-4 py-2.5 text-[11px] text-slate-400 border-t border-slate-100">
-                  Commission includes its VAT here. Unclaimed credit and other entries are in the total.
+                  Commission includes its VAT here. Bank interest, unclaimed credit and other entries are in the total.
                 </p>
               </Card>
             )}

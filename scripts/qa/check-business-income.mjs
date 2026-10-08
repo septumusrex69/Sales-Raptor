@@ -90,6 +90,11 @@ for (const col of ['to_interest', 'to_costs', 'commission', 'commission_vat']) {
 }
 ok('...and whatever the split misses goes to other, so the parts always sum to the ledger',
   /amount - \(coalesce\(to_interest, 0\) \+ coalesce\(to_costs, 0\)/.test(income))
+/* THE FIRM, 8 Oct: "Interest the bank pays the trust account is an income for the company. The
+   regulator said that we can take it." Its own line, and therefore NOT also in other. */
+ok('bank interest is its own column', /when kind = 'bank_interest' then amount else 0 end\) as bank_interest/.test(income))
+ok('...and is kept out of other', /kind not in \('earned', 'credit', 'bank_interest'\)/.test(income))
+ok('...and is in the total', /\+ l\.bank_interest \+ l\.other\)/.test(income))
 ok('...and charges come from client_charges, once', /from public\.client_charges c/.test(income))
 
 /* ---------------- 3. income is a tick nobody is born with ---------------- */
@@ -128,17 +133,20 @@ for (const sig of ['firm_entry_kind(text)', 'draw_from_trust(numeric, text, uuid
 
 /* ---------------- 6. the parts add up on the screen ---------------- */
 
-const fields = ['interest', 'costs', 'commission', 'commissionVat', 'creditTaken', 'chargesRaised', 'other']
+const fields = ['interest', 'costs', 'commission', 'commissionVat', 'creditTaken', 'chargesRaised', 'bankInterest', 'other']
 check('every part of an income row is drawn', INCOME_PARTS.map((p) => p.key).sort(), [...fields].sort())
 const rows = [
   toIncomeRow({ company_id: 'a', company_name: 'A', interest: 0, costs: 115, commission: 177, commission_vat: 26.55,
-    credit_taken: 7, charges_raised: 115, other: 3, total: 443.55 }),
+    credit_taken: 7, charges_raised: 115, bank_interest: 0, other: 3, total: 443.55 }),
   toIncomeRow({ company_id: 'b', company_name: 'B', interest: 10, costs: 0, commission: 0, commission_vat: 0,
-    credit_taken: 0, charges_raised: 0, other: 0, total: 10 }),
+    credit_taken: 0, charges_raised: 0, bank_interest: 0, other: 0, total: 10 }),
 ]
+rows.push(toIncomeRow({ company_id: null, company_name: null, interest: 0, costs: 0, commission: 0,
+  commission_vat: 0, credit_taken: 0, charges_raised: 0, bank_interest: 12.34, other: 0, total: 12.34 }))
 const t = incomeTotals(rows)
+check('bank interest is read off its own column', t.bankInterest, 12.34)
 check('the totals add each part across clients', t.commission, 177)
-check('...and the total is the sum of the totals', Math.round(t.total * 100) / 100, 453.55)
+check('...and the total is the sum of the totals', Math.round(t.total * 100) / 100, 465.89)
 check('...which is the sum of the parts',
   Math.round(fields.reduce((s, f) => s + t[f], 0) * 100) / 100, Math.round(t.total * 100) / 100)
 

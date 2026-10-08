@@ -83,27 +83,28 @@ export function cycleStartOn(iso: string): string {
 }
 
 /**
- * THE DAY THE OLD SYSTEM'S BOOKS STOP AND RAPTOR'S BEGIN, by default.
+ * THE DAY THE OLD SYSTEM'S BOOKS STOP AND RAPTOR'S BEGIN, by default: the last day of the last
+ * cycle Swordfish has actually PAID OVER, not the last cycle to close.
  *
- * THE FIRM, looking at ninety imported receipts sitting in the approval queue: "if the payments
- * come from Swordfish, they're already in there and they've already been approved... except for the
- * ones that doesn't fall in the next payment run. If we import, for example, today, the entire
- * Swordfish book, then from the 11th September until today would not have been processed. It should
- * go into a state of needing to be approved."
+ * THE FIRM, 8 October: "if we import today, we can assume all payments that have been recovered up
+ * until the 10th of August have been paid out. Money collected from the eleventh of August until
+ * the tenth of September will be paid out on the eleventh of October."
  *
- * So the line falls at the end of the last CLOSED cycle: import on 6 October and everything up to
- * 10 September is history, everything from the 11th needs a decision. That is the firm's own
- * example, arrived at from their own words.
+ * So a cycle that has closed is NOT yet history: it sits in trust until its payover day, a month
+ * later (`payover_lag_months`, 1, the same rule). Import on 8 October and 11 Aug -- 10 Sep is still
+ * to be paid over by Raptor on 11 October, so the line falls at 10 August. The default used to be
+ * the end of the last CLOSED cycle (10 September), which would have marked a whole month of
+ * collections as remitted and never paid them to anyone.
  *
- * IT IS A DEFAULT AND NOTHING MORE. Raptor cannot know when Swordfish last paid its clients -- the
- * firm does -- and the firm said in the same breath "I don't know. We'll have to figure that out."
- * So the import takes this as a date somebody can change, and getting it wrong in one direction
- * leaves money unremitted while the other remits it twice. It is never inferred from the data.
+ * ON THE PAYOVER DAY ITSELF the run counts as made: import on 11 October and 11 Aug -- 10 Sep is
+ * history. Importing that morning, before Swordfish has paid, would leave it unremitted -- which is
+ * why this stays a date somebody can change on the import screen, never one inferred from the data.
  */
-export function settledThroughDefault(today: string): string {
+export function settledThroughDefault(today: string, lagMonths = 1): string {
   const start = cycleStartOn(today)
   const [y, m, d] = start.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+  /* The open cycle's start, back `lagMonths` cycles, less a day. Date.UTC normalises month < 0. */
+  return new Date(Date.UTC(y, m - 1 - lagMonths, d - 1)).toISOString().slice(0, 10)
 }
 
 /** '2026-09-10' as a day count, in UTC, so no local clock can move it. */
