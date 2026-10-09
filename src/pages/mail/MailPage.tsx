@@ -56,6 +56,7 @@ import {
   findContactDetails, mergeCandidates, type ContactCandidate,
 } from '../../lib/signature'
 import { canRefileMail } from '../../lib/permissions'
+import { AttachmentKindTag } from '../../components/AttachmentKindTag'
 
 /**
  * HOW FAR AHEAD THE PAGE READS.
@@ -2727,6 +2728,7 @@ function MailBody({
               {downloading === name
                 ? <Loader2 size={11} className="shrink-0 animate-spin" />
                 : <Download size={11} className="shrink-0" />}
+              <AttachmentKindTag name={name} />
               <span className="truncate">{name}</span>
             </button>
           ))}

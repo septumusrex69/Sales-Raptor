@@ -15,11 +15,12 @@
  *
  *   node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-mime-parts.mjs
  */
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import {
   assembleBody, decodeQuotedPrintable, decodeTransfer, describeParts, flattenParts,
   inlineImagesFromParsed, listedAttachments, partContent, placeholderIndex, placeholderName,
-  plainText, readableParts, toText,
+  plainText, readableParts, toText, attachmentNamesOf, decodeEncodedWords,
 } from '../../api/_lib/mime.ts'
 
 const require = createRequire(import.meta.url)
@@ -309,6 +310,32 @@ check('nothing in, nothing listed', listedAttachments(undefined).length, 0)
  * headline and is indistinguishable from a healthy one -- a review of this suite found
  * eighteen files silent that way, about 800 assertion sites reported as nothing.
  */
+/* ---- WHAT AN UNNAMED ATTACHMENT IS CALLED (the firm, 9 Oct: "it doesn't show me if it's a PDF
+   or an email or what type of file this is") ---- */
+const mail = (subject) => Buffer.from(`From: a@b.co\r\nSubject: ${subject}\r\nTo: c@d.co\r\n\r\nbody`)
+check('a real filename is kept exactly',
+  attachmentNamesOf([{ filename: 'Statement Sept.pdf', contentType: 'application/pdf' }]), ['Statement Sept.pdf'])
+check('an attached email is named by its own subject, as .eml',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: mail('RE: Payment arrangement RAP-124119') }]),
+  ['RE: Payment arrangement RAP-124119.eml'.replace(':', ' ').replace('  ', ' ')])
+check('...two with the same subject stay two names',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: mail('RE: payment') }, { contentType: 'message/rfc822', content: mail('RE: payment') }]),
+  ['RE payment.eml', 'RE payment (2).eml'])
+check('...an encoded subject is decoded',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: mail('=?utf-8?B?' + Buffer.from('Betaling – Oktober').toString('base64') + '?=') }]),
+  ['Betaling – Oktober.eml'])
+check('...a subject folded over two lines is one name',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: Buffer.from('Subject: Email\r\n trails\r\n\r\nx') }]), ['Email trails.eml'])
+check('...and one with no subject is still said to be an email',
+  attachmentNamesOf([{ contentType: 'message/rfc822', content: Buffer.from('From: a@b.co\r\n\r\nx') }]), ['attachment-1.eml'])
+check('anything else unnamed carries the extension of its type, at its position',
+  attachmentNamesOf([{ filename: 'a.docx' }, { contentType: 'application/pdf' }, { contentType: 'text/calendar; method=REQUEST' }, { contentType: 'application/x-unknown' }]),
+  ['a.docx', 'attachment-2.pdf', 'attachment-3.ics', 'attachment-4'])
+check('Q-encoded words decode too', decodeEncodedWords('=?iso-8859-1?Q?Caf=E9_bill?='), 'Café bill')
+const syncSrc = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url), 'utf8')
+check('the sync names them with the shared rule', /attachmentNamesOf\(listedAttachments\(attachments\)\)/.test(syncSrc), true)
+check('...and the download finds them by the same rule', /attachmentNamesOf\(listed\)\.indexOf\(filename\)/.test(syncSrc), true)
+
 if (failures === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failures === 0
   ? '\nPASS — a message is taken apart from its structure, only the readable parts are fetched,'

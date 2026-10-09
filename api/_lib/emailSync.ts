@@ -5,7 +5,7 @@ import { referencesIn, normaliseReference, isColleague } from '../../src/lib/mai
 import { decrypt } from './crypto.js'
 import {
   assembleBody, describeParts, flattenParts, inlineImagesFromParsed, listedAttachments,
-  partContent, placeholderIndex, placeholderName, plainText, readableParts,
+  attachmentNamesOf, extensionFor, partContent, placeholderIndex, plainText, readableParts,
   type MessageBody, type MessagePart,
 } from './mime.js'
 import {
@@ -114,7 +114,7 @@ const MAX_ATTACHMENT_NAMES = 10
  * attached. An unnamed image with no filename is the remaining tracking-pixel shape.
  */
 function realAttachmentNames(
-  attachments: { filename?: string; related?: boolean; contentDisposition?: string; contentType?: string }[] | undefined,
+  attachments: { filename?: string; related?: boolean; contentDisposition?: string; contentType?: string; content?: unknown }[] | undefined,
 ): string[] {
   /*
    * THROUGH listedAttachments AND placeholderName, which the download route also uses. The filter
@@ -122,9 +122,7 @@ function realAttachmentNames(
    * again knew nothing about either -- so an attachment with no filename was listed on the
    * message and 404ed on every attempt to open it.
    */
-  return listedAttachments(attachments)
-    .map((att, i) => att.filename || placeholderName(i))
-    .slice(0, MAX_ATTACHMENT_NAMES)
+  return attachmentNamesOf(listedAttachments(attachments)).slice(0, MAX_ATTACHMENT_NAMES)
 }
 
 /**
@@ -1131,15 +1129,9 @@ export interface FetchedAttachment {
  * it has to know what it was and rename it by hand. The extension is taken from the part's own
  * content type, which is the only thing the message actually told us about it.
  */
-const EXTENSIONS: Record<string, string> = {
-  'text/calendar': '.ics', 'application/pdf': '.pdf', 'text/plain': '.txt',
-  'text/html': '.html', 'application/json': '.json', 'text/csv': '.csv',
-  'message/rfc822': '.eml', 'application/zip': '.zip',
-}
-
 function suggestedName(placeholder: string, contentType: string | undefined): string {
-  const ext = EXTENSIONS[(contentType ?? '').toLowerCase().split(';')[0].trim()]
-  return ext ? `${placeholder}${ext}` : placeholder
+  const ext = extensionFor(contentType)
+  return ext && !placeholder.toLowerCase().endsWith(ext) ? `${placeholder}${ext}` : placeholder
 }
 
 export async function fetchAttachment(
@@ -1176,11 +1168,12 @@ export async function fetchAttachment(
     if (!whole || !whole.source) return null
     const parsed = await simpleParser(whole.source)
     const listed = listedAttachments(parsed.attachments)
+    /* BY THE NAME THE SYNC GAVE IT, worked out the same way (attachmentNamesOf) -- an attached
+       email's subject, or attachment-3.pdf. A name written before that rule is a bare
+       attachment-N, which is a position in the same list. */
+    const byName = attachmentNamesOf(listed).indexOf(filename)
     const at = placeholderIndex(filename)
-    const match = at === null
-      ? listed.find((att) => (att.filename || '') === filename)
-      /* The same list, in the same order, numbered the same way the sync numbered it. */
-      : listed[at]
+    const match = byName >= 0 ? listed[byName] : at !== null ? listed[at] : undefined
     if (!match) return null
     return {
       /* Named for the person saving it: "attachment-1" tells them nothing about what it is. */

@@ -303,7 +303,7 @@ export const MAIL = [
     body_html: null,
     body_calendar: null,
     body_cached_at: MAIL_AT(149),
-    attachment_names: ['mandate.pdf'], is_junk: false, occurred_at: MAIL_AT(150),
+    attachment_names: ['mandate.pdf', 'RE Payment arrangement.eml', 'attachment-3'], is_junk: false, occurred_at: MAIL_AT(150),
     read_at: MAIL_AT(140), is_filed: true, is_settled: true, no_record_at: null,
     linked_account_id: '44444444-4444-4444-8444-444444444444',
     linked_lead_id: null, linked_deal_id: null, linked_company_id: null, linked_contact_id: null,

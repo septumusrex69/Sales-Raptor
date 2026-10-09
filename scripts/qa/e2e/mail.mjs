@@ -625,6 +625,11 @@ try {
   await page.mouse.click(5, 5)
   await page.waitForTimeout(300)
   /* This one carries a file, which is the message the attachment spacing was reported on. */
+  /* AND EACH SAYS WHAT KIND OF FILE IT IS (the firm, 9 Oct: "it doesn't show me if it's a PDF or
+     an email"). An old unnamed one, with no extension to read, gets no label rather than a guess. */
+  const kinds = await page.getByTestId('attachment-kind').allInnerTexts()
+  t.check('each attachment says what it is', kinds.map((k) => k.trim().toUpperCase()).join(','), 'PDF,EMAIL')
+  t.ok('...an attached email shown by its subject', await page.getByRole('button', { name: /RE Payment arrangement\.eml/ }).first().isVisible().catch(() => false))
   await t.shot(page, '27-mail-attachment')
   await page.keyboard.press('Escape')
   await page.mouse.click(5, 5)

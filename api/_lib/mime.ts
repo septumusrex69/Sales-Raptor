@@ -413,3 +413,90 @@ export function placeholderIndex(name: string): number | null {
   const n = Number(m[1]) - 1
   return n >= 0 ? n : null
 }
+
+/* ------------------------------------------------------------------ *
+ * What an unnamed attachment is called.
+ * ------------------------------------------------------------------ */
+
+/** The extension a type is saved under. The same table names it in the list and on the download. */
+export const ATTACHMENT_EXTENSIONS: Record<string, string> = {
+  'text/calendar': '.ics', 'application/pdf': '.pdf', 'text/plain': '.txt',
+  'text/html': '.html', 'application/json': '.json', 'text/csv': '.csv',
+  'message/rfc822': '.eml', 'application/zip': '.zip', 'application/x-zip-compressed': '.zip',
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/heic': '.heic',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.ms-outlook': '.msg',
+}
+
+export function extensionFor(contentType: string | undefined): string {
+  return ATTACHMENT_EXTENSIONS[(contentType ?? '').toLowerCase().split(';')[0].trim()] ?? ''
+}
+
+/** =?utf-8?B?…?= and =?iso-8859-1?Q?…?= back to words, for a Subject header read by hand. */
+export function decodeEncodedWords(s: string): string {
+  return s
+    .replace(/\?=\s+=\?/g, '?==?') // adjacent encoded words are joined without the space between
+    .replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_m, charset: string, enc: string, text: string) => {
+      const buf = enc.toUpperCase() === 'B'
+        ? Buffer.from(text, 'base64')
+        : decodeQuotedPrintable(text.replace(/_/g, ' '))
+      return toText(buf, charset)
+    })
+}
+
+/** The Subject of an attached email, from its own headers; '' where it has none. */
+export function attachedEmailSubject(content: unknown): string {
+  if (!Buffer.isBuffer(content)) return ''
+  const head = content.subarray(0, 64 * 1024).toString('latin1').split(/\r?\n\r?\n/)[0]
+  const unfolded = head.replace(/\r?\n[ \t]+/g, ' ')
+  const m = /^subject:[ \t]*(.*)$/im.exec(unfolded)
+  if (!m) return ''
+  // Raw 8-bit subjects are rare; latin1 keeps them as bytes and the encoded words are decoded.
+  return decodeEncodedWords(m[1]).trim()
+}
+
+const UNSAFE_IN_FILENAME = /[\\/:*?"<>|\u0000-\u001f]+/g
+
+/**
+ * THE NAMES A MESSAGE'S ATTACHMENTS ARE LISTED UNDER, all at once.
+ *
+ * The firm, 9 Oct, at a forwarded "Email trails" message listing attachment-1 to attachment-8:
+ * "it doesn't show me if it's a PDF or an email or what type of file this is." Those eight were
+ * attached emails, which carry no filename -- an attached email's name IS its subject. So:
+ *   - a real filename is kept exactly;
+ *   - an attached email is named by its own subject, as .eml;
+ *   - anything else unnamed is attachment-N with the extension its type has (attachment-3.pdf).
+ * ALL AT ONCE because two attached replies are usually both "RE: payment", and a name has to be
+ * unique within the message -- it is what the download asks for. The second gets " (2)".
+ *
+ * ONE FUNCTION FOR THE SYNC AND THE DOWNLOAD, because the download finds an attachment by the
+ * name the sync gave it; computed two ways they drift, and the drift is a file that 404s for ever
+ * (see placeholderIndex, which is that bug, and still reads the names written before this).
+ */
+export function attachmentNamesOf(attachments: {
+  filename?: string; contentType?: string; content?: unknown
+}[]): string[] {
+  const seen = new Map<string, number>()
+  return attachments.map((att, i) => {
+    let base: string
+    let ext = ''
+    if (att.filename) {
+      base = att.filename
+    } else if ((att.contentType ?? '').toLowerCase().startsWith('message/rfc822')) {
+      const subject = attachedEmailSubject(att.content).replace(UNSAFE_IN_FILENAME, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
+      base = subject || placeholderName(i)
+      ext = '.eml'
+    } else {
+      base = placeholderName(i)
+      ext = extensionFor(att.contentType)
+    }
+    const name = `${base}${ext}`
+    const n = (seen.get(name.toLowerCase()) ?? 0) + 1
+    seen.set(name.toLowerCase(), n)
+    if (n === 1) return name
+    return ext ? `${base} (${n})${ext}` : `${base} (${n})`
+  })
+}
