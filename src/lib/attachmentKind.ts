@@ -25,7 +25,21 @@ const KINDS: Record<string, string> = {
 }
 
 export function attachmentKind(name: string): string | null {
-  const m = /\.([a-z0-9]{1,5})$/i.exec(name.trim())
+  const m = /\.([a-z0-9]{1,5})$/i.exec(attachmentParts(name).leaf.trim())
   if (!m) return null
   return KINDS[m[1].toLowerCase()] ?? m[1].toUpperCase()
+}
+
+/**
+ * A FILE INSIDE AN ATTACHED EMAIL is listed as "<email> › <file>" (api/_lib/mime.ts,
+ * NESTED_SEPARATOR -- written again here because that module is server code; check-mime-parts
+ * holds the two equal). The chip shows the file's own name and says where it sits.
+ */
+export const NESTED_SEPARATOR = ' › '
+
+export function attachmentParts(name: string): { leaf: string; inside: string | null } {
+  const at = name.lastIndexOf(NESTED_SEPARATOR)
+  return at < 0
+    ? { leaf: name, inside: null }
+    : { leaf: name.slice(at + NESTED_SEPARATOR.length), inside: name.slice(0, at) }
 }

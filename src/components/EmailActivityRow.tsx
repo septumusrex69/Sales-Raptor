@@ -13,7 +13,7 @@ import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import type { ReactNode } from 'react'
 import type { Activity } from '../types'
-import { AttachmentKindTag } from './AttachmentKindTag'
+import { AttachmentLabel } from './AttachmentKindTag'
 
 type Direction = 'sent' | 'received'
 
@@ -295,8 +295,7 @@ export function EmailActivityRow({
                 className="inline-flex items-center gap-1.5 text-xs text-slate-600 bg-white border border-slate-200 rounded-md px-2.5 py-1.5 max-w-[280px] hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
               >
                 <Paperclip size={12} className="shrink-0" />
-                <AttachmentKindTag name={name} />
-                <span className="truncate">{name}</span>
+                <AttachmentLabel name={name} />
                 {downloading === name && <span className="text-slate-400">…</span>}
               </button>
             ))}

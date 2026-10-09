@@ -333,8 +333,39 @@ check('anything else unnamed carries the extension of its type, at its position'
   ['a.docx', 'attachment-2.pdf', 'attachment-3.ics', 'attachment-4'])
 check('Q-encoded words decode too', decodeEncodedWords('=?iso-8859-1?Q?Caf=E9_bill?='), 'Café bill')
 const syncSrc = readFileSync(new URL('../../api/_lib/emailSync.ts', import.meta.url), 'utf8')
-check('the sync names them with the shared rule', /attachmentNamesOf\(listedAttachments\(attachments\)\)/.test(syncSrc), true)
-check('...and the download finds them by the same rule', /attachmentNamesOf\(listed\)\.indexOf\(filename\)/.test(syncSrc), true)
+check('the sync names them with the shared walk', /\(await attachmentTree\(attachments\)\)\.map\(\(n\) => n\.name\)/.test(syncSrc), true)
+check('...and the download finds them by the same walk', /const tree = await attachmentTree\(parsed\.attachments/.test(syncSrc), true)
+check('the cap is no longer ten', /const MAX_ATTACHMENT_NAMES = 60/.test(syncSrc), true)
+
+/* ---- AND WHAT IS INSIDE AN ATTACHED EMAIL (the firm, 9 Oct: Outlook showed 18, Raptor 8) ---- */
+{
+  const inner = [
+    'From: a@b.co', 'Subject: RE: Tender documents', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="in"', '', '--in', 'Content-Type: text/plain', '', 'see attached',
+    '--in', 'Content-Type: application/pdf; name="Cover page.pdf"', 'Content-Disposition: attachment; filename="Cover page.pdf"',
+    'Content-Transfer-Encoding: base64', '', Buffer.from('%PDF-1.4 cover').toString('base64'), '--in--', '',
+  ].join('\r\n')
+  const outer = [
+    'From: camille@x.co', 'Subject: Email trails', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="out"', '', '--out', 'Content-Type: text/plain', '', 'trails',
+    '--out', 'Content-Type: message/rfc822', 'Content-Disposition: attachment', '', inner,
+    '--out', 'Content-Type: application/pdf; name="Bid.pdf"', 'Content-Disposition: attachment; filename="Bid.pdf"',
+    'Content-Transfer-Encoding: base64', '', Buffer.from('%PDF bid').toString('base64'), '--out--', '',
+  ].join('\r\n')
+  const { simpleParser } = await import('mailparser')
+  const { attachmentTree } = await import('../../api/_lib/attachmentTree.ts')
+  const parsed = await simpleParser(Buffer.from(outer))
+  const tree = await attachmentTree(parsed.attachments)
+  check('the attached email, the file inside it, and the file beside it are all listed',
+    tree.map((n) => n.name), ['RE Tender documents.eml', 'RE Tender documents.eml › Cover page.pdf', 'Bid.pdf'])
+  check('...and the file inside is the real file', tree[1]?.att.content?.toString(), '%PDF-1.4 cover')
+}
+const { NESTED_SEPARATOR: apiSep } = await import('../../api/_lib/mime.ts')
+const { NESTED_SEPARATOR: appSep, attachmentParts, attachmentKind } = await import('../../src/lib/attachmentKind.ts')
+check('the server and the screen split a path at the same mark', appSep, apiSep)
+check('the chip shows the file and says where it sits',
+  attachmentParts('RE Tender documents.eml › Cover page.pdf'), { leaf: 'Cover page.pdf', inside: 'RE Tender documents.eml' })
+check('...and its kind is the file\'s, not the email\'s', attachmentKind('RE Tender documents.eml › Cover page.pdf'), 'PDF')
 
 if (failures === 0) console.log(`${passed} passed, 0 failed`)
 console.log(failures === 0

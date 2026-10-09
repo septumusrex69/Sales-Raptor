@@ -2,8 +2,21 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { credentialsKeyProblem } from '../crypto.js'
 import { adminClient, requireCaller } from '../auth.js'
 import { fetchAttachment, fetchMessageBody } from '../emailSync.js'
+import { attachmentLeaf } from '../mime.js'
 import { findLinkedDetails } from '../../../src/lib/signature.js'
 import { bodyToStore } from '../../../src/lib/mailBodyCache.js'
+
+/*
+ * THE NAME THE FILE IS SAVED UNDER: the file's own, never the path it was listed under (a file
+ * inside an attached email is listed as "email › file"). Sent twice, because a subject named by
+ * a person carries dashes and accents a plain header cannot hold -- Node refuses the response
+ * outright -- so the plain one is an ASCII stand-in and filename* is the real name (RFC 6266).
+ */
+function contentDisposition(name: string): string {
+  const leaf = attachmentLeaf(name)
+  const ascii = leaf.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(leaf)}`
+}
 
 /**
  * Reaches into a connected mailbox for something that was never stored.
@@ -61,11 +74,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * out of a mailbox by guessing names — and the connection used is whichever mailbox actually
    * received the mail.
    */
+  /*
+   * A LIST WRITTEN BEFORE FILES INSIDE ATTACHED EMAILS WERE LISTED IS PUT RIGHT on its first
+   * download, which read the whole message anyway (the firm's "Email trails": 8 names, 18 files).
+   * Only ever a list the server worked out from the message itself, so nothing a caller sends can
+   * widen what this route will serve. Never fatal: the person came for a file.
+   */
+  async function repairNames(
+    where: { table: 'account_emails' | 'user_emails' | 'activities'; id: string } | undefined,
+    had: string[], fresh: string[] | undefined,
+  ): Promise<void> {
+    if (!admin || !where || !fresh || fresh.length === 0) return
+    if (fresh.length === had.length && fresh.every((n, i) => n === had[i])) return
+    const { error } = await admin.from(where.table).update({ attachment_names: fresh }).eq('id', where.id)
+    if (error) console.log(`[attachment] names not repaired on ${where.table} ${where.id}: ${error.message}`)
+  }
+
   async function serveAttachment(
     conn: { email: string; imap_host: string; imap_port: number; encrypted_password: string },
     location: { folder?: string | null; uid?: number | null; messageId?: string | null },
     names: string[],
     name: string,
+    repair?: { table: 'account_emails' | 'user_emails'; id: string },
   ): Promise<boolean> {
     if (!names.includes(name)) {
       res.status(404).json({ error: 'That file is not attached to this email.' })
@@ -78,8 +108,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       return true
     }
+    await repairNames(repair, names, file.names)
     res.setHeader('Content-Type', file.contentType)
-    res.setHeader('Content-Disposition', `attachment; filename="${name.replace(/"/g, '')}"`)
+    res.setHeader('Content-Disposition', contentDisposition(file.filename || name))
     res.status(200).send(file.content)
     return true
   }
@@ -122,6 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         ((mail.attachment_names as string[] | null) ?? []),
         filename,
+        { table: 'account_emails', id: mail.id as string },
       )
     } catch (err) {
       res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach the mailbox.' })
@@ -169,6 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           location,
           ((mail.attachment_names as string[] | null) ?? []),
           filename,
+          { table: 'user_emails', id: mail.id as string },
         )
       } catch (err) {
         res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach your mailbox.' })
@@ -307,8 +340,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       notes: `${profile?.name ?? 'A user'} downloaded "${filename}" from the email "${activity.subject}".`,
     })
 
+    await repairNames({ table: 'activities', id: activity.id as string },
+      ((activity.attachment_names as string[] | null) ?? []), file.names)
     res.setHeader('Content-Type', file.contentType)
-    res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/"/g, '')}"`)
+    res.setHeader('Content-Disposition', contentDisposition(file.filename || filename))
     res.status(200).send(file.content)
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : 'Could not reach the mailbox.' })

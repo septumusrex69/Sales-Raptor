@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { credentialsKeyProblem } from '../crypto.js'
 import { adminClient, requireCaller } from '../auth.js'
 import { fetchAttachment } from '../emailSync.js'
+import { attachmentLeaf } from '../mime.js'
 import { chargeItemWith } from '../../../src/lib/chargeEngine.js'
 import {
   escalationNote, escalationChargeable,
@@ -358,7 +359,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             name,
           )
           if (!file) { failed.push(`${name} (not found in the mailbox any more)`); continue }
-          const safe = name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
+          /* The file's own name, not the "email › file" path it may be listed under. */
+          const leaf = attachmentLeaf(name)
+          const safe = leaf.replace(/[^\w.\-() ]+/g, '_').slice(0, 120)
           const path = `${accountId}/${randomUUID()}-${safe}`
           const up = await admin.storage.from(BUCKET)
             .upload(path, file.content, { contentType: file.contentType, upsert: false })
@@ -366,7 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { error: docError } = await admin.from('account_documents').insert({
             account_id: accountId,
             query_id: ticket.id,
-            name,
+            name: leaf,
             storage_path: path,
             mime_type: file.contentType,
             size_bytes: file.content.length,

@@ -628,7 +628,11 @@ try {
   /* AND EACH SAYS WHAT KIND OF FILE IT IS (the firm, 9 Oct: "it doesn't show me if it's a PDF or
      an email"). An old unnamed one, with no extension to read, gets no label rather than a guess. */
   const kinds = await page.getByTestId('attachment-kind').allInnerTexts()
-  t.check('each attachment says what it is', kinds.map((k) => k.trim().toUpperCase()).join(','), 'PDF,EMAIL')
+  t.check('each attachment says what it is', kinds.map((k) => k.trim().toUpperCase()).join(','), 'PDF,EMAIL,PDF')
+  /* A file INSIDE the attached email is listed too, by its own name (Outlook showed 18, Raptor 8). */
+  t.ok('a file inside an attached email is listed by its own name',
+    await page.getByRole('button', { name: /Payslip\.pdf/ }).first().isVisible().catch(() => false)
+    && !(await page.getByText('RE Payment arrangement.eml › Payslip.pdf').count()))
   t.ok('...an attached email shown by its subject', await page.getByRole('button', { name: /RE Payment arrangement\.eml/ }).first().isVisible().catch(() => false))
   await t.shot(page, '27-mail-attachment')
   await page.keyboard.press('Escape')

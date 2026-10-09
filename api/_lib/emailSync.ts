@@ -1,11 +1,13 @@
 import { ImapFlow, type ListResponse } from 'imapflow'
 import { simpleParser } from 'mailparser'
+import { attachmentTree, type ParsedAttachment } from './attachmentTree.js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { referencesIn, normaliseReference, isColleague } from '../../src/lib/mailReference.js'
 import { decrypt } from './crypto.js'
 import {
   assembleBody, describeParts, flattenParts, inlineImagesFromParsed, listedAttachments,
-  attachmentNamesOf, extensionFor, partContent, placeholderIndex, plainText, readableParts,
+  NESTED_SEPARATOR, attachmentLeaf, extensionFor, partContent,
+  placeholderIndex, plainText, readableParts,
   type MessageBody, type MessagePart,
 } from './mime.js'
 import {
@@ -100,8 +102,14 @@ export function looksLikeJunk(path: string): boolean {
   return /(^|\.)(spam|junk|blocked|bulk)/i.test(path.split('.').pop() ?? path)
 }
 
-/** No point recording 40 filenames on one message; nobody scans past the first few. */
-const MAX_ATTACHMENT_NAMES = 10
+/*
+ * A CAP, BUT NOT TEN. It was ten on the reasoning that nobody scans past the first few -- and the
+ * firm's "Email trails" carried eighteen, all of which they wanted. Sixty is a guard against a
+ * pathological message, not a judgement about how many files somebody needs.
+ */
+const MAX_ATTACHMENT_NAMES = 60
+
+
 
 /**
  * Real attachments only -- signature logos and tracking pixels shouldn't bury a genuine
@@ -113,16 +121,14 @@ const MAX_ATTACHMENT_NAMES = 10
  * earlier version filtered on that and silently dropped a .docx someone had genuinely
  * attached. An unnamed image with no filename is the remaining tracking-pixel shape.
  */
-function realAttachmentNames(
-  attachments: { filename?: string; related?: boolean; contentDisposition?: string; contentType?: string; content?: unknown }[] | undefined,
-): string[] {
+async function realAttachmentNames(attachments: ParsedAttachment[] | undefined): Promise<string[]> {
   /*
    * THROUGH listedAttachments AND placeholderName, which the download route also uses. The filter
    * and the naming convention used to live only here, and the route that has to find the file
    * again knew nothing about either -- so an attachment with no filename was listed on the
    * message and 404ed on every attempt to open it.
    */
-  return attachmentNamesOf(listedAttachments(attachments)).slice(0, MAX_ATTACHMENT_NAMES)
+  return (await attachmentTree(attachments)).map((n) => n.name).slice(0, MAX_ATTACHMENT_NAMES)
 }
 
 /**
@@ -1103,6 +1109,12 @@ export interface FetchedAttachment {
   filename: string
   contentType: string
   content: Buffer
+  /*
+   * THE MESSAGE'S WHOLE LIST, worked out afresh, where this download had to read the whole
+   * message anyway. A message synced before files inside attached emails were listed is repaired
+   * by its first download: the route writes this back (8 names became 18 on the firm's message).
+   */
+  names?: string[]
 }
 
 /**
@@ -1151,7 +1163,7 @@ export async function fetchAttachment(
      * part is called "attachment-1" and looking for one only wastes a round trip before failing.
      * It is resolved positionally below, against the same list the sync numbered.
      */
-    const named = placeholderIndex(filename) === null
+    const named = placeholderIndex(filename) === null && !filename.includes(NESTED_SEPARATOR)
       ? parts.find((p) => p.filename === filename)
       : undefined
     if (named) {
@@ -1168,18 +1180,20 @@ export async function fetchAttachment(
     if (!whole || !whole.source) return null
     const parsed = await simpleParser(whole.source)
     const listed = listedAttachments(parsed.attachments)
-    /* BY THE NAME THE SYNC GAVE IT, worked out the same way (attachmentNamesOf) -- an attached
-       email's subject, or attachment-3.pdf. A name written before that rule is a bare
-       attachment-N, which is a position in the same list. */
-    const byName = attachmentNamesOf(listed).indexOf(filename)
+    /* BY THE NAME THE SYNC GAVE IT, worked out the same way (attachmentTree) -- an attached
+       email's subject, attachment-3.pdf, or a file inside an attached email. A name written
+       before that rule is a bare attachment-N, which is a position in the top-level list. */
+    const tree = await attachmentTree(parsed.attachments as ParsedAttachment[])
+    const byName = tree.find((n) => n.name === filename)
     const at = placeholderIndex(filename)
-    const match = byName >= 0 ? listed[byName] : at !== null ? listed[at] : undefined
-    if (!match) return null
+    const match = byName ? byName.att : at !== null ? listed[at] : undefined
+    if (!match || !Buffer.isBuffer(match.content)) return null
     return {
       /* Named for the person saving it: "attachment-1" tells them nothing about what it is. */
-      filename: match.filename || suggestedName(filename, match.contentType),
+      filename: match.filename || suggestedName(attachmentLeaf(filename), match.contentType),
       contentType: match.contentType || 'application/octet-stream',
-      content: match.content as Buffer,
+      content: match.content,
+      names: tree.map((n) => n.name).slice(0, MAX_ATTACHMENT_NAMES),
     }
   })
 }
@@ -1383,7 +1397,7 @@ async function syncMailbox(
         html: parsed.html || '',
         /* A meeting request's ICS, kept so the invite draws without a trip to the mailbox. */
         calendar: icsOf(parsed.attachments),
-        attachmentNames: realAttachmentNames(parsed.attachments),
+        attachmentNames: await realAttachmentNames(parsed.attachments),
         /* The folder's answer, or the agent's standing one. Either is enough to make it junk. */
         isJunk: isJunk || junkedSender,
         isSent,
@@ -1524,7 +1538,7 @@ async function syncMailbox(
           body: (parsed.text || '').slice(0, NOTES_MAX_LENGTH),
           messageId: parsed.messageId ?? `${conn.user_id}:${path}:${uid}`,
           inReplyTo: parsed.inReplyTo ?? null,
-          attachmentNames: realAttachmentNames(parsed.attachments),
+          attachmentNames: await realAttachmentNames(parsed.attachments),
           /* The same two lists the mailbox row already gets — worked out once, above, so the
              account's copy and the mailbox's copy cannot disagree about who was on a message. */
           toRecipients,
@@ -1630,7 +1644,7 @@ async function syncMailbox(
             // Names only -- the files stay in the mailbox. Recording them means an email
             // carrying a signed mandate or an invoice can't land in the CRM looking like an
             // ordinary (or, for an attachment-only email, empty) message.
-            attachment_names: realAttachmentNames(parsed.attachments),
+            attachment_names: await realAttachmentNames(parsed.attachments),
             /*
              * Everyone else on the message, so a reply from the lead, deal or client reaches the
              * same people the original did. A client who copies two of their own people arrived

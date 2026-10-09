@@ -14,7 +14,7 @@ import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
 import { downloadAttachment } from '../../lib/userMail'
 import { useAuth } from '../../store/AuthContext'
-import { AttachmentKindTag } from '../../components/AttachmentKindTag'
+import { AttachmentLabel } from '../../components/AttachmentKindTag'
 
 /**
  * Every email either way on this account.
@@ -372,8 +372,7 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
               {busy === name
                 ? <Loader2 size={11} className="shrink-0 animate-spin" />
                 : <Download size={11} className="shrink-0" />}
-              <AttachmentKindTag name={name} />
-              <span className="truncate">{name}</span>
+              <AttachmentLabel name={name} />
             </button>
           ))}
         </div>

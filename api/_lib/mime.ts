@@ -500,3 +500,23 @@ export function attachmentNamesOf(attachments: {
     return ext ? `${base} (${n})${ext}` : `${base} (${n})`
   })
 }
+
+/**
+ * A FILE INSIDE AN ATTACHED EMAIL is listed as "<the email's name> › <its own name>".
+ *
+ * The firm, 9 Oct: Outlook showed eighteen attachments on "Email trails" and Raptor eight. The
+ * eight were attached emails, and the other ten -- the tender cover pages, a table of contents,
+ * four pictures -- were INSIDE them. Outlook lists both; Raptor listed only the outer layer. The
+ * path is the name the download is asked for, so it says which email to open to find the file.
+ */
+export const NESTED_SEPARATOR = ' › '
+
+/** The name a person sees and saves: the last step of the path. */
+export function attachmentLeaf(name: string): string {
+  const at = name.lastIndexOf(NESTED_SEPARATOR)
+  return at < 0 ? name : name.slice(at + NESTED_SEPARATOR.length)
+}
+
+export function isAttachedEmail(att: { contentType?: string }): boolean {
+  return (att.contentType ?? '').toLowerCase().startsWith('message/rfc822')
+}
