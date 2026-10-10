@@ -294,31 +294,38 @@ export function FinanceWorkQueue() {
         {note && <p className="mx-4 mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900" data-testid="bulk-note">{note}</p>}
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[840px]">
+          {/*
+            ONE LINE A CLIENT (the firm, 10 Oct: "exceptionally bulky"). The client cell carried the
+            run number, the payment count AND the period, wrapped into six lines in a narrow column,
+            while the group heading above it already says the period; an Exceptions column said "1 to
+            fix" beside a button saying "Fix 1 exception". Now: name and run on one line each, the
+            period only on the Paid tab (where the heading does not carry it), exceptions on the
+            button only, and headings that fit on one line.
+          */}
+          <table className="w-full min-w-[720px]">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+              <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400 whitespace-nowrap">
                 <th className="w-8 pl-4 py-2.5">
                   <input type="checkbox" aria-label="Select every run shown"
                     checked={shown.length > 0 && shown.every((r) => picked.has(r.runId))}
                     onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((r) => r.runId)) : new Set())} />
                 </th>
                 <th className="px-4 py-2.5">Client</th>
-                <th className="px-4 py-2.5 text-right">Collected by BF</th>
+                <th className="px-4 py-2.5 text-right" title="Collected by Bredell Ferreira into trust">Collected</th>
                 <th className="px-4 py-2.5 text-right">PTC set-off</th>
-                <th className="px-4 py-2.5 text-right">Amount to pay</th>
-                <th className="px-4 py-2.5">Exceptions</th>
+                <th className="px-4 py-2.5 text-right">To pay</th>
                 <th className="px-4 py-2.5">Status</th>
                 <th className="px-4 py-2.5">Next step</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">
                   <Loader2 className="mx-auto w-5 h-5 animate-spin" />
                 </td></tr>
               )}
               {!loading && shown.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
                   {tab === 'paid'
                     ? 'Nothing has been paid over yet.'
                     : 'Nothing processed in this cycle or the last yet. A client appears here, with its run built, as soon as a payment for it is approved.'}
@@ -327,7 +334,7 @@ export function FinanceWorkQueue() {
               {!loading && groups.map((g) => (
                 <Fragment key={g.key}>
                 <tr className="border-b border-slate-100 bg-slate-50" data-testid="cycle-group">
-                  <td colSpan={8} className="px-4 py-2">
+                  <td colSpan={7} className="px-4 py-2">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <span className={clsx('text-[12.5px] font-semibold',
                         g.tone === 'late' ? 'text-amber-800' : g.tone === 'now' ? 'text-slate-800' : 'text-slate-500')}>
@@ -348,32 +355,28 @@ export function FinanceWorkQueue() {
                   className="cursor-pointer border-b border-slate-50 text-sm hover:bg-slate-50"
                   data-testid="queue-run"
                 >
-                  <td className="w-8 pl-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <td className="w-8 pl-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" aria-label={`Select ${r.client}`} checked={picked.has(r.runId)}
                       onChange={() => toggle(r.runId)} />
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="font-semibold text-slate-800">{r.client}</div>
-                    <div className="text-xs text-slate-400">
+                  <td className="px-4 py-2.5">
+                    <div className="font-semibold text-slate-800 whitespace-nowrap">{r.client}</div>
+                    <div className="text-xs text-slate-400 whitespace-nowrap">
                       {r.invoiceNumber} · {r.payments} {r.payments === 1 ? 'payment' : 'payments'}
-                      {' · '}{fmtDay(r.periodStart)}–{fmtDay(r.periodEnd)}
+                      {g.tone === 'done' && <>{' · '}{fmtDay(r.periodStart)}–{fmtDay(r.periodEnd)}</>}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{rand(r.trustCapital)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-500">
+                  <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{rand(r.trustCapital)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 whitespace-nowrap">
                     {r.ptcSetOff ? `− ${rand(r.ptcSetOff)}` : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums">{rand(r.netPayover)}</td>
-                  <td className="px-4 py-3">
-                    {r.exceptions > 0
-                      ? <span className="inline-block rounded-full bg-amber-100 px-2.5 py-1 text-[11.5px] font-semibold text-amber-800">{r.exceptions} to fix</span>
-                      : <span className="text-xs text-slate-400">None</span>}
-                  </td>
-                  <td className="px-4 py-3"><Pill status={r.status} /></td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums whitespace-nowrap">{rand(r.netPayover)}</td>
+                  <td className="px-4 py-2.5"><Pill status={r.status} /></td>
+                  <td className="px-4 py-2.5">
                     {r.nextStep === 'approve' && stillOpen(r) ? (
-                      <span className="whitespace-nowrap text-xs text-slate-400" data-testid="still-open">
-                        Open until {fmtDay(r.periodEnd)} · approve early from the run
+                      <span className="whitespace-nowrap text-xs text-slate-400" data-testid="still-open"
+                        title="Approve early from the run, with a reason">
+                        Open until {fmtDay(r.periodEnd)}
                       </span>
                     ) : r.nextStep && (
                       <button
