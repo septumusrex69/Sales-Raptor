@@ -366,6 +366,17 @@ try {
     await t.shot(page, 'trust-overview-periods')
     t.ok('the firm knows what it may draw', /R 4 420\.07/.test(body))
 
+    /* ---- THE RAIL STAYS PUT WHILE THE PAGE SCROLLS (the firm, 10 Oct: "When I scroll down ... that
+       thing disappears. It should stay") ---- */
+    await page.locator('main').evaluate((m) => { m.scrollTop = m.scrollHeight })
+    await page.waitForTimeout(200)
+    const scrolled = await page.locator('main').evaluate((m) => m.scrollTop)
+    const railTop = await page.getByRole('navigation', { name: 'Trust menu' }).first()
+      .evaluate((el) => Math.round(el.getBoundingClientRect().top)).catch(() => -9999)
+    t.ok(`the overview did scroll (${scrolled}px)`, scrolled > 300)
+    t.ok(`...and the trust menu is still on screen at the top (${railTop}px)`, railTop >= 0 && railTop < 160)
+    await page.locator('main').evaluate((m) => { m.scrollTop = 0 })
+
     /* ---- the rail folds, and folded it STILL says which book you are in ---- */
     await page.getByRole('button', { name: /Narrow this menu/ }).click()
     await page.waitForTimeout(250)
@@ -394,7 +405,7 @@ try {
       t.ok(`folded, ${label} is still an icon on screen`, await folded.getByRole('link', { name: label, exact: true }).isVisible())
     }
     const foldedBox = await folded.boundingBox()
-    t.ok(`...in a narrow rail, not the open one (${Math.round(foldedBox?.width ?? 0)}px)`, !!foldedBox && foldedBox.width <= 48)
+    t.ok(`...in a narrow rail, not the open one (${Math.round(foldedBox?.width ?? 0)}px)`, !!foldedBox && foldedBox.width <= 42)
     /* The firm, 8 Oct: the folded rail was "still quite big". Rail and gap together, not the rail alone. */
     const pageBox = await page.locator('nav[aria-label="Trust menu"] + div').boundingBox()
     const reach = foldedBox && pageBox ? pageBox.x - foldedBox.x : Infinity

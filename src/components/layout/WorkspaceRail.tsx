@@ -85,8 +85,15 @@ export function WorkspaceRail({
      * bottom to keep consistency." The name stays on top as a plain label: it is there to say which
      * book this is, not to be pressed.
      */
+    /*
+     * IT STAYS WHERE IT IS WHILE THE PAGE SCROLLS (the firm, 10 Oct: "When I scroll down on a
+     * specific pane, that thing disappears. It should stay ... so I can just go to any other pane").
+     * Sticky inside <main>, which is what scrolls, and as tall as the window under the top bar
+     * (4rem) less main's padding (3rem), so the door and the widen button stay at its foot. And
+     * 42px folded, not 48 ("take a millimeter and a half out of that").
+     */
     return (
-      <nav aria-label={`${title} menu`} className="w-12 mr-3 shrink-0 flex flex-col items-center">
+      <nav aria-label={`${title} menu`} className="sticky top-0 self-start h-[calc(100dvh-7rem)] w-[42px] mr-3 shrink-0 flex flex-col items-center">
         <div className="w-full pb-2 mb-1 text-center text-[10.5px] font-semibold leading-tight text-slate-500">
           {title}
         </div>
@@ -126,7 +133,7 @@ export function WorkspaceRail({
   }
 
   return (
-    <nav className="w-56 mr-6 shrink-0 flex flex-col">
+    <nav aria-label={`${title} menu`} className="sticky top-0 self-start h-[calc(100dvh-7rem)] w-56 mr-6 shrink-0 flex flex-col">
       <div className="px-3 pb-3">
         <div className="text-[15px] font-semibold text-slate-800 tracking-tight">{title}</div>
         <div className="text-[11.5px] text-slate-400 mt-0.5">{subtitle}</div>

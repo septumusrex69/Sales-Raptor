@@ -44,7 +44,7 @@ const ITEMS: RailItem[] = [
 
 export function TrustLayout() {
   return (
-    <div className="flex h-full">
+    <div className="flex min-h-full">
       <WorkspaceRail
         title="Trust"
         subtitle="Money held for other people"
