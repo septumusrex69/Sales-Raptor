@@ -12,6 +12,7 @@ import {
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
 import { groupRunsByCycle, periodLabel } from '../../lib/payoverGroups'
+import { supabase } from '../../lib/supabase'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
 import { rand as randAmount } from '../../lib/money'
 
@@ -100,6 +101,8 @@ export function FinanceWorkQueue() {
   const [staging, setStaging] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [note, setNote] = useState<string | null>(null)
+  /* How long after a cycle closes it is paid (Trust settings); one month unless the firm changed it. */
+  const [lag, setLag] = useState(1)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -113,7 +116,9 @@ export function FinanceWorkQueue() {
       /* THE WHOLE QUEUE, NOT ONE CYCLE. The firm asked for "a run in the current or last closed
          cycle": on the 11th the new cycle has nothing in it yet and last month's is what everybody
          is working, so filtering to today's period would open the screen empty every month end. */
-      const [q, t] = await Promise.all([fetchWorkQueue(null), fetchTiles(c?.periodStart ?? null)])
+      const [q, t, f] = await Promise.all([fetchWorkQueue(null), fetchTiles(c?.periodStart ?? null),
+        supabase.from('firm_settings').select('payover_lag_months').limit(1).maybeSingle()])
+      setLag(Number((f.data as { payover_lag_months?: number } | null)?.payover_lag_months ?? 1))
       setRows(q)
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
@@ -178,7 +183,7 @@ export function FinanceWorkQueue() {
   const paid = rows.filter((r) => r.status === 'paid')
   const shown = tab === 'paid' ? paid : open
   /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
-  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tab)
+  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tab, lag)
   const pickedRows = rows.filter((r) => picked.has(r.runId))
   const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r)).map((r) => r.runId)
   const toEmail = pickedRows.filter((r) => r.status === 'approved').map((r) => r.runId)
@@ -333,18 +338,35 @@ export function FinanceWorkQueue() {
               )}
               {!loading && groups.map((g) => (
                 <Fragment key={g.key}>
-                <tr className="border-b border-slate-100 bg-slate-50" data-testid="cycle-group">
-                  <td colSpan={7} className="px-4 py-2">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className={clsx('text-[12.5px] font-semibold',
-                        g.tone === 'late' ? 'text-amber-800' : g.tone === 'now' ? 'text-slate-800' : 'text-slate-500')}>
-                        {g.title}
-                        <span className="ml-2 font-normal text-slate-400">
-                          {g.tone === 'done' ? '' : `${periodLabel(g.periodStart, g.periodEnd)} · `}
-                          {g.runs.length} {g.runs.length === 1 ? 'client' : 'clients'}
-                        </span>
-                      </span>
-                      <span className="text-[12.5px] font-semibold tabular-nums text-slate-700">{rand(g.total)}</span>
+                {/*
+                  ONE BAND PER CYCLE, SAYING WHAT STATE ITS MONEY IS IN (the firm, 10 Oct: "is there a
+                  clear distinction"). A coloured rule and a word -- Overdue, Closed, Running, Paid --
+                  then the one sentence of what happens next and when, and the cycle's total.
+                */}
+                <tr className="border-b border-slate-100" data-testid="cycle-group" data-tone={g.tone}>
+                  <td colSpan={7} className="p-0">
+                    <div className={clsx('flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-l-4 px-4 py-3',
+                      g.tone === 'late' ? 'border-l-negative-500 bg-negative-50'
+                        : g.tone === 'now' ? 'border-l-gold-500 bg-gold-50'
+                          : g.tone === 'early' ? 'border-l-slate-400 bg-slate-50'
+                            : 'border-l-positive-600 bg-positive-50')}>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={clsx('rounded-full px-2.5 py-0.5 text-[11.5px] font-bold uppercase tracking-wide',
+                            g.tone === 'late' ? 'bg-negative-100 text-negative-700'
+                              : g.tone === 'now' ? 'bg-gold-100 text-gold-800'
+                                : g.tone === 'early' ? 'bg-slate-200 text-slate-700'
+                                  : 'bg-positive-100 text-positive-700')}>
+                            {g.title}
+                          </span>
+                          <span className="text-[13px] font-semibold text-slate-800">{periodLabel(g.periodStart, g.periodEnd)}</span>
+                          <span className="text-[12.5px] text-slate-500">
+                            · {g.runs.length} {g.runs.length === 1 ? 'client' : 'clients'}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-[12.5px] text-slate-600">{g.state}</div>
+                      </div>
+                      <span className="text-[14px] font-semibold tabular-nums text-slate-800">{rand(g.total)}</span>
                     </div>
                   </td>
                 </tr>

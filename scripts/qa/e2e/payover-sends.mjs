@@ -101,9 +101,13 @@ try {
   await groups.first().waitFor({ timeout: 15000 })
   const heads = (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
   t.check('one heading per cycle', heads.length, 3)
-  t.ok('the open cycle first, building up', /^This cycle so far — still open[\s\S]*1 client/.test(heads[0] ?? ''))
-  t.ok('...then this month, with its total', /^This month to process[\s\S]*3 clients[\s\S]*R 18 625\.60/.test(heads[1] ?? ''))
-  t.ok('...then the older one still pending', /^Earlier, still pending[\s\S]*1 client/.test(heads[2] ?? ''))
+  /* The firm, 10 Oct: "closed and pending payment ... this month is running" -- a clear split, in
+     words, the one that leaves soonest first. The pill is drawn uppercase, hence /i. */
+  t.ok('the overdue cycle first, saying it was due', /^Overdue[\s\S]*1 client[\s\S]*was due 11 Sep and is not yet paid/i.test(heads[0] ?? ''))
+  t.ok('...then the closed one, with its payover day and total',
+    /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · check, approve and pay on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
+  t.ok('...then the running one, still collecting', /^Running[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(heads[2] ?? ''))
+  t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now","early"]')
 
   /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
   t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))

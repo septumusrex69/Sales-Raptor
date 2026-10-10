@@ -20,14 +20,27 @@ export interface CycleGroup<T extends GroupableRun> {
   key: string
   title: string
   tone: 'now' | 'late' | 'early' | 'done'
+  /** The one-line state in the firm's words: what is happening to this money and when. */
+  state: string
+  /** The day this cycle's money is due out (the 11th, `lagMonths` after it closes). */
+  paysOn: string
   periodStart: string
   periodEnd: string
   runs: T[]
   total: number
 }
 
+/*
+ * THREE STATES, SAID IN WORDS AND ORDERED BY WHEN THE MONEY LEAVES (the firm, 10 Oct: "how am I
+ * going to know which one is for this payment run and which one has already been switched off ...
+ * closed and pending payment ... this month is running"). The queue used to put the running cycle
+ * on top in small grey type; now the one that is paid soonest is first, as on the Trust overview:
+ *   OVERDUE  -- closed, its payover day has passed, still not paid;
+ *   CLOSED   -- the cut-off has passed, nothing more goes in, waiting for its payover day;
+ *   RUNNING  -- still collecting: every payment approved today lands here until midnight on the 10th.
+ */
 export function groupRunsByCycle<T extends GroupableRun>(
-  runs: T[], openStart: string | null, mode: 'open' | 'paid',
+  runs: T[], openStart: string | null, mode: 'open' | 'paid', lagMonths = 1,
 ): CycleGroup<T>[] {
   const byStart = new Map<string, T[]>()
   for (const r of runs) {
@@ -37,17 +50,38 @@ export function groupRunsByCycle<T extends GroupableRun>(
   }
   const dueEnd = openStart ? dayBefore(openStart) : null
   return [...byStart.entries()]
-    .sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))
+    /* Paid: newest first (history). Working: oldest first -- the one that leaves soonest on top. */
+    .sort(([a], [b]) => (mode === 'paid' ? (a < b ? 1 : a > b ? -1 : 0) : (a < b ? -1 : a > b ? 1 : 0)))
     .map(([start, list]) => {
       const end = list[0].periodEnd
+      const paysOn = paysOnFor(end, lagMonths)
       const total = Math.round(list.reduce((s, r) => s + r.netPayover, 0) * 100) / 100
-      let title: string; let tone: CycleGroup<T>['tone']
-      if (mode === 'paid') { title = `Paid — ${periodLabel(start, end)}`; tone = 'done' }
-      else if (openStart && start >= openStart) { title = 'This cycle so far — still open'; tone = 'early' }
-      else if (dueEnd && end === dueEnd) { title = 'This month to process'; tone = 'now' }
-      else { title = 'Earlier, still pending'; tone = 'late' }
-      return { key: start, title, tone, periodStart: start, periodEnd: end, runs: list, total }
+      let title: string; let tone: CycleGroup<T>['tone']; let state: string
+      if (mode === 'paid') {
+        title = 'Paid'; tone = 'done'; state = `Paid over · was due ${dayLabel(paysOn)}`
+      } else if (openStart && start >= openStart) {
+        title = 'Running'; tone = 'early'
+        state = `Still collecting · closes at midnight on ${dayLabel(end)} · paid out ${dayLabel(paysOn)}`
+      } else if (dueEnd && end === dueEnd) {
+        title = 'Closed'; tone = 'now'
+        state = `Nothing more goes in · check, approve and pay on ${dayLabel(paysOn)}`
+      } else {
+        title = 'Overdue'; tone = 'late'
+        state = `Closed ${dayLabel(end)} · was due ${dayLabel(paysOn)} and is not yet paid`
+      }
+      return { key: start, title, tone, state, paysOn, periodStart: start, periodEnd: end, runs: list, total }
     })
+}
+
+/** The payover day: the day after the cycle closes, `lagMonths` later (a cycle ending 10 Sep pays 11 Oct). */
+export function paysOnFor(end: string, lagMonths: number): string {
+  const [y, m, d] = end.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1 + lagMonths, d + 1)).toISOString().slice(0, 10)
+}
+
+function dayLabel(iso: string): string {
+  const [, m, d] = iso.split('-').map(Number)
+  return `${d} ${MONTHS[m - 1]}`
 }
 
 function dayBefore(iso: string): string {
