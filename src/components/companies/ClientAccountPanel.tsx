@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { ChevronRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../ui/Card'
 import { rand } from '../../lib/money'
-import { fetchClientAccount, type ClientEntry, type ClientEntryKind } from '../../lib/business'
+import { fetchClientAccount, fetchLedgerRuns, type ClientEntry, type ClientEntryKind } from '../../lib/business'
+import { ledgerByPayover, type LedgerRun } from '../../lib/clientLedger'
 
 /**
  * WHAT PASSES BETWEEN THE FIRM AND THIS CLIENT, AS ONE RUNNING BALANCE.
@@ -20,9 +21,9 @@ import { fetchClientAccount, type ClientEntry, type ClientEntryKind } from '../.
  * reducing what it hands THIS client by what THIS client owes it. Trust is one side, Business is
  * the other, and the only place both are true at once is the client.
  *
- * THE BALANCE COMES FROM THE DATABASE. `client_account` computes it in one ordered window; adding
- * the rows up again here would be a second arithmetic, and the day the two disagreed the client
- * would be holding a statement that does not match the payover it was built from.
+ * ONE LINE A PAYOVER (the firm, 10 Oct). The lines come from `client_ledger`; `ledgerByPayover`
+ * folds the payments into the payover that carried them, and the headline balance is still the
+ * database's own.
  *
  * A POSITIVE BALANCE IS OWED TO THE CLIENT. Which is the direction they read it in -- it is their
  * money the firm is holding -- and the opposite of how the firm's own books would show it. The
@@ -30,14 +31,11 @@ import { fetchClientAccount, type ClientEntry, type ClientEntryKind } from '../.
  */
 
 /*
- * THE GROSS PAYOVER AND THE CHARGE ARE TWO LINES, NOT ONE NET FIGURE. The firm's own sequence
- * names them separately -- "payover due to client" and then "withdrawal fee subtracted from
- * payover" -- because that is how they say it to a client. Netting them would leave somebody
- * working backwards from a number nobody quoted.
+ * The badge on a line in a payover's detail, so the payments behind a run still say what each was.
  */
 const KIND: Record<ClientEntryKind, { label: string; tone: string }> = {
   held: { label: 'Held for them', tone: 'bg-positive-100 text-positive-700' },
-  owed: { label: 'Owed to us', tone: 'bg-negative-100 text-negative-700' },
+  owed: { label: 'Paid to them directly', tone: 'bg-negative-100 text-negative-700' },
   set_off: { label: 'Off the payover', tone: 'bg-gold-100 text-gold-800' },
   payover_paid: { label: 'Paid out', tone: 'bg-slate-100 text-slate-600' },
   released: { label: 'Released to them', tone: 'bg-positive-100 text-positive-700' },
@@ -48,20 +46,32 @@ const KIND: Record<ClientEntryKind, { label: string; tone: string }> = {
   invoice_paid: { label: 'Invoice paid', tone: 'bg-slate-100 text-slate-600' },
 }
 
+/*
+ * DEBIT AND CREDIT, IN THE FIRM'S BOOKS: a debit is the client owing us; a credit is us owing them.
+ * The balance says which with Dr / Cr rather than a minus sign, which the firm has already misread
+ * once on a remittance advice.
+ */
+const money = (v: number) => rand(Math.abs(v))
+const drCr = (v: number) => (v < 0 ? 'Dr' : v > 0 ? 'Cr' : '')
+
 export function ClientAccountPanel({ companyId }: { companyId: string }) {
   const [entries, setEntries] = useState<ClientEntry[]>([])
+  const [runs, setRuns] = useState<LedgerRun[]>([])
+  const [open, setOpen] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
     setLoading(true)
-    fetchClientAccount(companyId)
-      .then((e) => { if (live) setEntries(e) })
+    Promise.all([fetchClientAccount(companyId), fetchLedgerRuns(companyId)])
+      .then(([e, r]) => { if (live) { setEntries(e); setRuns(r) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [companyId])
+
+  const rows = useMemo(() => ledgerByPayover(entries, runs), [entries, runs])
 
   if (loading) {
     return (
@@ -89,9 +99,9 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
   }
 
   /*
-   * THE CLOSING BALANCE IS THE LAST ROW'S, NOT A SUM. Same reason as above: one arithmetic. The
-   * rows arrive in the order the balance was computed in, so the last one IS where the account
-   * stands.
+   * THE CLOSING BALANCE IS THE DATABASE'S: the last line of its own ordered window. The regrouped
+   * rows close on the same figure (a regrouping never changes a sum), and check-client-ledger
+   * holds that; reading the database's here means a disagreement would show, not hide.
    */
   const closing = entries[entries.length - 1].balance
 
@@ -116,50 +126,62 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="bg-slate-50 text-slate-400 text-slate-400">
-                <th className="text-left font-medium px-4 py-2.5">Date</th>
-                <th className="text-left font-medium px-4 py-2.5">What happened</th>
-                <th className="text-left font-medium px-4 py-2.5">Account</th>
-                <th className="text-left font-medium px-4 py-2.5">Reference</th>
-                <th className="text-right font-medium px-4 py-2.5">Amount</th>
-                <th className="text-right font-medium px-4 py-2.5" title="Positive: we owe the client. Negative: the client owes us.">Balance</th>
+              <tr className="bg-slate-50 text-slate-400">
+                <th className="text-left font-medium px-4 py-2">Date</th>
+                <th className="text-left font-medium px-4 py-2">What happened</th>
+                <th className="text-right font-medium px-4 py-2" title="The client owes us more">Debit</th>
+                <th className="text-right font-medium px-4 py-2" title="We owe the client more">Credit</th>
+                <th className="text-right font-medium px-4 py-2" title="Dr: the client owes us. Cr: we owe the client.">Balance</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((e, i) => {
-                const meta = KIND[e.kind]
+              {rows.map((r) => {
+                const many = r.lines.length > 1 || r.key.startsWith('run:') || r.key.startsWith('open:')
+                const shown = open === r.key
                 return (
-                  <tr key={`${e.kind}-${e.runId ?? e.chargeId ?? i}`}
-                    className="border-t border-slate-100">
-                    <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap tabular-nums">{e.on}</td>
-                    <td className="px-4 py-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-800 max-w-[28rem] truncate" title={e.description}>{e.description}</span>
-                        <span className={clsx(
-                          'rounded-full px-2 py-px text-[11px] font-medium',
-                          meta?.tone ?? 'bg-slate-100 text-slate-600',
-                        )}>
-                          {meta?.label ?? e.kind}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-1.5 text-slate-500">{e.caseNumber ?? ''}</td>
-                    <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap">
-                      {/* The run is a real page; an invoice number on a charge is not, yet. */}
-                      {e.runId
-                        ? <Link to={`/trust/runs/${e.runId}`} className="text-brand-500 hover:underline">
-                            {e.reference || 'the run'}
-                          </Link>
-                        : (e.reference || '—')}
-                    </td>
-                    <td className={clsx('px-4 py-1.5 text-right tabular-nums whitespace-nowrap',
-                      e.amount < 0 ? 'text-negative-700' : 'text-positive-700')}>
-                      {e.amount < 0 ? '−' : '+'}{rand(Math.abs(e.amount))}
-                    </td>
-                    <td className="px-4 py-1.5 text-right tabular-nums font-medium whitespace-nowrap">
-                      {rand(e.balance)}
-                    </td>
-                  </tr>
+                  <Fragment key={r.key}>
+                    <tr data-testid="ledger-row"
+                      className={clsx('border-t border-slate-100', many && 'cursor-pointer hover:bg-slate-50')}
+                      onClick={many ? () => setOpen(shown ? null : r.key) : undefined}>
+                      <td className="px-4 py-1.5 text-slate-500 tabular-nums">{r.on}</td>
+                      <td className="px-4 py-1.5">
+                        <div className="flex items-center gap-2">
+                          {many && <ChevronRight size={13} className={clsx('text-slate-400 transition-transform', shown && 'rotate-90')} />}
+                          {r.runId
+                            ? <Link to={`/trust/runs/${r.runId}`} onClick={(e) => e.stopPropagation()}
+                                className="text-slate-800 hover:text-gold-700 max-w-[30rem] truncate" title={r.label}>{r.label}</Link>
+                            : <span className="text-slate-800 max-w-[30rem] truncate" title={r.label}>{r.label}</span>}
+                          {r.state && <span className="text-slate-400">· {r.state}</span>}
+                          {many && <span className="text-slate-400">· {r.lines.length} {r.lines.length === 1 ? 'line' : 'lines'}</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-1.5 text-right tabular-nums text-negative-700">{r.amount < 0 ? money(r.amount) : ''}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums text-positive-700">{r.amount > 0 ? money(r.amount) : ''}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums font-medium">
+                        {money(r.balance)} <span className="text-[11px] text-slate-400">{drCr(r.balance)}</span>
+                      </td>
+                    </tr>
+                    {shown && r.lines.map((e, i) => {
+                      const meta = KIND[e.kind]
+                      return (
+                        <tr key={`${r.key}-${i}`} className="bg-slate-50/60 text-slate-600" data-testid="ledger-detail">
+                          <td className="px-4 py-1 pl-8 tabular-nums text-slate-400">{e.on}</td>
+                          <td className="px-4 py-1">
+                            <div className="flex items-center gap-2">
+                              <span className="max-w-[26rem] truncate" title={e.description}>{e.description}</span>
+                              <span className={clsx('rounded-full px-2 py-px text-[11px] font-medium', meta?.tone ?? 'bg-slate-100 text-slate-600')}>
+                                {meta?.label ?? e.kind}
+                              </span>
+                              {e.caseNumber && <span className="text-slate-400">{e.caseNumber}</span>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-1 text-right tabular-nums">{e.amount < 0 ? money(e.amount) : ''}</td>
+                          <td className="px-4 py-1 text-right tabular-nums">{e.amount > 0 ? money(e.amount) : ''}</td>
+                          <td />
+                        </tr>
+                      )
+                    })}
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -168,10 +190,10 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
       </Card>
 
       <p className="text-[12.5px] text-slate-500 leading-relaxed">
-        Every rand held for this client, every fee they owe us on payments made to them directly,
-        every charge, set-off and payover, in order. A positive balance is money we owe them; a
-        negative one is money they owe us, and comes off their next payover. A charge set off comes
-        out of <em>this client&rsquo;s own</em> trust money and never anybody else&rsquo;s.
+        One line a payover, and a line for each payover paid, charge and invoice. Open a payover for
+        the payments behind it. A debit is the client owing us; a credit is us owing them. What they
+        owe comes off their next payover, out of <em>this client&rsquo;s own</em> trust money and
+        never anybody else&rsquo;s.
       </p>
     </div>
   )

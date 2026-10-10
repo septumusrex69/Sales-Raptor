@@ -45,19 +45,23 @@ const REP = { ...PROFILE, name: 'Dineo', role: 'Sales Representative' }
 
 const CO = { id: 'c1', name: 'Rinda Roo Company', owner_id: ADMIN.id }
 
-/* THE CLIENT LEDGER (10 Oct): held for them, a PTC fee they owe, a charge waiting for the payover,
-   the charge set off, the payover paid, an invoice raised and paid. Opens at nil, goes both ways,
-   and closes with the client owing us. */
+/* THE CLIENT LEDGER, ONE LINE A PAYOVER (10 Oct). Two paid payovers, each with the payments of its
+   period behind it, each paid out on its own line; two invoices, one paid; and money collected after
+   the last run, not on a payover yet. Opens at nil, goes both ways, closes with the client owing us. */
+const RUNS = [
+  { id: 'r1', invoice_number: 'PO-RRC-2608', period_start: '2026-07-11', period_end: '2026-08-10', status: 'paid' },
+  { id: 'r2', invoice_number: 'PO-RRC-2609', period_start: '2026-08-11', period_end: '2026-09-10', status: 'paid' },
+]
 const STATEMENT = [
-  { entry_on: '2026-08-12', kind: 'held', description: 'Capital recovered, less commission, held for the client',
+  { entry_on: '2026-08-05', kind: 'held', description: 'Capital recovered, less commission, held for the client',
     reference: null, case_number: 'RAP-1001', amount: 2557.90, balance: 2557.90, run_id: null, charge_id: null },
   { entry_on: '2026-08-15', kind: 'payover_paid', description: 'Payover PO-RRC-2608 paid to the client',
     reference: 'PO-RRC-2608', case_number: null, amount: -2557.90, balance: 0, run_id: 'r1', charge_id: null },
   { entry_on: '2026-09-02', kind: 'invoice_raised', description: 'Withdrawal of RRC00003',
     reference: 'INV-0012', case_number: 'RAP-1003', amount: -575.00, balance: -575.00, run_id: null, charge_id: 'ch1' },
-  { entry_on: '2026-09-12', kind: 'held', description: 'Capital recovered, less commission, held for the client',
+  { entry_on: '2026-09-05', kind: 'held', description: 'Capital recovered, less commission, held for the client',
     reference: null, case_number: 'RAP-1001', amount: 1800.00, balance: 1225.00, run_id: null, charge_id: null },
-  { entry_on: '2026-09-12', kind: 'owed', description: 'Paid straight to the client, so they owe the trust the fees and commission',
+  { entry_on: '2026-09-06', kind: 'owed', description: 'Paid straight to the client, so they owe the trust the fees and commission',
     reference: null, case_number: 'RAP-1004', amount: -575.00, balance: 650.00, run_id: null, charge_id: null },
   { entry_on: '2026-09-15', kind: 'payover_paid', description: 'Payover PO-RRC-2609 paid to the client',
     reference: 'PO-RRC-2609', case_number: null, amount: -1225.00, balance: -575.00, run_id: 'r2', charge_id: null },
@@ -65,6 +69,8 @@ const STATEMENT = [
     reference: 'INV-0019', case_number: null, amount: -1380.00, balance: -1955.00, run_id: null, charge_id: 'ch2' },
   { entry_on: '2026-10-04', kind: 'invoice_paid', description: 'Invoice paid by the client',
     reference: 'EFT 8812', case_number: null, amount: 1380.00, balance: -575.00, run_id: null, charge_id: 'ch2' },
+  { entry_on: '2026-10-12', kind: 'held', description: 'Capital recovered, less commission, held for the client',
+    reference: null, case_number: 'RAP-1005', amount: 300.00, balance: -275.00, run_id: null, charge_id: null },
 ]
 
 function handlersFor(profile, statement = STATEMENT) {
@@ -74,6 +80,7 @@ function handlersFor(profile, statement = STATEMENT) {
       () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [CO] })],
     [(u) => /\/rpc\/client_ledger/.test(u), () => ({ body: statement })],
+    [(u) => /\/rest\/v1\/payover_runs/.test(u), () => ({ body: RUNS })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
@@ -97,57 +104,55 @@ try {
     await tab.click()
     await page.waitForSelector('text=The client’s ledger', { timeout: 10000 })
 
-    /* COUNTED BY ROWS IN THE STATEMENT'S OWN TABLE. The page carries other tables, and a bare
-       `tr` count would be right for the wrong reason. */
-    const rows = page.locator('table tbody tr')
-    t.check('all eight entries are drawn', await rows.count(), 8)
+    /* COUNTED BY THE LEDGER'S OWN ROWS. Nine lines of money become eight rows: the two payments
+       of September's period are ONE payover line, which is the whole of what the firm asked for. */
+    const rows = page.locator('[data-testid="ledger-row"]')
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="ledger-row"]').length === 8, null, { timeout: 10000 })
+    t.check('nine lines of money are eight ledger rows', await rows.count(), 8)
 
     const body = plain(await page.locator('main').innerText())
-
-    /* EACH OF THE FIRM'S EIGHT, NAMED. Not a loop over "whatever is there" -- that passes on an
-       empty table. */
     for (const label of [
-      'held for the client', 'Payover PO-RRC-2608 paid to the client', 'Withdrawal of RRC00003',
-      'Paid straight to the client', 'Executive listing', 'Invoice paid by the client',
+      'Payover PO-RRC-2608 · 11 Jul 2026 – 10 Aug 2026', 'Payover PO-RRC-2608 paid to the client',
+      'Invoice INV-0012: Withdrawal of RRC00003', 'Payover PO-RRC-2609 · 11 Aug 2026 – 10 Sep 2026',
+      'Invoice INV-0019: Executive listing', 'paid by the client', 'Collections 11 Oct 2026 – 10 Nov 2026',
     ]) {
-      t.ok(`"${label}" is on the statement`, body.includes(label))
+      t.ok(`"${label}" is on the ledger`, body.includes(label))
     }
+    /* A PTC IS NOT A LINE OF ITS OWN any more: it is inside its payover until somebody opens it. */
+    t.ok('a PTC is not drawn until its payover is opened', !body.includes('Paid straight to the client'))
+    t.ok('money after the last run says it is not on a payover yet', /Not on a payover yet/.test(body))
+    t.ok('the ledger has Debit and Credit columns', /Debit/.test(body) && /Credit/.test(body))
 
-    /* AND EACH IS LABELLED AS THE KIND OF THING IT IS, because "Withdrawal of RRC00003" appears
-       twice -- once invoiced and once taken off a payover -- and they are different events. */
-    for (const chip of ['Held for them', 'Owed to us', 'Paid out', 'Invoiced', 'Invoice paid']) {
-      t.ok(`the "${chip}" label is used`, body.includes(chip))
-    }
+    /* The September payover nets R1 800 held and R575 owed: R1 225 credited, on one line. */
+    const sep = rows.filter({ hasText: 'PO-RRC-2609 ·' })
+    t.ok('September\'s payover is credited its net', /R 1 225\.00/.test(plain(await sep.innerText())))
+    t.ok('...and says how many lines are behind it', /2 lines/.test(await sep.innerText()))
 
-    /*
-     * THE GROSS PAYOVER AND THE CHARGE ARE TWO LINES, NOT ONE NET FIGURE. R1 800.00 due and
-     * R575.00 off it, rather than R1 225.00 with no explanation.
-     */
-    t.ok('money held for them is its own line', /\+R 1 800\.00/.test(body))
-    t.ok('...and so is a fee they owe us on a payment made to them', /−R 575\.00/.test(body))
-
-    /*
-     * THE BALANCE IS THE DATABASE'S. Every one of the eight is asserted, in order: a component
-     * that re-summed its own amounts would have to reproduce all eight by luck, including the two
-     * that share 2026-09-12.
-     */
-    const balances = await page.locator('table tbody tr td:last-child').allInnerTexts()
-    /* JOINED INTO ONE STRING ON PURPOSE: the runner's check is Object.is, which is always false
-       for two arrays -- so an assertion comparing them fails on identical content, and one written
-       the other way round would pass on anything at all. */
-    t.check('the running balance is the one handed over',
-      balances.map((b) => plain(b).trim()).join(' | '),
-      ['R 2 557.90', 'R 0.00', '-R 575.00', 'R 1 225.00', 'R 650.00',
-        '-R 575.00', '-R 1 955.00', '-R 575.00'].join(' | '))
-
-    /* THE CLOSING FIGURE SAYS WHICH WAY IT POINTS. A bare "-R 575.00" leaves somebody working out
-       the sign; this account closes with the client owing the firm. */
+    /* Dr / Cr, never a bare minus: the firm misread "-R 14 162.50" once already. */
+    const balances = await page.locator('[data-testid="ledger-row"] td:last-child').allInnerTexts()
+    t.check('the running balance, in Dr and Cr',
+      balances.map((b) => plain(b).replace(/\s+/g, ' ').trim()).join(' | '),
+      ['R 2 557.90 Cr', 'R 0.00', 'R 575.00 Dr', 'R 650.00 Cr', 'R 575.00 Dr',
+        'R 1 955.00 Dr', 'R 575.00 Dr', 'R 275.00 Dr'].join(' | '))
     t.ok('and it says who owes whom', /The client owes us/.test(body))
-    t.ok('...with the amount', /R 575\.00/.test(body))
+    t.ok('...with the database\'s closing figure', /R 275\.00/.test(body))
 
-    /* A payover line opens the run it came from; an invoice has no page to open yet. */
+    /* OPENING A PAYOVER shows the payments behind it, each with its account. */
+    await sep.click()
+    await page.waitForSelector('[data-testid="ledger-detail"]', { timeout: 5000 })
+    const detail = plain(await page.locator('[data-testid="ledger-detail"]').allInnerTexts().then((x) => x.join(' / ')))
+    t.check('opening it shows its two payments', await page.locator('[data-testid="ledger-detail"]').count(), 2)
+    t.ok('...the PTC among them, named for what it is', /Paid to them directly/.test(detail))
+    t.ok('...with the account it came from', /RAP-1004/.test(detail))
+
     t.ok('a payover line links to its run',
       (await page.locator('table a[href="/trust/runs/r1"]').count()) > 0)
+
+    /* The firm, 10 Oct: the Account tab to the right of Payovers. */
+    const tabs = await page.locator('button').allInnerTexts()
+    const pi = tabs.findIndex((x) => /^Payovers/.test(x.trim()))
+    const ai = tabs.findIndex((x) => x.trim() === 'Account')
+    t.ok('the Account tab sits right of Payovers', pi >= 0 && ai > pi)
     await context.close()
   }
 

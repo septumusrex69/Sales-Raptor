@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import type { LedgerRun } from './clientLedger'
 
 /**
  * THE FIRM'S OWN ACCOUNTS, READ BACK.
@@ -146,6 +147,21 @@ export async function fetchClientAccount(companyId: string): Promise<ClientEntry
     balance: n(r.balance),
     runId: (r.run_id as string | null) ?? null,
     chargeId: (r.charge_id as string | null) ?? null,
+  }))
+}
+
+/** The client's payover runs, for grouping their ledger one line a payover (clientLedger.ts). */
+export async function fetchLedgerRuns(companyId: string): Promise<LedgerRun[]> {
+  const { data, error } = await supabase.from('payover_runs')
+    .select('id, invoice_number, period_start, period_end, status')
+    .eq('company_id', companyId)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    invoiceNumber: (r.invoice_number as string | null) ?? null,
+    periodStart: String(r.period_start),
+    periodEnd: String(r.period_end),
+    status: String(r.status),
   }))
 }
 

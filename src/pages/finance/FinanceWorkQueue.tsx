@@ -410,7 +410,10 @@ export function FinanceWorkQueue() {
                   <td className="px-2 py-1.5"><Pill status={r.status} /></td>
                   <td className="px-3 py-1.5">
                     {r.nextStep === 'approve' && stillOpen(r) ? (
-                      <span className="whitespace-nowrap text-xs text-slate-400" data-testid="still-open"
+                      /* ONE HEIGHT FOR EVERY RUN (the firm, 10 Oct: "make them all as big as the email
+                         advice"). The words wear the button's own box -- its padding, its type and a
+                         border nobody can see -- so a row reads the same height whichever it holds. */
+                      <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-slate-400" data-testid="still-open"
                         title="Approve early from the run, with a reason">
                         Open until {fmtDay(r.periodEnd)}
                       </span>

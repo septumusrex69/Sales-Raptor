@@ -823,16 +823,16 @@ export function CompanyDetail() {
       <RecordTabs<ClientTab>
         tabs={[
           { id: 'Overview', label: 'Overview' },
-          /* Only for somebody who may see the trust side: the statement IS the payover run and
-             the commission that came off it. Hidden rather than refusing, like every other
-             money screen -- the tab is a courtesy and canViewTrust is the rule. */
-          ...(canViewTrust(currentUser) ? [{ id: 'Account' as const, label: 'Account' }] : []),
           { id: 'Emails', label: 'Emails', count: emailActivities.length },
           { id: 'Notes', label: 'Notes', count: nonEmailActivities.length },
           { id: 'Tasks', label: 'Tasks', count: companyTasks.length },
           /* The client's payover folder: every run and the copies that were sent (the firm, 8 Oct).
-             LAST, at the firm's asking (10 Oct: "so it's the last one there"). */
+             Towards the end, at the firm's asking (10 Oct: "so it's the last one there"). */
           ...(canViewTrust(currentUser) ? [{ id: 'Payovers' as const, label: 'Payovers' }] : []),
+          /* The client's ledger. Only for somebody who may see the trust side; hidden rather than
+             refusing, like every other money screen. Right of Payovers at the firm's asking (10
+             Oct): it is read as the sum of those runs, so it comes after them. */
+          ...(canViewTrust(currentUser) ? [{ id: 'Account' as const, label: 'Account' }] : []),
         ]}
         active={tab}
         onChange={setTab}

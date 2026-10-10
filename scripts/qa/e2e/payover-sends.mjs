@@ -127,6 +127,10 @@ try {
     JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['E']))
   t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
 
+  /* A row with a button, measured here to hold the Running tab's text-only row against it. */
+  const buttonRowHeight = await page.getByTestId('queue-run').filter({ has: page.locator('button') }).first()
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height)).catch(() => -1)
+
   /* ---- THE RUNNING TAB: still collecting ---- */
   await page.getByTestId('tab-running').click()
   /* Wait for the Running band itself: the locator would otherwise read the Closed tab's first band. */
@@ -135,6 +139,12 @@ try {
   t.ok('Running holds the open cycle, still collecting', /^Running[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(runningHead))
   t.ok('...and its run says so instead of offering Approve',
     /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
+  /* ONE HEIGHT FOR EVERY RUN (the firm, 10 Oct): "make them all as big as the email advice" lines.
+     Presence first, so a missing button row cannot pass as equal. */
+  const openRowHeight = await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' })
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height))
+  t.ok('a run row with a button was measured', buttonRowHeight > 0)
+  t.check('...and an "Open until" row stands exactly as tall', openRowHeight, buttonRowHeight)
 
   /* ---- APPROVING BEFORE THE CYCLE CLOSES, WITH A REASON (the firm, 8 Oct) ---- */
   runShown = OPEN_RUN

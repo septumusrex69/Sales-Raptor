@@ -295,7 +295,10 @@ for (const lit of compared) {
  * somebody to discover by trusting a green run.
  */
 const panel = strip(read('src/components/companies/ClientAccountPanel.tsx'))
-ok('the panel draws the balance it was given', /rand\(e\.balance\)/.test(panel))
+/* Since 10 Oct the rows are one a payover (the firm's ask), so a row's balance is the sum of the
+   rows above it -- clientLedger.ts, held by check-client-ledger to close on the database's own
+   closing figure. What stays the database's is the headline, below. */
+ok('the panel draws the grouped balance', /money\(r\.balance\)/.test(panel) && /ledgerByPayover\(/.test(panel))
 /* The closing figure likewise: the LAST row's balance, not a total of the column. */
 ok('...and the closing figure is the last row', /entries\[entries\.length - 1\]\.balance/.test(panel))
 /*
