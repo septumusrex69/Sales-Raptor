@@ -150,6 +150,36 @@ will be done later (§5, first item).
 
 ---
 
+## 3a. THE GO-LIVE PLAN FOR THE MONEY (agreed with the user, 10 Oct)
+
+- **Clean break.** Everything up to the cut-over stays Swordfish's: receipts dated on or before it
+  are Swordfish's to pay over (Camille keeps running those runs from Swordfish); Raptor splits only
+  receipts from the day after. The book (accounts, balances, history) still imports, frozen as is.
+- **Cut-over: end of 10 December 2026** (fallback: end of 10 January). Swordfish pays 11 Dec and
+  11 Jan; Raptor's first payover is **11 Feb** -- two months of live running before money goes out
+  on Raptor's figures.
+- **Parallel run: the 11 Oct - 10 Nov cycle.** Camille works it in Swordfish; the same Swordfish
+  export, trust statement and her Excel go into STAGING; Raptor's 11 Dec payover per client is
+  compared with what she pays. Go / no-go about 1 Dec: every client agrees or the difference is
+  explained, the Trust overview balances, brought-forward balances match her sheet, Camille has
+  done the cycle herself. Then time with Camille in the week after 11 Dec.
+- **To build before mid-November** (not started):
+  1. import option "clean break: every receipt up to the cut-over is Swordfish's" (today's default
+     brings Swordfish's received-not-paid-over receipts INTO the ledger -- the R15 943.54);
+  2. a ring-fenced trust bucket "Held for Swordfish payovers", set once at cut-over (from the bank
+     opening balance; Swordfish cannot report what it owes per client -- "Swordfish can do
+     nothing"), its line on the Trust overview, and "Swordfish payover" / "Swordfish-era drawing"
+     on Trust -> Exceptions to take its debits off it; what is left after the last Swordfish run is
+     the one-off Swordfish difference (firm fees can be written off; client money cannot);
+  3. **balances brought forward from Camille's Excel** (40-50 clients, R400k-R1m owed to the firm:
+     withdrawal fees, PTCs, other) as `client_charges` dated the cut-over, set off against the
+     next payover by default, and a per-client ledger on the client record opening with it. The
+     user is getting the file (or its headings); NEVER commit it -- staging only;
+  4. finish the production copy (§5).
+- **Also raised, not yet specified:** reversals of payments (reversal of an un-invoiced payment
+  works since `533b46b`; Reverse is on Trust -> Check), and something about opening a client from
+  a payover run ("we'll get to that").
+
 ## 4. Decisions waiting on the firm
 
 Do not guess these. Each one changes money.
