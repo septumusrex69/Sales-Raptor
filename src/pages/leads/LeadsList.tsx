@@ -387,37 +387,37 @@ export function LeadsList() {
               Squeezed to the container width, short values broke onto two lines — "No Contact
               / Yet", "Debt / Collection" — which quietly doubled the row height and undid the
               space the compact header just bought. */}
-          <table className="min-w-full text-sm whitespace-nowrap">
+          <table className="min-w-full text-[12.5px] whitespace-nowrap">
             <thead className="sticky top-0 z-20 bg-white">
-              <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+              <tr className="text-left text-slate-400 border-b border-slate-100">
                 {col.leadNumber && (
-                  <th className="font-medium px-5 py-2 sticky z-30 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
+                  <th className="font-medium px-3 py-1.5 sticky z-30 bg-white min-w-[100px]" style={{ left: pinnedLeft.leadNumber }}>
                     {sortableHeader('leadNumber', 'Lead #')}
                   </th>
                 )}
                 {col.companyLead && (
-                  <th className="font-medium px-3 py-2 bg-white sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
+                  <th className="font-medium px-2 py-1.5 bg-white sticky z-10 bg-white min-w-[180px]" style={{ left: pinnedLeft.companyLead }}>
                     {sortableHeader('companyLead', 'Company / Lead')}
                   </th>
                 )}
-                {col.dateAdded && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('dateAdded', 'Added')}</th>}
-                {col.contactPerson && <th className="font-medium px-3 py-2 bg-white">Contact Person</th>}
-                {col.status && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('status', 'Status')}</th>}
-                {col.classification && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('classification', 'Class')}</th>}
-                {col.score && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('score', 'Score')}</th>}
-                {col.services && <th className="font-medium px-3 py-2 bg-white">Service(s)</th>}
-                {col.estValue && <th className="font-medium px-3 py-2 bg-white text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
-                {col.handoverAmount && <th className="font-medium px-3 py-2 bg-white text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
-                {col.owner && <th className="font-medium px-3 py-2 bg-white">Owner</th>}
-                {col.nextFollowUp && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
-                {col.lastContact && <th className="font-medium px-3 py-2 bg-white">{sortableHeader('lastContact', 'Last Contact')}</th>}
-                {col.source && <th className="font-medium px-3 py-2 bg-white">Source</th>}
-                {col.city && <th className="font-medium px-3 py-2 bg-white">City</th>}
-                {col.province && <th className="font-medium px-3 py-2 bg-white">Province</th>}
-                {col.leadAge && <th className="font-medium px-3 py-2 bg-white">Lead Age</th>}
-                {col.jobTitle && <th className="font-medium px-3 py-2 bg-white">Job Title</th>}
-                {col.phone && <th className="font-medium px-3 py-2 bg-white">Phone</th>}
-                {col.email && <th className="font-medium px-3 py-2 bg-white">Email</th>}
+                {col.dateAdded && <th className="font-medium px-2 py-1.5 bg-white">{sortableHeader('dateAdded', 'Added')}</th>}
+                {col.contactPerson && <th className="font-medium px-2 py-1.5 bg-white">Contact Person</th>}
+                {col.status && <th className="font-medium px-2 py-1.5 bg-white">{sortableHeader('status', 'Status')}</th>}
+                {col.classification && <th className="font-medium px-2 py-1.5 bg-white">{sortableHeader('classification', 'Class')}</th>}
+                {col.score && <th className="font-medium px-2 py-1.5 bg-white">{sortableHeader('score', 'Score')}</th>}
+                {col.services && <th className="font-medium px-2 py-1.5 bg-white">Service(s)</th>}
+                {col.estValue && <th className="font-medium px-2 py-1.5 bg-white text-right">{sortableHeader('estValue', 'Est. Value', 'right')}</th>}
+                {col.handoverAmount && <th className="font-medium px-2 py-1.5 bg-white text-right">{sortableHeader('handoverAmount', 'Handover Amount', 'right')}</th>}
+                {col.owner && <th className="font-medium px-2 py-1.5 bg-white">Owner</th>}
+                {col.nextFollowUp && <th className="font-medium px-2 py-1.5 bg-white">{sortableHeader('nextFollowUp', 'Next Follow-up')}</th>}
+                {col.lastContact && <th className="font-medium px-2 py-1.5 bg-white">{sortableHeader('lastContact', 'Last Contact')}</th>}
+                {col.source && <th className="font-medium px-2 py-1.5 bg-white">Source</th>}
+                {col.city && <th className="font-medium px-2 py-1.5 bg-white">City</th>}
+                {col.province && <th className="font-medium px-2 py-1.5 bg-white">Province</th>}
+                {col.leadAge && <th className="font-medium px-2 py-1.5 bg-white">Lead Age</th>}
+                {col.jobTitle && <th className="font-medium px-2 py-1.5 bg-white">Job Title</th>}
+                {col.phone && <th className="font-medium px-2 py-1.5 bg-white">Phone</th>}
+                {col.email && <th className="font-medium px-2 py-1.5 bg-white">Email</th>}
                 <th className="w-10"></th>
               </tr>
             </thead>
@@ -438,49 +438,51 @@ export function LeadsList() {
                       </td>
                     </tr>
                   )}
-                  <tr onClick={() => navigate(`/leads/${lead.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
+                  <tr onClick={() => navigate(`/leads/${lead.id}`)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
                     {col.leadNumber && (
-                      <td className="px-5 py-2 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
+                      <td className="px-3 py-1.5 sticky z-10 bg-white" style={{ left: pinnedLeft.leadNumber }}>
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                           {formatLeadNumber(lead.leadNumber)}
                         </Link>
                       </td>
                     )}
                     {col.companyLead && (
-                      <td className="px-3 py-2 sticky z-10 bg-white" style={{ left: pinnedLeft.companyLead }}>
-                        <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+                      <td className="px-2 py-1.5 sticky z-10 bg-white" style={{ left: pinnedLeft.companyLead }}>
+                        <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} title={lead.companyName || `${lead.firstName} ${lead.lastName}`} className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
                           {lead.companyName || `${lead.firstName} ${lead.lastName}`}
                         </Link>
                       </td>
                     )}
                     {col.dateAdded && (
-                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap" title={formatDate(lead.createdAt)}>
+                      <td className="px-2 py-1.5 text-slate-500 whitespace-nowrap" title={formatDate(lead.createdAt)}>
                         {relativeDayLabel(lead.createdAt)}
                       </td>
                     )}
                     {col.contactPerson && (
-                      <td className="px-3 py-2">
-                        <p className="text-slate-700">
+                      <td className="px-2 py-1.5">
+                        {/* One line: the job title rides after the name rather than under it,
+                            which was what made every lead row two rows tall. */}
+                        <span className="text-slate-700">
                           {lead.firstName} {lead.lastName}
-                        </p>
-                        {lead.jobTitle && <p className="text-xs text-slate-400">{lead.jobTitle}</p>}
+                        </span>
+                        {lead.jobTitle && <span className="text-slate-400"> · {lead.jobTitle}</span>}
                       </td>
                     )}
                     {col.status && (
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1.5">
                         <StatusBadge status={lead.status} />
                       </td>
                     )}
                     {col.classification && (
-                      <td className="px-3 py-2">{lead.classification ? <ClassificationBadge classification={lead.classification} /> : <span className="text-slate-300">—</span>}</td>
+                      <td className="px-2 py-1.5">{lead.classification ? <ClassificationBadge classification={lead.classification} /> : <span className="text-slate-300">—</span>}</td>
                     )}
                     {col.score && (
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1.5">
                         <ScorePill score={lead.score} />
                       </td>
                     )}
                     {col.services && (
-                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
                         {leadServices.length === 0 ? (
                           <span className="text-slate-300">—</span>
                         ) : (
@@ -507,32 +509,32 @@ export function LeadsList() {
                         )}
                       </td>
                     )}
-                    {col.estValue && <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(lead.estimatedValue)}</td>}
+                    {col.estValue && <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-700">{formatCurrency(lead.estimatedValue)}</td>}
                     {col.handoverAmount && (
-                      <td className="px-3 py-2 text-right text-slate-600">{lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : '—'}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">{lead.estimatedHandoverAmount != null ? formatCurrency(lead.estimatedHandoverAmount) : '—'}</td>
                     )}
                     {col.owner && (
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1.5">
                         <div className="flex items-center gap-1.5">
-                          <UserAvatar userId={lead.ownerId} size={22} />
-                          <span className="text-slate-500 text-xs">{userById(lead.ownerId)?.name.split(' ')[0]}</span>
+                          <UserAvatar userId={lead.ownerId} size={18} />
+                          <span className="text-slate-500">{userById(lead.ownerId)?.name.split(' ')[0]}</span>
                         </div>
                       </td>
                     )}
                     {col.nextFollowUp && (
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1.5">
                         <Link to={`/leads/${lead.id}`} onClick={(e) => e.stopPropagation()} className={`hover:underline ${followUpTone(lead.nextFollowUpAt)}`}>
                           {formatDate(lead.nextFollowUpAt)}
                         </Link>
                       </td>
                     )}
                     {col.lastContact && (
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1.5">
                         <div className="flex items-center gap-1.5">
-                          <div>
-                            <p className="text-slate-600">{formatDate(lead.lastContactAt)}</p>
-                            {lead.lastContactAt && <p className="text-xs text-slate-400">{daysAgoLabel(lead.lastContactAt)}</p>}
-                          </div>
+                          <span>
+                            <span className="text-slate-600">{formatDate(lead.lastContactAt)}</span>
+                            {lead.lastContactAt && <span className="text-slate-400"> · {daysAgoLabel(lead.lastContactAt)}</span>}
+                          </span>
                           {staleContact && (
                             <span title="Class A lead — no recent contact">
                               <AlertTriangle size={13} className="text-[var(--c-rust-deep)] shrink-0" />
@@ -541,14 +543,14 @@ export function LeadsList() {
                         </div>
                       </td>
                     )}
-                    {col.source && <td className="px-3 py-2 text-slate-500">{lead.source}</td>}
-                    {col.city && <td className="px-3 py-2 text-slate-500">{lead.city ?? '—'}</td>}
-                    {col.province && <td className="px-3 py-2 text-slate-500">{lead.province ?? '—'}</td>}
-                    {col.leadAge && <td className="px-3 py-2 text-slate-500">{leadAgeLabel(lead.createdAt)}</td>}
-                    {col.jobTitle && <td className="px-3 py-2 text-slate-500">{lead.jobTitle ?? '—'}</td>}
-                    {col.phone && <td className="px-3 py-2 text-slate-500">{lead.phone ?? '—'}</td>}
-                    {col.email && <td className="px-3 py-2 text-slate-500">{lead.email ?? '—'}</td>}
-                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    {col.source && <td className="px-2 py-1.5 text-slate-500">{lead.source}</td>}
+                    {col.city && <td className="px-2 py-1.5 text-slate-500">{lead.city ?? '—'}</td>}
+                    {col.province && <td className="px-2 py-1.5 text-slate-500">{lead.province ?? '—'}</td>}
+                    {col.leadAge && <td className="px-2 py-1.5 text-slate-500">{leadAgeLabel(lead.createdAt)}</td>}
+                    {col.jobTitle && <td className="px-2 py-1.5 text-slate-500">{lead.jobTitle ?? '—'}</td>}
+                    {col.phone && <td className="px-2 py-1.5 text-slate-500">{lead.phone ?? '—'}</td>}
+                    {col.email && <td className="px-2 py-1.5 text-slate-500">{lead.email ?? '—'}</td>}
+                    <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
                       <RowMenu
                         items={[
                           { label: 'Call', icon: <Phone size={14} />, onClick: () => logQuickAction(lead, 'Call') },

@@ -465,11 +465,11 @@ export function CollectorDashboard() {
                 <ul className="divide-y divide-slate-100">
                   {teamPeople.map(({ row, name, line: theirs }, i) => (
                     <li key={row.userId}
-                      className={`flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm ${
-                        row.userId === currentUser?.id ? 'bg-amber-50/50' : ''}`}>
+                      className={`flex items-center gap-x-4 px-4 py-1.5 text-[12.5px] whitespace-nowrap ${
+                        row.userId === currentUser?.id ? 'bg-amber-50/50' : 'hover:bg-slate-50'}`}>
                       <span className="w-5 shrink-0 tabular-nums text-slate-400">{i + 1}</span>
                       <Link to={`/performance/${row.userId}`}
-                        className="min-w-[10rem] font-medium text-slate-800 hover:underline">
+                        className="min-w-[10rem] max-w-[16rem] truncate font-medium text-slate-800 hover:underline" title={name}>
                         {name}
                         {row.userId === currentUser?.id && (
                           <span className="ml-1.5 text-[11px] font-normal text-slate-400">(you)</span>
@@ -842,9 +842,9 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
       </p>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <tr className="text-left text-slate-400 border-b border-slate-100">
               {/*
                 THE FIRM'S OWN ORDER, and it is not the order this table had. Who they are, what
                 they were set, what they have done, and only then how that reads as a percentage
@@ -870,12 +870,12 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
           <tbody>
             {shown.map((l) => (
               <tr key={l.userId}
-                className={`border-b border-slate-50 last:border-0 ${
+                className={`border-b border-slate-50 last:border-0 hover:bg-slate-50 ${
                   /* Your own row, out of thirty. Nothing louder than a tint: it is a marker, not
                      a status, and colouring it like one would read as something being wrong. */
                   l.userId === me ? 'bg-gold-50' : ''
                 }`}>
-                <td className="px-3 py-2 tabular-nums font-semibold text-slate-700">
+                <td className="px-3 py-1.5 tabular-nums font-semibold text-slate-700">
                   {places.get(l.userId)
                     ? places.get(l.userId)?.place
                     : (
@@ -885,27 +885,26 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
                       </span>
                     )}
                 </td>
-                <td className="px-2.5 py-2 whitespace-nowrap">
+                <td className="px-2.5 py-1.5 whitespace-nowrap">
                   <Link to={`/performance/${l.userId}`}
                     className="flex items-center gap-2 group">
-                    <UserAvatar userId={l.userId} size={22} />
-                    <span className="min-w-0">
-                      <span className="block text-slate-700 group-hover:underline">
-                        {l.name}
-                        {l.userId === me && <span className="ml-1 text-[10px] text-slate-400">(you)</span>}
-                      </span>
+                    <UserAvatar userId={l.userId} size={18} />
+                    <span className="min-w-0 max-w-[16rem] truncate" title={`${l.name} · ${l.grade}`}>
+                      <span className="text-slate-700 group-hover:underline">{l.name}</span>
+                      {l.userId === me && <span className="ml-1 text-[10px] text-slate-400">(you)</span>}
                       {/*
-                        UNDER THE NAME RATHER THAN IN A COLUMN OF ITS OWN. It has to be on the row
+                        BESIDE THE NAME RATHER THAN IN A COLUMN OF ITS OWN. It has to be on the row
                         -- it is half the firm's answer to "it's not a pissing contest" -- and the
                         table is thirteen columns wide already. A grade is one word and it belongs
-                        to the person, not to the figures.
+                        to the person, not to the figures. Inline in grey, not stacked under the
+                        name: the firm wants one thin line a row, like the checking list.
                       */}
-                      <span className="block text-[10px] text-slate-400">{l.grade}</span>
+                      <span className="text-slate-400"> &middot; {l.grade}</span>
                     </span>
                   </Link>
                 </td>
-                <td className="px-2.5 py-2 text-slate-500 whitespace-nowrap">{l.team}</td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-500">
+                <td className="px-2.5 py-1.5 text-slate-500 whitespace-nowrap">{l.team}</td>
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-500">
                   {moneyText(l.line.target)}
                   {/*
                     WHERE THE FIGURE CAME FROM. A team leader looking at thirty targets has to be
@@ -914,26 +913,26 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
                     wrong or never set at all.
                   */}
                   {l.line.target !== null && l.origin === 'grade' && (
-                    <span className="block text-[10px] text-slate-400">from grade</span>
+                    <span className="ml-1 text-[10px] text-slate-400">from grade</span>
                   )}
                 </td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">
                   {l.today > 0 ? formatCurrency(l.today) : '—'}
                 </td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
                   {formatCurrency(l.line.collected)}
                 </td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">
                   {l.accounts.toLocaleString('en-ZA')}
                 </td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">
                   {l.payments.toLocaleString('en-ZA')}
                 </td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">
                   {/* A dash, not R0. Somebody who took no payments has no average — see clerkLines. */}
                   {l.averagePayment === null ? '—' : formatCurrency(l.averagePayment)}
                 </td>
-                <td className="px-2.5 py-2 text-right whitespace-nowrap">
+                <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                   <span className="inline-flex items-center gap-2 justify-end">
                     <span className="tabular-nums font-medium text-slate-800">{pctText(l.line.achieved)}</span>
                     {/* Narrower than the teams table's. With thirteen columns on the row, thirty
@@ -946,15 +945,15 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
                   says which band somebody is in; this says how far from the line they are, which
                   is the difference between a conversation and a warning.
                 */}
-                <td className={`px-3 py-2 text-right tabular-nums ${
+                <td className={`px-3 py-1.5 text-right tabular-nums ${
                   l.line.gap === null ? 'text-slate-400' : l.line.gap < 0 ? 'text-rose-700' : 'text-emerald-700'
                 }`}>
                   {gapText(l.line.gap)}
                 </td>
-                <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-slate-600">
+                <td className="px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-600">
                   {moneyText(l.line.neededADay)}
                 </td>
-                <td className="px-2.5 py-2 whitespace-nowrap"><StatusPill standing={l.line.standing} /></td>
+                <td className="px-2.5 py-1.5 whitespace-nowrap"><StatusPill standing={l.line.standing} /></td>
               </tr>
             ))}
             {shown.length === 0 && (
@@ -1138,9 +1137,9 @@ function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: strin
         </span>
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <tr className="text-left text-slate-400 border-b border-slate-100">
               <th className="px-4 py-2 font-medium">Collector</th>
               <th className="px-3 py-2 font-medium text-right">Book</th>
               <th className="px-3 py-2 font-medium text-right">Collected</th>
@@ -1153,30 +1152,30 @@ function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: strin
           </thead>
           <tbody>
             {scored.map((s: CollectorScore) => (
-              <tr key={s.userId} className="border-b border-slate-50 last:border-0">
-                <td className="px-4 py-2">
+              <tr key={s.userId} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                <td className="px-4 py-1.5">
                   <span className="flex items-center gap-2">
-                    <UserAvatar userId={s.userId} size={22} />
+                    <UserAvatar userId={s.userId} size={18} />
                     <span className="text-slate-700">
                       {users.find((u) => u.id === s.userId)?.name ?? 'Unknown'}
                     </span>
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
                   {s.inPlayAccounts.toLocaleString('en-ZA')}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatCurrency(s.collected)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{s.payments}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{formatCurrency(s.collected)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{s.payments}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-800">
                   {s.paymentsPerHundred === null ? '—' : s.paymentsPerHundred.toFixed(1)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
                   {s.promiseKeptRate === null ? '—' : `${Math.round(s.promiseKeptRate * 100)}%`}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
                   {s.coverage === null ? '—' : `${Math.round(s.coverage * 100)}%`}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{s.actions.toLocaleString('en-ZA')}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{s.actions.toLocaleString('en-ZA')}</td>
               </tr>
             ))}
         </tbody>
@@ -1248,9 +1247,9 @@ function TeamTable({ rows, users, teams, targets, periodKey, pace, targetFor }: 
         </span>
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+            <tr className="text-left text-slate-400 border-b border-slate-100">
               <th className="px-4 py-2 font-medium">Team</th>
               <th className="px-3 py-2 font-medium text-right">People</th>
               <th className="px-3 py-2 font-medium text-right">Target</th>
@@ -1264,28 +1263,28 @@ function TeamTable({ rows, users, teams, targets, periodKey, pace, targetFor }: 
           </thead>
           <tbody>
             {lines.map(({ teamId, name, total, fromMembers, line }) => (
-              <tr key={teamId || 'none'} className="border-b border-slate-50 last:border-0">
-                <td className="px-4 py-2 text-slate-700">
+              <tr key={teamId || 'none'} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                <td className="px-4 py-1.5 text-slate-700">
                   {name}
                   {fromMembers && total.withTarget > 0 && total.withTarget < total.members && (
-                    <span className="block text-[11px] text-amber-700">
-                      Target from {total.withTarget} of {total.members}
+                    <span className="ml-1.5 text-[11px] text-amber-700">
+                      &middot; Target from {total.withTarget} of {total.members}
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{total.members}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-500">{moneyText(line.target)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-700">{formatCurrency(line.collected)}</td>
-                <td className="px-3 py-2 text-right">
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{total.members}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">{moneyText(line.target)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">{formatCurrency(line.collected)}</td>
+                <td className="px-3 py-1.5 text-right">
                   <span className="inline-flex items-center gap-2 justify-end">
                     <span className="tabular-nums font-medium text-slate-800">{pctText(line.achieved)}</span>
                     <ProgressBar achieved={line.achieved} />
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.stillNeeded)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.neededADay)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{moneyText(line.neededAWeek)}</td>
-                <td className="px-3 py-2"><StatusPill standing={line.standing} /></td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{moneyText(line.stillNeeded)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{moneyText(line.neededADay)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">{moneyText(line.neededAWeek)}</td>
+                <td className="px-3 py-1.5"><StatusPill standing={line.standing} /></td>
               </tr>
             ))}
           </tbody>

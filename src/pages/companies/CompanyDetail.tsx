@@ -288,39 +288,53 @@ export function CompanyDetail() {
       {companyContacts.length === 0 ? (
         <p className="text-sm text-slate-400">No contact persons yet.</p>
       ) : (
-        <div className="space-y-1">
-          {companyContacts.map((c) => (
-            <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
-              <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
-                <UserAvatar userId={c.ownerId} size={30} />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">{c.firstName} {c.lastName}</p>
-                  <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
-                </div>
-              </Link>
-              <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                {c.phone && (
-                  <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
-                )}
-                {c.mobile && (
-                  <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
-                    <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                  </PhoneLink>
-                )}
-                {c.email && (
-                  <span className="inline-flex items-center gap-1">
-                    <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                      <Mail size={11} />
+        // The checking list's shape, which the firm asked for on every list in the app: one
+        // line a person, job title after the name, each number in a column of its own.
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
+            <tbody>
+              {companyContacts.map((c) => (
+                <tr key={c.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-2 py-1.5">
+                    <Link to={`/contacts/${c.id}`} className="inline-flex items-center gap-2 max-w-[16rem]" title={`${c.firstName} ${c.lastName}${c.jobTitle ? ` · ${c.jobTitle}` : ''}`}>
+                      <UserAvatar userId={c.ownerId} size={18} />
+                      <span className="truncate">
+                        <span className="font-medium text-slate-700 hover:text-brand-600">{c.firstName} {c.lastName}</span>
+                        {c.jobTitle && <span className="text-slate-400"> · {c.jobTitle}</span>}
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.phone && (
+                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }} />
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.mobile && (
+                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, contactId: c.id, companyId: company.id }}>
+                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                      </PhoneLink>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                          <Mail size={11} />
+                        </button>
+                        {c.email}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
+                      <Pencil size={11} />
                     </button>
-                    {c.email}
-                  </span>
-                )}
-                <button onClick={() => setEditContact(c)} className="text-slate-400 hover:text-brand-600" title="Edit contact">
-                  <Pencil size={11} />
-                </button>
-              </div>
-            </div>
-          ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>
@@ -333,38 +347,38 @@ export function CompanyDetail() {
         <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
       </div>
       <div className="overflow-x-auto px-5 pb-5">
-        <table className="w-full text-sm border border-slate-100 rounded-xl overflow-hidden">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-xs text-slate-400 bg-slate-50/70">
-              <th className="font-medium px-4 py-2.5">Sub-account</th>
-              <th className="font-medium px-3 py-2.5">Code</th>
-              <th className="font-medium px-3 py-2.5 text-right">Accounts</th>
-              <th className="font-medium px-3 py-2.5 text-right">Handover Amount</th>
-              <th className="font-medium px-3 py-2.5 text-right">Payments to Date</th>
+            <tr className="text-left text-slate-400 border-b border-slate-100">
+              <th className="font-medium px-3 py-1.5">Sub-account</th>
+              <th className="font-medium px-2 py-1.5">Code</th>
+              <th className="font-medium px-2 py-1.5 text-right">Accounts</th>
+              <th className="font-medium px-2 py-1.5 text-right">Handover Amount</th>
+              <th className="font-medium px-2 py-1.5 text-right">Payments to Date</th>
             </tr>
           </thead>
           <tbody>
             {subAccounts.map((s) => (
-              <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
-                <td className="px-4 py-2.5">
-                  <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+              <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/companies/${s.id}`)}>
+                <td className="px-3 py-1.5">
+                  <Link to={`/companies/${s.id}`} onClick={(e) => e.stopPropagation()} title={s.name} className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
                     {s.name}
                   </Link>
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5">
                   {s.code ? <span className="font-mono text-[11px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{s.code}</span> : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.accountCount ?? '—'}</td>
-                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
-                <td className="px-3 py-2.5 text-right text-slate-600 tabular-nums">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
+                <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{s.accountCount ?? '—'}</td>
+                <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{s.handoverAmount !== undefined ? formatCurrency(s.handoverAmount) : '—'}</td>
+                <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{s.paymentsToDate !== undefined ? formatCurrency(s.paymentsToDate) : '—'}</td>
               </tr>
             ))}
             <tr className="border-t border-slate-200" style={{ background: 'rgba(236,220,184,0.25)' }}>
-              <td className="px-4 py-2.5 font-bold text-slate-800">Total</td>
-              <td className="px-3 py-2.5"></td>
-              <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
-              <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
-              <td className="px-3 py-2.5 text-right font-bold text-slate-800 tabular-nums">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
+              <td className="px-3 py-1.5 font-bold text-slate-800">Total</td>
+              <td className="px-2 py-1.5"></td>
+              <td className="px-2 py-1.5 text-right font-bold text-slate-800 tabular-nums whitespace-nowrap">{subAccounts.reduce((s, a) => s + (a.accountCount ?? 0), 0)}</td>
+              <td className="px-2 py-1.5 text-right font-bold text-slate-800 tabular-nums whitespace-nowrap">{formatCurrency(subAccounts.reduce((s, a) => s + (a.handoverAmount ?? 0), 0))}</td>
+              <td className="px-2 py-1.5 text-right font-bold text-slate-800 tabular-nums whitespace-nowrap">{formatCurrency(subAccounts.reduce((s, a) => s + (a.paymentsToDate ?? 0), 0))}</td>
             </tr>
           </tbody>
         </table>
@@ -447,14 +461,14 @@ export function CompanyDetail() {
       {openDeals.length === 0 ? (
         <p className="text-sm text-slate-400">No open deals.</p>
       ) : (
-        <div className="divide-y divide-slate-50">
+        // One line a row at 12.5px, the checking list's density, which the firm asked for on
+        // every list; the money cannot wrap and so cannot put its minus sign above the figure.
+        <div>
           {openDeals.map((d) => (
-            <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">{d.name}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-500">{formatCurrency(d.value)}</span>
-                <StageBadge stage={d.stage} />
-              </div>
+            <Link key={d.id} to={`/deals/${d.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+              <span className="ml-auto shrink-0 text-right tabular-nums whitespace-nowrap text-slate-500">{formatCurrency(d.value)}</span>
+              <span className="shrink-0"><StageBadge stage={d.stage} /></span>
             </Link>
           ))}
         </div>
@@ -469,11 +483,11 @@ export function CompanyDetail() {
       {wonDeals.length === 0 ? (
         <p className="text-sm text-slate-400">No won deals yet.</p>
       ) : (
-        <div className="divide-y divide-slate-50">
+        <div>
           {wonDeals.map((d) => (
-            <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">{d.name}</span>
-              <span className="text-sm font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
+            <Link key={d.id} to={`/deals/${d.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+              <span className="ml-auto shrink-0 text-right tabular-nums whitespace-nowrap font-semibold text-[var(--c-gold-deep)]">{formatCurrency(d.value)}</span>
             </Link>
           ))}
         </div>
@@ -488,11 +502,11 @@ export function CompanyDetail() {
       {companyLeads.length === 0 ? (
         <p className="text-sm text-slate-400">No leads for this company.</p>
       ) : (
-        <div className="divide-y divide-slate-50">
+        <div>
           {companyLeads.map((l) => (
-            <Link key={l.id} to={`/leads/${l.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">{l.firstName} {l.lastName}</span>
-              <StatusBadge status={l.status} />
+            <Link key={l.id} to={`/leads/${l.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0">{l.firstName} {l.lastName}</span>
+              <span className="ml-auto shrink-0"><StatusBadge status={l.status} /></span>
             </Link>
           ))}
         </div>
@@ -559,11 +573,11 @@ export function CompanyDetail() {
       {companyTasks.length === 0 ? (
         <p className="text-sm text-slate-400">No tasks yet.</p>
       ) : (
-        <div className="space-y-2">
+        <div>
           {companyTasks.map((t) => (
-            <div key={t.id} className="text-sm">
-              <p className="text-slate-700">{t.title}</p>
-              <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
+            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="text-slate-700 truncate min-w-0" title={t.title}>{t.title}</span>
+              <span className="ml-auto shrink-0 text-slate-400">Due {formatDate(t.dueDate)}</span>
             </div>
           ))}
         </div>

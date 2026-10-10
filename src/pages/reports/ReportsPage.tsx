@@ -525,31 +525,31 @@ export function ReportsPage() {
               <CardHeader title="Sales Forecast" subtitle="Weighted value = deal value × probability" />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                    <th className="font-medium px-5 py-2.5">Deal</th>
-                    <th className="font-medium px-3 py-2.5 text-right">Value</th>
-                    <th className="font-medium px-3 py-2.5 text-right">Probability</th>
-                    <th className="font-medium px-3 py-2.5 text-right">Weighted Value</th>
+                  <tr className="text-left border-y border-slate-100 text-slate-400">
+                    <th className="font-medium px-3 py-2">Deal</th>
+                    <th className="font-medium px-2 py-2 text-right">Value</th>
+                    <th className="font-medium px-2 py-2 text-right">Probability</th>
+                    <th className="font-medium px-2 py-2 text-right">Weighted Value</th>
                   </tr>
                 </thead>
                 <tbody>
                   {forecast.map((d) => (
-                    <tr key={d.id} className="border-t border-slate-50">
-                      <td className="px-5 py-2.5 font-medium text-slate-700">
+                    <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5 font-medium text-slate-700 max-w-[16rem] truncate" title={d.name}>
                         <Link to={`/deals/${d.id}`} className="hover:text-brand-600 hover:underline">
                           {d.name}
                         </Link>
                       </td>
-                      <td className="px-3 py-2.5 text-right text-slate-500">{formatCurrency(d.value)}</td>
-                      <td className="px-3 py-2.5 text-right text-slate-500">{d.probability}%</td>
-                      <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{formatCurrency(d.weighted)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{formatCurrency(d.value)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{d.probability}%</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">{formatCurrency(d.weighted)}</td>
                     </tr>
                   ))}
                   {forecast.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="text-center text-slate-400 text-sm py-8">
+                      <td colSpan={4} className="text-center text-slate-400 py-6 whitespace-normal">
                         No open deals match your filters.
                       </td>
                     </tr>
@@ -564,26 +564,26 @@ export function ReportsPage() {
       {tab === 'Products & Services' && (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400">
-                  <th className="font-medium px-5 py-3">Service</th>
-                  <th className="font-medium px-3 py-3 text-center">Leads</th>
-                  <th className="font-medium px-3 py-3 text-center">Engaged</th>
-                  <th className="font-medium px-3 py-3 text-center">Won</th>
-                  <th className="font-medium px-3 py-3 text-center">Rejected</th>
-                  <th className="font-medium px-3 py-3 text-center">Conversion</th>
-                  <th className="font-medium px-3 py-3 text-right">Pipeline Value</th>
-                  <th className="font-medium px-3 py-3 text-right">Avg Value</th>
+                <tr className="text-left border-b border-slate-100 text-slate-400">
+                  <th className="font-medium px-3 py-2">Service</th>
+                  <th className="font-medium px-2 py-2 text-center">Leads</th>
+                  <th className="font-medium px-2 py-2 text-center">Engaged</th>
+                  <th className="font-medium px-2 py-2 text-center">Won</th>
+                  <th className="font-medium px-2 py-2 text-center">Rejected</th>
+                  <th className="font-medium px-2 py-2 text-center">Conversion</th>
+                  <th className="font-medium px-2 py-2 text-right">Pipeline Value</th>
+                  <th className="font-medium px-2 py-2 text-right">Avg Value</th>
                 </tr>
               </thead>
               <tbody>
                 {servicesReport
                   .sort((a, b) => b.leads - a.leads)
                   .map((s) => (
-                    <tr key={s.service} className="border-t border-slate-50">
-                      <td className="px-5 py-3 font-medium text-slate-700">{s.service}</td>
-                      <td className="px-3 py-3 text-center">
+                    <tr key={s.service} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5 font-medium text-slate-700">{s.service}</td>
+                      <td className="px-2 py-1.5 text-center">
                         <Link
                           to={buildDrilldownUrl('/leads', { service: s.service, [SALES_MONTH_PARAM]: periodParam })}
                           className="text-slate-600 hover:text-brand-600 hover:underline"
@@ -591,12 +591,12 @@ export function ReportsPage() {
                           {s.leads}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.engaged}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.won}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.rejected}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.conversionRate}%</td>
-                      <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatCurrency(s.pipelineValue)}</td>
-                      <td className="px-3 py-3 text-right text-slate-600">{formatCurrency(s.avgValue)}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.engaged}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.won}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.rejected}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.conversionRate}%</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">{formatCurrency(s.pipelineValue)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{formatCurrency(s.avgValue)}</td>
                     </tr>
                   ))}
               </tbody>
@@ -636,34 +636,34 @@ export function ReportsPage() {
       {tab === 'Sales Team' && (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400">
-                  <th className="font-medium px-5 py-3">Salesperson</th>
-                  <th className="font-medium px-3 py-3 text-center">Leads Assigned</th>
-                  <th className="font-medium px-3 py-3 text-center">Calls</th>
-                  <th className="font-medium px-3 py-3 text-center">Meetings</th>
-                  <th className="font-medium px-3 py-3 text-center">Proposals</th>
-                  <th className="font-medium px-3 py-3 text-center">Emails Sent</th>
-                  <th className="font-medium px-3 py-3 text-center">Responded</th>
-                  <th className="font-medium px-3 py-3 text-center">Deals Won</th>
-                  <th className="font-medium px-3 py-3 text-right">Revenue Won</th>
-                  <th className="font-medium px-3 py-3 text-right">Avg Deal Value</th>
-                  <th className="font-medium px-3 py-3 text-center">Conversion</th>
+                <tr className="text-left border-b border-slate-100 text-slate-400">
+                  <th className="font-medium px-3 py-2">Salesperson</th>
+                  <th className="font-medium px-2 py-2 text-center">Leads Assigned</th>
+                  <th className="font-medium px-2 py-2 text-center">Calls</th>
+                  <th className="font-medium px-2 py-2 text-center">Meetings</th>
+                  <th className="font-medium px-2 py-2 text-center">Proposals</th>
+                  <th className="font-medium px-2 py-2 text-center">Emails Sent</th>
+                  <th className="font-medium px-2 py-2 text-center">Responded</th>
+                  <th className="font-medium px-2 py-2 text-center">Deals Won</th>
+                  <th className="font-medium px-2 py-2 text-right">Revenue Won</th>
+                  <th className="font-medium px-2 py-2 text-right">Avg Deal Value</th>
+                  <th className="font-medium px-2 py-2 text-center">Conversion</th>
                 </tr>
               </thead>
               <tbody>
                 {salespeople
                   .sort((a, b) => b.revenueWon - a.revenueWon)
                   .map((s) => (
-                    <tr key={s.rep.id} className="border-t border-slate-50">
-                      <td className="px-5 py-3">
+                    <tr key={s.rep.id} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5">
                         <Link to={`/reps/${s.rep.id}`} className="flex items-center gap-2.5 hover:text-brand-600">
-                          <UserAvatar userId={s.rep.id} size={26} />
+                          <UserAvatar userId={s.rep.id} size={20} />
                           <span className="font-medium text-slate-700">{s.rep.name}</span>
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <Link
                           to={buildDrilldownUrl('/leads', { owner: s.rep.id, [SALES_MONTH_PARAM]: periodParam })}
                           className="text-slate-600 hover:text-brand-600 hover:underline"
@@ -671,35 +671,35 @@ export function ReportsPage() {
                           {s.leadsAssigned}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Call' })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {s.calls}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Meeting' })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {s.meetings}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Proposal' })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {s.proposals}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Email' })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {s.emailsSent}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center">
+                      <td className="px-2 py-1.5 text-center">
                         <Link to={buildDrilldownUrl('/activities', { owner: s.rep.id, type: 'Email' })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {s.emailsResponded}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.dealsWon}</td>
-                      <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatCurrency(s.revenueWon)}</td>
-                      <td className="px-3 py-3 text-right text-slate-600">{formatCurrency(s.avgDealValue)}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.conversionRate}%</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.dealsWon}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">{formatCurrency(s.revenueWon)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{formatCurrency(s.avgDealValue)}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.conversionRate}%</td>
                     </tr>
                   ))}
               </tbody>
@@ -711,24 +711,24 @@ export function ReportsPage() {
       {tab === 'Lead Sources' && (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400">
-                  <th className="font-medium px-5 py-3">Source</th>
-                  <th className="font-medium px-3 py-3 text-center">Leads</th>
-                  <th className="font-medium px-3 py-3 text-center">Engaged Leads</th>
-                  <th className="font-medium px-3 py-3 text-center">Deals Won</th>
-                  <th className="font-medium px-3 py-3 text-right">Revenue</th>
-                  <th className="font-medium px-3 py-3 text-center">Conversion Rate</th>
+                <tr className="text-left border-b border-slate-100 text-slate-400">
+                  <th className="font-medium px-3 py-2">Source</th>
+                  <th className="font-medium px-2 py-2 text-center">Leads</th>
+                  <th className="font-medium px-2 py-2 text-center">Engaged Leads</th>
+                  <th className="font-medium px-2 py-2 text-center">Deals Won</th>
+                  <th className="font-medium px-2 py-2 text-right">Revenue</th>
+                  <th className="font-medium px-2 py-2 text-center">Conversion Rate</th>
                 </tr>
               </thead>
               <tbody>
                 {sourcePerformance
                   .sort((a, b) => b.revenue - a.revenue)
                   .map((s) => (
-                    <tr key={s.source} className="border-t border-slate-50">
-                      <td className="px-5 py-3 font-medium text-slate-700">{s.source}</td>
-                      <td className="px-3 py-3 text-center">
+                    <tr key={s.source} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5 font-medium text-slate-700">{s.source}</td>
+                      <td className="px-2 py-1.5 text-center">
                         <Link
                           to={buildDrilldownUrl('/leads', { source: s.source, [SALES_MONTH_PARAM]: periodParam })}
                           className="text-slate-600 hover:text-brand-600 hover:underline"
@@ -736,10 +736,10 @@ export function ReportsPage() {
                           {s.leads}
                         </Link>
                       </td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.engaged}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.won}</td>
-                      <td className="px-3 py-3 text-right font-semibold text-slate-700">{formatCurrency(s.revenue)}</td>
-                      <td className="px-3 py-3 text-center text-slate-600">{s.conversionRate}%</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.engaged}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.won}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">{formatCurrency(s.revenue)}</td>
+                      <td className="px-2 py-1.5 text-center text-slate-600">{s.conversionRate}%</td>
                     </tr>
                   ))}
               </tbody>
@@ -759,23 +759,23 @@ export function ReportsPage() {
               <CardHeader title="Province Breakdown" />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                    <th className="font-medium px-5 py-2.5">Province</th>
-                    <th className="font-medium px-3 py-2.5 text-center">Leads</th>
-                    <th className="font-medium px-3 py-2.5 text-center">Won</th>
-                    <th className="font-medium px-3 py-2.5 text-center">Conversion</th>
-                    <th className="font-medium px-3 py-2.5 text-right">Pipeline Value</th>
+                  <tr className="text-left border-y border-slate-100 text-slate-400">
+                    <th className="font-medium px-3 py-2">Province</th>
+                    <th className="font-medium px-2 py-2 text-center">Leads</th>
+                    <th className="font-medium px-2 py-2 text-center">Won</th>
+                    <th className="font-medium px-2 py-2 text-center">Conversion</th>
+                    <th className="font-medium px-2 py-2 text-right">Pipeline Value</th>
                   </tr>
                 </thead>
                 <tbody>
                   {provinceReport
                     .sort((a, b) => b.leads - a.leads)
                     .map((p) => (
-                      <tr key={p.province} className="border-t border-slate-50">
-                        <td className="px-5 py-2.5 font-medium text-slate-700">{p.province}</td>
-                        <td className="px-3 py-2.5 text-center">
+                      <tr key={p.province} className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="px-3 py-1.5 font-medium text-slate-700">{p.province}</td>
+                        <td className="px-2 py-1.5 text-center">
                           <Link
                             to={buildDrilldownUrl('/leads', { province: p.province, [SALES_MONTH_PARAM]: periodParam })}
                             className="text-slate-600 hover:text-brand-600 hover:underline"
@@ -783,9 +783,9 @@ export function ReportsPage() {
                             {p.leads}
                           </Link>
                         </td>
-                        <td className="px-3 py-2.5 text-center text-slate-600">{p.won}</td>
-                        <td className="px-3 py-2.5 text-center text-slate-600">{p.conversionRate}%</td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{formatCurrency(p.pipelineValue)}</td>
+                        <td className="px-2 py-1.5 text-center text-slate-600">{p.won}</td>
+                        <td className="px-2 py-1.5 text-center text-slate-600">{p.conversionRate}%</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">{formatCurrency(p.pipelineValue)}</td>
                       </tr>
                     ))}
                 </tbody>
@@ -797,18 +797,18 @@ export function ReportsPage() {
               <CardHeader title="Top Cities / Towns" />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                    <th className="font-medium px-5 py-2.5">City / Town</th>
-                    <th className="font-medium px-3 py-2.5 text-center">Leads</th>
+                  <tr className="text-left border-y border-slate-100 text-slate-400">
+                    <th className="font-medium px-3 py-2">City / Town</th>
+                    <th className="font-medium px-2 py-2 text-center">Leads</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cityReport.map((c) => (
-                    <tr key={c.city} className="border-t border-slate-50">
-                      <td className="px-5 py-2.5 font-medium text-slate-700">{c.city}</td>
-                      <td className="px-3 py-2.5 text-center">
+                    <tr key={c.city} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5 font-medium text-slate-700">{c.city}</td>
+                      <td className="px-2 py-1.5 text-center">
                         <Link to={buildDrilldownUrl('/leads', { city: c.city, [SALES_MONTH_PARAM]: periodParam })} className="text-slate-600 hover:text-brand-600 hover:underline">
                           {c.leads}
                         </Link>
@@ -817,7 +817,7 @@ export function ReportsPage() {
                   ))}
                   {cityReport.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="text-center text-slate-400 text-sm py-8">
+                      <td colSpan={2} className="text-center text-slate-400 py-6 whitespace-normal">
                         No leads with a city captured for this Sales Cycle and filters.
                       </td>
                     </tr>
@@ -853,11 +853,11 @@ export function ReportsPage() {
             </Card>
             <Card>
               <CardHeader title="Breakdown" />
-              <div className="space-y-2">
+              <div className="text-[12.5px]">
                 {lostByReason.map((r) => (
-                  <div key={r.name} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-600">{r.name}</span>
-                    <span className="font-semibold text-slate-700">{r.value}</span>
+                  <div key={r.name} className="flex items-center justify-between gap-3 border-b border-slate-50 py-1.5 hover:bg-slate-50">
+                    <span className="text-slate-600 truncate" title={r.name}>{r.name}</span>
+                    <span className="font-semibold text-slate-700 tabular-nums">{r.value}</span>
                   </div>
                 ))}
                 {lostByReason.length === 0 && <p className="text-sm text-slate-400">No lost deals in this Sales Cycle.</p>}

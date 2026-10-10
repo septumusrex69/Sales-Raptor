@@ -2930,12 +2930,12 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
         </p>
       )}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {days.map((day) => (
           <div key={day.date}>
-            <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">{formatDate(day.date)}</p>
-            <div className="space-y-2.5">
-              {day.entries.map((e) => <TimelineRow key={e.id} entry={e} />)}
+            <p className="text-[11px] text-slate-400 mb-1 border-b border-slate-100 pb-0.5">{formatDate(day.date)}</p>
+            <div className="divide-y divide-slate-50">
+              {day.entries.map((e) => <div key={e.id} className="py-1 hover:bg-slate-50"><TimelineRow entry={e} /></div>)}
             </div>
           </div>
         ))}
@@ -2963,65 +2963,55 @@ function TimelinePanel({ entries, accountId, userName, userId, onChange, noteRef
  */
 const CLAMP_AT = 150
 
+/*
+ * ONE LINE AN ENTRY, AT THE FIRM'S ASKING. "Wherever in this whole app there are a lot of things
+ * listed under each other... it should look like the checking list: thin, sleek, easy to read."
+ * This was a 28px icon and two lines a row -- the title, then who and how under it -- so a
+ * fortnight of work filled the screen. Now the title, then the detail and the author after it in
+ * grey, then the money hard right, on one line. Nothing is dropped: a closed row truncates with the
+ * whole of it on the title, and a long one still opens in place (click it, or Show more) to its
+ * full wrapped text. A newline counts as long too, because a typed note's second line is the one a
+ * single line hides.
+ */
 function TimelineRow({ entry }: { entry: TimelineEntry }) {
   const style = styleFor(entry)
   const Icon = style.icon
   const reversed = entry.status === 'reversed'
   const [open, setOpen] = useState(false)
-  const long = entry.title.length > CLAMP_AT
+  const long = entry.title.length > CLAMP_AT || entry.title.includes('\n')
   const wraps = entry.kind === 'note' || entry.kind === 'query' || entry.kind === 'main_comment'
+  const aside = [entry.detail, entry.by].filter(Boolean).join(' · ')
   return (
-    <div className="flex gap-3">
-      <div className={`w-7 h-7 rounded-full grid place-items-center shrink-0 ${style.ring}`}>
-        <Icon size={13} className={style.fg} />
+    <div className={`flex gap-2 text-[12.5px] ${open ? 'items-start' : 'items-center'}`}>
+      <div className={`w-5 h-5 rounded-full grid place-items-center shrink-0 ${style.ring}`}>
+        <Icon size={11} className={style.fg} />
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <p
-            onClick={long ? () => setOpen((v) => !v) : undefined}
-            className={`text-sm min-w-0 wrap-anywhere ${wraps ? 'whitespace-pre-wrap' : ''} ${
-              long ? 'cursor-pointer' : ''} ${long && !open ? 'line-clamp-3' : ''} ${
-              reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}
-          >
-            {entry.title}
-            {entry.status && entry.kind === 'promise' && <PromiseChip status={entry.status} />}
-          </p>
-          <span className="text-sm tabular-nums shrink-0">
-            {entry.amount != null
-              ? <span className={entry.kind === 'payment' && !reversed ? 'text-positive-700 font-medium' : 'text-slate-600'}>
-                  {formatMoney(entry.amount)}
-                </span>
-              : entry.free
-                ? <span className="text-slate-300 text-xs" title="Work done past the Annexure B ceiling. Real history, no money.">not charged</span>
-                : null}
-          </span>
-        </div>
-        {/*
-          SHOW MORE SITS ON THE LINE THAT WAS ALREADY THERE, hard right.
-
-          THE FIRM, looking at a timeline of filed emails: "this email is taking a lot of space...
-          maybe the show more can be more on the right to make this smaller. It's starting to
-          become very big." It had a line of its own under every clamped entry, so a filed email
-          cost five lines: two of subject, the ellipsis, Show more, and the author. Moved onto the
-          author's line it costs four, and the eye has one column to run down instead of two.
-
-          The row is drawn whenever there is EITHER something to say or something to open, so an
-          entry with no author still gets its button.
-        */}
-        {(entry.detail || entry.by || long) && (
-          <div className="mt-0.5 flex items-baseline justify-between gap-3">
-            <p className="min-w-0 truncate text-[11px] text-slate-400">
-              {[entry.detail, entry.by].filter(Boolean).join(' · ')}
-            </p>
-            {long && (
-              <button onClick={() => setOpen((v) => !v)}
-                className="shrink-0 text-[11px] text-brand-600 hover:underline">
-                {open ? 'Show less' : 'Show more'}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      <p
+        onClick={long ? () => setOpen((v) => !v) : undefined}
+        title={open ? undefined : [entry.title, aside].filter(Boolean).join(' · ')}
+        className={`min-w-0 flex-1 ${open ? `wrap-anywhere ${wraps ? 'whitespace-pre-wrap' : ''}` : 'truncate'} ${
+          long ? 'cursor-pointer' : ''} ${
+          reversed ? 'line-through text-slate-400' : 'text-slate-700'}`}
+      >
+        {entry.title}
+        {entry.status && entry.kind === 'promise' && <PromiseChip status={entry.status} />}
+        {aside && <span className="text-slate-400"> · {aside}</span>}
+      </p>
+      {long && (
+        <button onClick={() => setOpen((v) => !v)}
+          className="shrink-0 text-[11px] text-brand-600 hover:underline">
+          {open ? 'Show less' : 'Show more'}
+        </button>
+      )}
+      <span className="tabular-nums whitespace-nowrap text-right shrink-0">
+        {entry.amount != null
+          ? <span className={entry.kind === 'payment' && !reversed ? 'text-positive-700 font-medium' : 'text-slate-600'}>
+              {formatMoney(entry.amount)}
+            </span>
+          : entry.free
+            ? <span className="text-slate-300 text-[11px]" title="Work done past the Annexure B ceiling. Real history, no money.">not charged</span>
+            : null}
+      </span>
     </div>
   )
 }
@@ -3972,22 +3962,26 @@ function StandingPanel({
       {ownedProperty.length > 0 && new Set(ownedProperty.map((p) => p.owner)).size > 1 && (
         <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden">
           <Finding icon={<Home size={12} />} label="Property held, across every trace">
-            <ul className="space-y-1">
-              {ownedProperty.slice(0, 5).map((p) => (
-                <li key={`${p.traceId}:${p.item.id}`} className="min-w-0">
-                  <button type="button" onClick={() => onOpenTrace(p.traceId)}
-                    className="block text-left w-full hover:underline">
-                    <span className="block text-sm text-slate-800 break-words">{p.item.value}</span>
-                    <span className="block text-[11px] text-slate-400">
-                      {[
-                        p.owner ?? (p.ownerKind === 'director' ? 'a director' : 'the debtor'),
-                        p.ownerKind === 'director' ? 'director' : null,
-                        p.item.amount !== null ? `bought for ${formatMoney(p.item.amount)}` : null,
-                      ].filter(Boolean).join(' \u00b7 ')}
-                    </span>
-                  </button>
-                </li>
-              ))}
+            {/* One line a property: the deed, then whose it is after a dot -- the firm's "thin,
+                sleek" list. The whole line rides on the title where the panel truncates it. */}
+            <ul>
+              {ownedProperty.slice(0, 5).map((p) => {
+                const whose = [
+                  p.owner ?? (p.ownerKind === 'director' ? 'a director' : 'the debtor'),
+                  p.ownerKind === 'director' ? 'director' : null,
+                  p.item.amount !== null ? `bought for ${formatMoney(p.item.amount)}` : null,
+                ].filter(Boolean).join(' \u00b7 ')
+                return (
+                  <li key={`${p.traceId}:${p.item.id}`} className="min-w-0">
+                    <button type="button" onClick={() => onOpenTrace(p.traceId)}
+                      title={`${p.item.value} \u00b7 ${whose}`}
+                      className="block text-left w-full truncate py-0.5 text-[12.5px] hover:underline">
+                      <span className="text-slate-800">{p.item.value}</span>
+                      <span className="text-[11px] text-slate-400"> · {whose}</span>
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
             {ownedProperty.length > 5 && (
               <p className="text-[11px] text-slate-400 mt-1">
@@ -4035,15 +4029,19 @@ function StandingPanel({
               commercial trace and they land here with the judgments against them.
             </p>
           )}
-          <ul className="space-y-1.5">
+          {/* ONE LINE A DIRECTOR -- the firm's "thin, sleek, easy to read". The ID number, their
+              other companies and anything against them personally used to stack under the name;
+              they follow it now, each truncated with the whole of it on its title. */}
+          <ul className="divide-y divide-slate-50">
             {directors.map((d) => (
-              <li key={d.id} className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
-                <span className={d.status === 'Resigned' ? 'text-slate-400' : 'text-slate-800'}>
+              <li key={d.id} className="flex items-center gap-2 py-1 text-[12.5px] whitespace-nowrap min-w-0 hover:bg-slate-50">
+                <span className={`min-w-0 truncate ${d.status === 'Resigned' ? 'text-slate-400' : 'text-slate-800'}`}
+                  title={[d.fullName, d.idNumber].filter(Boolean).join(' · ')}>
                   {d.fullName}
                   {/* The ID number is why a director is stored at all: their own trace is keyed on it. */}
-                  {d.idNumber && <span className="block text-[11px] text-slate-400 font-mono">{d.idNumber}</span>}
+                  {d.idNumber && <span className="text-[11px] text-slate-400 font-mono"> · {d.idNumber}</span>}
                 </span>
-                <span className={`text-[11px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                <span className={`text-[11px] px-2 py-0.5 rounded-full shrink-0 ${
                   d.status === 'Resigned' ? 'bg-slate-100 text-slate-500' : 'bg-positive-50 text-positive-700'
                 }`}>
                   {d.status ?? 'Unknown'}
@@ -4111,53 +4109,57 @@ function StandingPanel({
             </p>
           )}
 
-          <ul className="divide-y divide-slate-100">
-            {ownJudgments.map((j) => (
-              <li key={j.id} className="px-2.5 py-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 break-words">
-                      {j.plaintiff ?? 'Plaintiff not recorded'}
-                    </p>
-                    <p className="text-[11px] text-slate-400">creditor</p>
-                  </div>
-                  {j.amount !== null && (
-                    <span className="text-sm text-slate-700 tabular-nums shrink-0">{formatMoney(j.amount)}</span>
-                  )}
-                </div>
-
-                {/*
-                  TWO COLUMNS IN THIS PANEL, FOUR WHERE THERE IS ROOM. The design was drawn with
-                  four across a full-width card; this panel is a 19rem column in the three-column
-                  layout, where four columns give each about forty pixels and "Judgement By
-                  Default" wraps to four lines. @container, so it answers to the PANEL's width and
-                  not the screen's -- the same card is wide in the one-column layout.
-                */}
-                <dl className="mt-2 grid grid-cols-2 @lg/trace:grid-cols-4 gap-x-3 gap-y-1.5">
-                  <JudgmentCell label="Date" value={j.filedOn ? formatDate(j.filedOn) : null} />
-                  {/*
-                    WHAT THE DEBT WAS, then WHAT THE COURT DID. The bureau's two columns are
-                    caseReason ("Levies") and caseType ("Judgement By Default"), and they answer
-                    those two different questions in that order.
-                  */}
-                  <JudgmentCell label="Type" value={j.caseReason} />
-                  <JudgmentCell label="Outcome" value={j.caseType} />
-                  <JudgmentCell label="Case number" value={j.caseNumber} />
-                </dl>
-
-                {/*
-                  THE ROW AS THE BUREAU PRINTED IT, where its columns could not be split. Shown as
-                  the bureau's own words rather than dressed up as a plaintiff — a judgment nobody
-                  could parse is still a judgment, and who sued is the part worth having.
-                */}
-                {j.plaintiff === null && j.sourceText !== null && (
-                  <p className="mt-1.5 text-[11px] text-slate-500 italic">
-                    As printed: &ldquo;{j.sourceText}&rdquo;
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
+          {/*
+            ONE LINE A JUDGMENT, the checking list's shape, which is what the firm asked every list
+            in the app to be. The four labelled columns they drew are still the four columns --
+            they are simply a table's headings now rather than four little labels repeated in
+            every card, which is what made one judgment five lines tall. The creditor leads and
+            the amount closes, so the eye reads who and how much at the two ends. Too wide for
+            the panel, it scrolls sideways inside it rather than wrapping.
+          */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-400">
+                  <th className="px-3 py-1.5 text-left font-medium">Creditor</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Date</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Type</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Outcome</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Case number</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownJudgments.map((j) => (
+                  <tr key={j.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    {/*
+                      THE ROW AS THE BUREAU PRINTED IT, where its columns could not be split. Shown
+                      as the bureau's own words rather than dressed up as a plaintiff -- a judgment
+                      nobody could parse is still a judgment, and who sued is the part worth having.
+                    */}
+                    <td className="px-3 py-1.5 max-w-[16rem] truncate font-medium text-slate-800"
+                      title={j.plaintiff ?? (j.sourceText !== null ? `As printed: \u201c${j.sourceText}\u201d` : undefined)}>
+                      {j.plaintiff === null && j.sourceText !== null
+                        ? <span className="font-normal italic text-slate-500">As printed: &ldquo;{j.sourceText}&rdquo;</span>
+                        : j.plaintiff ?? <span className="font-normal text-slate-400">Plaintiff not recorded</span>}
+                    </td>
+                    <JudgmentCell label="Date" value={j.filedOn ? formatDate(j.filedOn) : null} />
+                    {/*
+                      WHAT THE DEBT WAS, then WHAT THE COURT DID. The bureau's two columns are
+                      caseReason ("Levies") and caseType ("Judgement By Default"), and they answer
+                      those two different questions in that order.
+                    */}
+                    <JudgmentCell label="Type" value={j.caseReason} />
+                    <JudgmentCell label="Outcome" value={j.caseType} />
+                    <JudgmentCell label="Case number" value={j.caseNumber} />
+                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-700">
+                      {j.amount !== null ? formatMoney(j.amount) : '\u2014'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </Card>
@@ -4404,15 +4406,15 @@ function Finding({ icon, label, children, action, divider }: {
   )
 }
 
-/** One column of a judgment. Absent values say so rather than leaving a blank under a heading. */
+/** One column of a judgment, as a table cell. Absent values say so rather than leaving a blank
+ *  under a heading; the label rides on the title for whoever is reading a cell scrolled away from
+ *  its heading. */
 function JudgmentCell({ label, value }: { label: string; value: string | null }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[10px] uppercase tracking-wide text-slate-400">{label}</dt>
-      <dd className={`text-xs break-words ${value ? 'text-slate-800' : 'text-slate-400'}`}>
-        {value ?? 'Not recorded'}
-      </dd>
-    </div>
+    <td title={value ? `${label}: ${value}` : label}
+      className={`px-2 py-1.5 max-w-[12rem] truncate ${value ? 'text-slate-800' : 'text-slate-400'}`}>
+      {value ?? 'Not recorded'}
+    </td>
   )
 }
 
@@ -4446,12 +4448,11 @@ function JudgmentCell({ label, value }: { label: string; value: string | null })
 function PersonalJudgments({ judgments }: { judgments: AccountJudgment[] }) {
   if (judgments.length === 0) return null
   const newest = judgments.reduce((a, b) => ((b.filedOn ?? '') > (a.filedOn ?? '') ? b : a))
+  const said = `${judgments.length === 1 ? 'A judgment against them personally' : `${judgments.length} judgments against them personally`}${
+    newest.plaintiff ? ` — ${newest.plaintiff}` : ''}${newest.filedOn ? `, ${formatDate(newest.filedOn)}` : ''}`
+  /* Inline and truncated, on the director's own line -- see the directors list. */
   return (
-    <span className="block w-full mt-0.5 text-[11px] text-negative-700">
-      {judgments.length === 1 ? 'A judgment against them personally' : `${judgments.length} judgments against them personally`}
-      {newest.plaintiff && <> &mdash; {newest.plaintiff}</>}
-      {newest.filedOn && <>, {formatDate(newest.filedOn)}</>}
-    </span>
+    <span className="min-w-0 truncate text-[11px] text-negative-700" title={said}>{said}</span>
   )
 }
 
@@ -4462,20 +4463,18 @@ function Directorships({ companies }: { companies: DirectorCompany[] }) {
   const { active, resigned } = directorshipSummary(companies)
   const named = active.slice(0, NAME_AT_MOST)
   const unnamed = active.length - named.length
+  const resignedLine = resigned > 0
+    ? `${active.length > 0 ? 'and has resigned from' : 'Has resigned from'} ${resigned} other${resigned === 1 ? ' company' : ' companies'}`
+    : null
+  /* Inline and truncated, on the director's own line, with the whole sentence on the title. */
+  const said = [
+    named.length > 0 ? `Also directs ${named.map((c) => c.companyName).join(', ')}${unnamed > 0 ? ` and ${unnamed} more` : ''}` : null,
+    resignedLine,
+  ].filter(Boolean).join(' ')
   return (
-    <span className="block w-full mt-0.5">
-      {named.length > 0 && (
-        <span className="block text-[11px] text-slate-500">
-          Also directs {named.map((c) => c.companyName).join(', ')}
-          {unnamed > 0 && ` and ${unnamed} more`}
-        </span>
-      )}
-      {resigned > 0 && (
-        <span className="block text-[11px] text-slate-400">
-          {active.length > 0 ? 'and has resigned from' : 'Has resigned from'} {resigned} other
-          {resigned === 1 ? ' company' : ' companies'}
-        </span>
-      )}
+    <span className="min-w-0 truncate text-[11px] text-slate-500" title={said}>
+      {named.length > 0 && <>Also directs {named.map((c) => c.companyName).join(', ')}{unnamed > 0 && ` and ${unnamed} more`}</>}
+      {resignedLine && <span className="text-slate-400">{named.length > 0 ? ' ' : ''}{resignedLine}</span>}
     </span>
   )
 }
@@ -4668,27 +4667,33 @@ function StatementTable({
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <caption className="sr-only">Statement for account {account.accountNumber}</caption>
           <thead>
-            <tr className="text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200">
-              <th className="text-left px-3 py-2 font-medium">Date</th>
-              <th className="text-left px-3 py-2 font-medium">Detail</th>
-              <th className="text-right px-3 py-2 font-medium">Debit</th>
-              <th className="text-right px-3 py-2 font-medium">Credit</th>
-              <th className="text-right px-3 py-2 font-medium">Balance</th>
+            <tr className="text-slate-400 border-b border-slate-100">
+              <th className="text-left px-3 py-1.5 font-medium">Date</th>
+              <th className="text-left px-2 py-1.5 font-medium">Detail</th>
+              <th className="text-right px-2 py-1.5 font-medium">Debit</th>
+              <th className="text-right px-2 py-1.5 font-medium">Credit</th>
+              <th className="text-right px-3 py-1.5 font-medium">Balance</th>
             </tr>
           </thead>
           <tbody>
             {statement.map((l, i) => (
-              <tr key={i} className="border-b border-slate-50 last:border-0">
+              <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                 <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{formatDate(l.date)}</td>
-                <td className={`px-3 py-1.5 ${l.kind === 'payment' ? 'text-positive-700'
-                  : l.kind === 'fee-no-charge' ? 'text-slate-500' : 'text-slate-700'}`}>
+                {/* ONE LINE A MOVEMENT (the firm: "thin, sleek, easy to read"). The note on the
+                    running interest line used to sit under it; it follows it now, and a long
+                    description truncates with the whole of it on the title. */}
+                <td className={`px-2 py-1.5 max-w-[28rem] truncate ${l.kind === 'payment' ? 'text-positive-700'
+                  : l.kind === 'fee-no-charge' ? 'text-slate-500' : 'text-slate-700'}`}
+                  title={l.kind === 'interest-accruing'
+                    ? `${l.description} · Running since the last monthly posting. It will be charged as part of this month.`
+                    : l.description}>
                   {l.description}
                   {l.kind === 'interest-accruing' && (
-                    <span className="block text-[11px] text-slate-400">
-                      Running since the last monthly posting. It will be charged as part of this month.
+                    <span className="text-[11px] text-slate-400">
+                      {' · '}Running since the last monthly posting. It will be charged as part of this month.
                     </span>
                   )}
                 </td>
@@ -4700,12 +4705,12 @@ function StatementTable({
                   blank it would read as a number somebody forgot to fill in, on the one page whose
                   whole job is to be checkable; the words say the work happened and earned nothing.
                 */}
-                <td className={`px-3 py-1.5 text-right tabular-nums ${
+                <td className={`px-2 py-1.5 text-right tabular-nums whitespace-nowrap ${
                   l.kind === 'fee-no-charge' ? 'text-slate-400' : 'text-slate-700'}`}>
                   {l.kind === 'fee-no-charge' ? 'no charge' : l.debit ? formatMoney(l.debit) : ''}
                 </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums font-medium text-slate-900">{formatMoney(l.balance)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-positive-700">{l.credit ? formatMoney(l.credit) : ''}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-900">{formatMoney(l.balance)}</td>
               </tr>
             ))}
           </tbody>
@@ -4718,7 +4723,10 @@ function StatementTable({
             would charge a fee for a payment nobody has made.
           */}
           {breakdown && breakdown.balance > 0 && (
-            <tfoot>
+            /* The quotation keeps its explanatory sentence free to wrap: it is a footnote under
+               the movements, not one of them, and held to one line it would widen the Detail
+               column for every row above it. */
+            <tfoot className="whitespace-normal">
               <tr className="border-t-2 border-slate-200">
                 <td className="px-3 pt-3 text-slate-500 text-xs" colSpan={2}>Balance outstanding</td>
                 <td colSpan={2} />

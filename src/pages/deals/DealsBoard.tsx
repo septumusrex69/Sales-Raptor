@@ -247,7 +247,7 @@ export function DealsBoard() {
                   </div>
                 </div>
                 <p className="px-3.5 text-xs text-slate-400 -mt-2 mb-2">{formatCurrency(stageValue)}</p>
-                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2.5">
+                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1.5">
                   {stageDeals.map((deal) => (
                     <DealCard
                       key={deal.id}
@@ -266,16 +266,16 @@ export function DealsBoard() {
       ) : (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400">
-                  <th className="font-medium px-5 py-2.5">{header('name', 'Deal')}</th>
-                  <th className="font-medium px-3 py-2.5">{header('company', 'Company')}</th>
-                  <th className="font-medium px-3 py-2.5 text-right">{header('value', 'Value', 'right')}</th>
-                  <th className="font-medium px-3 py-2.5">{header('stage', 'Stage')}</th>
-                  <th className="font-medium px-3 py-2.5">{header('probability', 'Probability')}</th>
-                  <th className="font-medium px-3 py-2.5">{header('owner', 'Owner')}</th>
-                  <th className="font-medium px-3 py-2.5">{header('expectedCloseDate', 'Expected Close')}</th>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="font-medium px-3 py-1.5">{header('name', 'Deal')}</th>
+                  <th className="font-medium px-2 py-1.5">{header('company', 'Company')}</th>
+                  <th className="font-medium px-2 py-1.5 text-right">{header('value', 'Value', 'right')}</th>
+                  <th className="font-medium px-2 py-1.5">{header('stage', 'Stage')}</th>
+                  <th className="font-medium px-2 py-1.5">{header('probability', 'Probability')}</th>
+                  <th className="font-medium px-2 py-1.5">{header('owner', 'Owner')}</th>
+                  <th className="font-medium px-2 py-1.5">{header('expectedCloseDate', 'Expected Close')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -293,16 +293,20 @@ export function DealsBoard() {
                       </td>
                     </tr>
                   )}
-                  <tr onClick={() => navigate(`/deals/${deal.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
-                    <td className="px-5 py-2">
-                      <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
-                        {deal.name}
-                      </Link>
-                      {deal.notes && <p className="text-xs text-slate-400 truncate max-w-[28ch]" title={deal.notes}>{deal.notes}</p>}
+                  <tr onClick={() => navigate(`/deals/${deal.id}`)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+                    <td className="px-3 py-1.5">
+                      {/* The note rides after the name, not under it — under it, every deal with a
+                          note was a two-line row, and the firm asked for one line throughout. */}
+                      <span className="block max-w-[24rem] truncate" title={deal.notes ? `${deal.name} · ${deal.notes}` : deal.name}>
+                        <Link to={`/deals/${deal.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
+                          {deal.name}
+                        </Link>
+                        {deal.notes && <span className="text-slate-400"> · {deal.notes}</span>}
+                      </span>
                     </td>
-                    <td className="px-3 py-2 text-slate-500">{companyById(deal.companyId)?.name}</td>
-                    <td className="px-3 py-2 text-right font-medium text-slate-700">{formatCurrency(deal.value)}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5 text-slate-500"><span className="block max-w-[16rem] truncate" title={companyById(deal.companyId)?.name}>{companyById(deal.companyId)?.name}</span></td>
+                    <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-700">{formatCurrency(deal.value)}</td>
+                    <td className="px-2 py-1.5">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -315,14 +319,14 @@ export function DealsBoard() {
                         <StageBadge stage={deal.stage} label={dealStageLabel(deal)} />
                       </button>
                     </td>
-                    <td className="px-3 py-2 text-slate-500">{deal.probability}%</td>
-                    <td className="px-3 py-2">
+                    <td className="px-2 py-1.5 text-slate-500 tabular-nums">{deal.probability}%</td>
+                    <td className="px-2 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <UserAvatar userId={deal.ownerId} size={22} />
-                        <span className="text-slate-500 text-xs">{userById(deal.ownerId)?.name.split(' ')[0]}</span>
+                        <UserAvatar userId={deal.ownerId} size={18} />
+                        <span className="text-slate-500">{userById(deal.ownerId)?.name.split(' ')[0]}</span>
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
+                    <td className="px-3 py-1.5 text-slate-500">{formatDate(deal.expectedCloseDate)}</td>
                   </tr>
                   </Fragment>
                   )
@@ -350,42 +354,38 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
   const { companyById, contactById } = useAppStore()
   const company = companyById(deal.companyId)
   const contact = contactById(deal.contactId)
+  // Two short lines, which is what the firm asked every list to come down to: who and how much,
+  // then everything else after a " · ". The note was a third block and the owner row a fourth;
+  // the note is now the card's tooltip, so it is still one hover away.
+  const lockedHint = canDrag ? null : "Only this deal's owner, a Sales Manager, or an Administrator can move its stage"
+  const tip = [lockedHint, deal.notes].filter(Boolean).join('\n') || undefined
   return (
     <div
       draggable={canDrag}
       onDragStart={onDragStart}
       onClick={onOpen}
-      title={canDrag ? undefined : "Only this deal's owner, a Sales Manager, or an Administrator can move its stage"}
-      className={`bg-white rounded-lg border border-slate-200 px-3 py-2.5 hover:shadow-md hover:border-slate-300 transition-shadow ${canDrag ? 'cursor-pointer' : 'cursor-default'}`}
+      title={tip}
+      className={`bg-white rounded-md border border-slate-200 px-2.5 py-1.5 text-[12.5px] hover:border-slate-300 hover:shadow-sm transition-shadow ${canDrag ? 'cursor-pointer' : 'cursor-default'}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-800 truncate">{company?.name ?? deal.name}</p>
-          <p className="text-xs text-slate-500 truncate">
-            {deal.service ?? deal.name}
-            {contact ? ` · ${contact.firstName} ${contact.lastName}` : ''}
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="font-medium text-slate-800 truncate min-w-0">{company?.name ?? deal.name}</p>
+        {dealKind(deal) === 'Handover' ? (
+          <p className="font-semibold text-slate-800 tabular-nums whitespace-nowrap shrink-0">
+            {deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '—'}
+            <span className="text-[10px] font-medium text-slate-400 ml-1">book</span>
           </p>
-        </div>
-        <div className="text-right shrink-0">
-          {dealKind(deal) === 'Handover' ? (
-            <p className="text-sm font-bold text-slate-800 tabular-nums">
-              {deal.handoverAmount != null ? formatCurrency(deal.handoverAmount) : '—'}
-              <span className="text-[10px] font-medium text-slate-400 ml-1">book</span>
-            </p>
-          ) : (
-            <p className="text-sm font-bold text-slate-800 tabular-nums">{formatCurrency(deal.value)}</p>
-          )}
-          <p className="text-[11px] text-slate-400 tabular-nums">{deal.probability}%</p>
-        </div>
+        ) : (
+          <p className="font-semibold text-slate-800 tabular-nums whitespace-nowrap shrink-0">{formatCurrency(deal.value)}</p>
+        )}
       </div>
-
-      {deal.notes && <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2">{deal.notes}</p>}
-
-      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-50 text-[11px] text-slate-400">
-        <UserAvatar userId={deal.ownerId} size={18} />
-        <span className="truncate" title={`Opened ${formatDate(deal.createdAt)} · Close ${formatDate(deal.expectedCloseDate)}`}>
-          {relativeDayLabel(deal.createdAt)} · closes {formatDate(deal.expectedCloseDate)}
+      <div className="flex items-center gap-1.5 text-[11px] text-slate-400 min-w-0">
+        <UserAvatar userId={deal.ownerId} size={14} />
+        <span className="truncate min-w-0" title={`Opened ${formatDate(deal.createdAt)} · Close ${formatDate(deal.expectedCloseDate)}`}>
+          {deal.service ?? deal.name}
+          {contact ? ` · ${contact.firstName} ${contact.lastName}` : ''}
+          {` · ${relativeDayLabel(deal.createdAt)} · closes ${formatDate(deal.expectedCloseDate)}`}
         </span>
+        <span className="ml-auto shrink-0 tabular-nums">{deal.probability}%</span>
       </div>
     </div>
   )

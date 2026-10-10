@@ -53,15 +53,15 @@ export function RepLeaderboard({ rows }: { rows: LeaderboardRow[] }) {
         <CardHeader title="Top Performing Reps" subtitle="Click a column to sort · click a rep for their full performance report" />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-              <th className="font-medium px-5 py-2.5">Rep</th>
+            <tr className="text-left border-y border-slate-100 text-slate-400">
+              <th className="font-medium px-3 py-2">Rep</th>
               {COLUMNS.map((c) => (
                 <th
                   key={c.key}
                   onClick={() => toggleSort(c.key)}
-                  className="font-medium px-3 py-2.5 text-right cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
+                  className="font-medium px-2 py-2 text-right cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
                 >
                   {c.label}
                   {sortKey === c.key ? (sortDir === 'desc' ? ' ▼' : ' ▲') : ''}
@@ -71,8 +71,8 @@ export function RepLeaderboard({ rows }: { rows: LeaderboardRow[] }) {
           </thead>
           <tbody>
             {sorted.map((r, i) => (
-              <tr key={r.repId} className={i === 0 ? 'border-t border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-t border-slate-50 hover:bg-slate-50/60'}>
-                <td className="px-5 py-2.5">
+              <tr key={r.repId} className={i === 0 ? 'border-b border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-b border-slate-50 hover:bg-slate-50'}>
+                <td className="px-3 py-1.5">
                   <Link to={`/reps/${r.repId}`} className="flex items-center gap-2 font-medium text-slate-700 hover:text-brand-600">
                     <span
                       className={clsx(
@@ -83,12 +83,12 @@ export function RepLeaderboard({ rows }: { rows: LeaderboardRow[] }) {
                     >
                       {i + 1}
                     </span>
-                    <UserAvatar userId={r.repId} size={24} />
+                    <UserAvatar userId={r.repId} size={18} />
                     {r.name}
                   </Link>
                 </td>
                 {COLUMNS.map((c) => (
-                  <td key={c.key} className="px-3 py-2.5 text-right text-slate-600 whitespace-nowrap">
+                  <td key={c.key} className="px-2 py-1.5 text-right tabular-nums text-slate-600 whitespace-nowrap">
                     {c.format ? c.format(r[c.key]) : r[c.key]}
                   </td>
                 ))}

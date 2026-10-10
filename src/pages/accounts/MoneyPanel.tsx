@@ -77,14 +77,14 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[460px] text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400">
+            <tr className="border-b border-slate-100 text-left text-slate-400">
               <th className="py-2" />
-              <th className="py-2 text-right">Charged</th>
-              <th className="py-2 text-right">Taken</th>
-              <th className="py-2 text-right">Left</th>
-              <th className="py-2 text-right">Cannot take</th>
+              <th className="px-2 py-1.5 font-medium text-right">Charged</th>
+              <th className="px-2 py-1.5 font-medium text-right">Taken</th>
+              <th className="px-2 py-1.5 font-medium text-right">Left</th>
+              <th className="px-2 py-1.5 font-medium text-right">Cannot take</th>
             </tr>
           </thead>
           <tbody>
@@ -92,7 +92,7 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
             <Bucket label="Interest" charged={pos.interestCharged} taken={pos.interestTaken} left={pos.interestLeft} cant={pos.interestCantTake} />
             <Bucket label="Costs · items 1–7" charged={pos.costsCharged} taken={pos.costsTaken} left={pos.costsLeft} cant={pos.costsCantTake} />
             <Bucket label="Receipt fees · item 9" charged={pos.receiptFeesCharged} taken={pos.receiptFeesTaken} left={pos.receiptFeesLeft} cant={pos.receiptFeesCantTake} />
-            <tr className="border-t-2 border-slate-800 text-sm">
+            <tr className="border-t-2 border-slate-800">
               <td className="py-2 font-semibold text-slate-800">BF left to take</td>
               <td /><td />
               <td className="py-2 text-right font-semibold tabular-nums">{rand(pos.bfLeftToTake)}</td>
@@ -138,7 +138,7 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
 
         {preview && (
           <>
-            <table className="mt-3 w-full max-w-md text-sm">
+            <table className="mt-3 w-full max-w-md text-[12.5px] whitespace-nowrap">
               <tbody>
                 <Row label="Receipt fee charged (item 9)" value={preview.receiptFeeExcl + preview.receiptFeeVat} sub />
                 <Row label="Half A → interest" value={preview.toInterest} sub />
@@ -164,12 +164,12 @@ export function MoneyPanel({ accountId }: { accountId: string }) {
                 </tr>
               </tbody>
             </table>
-            <table className="mt-3 w-full max-w-md text-sm">
+            <table className="mt-3 w-full max-w-md text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400">
-                  <th className="py-1">Left after</th>
-                  <th className="py-1 text-right">Before</th>
-                  <th className="py-1 text-right">After</th>
+                <tr className="border-b border-slate-100 text-left text-slate-400">
+                  <th className="py-1.5 font-medium">Left after</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Before</th>
+                  <th className="py-1.5 font-medium text-right">After</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,12 +199,12 @@ function Bucket({ label, charged, taken, left, cant }: {
   label: string; charged: number; taken: number; left: number; cant: number | null
 }) {
   return (
-    <tr className="border-b border-slate-50">
+    <tr className="border-b border-slate-50 hover:bg-slate-50">
       <td className="py-1.5 text-slate-700">{label}</td>
-      <td className="py-1.5 text-right tabular-nums text-slate-500">{rand(charged)}</td>
-      <td className="py-1.5 text-right tabular-nums text-emerald-700">{rand(taken)}</td>
-      <td className="py-1.5 text-right tabular-nums font-medium">{rand(left)}</td>
-      <td className="py-1.5 text-right tabular-nums text-negative-600">{randOrDash(cant)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(charged)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{rand(taken)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums font-medium">{rand(left)}</td>
+      <td className="pl-2 py-1.5 text-right tabular-nums text-negative-600">{randOrDash(cant)}</td>
     </tr>
   )
 }
@@ -224,7 +224,7 @@ function After({ label, before, after }: { label: string; before: number; after:
   return (
     <tr className="border-b border-slate-50">
       <td className="py-1.5 text-slate-600">{label}</td>
-      <td className="py-1.5 text-right tabular-nums text-slate-400">{rand(before)}</td>
+      <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">{rand(before)}</td>
       <td className="py-1.5 text-right tabular-nums">{rand(after)}</td>
     </tr>
   )

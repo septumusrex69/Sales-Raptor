@@ -53,57 +53,50 @@ export function LedgerPanel({ accountId }: { accountId: string }) {
         </span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[920px]">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="border-b border-slate-100 text-left text-[11px] font-medium uppercase tracking-[0.06em] text-slate-400">
-              <th className="px-4 py-2.5">Payment</th>
-              <th className="px-4 py-2.5 text-right">Gross</th>
-              <th className="px-4 py-2.5 text-right">Receipt fee</th>
-              <th className="px-4 py-2.5 text-right">Interest</th>
-              <th className="px-4 py-2.5 text-right">Costs</th>
-              <th className="px-4 py-2.5 text-right">Capital</th>
-              <th className="px-4 py-2.5 text-right">Commission</th>
-              <th className="px-4 py-2.5 text-right">Capital left</th>
-              <th className="px-4 py-2.5 text-right">Interest left</th>
-              <th className="px-4 py-2.5 text-right">Costs left</th>
-              <th className="px-4 py-2.5">Paid over in</th>
+            <tr className="border-b border-slate-100 text-left text-slate-400">
+              <th className="px-3 py-1.5 font-medium">Payment</th>
+              <th className="px-2 py-1.5 font-medium text-right">Gross</th>
+              <th className="px-2 py-1.5 font-medium text-right">Receipt fee</th>
+              <th className="px-2 py-1.5 font-medium text-right">Interest</th>
+              <th className="px-2 py-1.5 font-medium text-right">Costs</th>
+              <th className="px-2 py-1.5 font-medium text-right">Capital</th>
+              <th className="px-2 py-1.5 font-medium text-right">Commission</th>
+              <th className="px-2 py-1.5 font-medium text-right">Capital left</th>
+              <th className="px-2 py-1.5 font-medium text-right">Interest left</th>
+              <th className="px-2 py-1.5 font-medium text-right">Costs left</th>
+              <th className="px-3 py-1.5 font-medium">Paid over in</th>
             </tr>
           </thead>
           <tbody>
             {lines.map((l) => (
               <tr key={l.paymentId}
-                className={clsx('border-b border-slate-50 text-sm', l.reversed && 'text-slate-400')}>
-                <td className="px-4 py-2.5">
-                  <div className={clsx('font-medium', l.reversed && 'line-through')}>
+                className={clsx('border-b border-slate-50 hover:bg-slate-50', l.reversed && 'text-slate-400')}>
+                {/* ONE LINE A PAYMENT, the checking list's shape (the firm: "thin, sleek, easy to
+                    read"). What used to sit under the date follows it after a dot, truncated, with
+                    the whole of it on the title. */}
+                <td className="px-3 py-1.5 max-w-[22rem] truncate" title={aboutPayment(l)}>
+                  <span className={clsx('font-medium', l.reversed && 'line-through')}>
                     {l.receivedAt ? fmt(l.receivedAt) : '—'}
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {l.paidToClient ? 'paid the client directly' : 'into the trust account'}
-                    {l.capturedAt ? ` · captured ${fmt(l.capturedAt)}` : ''}
-                    {l.reversed && l.reversalReason ? ` · reversed: ${l.reversalReason}` : ''}
-                    {l.needsRate && ' · no commission rate'}
-                    {l.excessCredit > 0 && (l.paidToClient
-                      ? ` · ${rand(l.excessCredit)} overpaid to the client, theirs to sort out`
-                      : ` · ${rand(l.excessCredit)} held as a credit`)}
-                  </div>
+                  </span>
+                  <span className="text-slate-400"> · {aboutPayment(l)}</span>
                 </td>
-                <td className={clsx('px-4 py-2.5 text-right tabular-nums', l.reversed && 'line-through')}>{rand(l.amount)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rand(l.receiptFee)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rand(l.toInterest)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rand(l.toCosts)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rand(l.toCapital)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{rand(l.commission + l.commissionVat)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums font-medium">{rand(l.capitalAfter)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">{rand(l.interestAfter)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">{rand(l.costsAfter)}</td>
-                <td className="px-4 py-2.5 text-xs">
+                <td className={clsx('px-2 py-1.5 text-right tabular-nums', l.reversed && 'line-through')}>{rand(l.amount)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{rand(l.receiptFee)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{rand(l.toInterest)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{rand(l.toCosts)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{rand(l.toCapital)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">{rand(l.commission + l.commissionVat)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums font-medium">{rand(l.capitalAfter)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(l.interestAfter)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(l.costsAfter)}</td>
+                <td className="px-3 py-1.5">
                   {l.runId
                     ? (
                       <Link to={`/trust/runs/${l.runId}`} className="text-navy-700 hover:underline">
                         {l.runInvoice}
-                        <span className="block text-slate-400">
-                          {l.runStatus ? RUN_STATUS_LABEL[l.runStatus] : ''}
-                        </span>
+                        {l.runStatus && <span className="text-slate-400"> · {RUN_STATUS_LABEL[l.runStatus]}</span>}
                       </Link>
                       )
                     : <span className="text-slate-400">not yet in a run</span>}
@@ -119,6 +112,19 @@ export function LedgerPanel({ accountId }: { accountId: string }) {
       </p>
     </Card>
   )
+}
+
+/** What used to be the payment's second line: where the money went and anything odd about it. */
+function aboutPayment(l: LedgerLine): string {
+  return [
+    l.paidToClient ? 'paid the client directly' : 'into the trust account',
+    l.capturedAt ? `captured ${fmt(l.capturedAt)}` : null,
+    l.reversed && l.reversalReason ? `reversed: ${l.reversalReason}` : null,
+    l.needsRate ? 'no commission rate' : null,
+    l.excessCredit > 0 ? (l.paidToClient
+      ? `${rand(l.excessCredit)} overpaid to the client, theirs to sort out`
+      : `${rand(l.excessCredit)} held as a credit`) : null,
+  ].filter(Boolean).join(' · ')
 }
 
 function fmt(iso: string): string {

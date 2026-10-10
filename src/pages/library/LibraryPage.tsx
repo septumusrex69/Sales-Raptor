@@ -444,8 +444,8 @@ function KindGroup({ kind, rows, openId, onOpen, byId }: {
 }) {
   if (rows.length === 0) return null
   return (
-    <div className="mb-4">
-      <div className="flex items-baseline justify-between px-1 pb-1.5">
+    <div className="mb-3">
+      <div className="flex items-baseline justify-between px-1 pb-1 border-b border-slate-100">
         <h3 className="text-[10px] uppercase tracking-[0.16em] text-slate-400 font-semibold">
           {TEMPLATE_KINDS[kind].plural}
         </h3>
@@ -474,32 +474,34 @@ function ListRow({ template, current, onOpen, attaches }: {
   attaches: LibraryTemplate | null
 }) {
   const broken = unknownFields(template.scope, template.body, template.subject).length > 0
+  const filedAs = template.seedKey ?? (template.position ? DESK_POSITIONS[template.position].label : 'written here')
   return (
-    <button type="button" onClick={onOpen} aria-current={current}
-      className={`block w-full text-left rounded-md border px-2.5 py-2 mb-1 transition
+    /* ONE LINE, the firm's checking-list look ("thin, sleek, easy to read"): what it is filed
+       under used to be a second line of its own under every name. It trails the name in grey now,
+       gives way first when the column is narrow, and is always in the tooltip. */
+    <button type="button" onClick={onOpen} aria-current={current} title={`${template.name} \u00b7 ${filedAs}`}
+      className={`flex w-full items-center gap-1.5 text-left border-b border-slate-50 border-l-[3px] px-2 py-1.5 text-[12.5px] whitespace-nowrap transition
         ${current
-          ? 'border-slate-200 border-l-[3px] border-l-gold-500 bg-navy-50'
-          : 'border-slate-200 bg-white hover:border-slate-300'}`}>
-      <span className="flex items-center gap-1.5">
-        {/* A dot rather than a word: at this width a chip pushes the name out of view, and the
-            reader only needs to know there is something to look at. */}
-        {broken && <span title="Asks for a field nothing can fill"
-          className="w-1.5 h-1.5 rounded-full bg-negative-500 shrink-0" />}
-        <span className={`text-[13px] truncate ${current ? 'text-navy-950 font-semibold' : 'text-slate-700 font-medium'}`}>
-          {template.name}
-        </span>
-        {/* The clip is on a span, not on the <svg> itself: an aria-label on a bare SVG is not
-            reliably announced, and the span is also what carries the hover title. */}
-        {attaches && (
-          <span data-attaches="yes" title={`Sends with ${attaches.name}`}
-            aria-label={`Sends with ${attaches.name}`} className="shrink-0 inline-flex">
-            <Paperclip size={11} className="text-slate-400" />
-          </span>
-        )}
-        {!template.active && <span className="text-[9px] text-slate-400 shrink-0">retired</span>}
+          ? 'border-l-gold-500 bg-navy-50'
+          : 'border-l-transparent hover:bg-slate-50'}`}>
+      {/* A dot rather than a word: at this width a chip pushes the name out of view, and the
+          reader only needs to know there is something to look at. */}
+      {broken && <span title="Asks for a field nothing can fill"
+        className="w-1.5 h-1.5 rounded-full bg-negative-500 shrink-0" />}
+      <span className={`truncate ${current ? 'text-navy-950 font-semibold' : 'text-slate-700 font-medium'}`}>
+        {template.name}
       </span>
-      <span className="block text-[10px] font-mono text-slate-400 mt-0.5 truncate">
-        {template.seedKey ?? (template.position ? DESK_POSITIONS[template.position].label : 'written here')}
+      {/* The clip is on a span, not on the <svg> itself: an aria-label on a bare SVG is not
+          reliably announced, and the span is also what carries the hover title. */}
+      {attaches && (
+        <span data-attaches="yes" title={`Sends with ${attaches.name}`}
+          aria-label={`Sends with ${attaches.name}`} className="shrink-0 inline-flex">
+          <Paperclip size={11} className="text-slate-400" />
+        </span>
+      )}
+      {!template.active && <span className="text-[10px] text-slate-400 shrink-0">retired</span>}
+      <span className="min-w-0 flex-1 shrink-[2] truncate text-[10.5px] font-mono text-slate-400">
+        &middot; {filedAs}
       </span>
     </button>
   )

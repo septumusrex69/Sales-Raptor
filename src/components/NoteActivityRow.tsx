@@ -40,14 +40,14 @@ function TypeBadge({ activity, size }: { activity: Activity; size: 'full' | 'qui
   const isDownload = downloadedFilename(activity) !== null
   const color = isDownload ? 'var(--c-grey-blue)' : ACTIVITY_TYPE_COLORS[activity.type]
   const Icon = isDownload ? Download : TYPE_ICONS[activity.type] ?? StickyNote
-  const box = size === 'full' ? 'w-[26px] h-[26px]' : 'w-[22px] h-[22px]'
+  const box = size === 'full' ? 'w-5 h-5' : 'w-[18px] h-[18px]'
   return (
     <span
       title={isDownload ? 'Attachment downloaded' : activity.type}
       style={{ backgroundColor: tintOf(color), color }}
       className={`${box} rounded-md flex items-center justify-center shrink-0`}
     >
-      <Icon size={size === 'full' ? 14 : 12} strokeWidth={2.2} />
+      <Icon size={size === 'full' ? 12 : 11} strokeWidth={2.2} />
     </span>
   )
 }
@@ -74,30 +74,33 @@ export function NoteActivityRow({ group }: { group: GroupedActivity }) {
     .join(' · ')
 
   return (
-    <div className={`flex items-start gap-3 px-3 ${automatic ? 'py-2' : 'py-2.5'}`}>
+    <div className="flex items-start gap-2.5 px-3 py-1.5">
       <TypeBadge activity={activity} size={automatic ? 'quiet' : 'full'} />
       <div className="min-w-0 flex-1">
         {filename ? (
           <p className="flex items-baseline gap-2 min-w-0">
-            <span className="text-[13px] text-slate-500 shrink-0">Downloaded</span>
-            <span className="text-[13px] text-slate-400 truncate">{filename}</span>
+            <span className="text-[12.5px] text-slate-500 shrink-0">Downloaded</span>
+            <span className="text-[12.5px] text-slate-400 truncate">{filename}</span>
           </p>
         ) : automatic ? (
-          <p className="text-[13px] text-slate-500">{activity.subject}</p>
+          <p className="text-[12.5px] text-slate-500 truncate" title={activity.subject}>{activity.subject}</p>
         ) : (
-          <>
-            <p className="text-[14.5px] leading-snug text-slate-700 whitespace-pre-wrap">{activity.notes || activity.subject}</p>
+          // What somebody wrote still wraps — it is the note itself, and cutting it to one line
+          // would hide the part the next person needs. The subject that used to sit under it as a
+          // second line rides on the end of the note instead, so a one-line note is one line.
+          <p className="text-[12.5px] leading-snug text-slate-700 whitespace-pre-wrap">
+            {activity.notes || activity.subject}
             {activity.notes && activity.subject && activity.subject !== 'Note added' && (
-              <p className="text-xs text-slate-400 mt-0.5">{activity.subject}</p>
+              <span className="text-slate-400"> · {activity.subject}</span>
             )}
-          </>
+          </p>
         )}
       </div>
       {/* Alongside rather than underneath. As a third line it doubled the height of every row,
           including the one-line automatic ones, so a busy client scrolled twice as far to read
           the same thing — and it puts the note rows on the same skeleton as the email rows,
           which already carry their time out here. */}
-      <p className="text-[11.5px] text-slate-400 shrink-0 whitespace-nowrap tabular-nums pt-0.5">{meta}</p>
+      <p className="text-[11.5px] text-slate-400 shrink-0 whitespace-nowrap tabular-nums pt-px">{meta}</p>
     </div>
   )
 }

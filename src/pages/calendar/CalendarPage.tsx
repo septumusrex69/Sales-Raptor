@@ -491,21 +491,24 @@ function DayView({ cursor, events, onMeeting }: {
   const dayEvents = events.filter((e) => sameDay(e.date, cursor)).sort((a, b) => a.date.getTime() - b.date.getTime())
   return (
     <Card padded={false}>
-      <div className="divide-y divide-slate-50">
+      {/* The day as a list, one line an event at 12.5px -- the checking list's density, which
+          the firm asked for on every list. Who it is with and the note ride after the title. */}
+      <div>
         {dayEvents.length === 0 && <p className="text-center text-slate-400 text-sm py-10">No events scheduled for this day.</p>}
         {dayEvents.map((e) => (
           <Chip key={e.id} event={e} onMeeting={onMeeting}
-            className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50">
+            className="flex items-center gap-3 px-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: e.color }} />
-            <span className="text-sm text-slate-500 w-16 shrink-0">{e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-700 truncate">{e.primary}</p>
-              <p className="text-xs text-slate-400">
+            <span className="text-slate-500 w-12 shrink-0 tabular-nums">{e.date.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="min-w-0 flex-1 truncate" title={[e.primary, e.who ? `with ${e.who}` : e.type, e.note].filter(Boolean).join(' · ')}>
+              <span className="font-medium text-slate-700">{e.primary}</span>
+              <span className="text-slate-400">
+                {' · '}
                 {e.who ? `with ${e.who}` : e.type}
                 {e.note ? ` · ${e.note}` : ''}
-              </p>
-            </div>
-            <UserAvatar userId={e.ownerId} size={24} />
+              </span>
+            </span>
+            <UserAvatar userId={e.ownerId} size={18} />
           </Chip>
         ))}
       </div>

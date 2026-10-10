@@ -100,12 +100,26 @@ export function LibraryWorkflows() {
           {mayEdit ? 'No workflows yet. Start one and say what sets it off.' : 'No workflows yet.'}
         </p>
       ) : (
-        <ul className="space-y-3">
-          {list.map((w, i) => (
-            <WorkflowRow key={w.id} index={i + 1} workflow={w}
-              onOpen={() => navigate(`/library/workflows/${w.key}`)} />
-          ))}
-        </ul>
+        /* The checking-list look the firm asked for everywhere rows sit under each other: one
+           thin line per workflow, the headings once at the top instead of on every card, and the
+           whole thing scrolling sideways inside the card on an iPad rather than wrapping. */
+        <div className="overflow-x-auto">
+          <div className="min-w-[44rem] text-[12.5px] whitespace-nowrap">
+            <div className={`${WORKFLOW_COLUMNS} border-b border-slate-100 text-slate-400`}>
+              <p className="px-3 py-2 font-medium">No.</p>
+              <p className="px-2 py-2 font-medium">Workflow</p>
+              <p className="px-2 py-2 font-medium">Trigger</p>
+              <p className="px-2 py-2 font-medium">Sequence</p>
+              <p className="px-3 py-2 font-medium">State</p>
+            </div>
+            <ul>
+              {list.map((w, i) => (
+                <WorkflowRow key={w.id} index={i + 1} workflow={w}
+                  onOpen={() => navigate(`/library/workflows/${w.key}`)} />
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
       {list !== null && list.length > 1 && <HowTheyConnect list={list} />}
       </Card>
@@ -171,46 +185,41 @@ function WorkflowRow({ index, workflow, onOpen }: {
   onOpen: () => void
 }) {
   const live = workflow.versions.find((v) => v.state === 'active') ?? workflow.versions[0]
+  const trigger = workflow.trigger ? triggerMeta(workflow.trigger).label : '\u2014'
   return (
-    <li>
+    <li className="border-b border-slate-50">
+      {/* The two facts still sit under their own headings -- the header row above -- and nothing
+          here is typed: the trigger is the version's own column and the sequence is derived from
+          its steps. The description trails the name in grey; whatever the line cannot hold is in
+          the tooltip rather than on a second line. */}
       <button type="button" onClick={onOpen}
-        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-left
-          transition hover:border-[#c9a052] hover:shadow-sm">
-        <div className="flex items-start gap-3">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-navy-950
-            text-[12px] font-semibold text-gold-400 tabular-nums">
-            {String(index).padStart(2, '0')}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-semibold text-slate-800">{workflow.name}</p>
-            {workflow.description && (
-              <p className="text-[13px] text-slate-400 mt-0.5">{workflow.description}</p>
-            )}
-          </div>
-          <span className="flex shrink-0 items-center gap-2">
-            {live && <StateBadge state={live.state} />}
-            <ChevronRight size={15} className="text-slate-300" />
-          </span>
-        </div>
-
-        {/* The two facts, under their own headings, on one rule. Nothing here is typed: the
-            trigger is the version's own column and the sequence is derived from its steps. */}
-        <div className="mt-3 border-t border-slate-100 pt-3 grid gap-3 sm:grid-cols-2">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Trigger</p>
-            <p className="text-[13px] font-medium text-slate-700 mt-0.5">
-              {workflow.trigger ? triggerMeta(workflow.trigger).label : '\u2014'}
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Sequence</p>
-            <p className="text-[13px] text-slate-600 mt-0.5">{workflow.sequence ?? '\u2014'}</p>
-          </div>
-        </div>
+        className={`${WORKFLOW_COLUMNS} w-full text-left hover:bg-slate-50`}>
+        <span className="px-3 py-1.5 font-semibold text-slate-400 tabular-nums">
+          {String(index).padStart(2, '0')}
+        </span>
+        <span className="px-2 py-1.5 min-w-0 truncate"
+          title={workflow.description ? `${workflow.name} \u00b7 ${workflow.description}` : workflow.name}>
+          <span className="font-medium text-slate-800">{workflow.name}</span>
+          {workflow.description && (
+            <span className="text-slate-400"> &middot; {workflow.description}</span>
+          )}
+        </span>
+        <span className="px-2 py-1.5 min-w-0 truncate text-slate-700" title={trigger}>{trigger}</span>
+        <span className="px-2 py-1.5 min-w-0 truncate text-slate-600" title={workflow.sequence ?? undefined}>
+          {workflow.sequence ?? '\u2014'}
+        </span>
+        <span className="px-3 py-1.5 flex items-center justify-end gap-2">
+          {live && <StateBadge state={live.state} />}
+          <ChevronRight size={14} className="text-slate-300" />
+        </span>
       </button>
     </li>
   )
 }
+
+/** The list's columns, shared by its header and every row so the two cannot drift apart. */
+const WORKFLOW_COLUMNS =
+  'grid grid-cols-[3rem_minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.6fr)_7rem] items-center'
 
 /**
  * STARTING A WORKFLOW, AND THE TRIGGER IS ASKED FOR FIRST.

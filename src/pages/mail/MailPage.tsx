@@ -2100,11 +2100,14 @@ function MailSearchBar({
   )
 }
 
-function RowGutter({ mail, selecting, chosen, onChoose }: {
+function RowGutter({ mail, selecting, chosen, onChoose, inline }: {
   mail: MailItem
   selecting: boolean
   chosen: boolean
   onChoose: (on: boolean) => void
+  /** The list's one-line row, where the box centres on the line rather than on a stacked
+      summary's first line. */
+  inline?: boolean
 }) {
   /*
    * NOTHING AT ALL WHEN NOTHING IS BEING SELECTED. The firm: "the little circles that indicate the
@@ -2120,7 +2123,7 @@ function RowGutter({ mail, selecting, chosen, onChoose }: {
    */
   if (!selecting) return null
   return (
-    <span className="w-4 shrink-0 grid place-items-center self-start mt-3">
+    <span className={`w-4 shrink-0 grid place-items-center ${inline ? '' : 'self-start mt-3'}`}>
       <input type="checkbox" checked={chosen} onChange={(e) => onChoose(e.target.checked)}
         aria-label={`Select the email from ${mail.fromAddress}`} />
     </span>
@@ -2205,7 +2208,7 @@ function MailSummary({ mail, tight, blocked }: {
       Three tiers of weight follow the same order: the sender carries the most, the subject
       less, the preview least. Unread deepens the sender rather than adding a fourth signal.
     */
-    <span className="flex items-start gap-3 min-w-0">
+    <span className={`flex min-w-0 ${tight ? 'items-start gap-3' : 'items-center gap-2.5'}`}>
       {/*
         The sender, as a face before it is a name. See senderColour -- the colour is the whole
         point, and it is why this is worth the width: a mailbox is scanned by correspondent, and
@@ -2221,66 +2224,92 @@ function MailSummary({ mail, tight, blocked }: {
       */}
       <span className="relative shrink-0 inline-flex">
         <Avatar name={mail.fromName || mail.fromAddress} color={senderColour(mail.fromAddress)}
-          size={tight ? 32 : 36} />
+          size={tight ? 32 : 22} />
         {!mail.readAt && (
           <span aria-hidden title="Unread"
-            className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand-500 ring-2 ring-white" />
+            className={`absolute -top-0.5 -right-0.5 rounded-full bg-brand-500 ring-2 ring-white ${tight ? 'w-2.5 h-2.5' : 'w-2 h-2'}`} />
         )}
       </span>
 
-      <span className="block min-w-0 flex-1">
-      {/* 1. Who it is from, and when. */}
-      <span className="flex items-baseline gap-2">
-        <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}>
-          {mail.fromName || mail.fromAddress}
-          {/* The address as well as the name, but not in the reading pane's narrow column,
-              where it would push the name itself out of sight. */}
-          {mail.fromName && !tight && (
-            <span className="font-normal text-slate-400"> &middot; {mail.fromAddress}</span>
-          )}
+      {tight ? (
+        <span className="block min-w-0 flex-1">
+        {/* 1. Who it is from, and when. */}
+        <span className="flex items-baseline gap-2">
+          <span className={`text-sm truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}>
+            {/* The name alone: the address would push the name itself out of sight here. */}
+            {mail.fromName || mail.fromAddress}
+          </span>
+          <span className="ml-auto shrink-0 text-xs text-slate-400">
+            {relativeDayLabel(mail.occurredAt)}
+          </span>
         </span>
-        <span className="ml-auto shrink-0 text-xs text-slate-400">
-          {relativeDayLabel(mail.occurredAt)}
-        </span>
-      </span>
 
-      {/* 2. What it is about, and where the message stands. */}
-      <span className="flex items-center gap-2 mt-0.5">
-        <span className={`text-[13px] truncate ${unread ? 'text-slate-700' : 'text-slate-500'}`}>
-          {mail.subject || '(no subject)'}
+        {/* 2. What it is about, and where the message stands. */}
+        <span className="flex items-center gap-2 mt-0.5">
+          <span className={`text-[13px] truncate ${unread ? 'text-slate-700' : 'text-slate-500'}`}>
+            {mail.subject || '(no subject)'}
+          </span>
+          {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+          {/*
+            Pushed to the right end of the subject line rather than given a line of its own — the
+            state of a row belongs where the eye already is, and costs no height there.
+          */}
+          <span className="ml-auto flex items-center gap-1.5">
+            <MailStatus mail={mail} blocked={blocked ?? []} tight />
+          </span>
         </span>
-        {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
         {/*
-          Pushed to the right end of the subject line rather than given a line of its own — the
-          state of a row belongs where the eye already is, and costs no height there.
+          One line of preview. A four-line row is one you scroll past rather than scan.
+
+          `truncate` for the single line rather than `line-clamp-1`, deliberately. line-clamp needs
+          display:-webkit-box, and two things go wrong with that here: Tailwind emits `.block` later
+          in the stylesheet, so pairing them silently kills the clamp; and Safari can reserve the
+          UNCLAMPED height while painting only the visible line, which is what left ~120px of blank
+          space under every row with a preview on the firm's iPad. Chromium renders the same markup
+          at 81px, which is why it took a screenshot to find.
+
+          truncate is overflow+ellipsis+nowrap — no display trickery, identical everywhere.
         */}
-        <span className="ml-auto flex items-center gap-1.5">
-          <MailStatus mail={mail} blocked={blocked ?? []} tight={tight} />
+        {mail.snippet && (
+          <span className="block text-[13px] text-slate-400 mt-0.5 truncate">
+            {mail.snippet}
+          </span>
+        )}
         </span>
-      </span>
-      {/*
-        One line in the pane, two in the list. A four-line row is one you scroll past rather than
-        scan.
-        
-        `truncate` for the single line rather than `line-clamp-1`, deliberately. line-clamp needs
-        display:-webkit-box, and two things go wrong with that here: Tailwind emits `.block` later
-        in the stylesheet, so pairing them silently kills the clamp; and Safari can reserve the
-        UNCLAMPED height while painting only the visible line, which is what left ~120px of blank
-        space under every row with a preview on the firm's iPad. Chromium renders the same markup
-        at 81px, which is why it took a screenshot to find.
+      ) : (
+        /*
+          ONE LINE IN THE LIST, the firm's checking-list look: "thin, sleek, easy to read. The rest
+          is bulky, information is all over the place." The list used to give every message three
+          lines -- sender, subject, two lines of preview -- so a page of mail was a dozen rows and
+          had to be scrolled to be scanned. Now each tier is a column on one line, in the same
+          order and weight: the sender (address after the name, cut off rather than wrapped, the
+          whole of it in the tooltip), then the subject with the preview trailing it in grey, then
+          the chips, then the day at the right edge where every row's day lines up.
 
-        truncate is overflow+ellipsis+nowrap — no display trickery, identical everywhere.
-
-        The two-line case still needs line-clamp, so it gets an explicit max height as well:
-        whatever the browser thinks the box measures, the row cannot grow past two lines.
-      */}
-      {mail.snippet && (
-        <span className={`block text-[13px] text-slate-400 mt-0.5 ${
-          tight ? 'truncate' : 'line-clamp-2 max-h-[2.7em] overflow-hidden'}`}>
-          {mail.snippet}
+          Only the narrow reading-pane column keeps the stacked form above: at a third of the
+          screen there is no line long enough to hold a sender and a subject side by side.
+        */
+        <span className="flex items-center gap-2 min-w-0 flex-1 text-[12.5px] whitespace-nowrap">
+          <span className={`w-36 sm:w-56 shrink-0 truncate ${unread ? 'font-bold text-navy-950' : 'font-semibold text-slate-700'}`}
+            title={mail.fromName ? `${mail.fromName} <${mail.fromAddress}>` : mail.fromAddress}>
+            {mail.fromName || mail.fromAddress}
+            {mail.fromName && (
+              <span className="font-normal text-slate-400"> &middot; {mail.fromAddress}</span>
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className={unread ? 'font-medium text-slate-800' : 'text-slate-600'}>
+              {mail.subject || '(no subject)'}
+            </span>
+            {mail.snippet && <span className="text-slate-400"> &middot; {mail.snippet}</span>}
+          </span>
+          {mail.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+          <MailStatus mail={mail} blocked={blocked ?? []} />
+          <span className="shrink-0 min-w-[4.5rem] text-right text-[12px] text-slate-400 tabular-nums">
+            {relativeDayLabel(mail.occurredAt)}
+          </span>
         </span>
       )}
-      </span>
     </span>
   )
 }
@@ -3237,27 +3266,27 @@ function MailRow({
       Read rows keep a transparent bar of the same width so nothing shifts sideways as mail is
       read, which would make the whole list twitch.
     */
-    <li className={unread ? 'bg-brand-50/60' : undefined}>
-      <div className="px-5 py-3 flex items-start gap-3">
+    <li className={unread ? 'bg-brand-50/60' : 'hover:bg-slate-50'}>
+      <div className="px-5 py-1.5 flex items-center gap-3">
         {/*
           The gutter sits OUTSIDE the button that opens the message. Nesting a checkbox inside
           the other means ticking a row to delete it also opens and reads it, which is the
           opposite of what somebody clearing spam wants.
         */}
-        <RowGutter mail={mail} selecting={selecting} chosen={chosen} onChoose={onChoose} />
+        <RowGutter mail={mail} selecting={selecting} chosen={chosen} onChoose={onChoose} inline />
 
         <button onClick={onToggle} aria-expanded={expanded} className="min-w-0 flex-1 text-left">
           {/* Collapsed, the snippet is the preview. Open, the whole message replaces it below. */}
           <MailSummary mail={expanded ? { ...mail, snippet: null } : mail} blocked={blocked} />
         </button>
 
-        <div className="shrink-0 flex items-center gap-2 pt-0.5">
+        <div className="shrink-0 flex items-center gap-2">
           {/* Linked mail offers nothing: it is on an account, it raised a fee, and it is not
               anybody's to re-file or delete. The database refuses both as well. */}
           {!mail.isFiled && (
             <button onClick={onLink}
-              className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-gold-500 bg-gold-400 text-navy-950">
-              <Link2 size={13} /> Match
+              className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 rounded-md border border-gold-500 bg-gold-400 text-navy-950">
+              <Link2 size={12} /> Match
             </button>
           )}
           <button onClick={onToggle} aria-label={expanded ? 'Close this email' : 'Read this email'}
@@ -3268,7 +3297,7 @@ function MailRow({
       </div>
 
       {expanded && (
-        <div className="px-5 pb-4 pl-[2.9rem]">
+        <div className="px-5 pt-1.5 pb-4 pl-[2.9rem]">
           {/*
             WHO ELSE WAS ON IT, here as well as in the reading pane. The firm: "I can't see all the
             other recipients of an email." Offering Reply all on a row that never says who would be
@@ -3399,22 +3428,21 @@ function BlockedList({ senders, onUnblock }: {
   return (
     <ul className="divide-y divide-slate-100">
       {senders.map((b) => (
-        <li key={b.id} className="px-5 py-3 flex items-center gap-3">
-          <span className="shrink-0 grid place-items-center w-7 h-7 rounded-full bg-slate-100 text-slate-400">
-            <Ban size={13} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-slate-800 truncate">
+        <li key={b.id} className="px-5 py-1.5 flex items-center gap-2.5 text-[12.5px] whitespace-nowrap hover:bg-slate-50">
+          <Ban size={13} className="shrink-0 text-slate-400" />
+          {/* One line, the checking-list look: the pattern, then when and why in grey after it. */}
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium text-slate-800">
               {b.kind === 'domain' ? `Everything from ${b.pattern}` : b.pattern}
-            </p>
-            <p className="text-xs text-slate-400 truncate">
-              Blocked {relativeDayLabel(b.createdAt).toLowerCase()}
+            </span>
+            <span className="text-slate-400">
+              {' '}&middot; Blocked {relativeDayLabel(b.createdAt).toLowerCase()}
               {b.label && <> &middot; {b.label}</>}
-            </p>
-          </div>
+            </span>
+          </span>
           <button onClick={() => void onUnblock(b.id)}
-            className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
-            <Undo2 size={13} /> Unblock
+            className="shrink-0 inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50">
+            <Undo2 size={12} /> Unblock
           </button>
         </li>
       ))}

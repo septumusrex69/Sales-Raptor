@@ -309,7 +309,7 @@ export function DisputesBoard() {
                   <span className="text-sm font-semibold text-slate-700">{COLUMN_LABEL[col]}</span>
                   <span className="text-xs text-slate-400">({cards.length})</span>
                 </div>
-                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2.5">
+                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1.5">
                   {cards.map((q) => (
                     <DisputeCard
                       key={q.id}
@@ -333,21 +333,27 @@ export function DisputesBoard() {
       ) : (
         <Card padded={false}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/*
+              ONE LINE A DISPUTE, the checking list's shape -- the firm: "thin, sleek, easy to read."
+              The account number used to sit under the debtor and the classification under the
+              chip; both follow on the same line now, after a dot, and a long description
+              truncates with the whole of it on the title.
+            */}
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
-                  <th className="font-medium px-5 py-2.5">Debtor</th>
-                  <th className="font-medium px-3 py-2.5">Dispute</th>
-                  <th className="font-medium px-3 py-2.5">Owner</th>
-                  <th className="font-medium px-3 py-2.5">Sitting with</th>
-                  <th className="font-medium px-3 py-2.5">Chase</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Age</th>
+                <tr className="text-left text-slate-400 border-b border-slate-100">
+                  <th className="font-medium px-3 py-1.5">Debtor</th>
+                  <th className="font-medium px-2 py-1.5">Dispute</th>
+                  <th className="font-medium px-2 py-1.5">Owner</th>
+                  <th className="font-medium px-2 py-1.5">Sitting with</th>
+                  <th className="font-medium px-2 py-1.5">Chase</th>
+                  <th className="font-medium px-3 py-1.5 text-right">Age</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((q) => (
-                  <tr key={q.id} onClick={() => navigate(`/queries/${q.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
-                    <td className="px-5 py-2">
+                  <tr key={q.id} onClick={() => navigate(`/queries/${q.id}`)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+                    <td className="px-3 py-1.5 max-w-[16rem] truncate" title={[q.debtorName, q.accountNumber].filter(Boolean).join(' · ')}>
                       {/* A query about a whole handover sheet has no account, so it is named
                           rather than linked to /accounts/null -- which renders as a page saying
                           the account is gone. */}
@@ -356,26 +362,27 @@ export function DisputesBoard() {
                           {q.debtorName}
                         </Link>
                       ) : <span className="font-medium text-slate-700">{q.debtorName}</span>}
-                      <span className="block text-xs text-slate-400">{q.accountNumber}</span>
+                      {q.accountNumber && <span className="text-slate-400"> · {q.accountNumber}</span>}
                     </td>
-                    <td className="px-3 py-2 text-slate-600 max-w-[26rem]">
-                      <span className="line-clamp-2 wrap-anywhere">{q.description}</span>
+                    <td className="px-2 py-1.5 text-slate-600 max-w-[26rem] truncate"
+                      title={[q.description, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}>
                       {/* The same chip as the card, from the same record -- see DisputeCard. */}
-                      <span className={`mt-1 text-[10px] font-semibold uppercase tracking-wide inline-block px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
+                      <span className={`mr-1.5 text-[10px] font-semibold uppercase tracking-wide inline-block px-1.5 py-0.5 rounded align-middle ${escalationCard(q.kind).tint}`}>
                         {escalationCard(q.kind).label}
                       </span>
-                      {q.kind === 'dispute' && q.category && <span className="block text-xs text-slate-400">{q.category}</span>}
+                      {q.description}
+                      {q.kind === 'dispute' && q.category && <span className="text-slate-400"> · {q.category}</span>}
                     </td>
-                    <td className="px-3 py-2 text-slate-500">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
-                    <td className="px-3 py-2"><StageChip column={columnOf(q)} /></td>
-                    <td className={`px-3 py-2 ${isStale(q, TODAY) ? 'text-negative-700 font-medium' : 'text-slate-500'}`}>
+                    <td className="px-2 py-1.5 text-slate-500 max-w-[10rem] truncate">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
+                    <td className="px-2 py-1.5"><StageChip column={columnOf(q)} /></td>
+                    <td className={`px-2 py-1.5 tabular-nums ${isStale(q, TODAY) ? 'text-negative-700 font-medium' : 'text-slate-500'}`}>
                       {q.chaseOn ? formatDate(q.chaseOn) : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right text-slate-500 tabular-nums">{ageInDays(q)}d</td>
+                    <td className="px-3 py-1.5 text-right text-slate-500 tabular-nums">{ageInDays(q)}d</td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No disputes match.</td></tr>
+                  <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">No disputes match.</td></tr>
                 )}
               </tbody>
             </table>
@@ -403,7 +410,7 @@ function StageChip({ column }: { column: Column }) {
     client: 'bg-gold-100 text-[var(--c-gold-deep)]',
     resolved: 'bg-positive-100 text-positive-700',
   }
-  return <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${chip[column]}`}>{COLUMN_LABEL[column]}</span>
+  return <span className={`inline-block text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${chip[column]}`}>{COLUMN_LABEL[column]}</span>
 }
 
 function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
@@ -419,15 +426,15 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
       draggable={!closed && !busy}
       onDragStart={onDragStart}
       onClick={onOpen}
-      className={`bg-white rounded-lg border border-slate-200 p-3 cursor-pointer hover:border-slate-300 hover:shadow-sm transition ${busy ? 'opacity-60' : ''}`}
+      title={[q.description, q.debtorName, q.accountNumber, q.kind === 'dispute' ? q.category : null].filter(Boolean).join(' · ')}
+      className={`bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 cursor-pointer hover:border-slate-300 hover:shadow-sm transition ${busy ? 'opacity-60' : ''}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[12px] text-slate-500 truncate">{q.debtorName}</span>
-        <span className="text-xs text-slate-400 shrink-0 tabular-nums">{ageInDays(q)}d</span>
-      </div>
-      <p className="text-[11px] text-slate-300">{q.accountNumber}</p>
-      <p className="text-[13px] font-semibold leading-snug text-navy-950 mt-1.5 line-clamp-2 wrap-anywhere">{q.description}</p>
       {/*
+        TWO SHORT LINES A CARD, at the firm's asking ("thin, sleek, easy to read"): it was seven --
+        debtor, account number, two of description, the chip, the classification, then owner and
+        chase. Now WHAT on the first (the kind's chip, the description, the age) and WHO and WHEN on
+        the second. Every fact is still on the card; what does not fit is on its title.
+
         EVERY KIND WEARS ITS OWN CHIP, AND THEY ARE DIFFERENT COLOURS. This board carries four
         things that are not all disputes, and it used to name only two of them -- with a chain
         that fell through, so a request announced itself as a recommendation to sue. The words
@@ -437,15 +444,22 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
         The firm asked for the colour: "a request and a dispute looks exactly the same." They are
         not the same object -- a dispute holds every collection sequence on the account and a
         request holds nothing -- so the one that stops the work wears the rust and the rest stay
-        quiet. A dispute still shows its classification under the chip, which is the line people
-        already read.
+        quiet. A dispute still shows its classification, which is the line people already read.
       */}
-      <p className={`text-[10px] font-semibold uppercase tracking-wide mt-1.5 inline-block px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
-        {escalationCard(q.kind).label}
-      </p>
-      {q.kind === 'dispute' && q.category && <p className="text-xs text-slate-400 mt-1">{q.category}</p>}
-      <div className="flex items-center justify-between gap-2 mt-2.5 text-xs">
-        <span className="text-slate-500 truncate">{ownerName ?? 'Unassigned'}</span>
+      <div className="flex items-center gap-1.5 whitespace-nowrap min-w-0">
+        <span className={`shrink-0 text-[9.5px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${escalationCard(q.kind).tint}`}>
+          {escalationCard(q.kind).label}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-navy-950">{q.description}</span>
+        <span className="text-[11px] text-slate-400 shrink-0 tabular-nums">{ageInDays(q)}d</span>
+      </div>
+      <div className="flex items-center gap-1.5 mt-0.5 text-[11px] whitespace-nowrap min-w-0">
+        <span className="min-w-0 flex-1 truncate text-slate-400">
+          <span className="text-slate-600">{q.debtorName}</span>
+          {q.accountNumber && <> · {q.accountNumber}</>}
+          {q.kind === 'dispute' && q.category && <> · {q.category}</>}
+          {' · '}<span className="text-slate-500">{ownerName ?? 'Unassigned'}</span>
+        </span>
         {closed
           ? <span className="text-[var(--c-green)] shrink-0">{q.outcome ? QUERY_OUTCOME_LABEL[q.outcome] : 'Closed'}</span>
           : q.chaseOn

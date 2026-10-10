@@ -104,29 +104,49 @@ export function HandoverBook({ company, onUpload }: { company: Company; onUpload
       {rows.length === 0 ? (
         <p className="text-sm text-slate-400">Nothing handed over yet.</p>
       ) : (
-        <div className="divide-y divide-slate-100 -mx-1">
-          {rows.map((h: Handover) => (
-            <div key={h.id} className="flex items-baseline justify-between gap-3 px-1 py-2">
-              <span className="min-w-0">
-                {/* STRUCK THROUGH, NOT REMOVED. The figure is what the sheet said; the line through
-                    it is what the firm did about it. */}
-                <span className={`text-[13.5px] ${h.discardedAt ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
-                  {formatCurrency(h.capitalAmount)}
-                </span>
-                {h.accountsCount != null && <span className="text-[12px] text-slate-400 ml-2">{h.accountsCount} accounts</span>}
-                {h.reference && <span className="text-[12px] text-slate-400 ml-2 truncate">{h.reference}</span>}
-                {/* SAID IN WORDS AS WELL AS IN A LINE. A strikethrough alone is not a state to
-                    anybody reading this aloud down a telephone, and it is not a state at all to
-                    somebody who cannot see it. */}
-                {h.discardedAt && (
-                  <span className="text-[12px] text-[var(--c-gold-deep)] ml-2">
-                    discarded {formatDate(h.discardedAt)}
-                  </span>
-                )}
-              </span>
-              <span className="text-[11.5px] text-slate-400 shrink-0 tabular-nums">{formatDate(h.receivedAt)}</span>
-            </div>
-          ))}
+        // The checking list's shape, which the firm asked for on every list: a row a batch, the
+        // date, the capital, the count and the reference each in a column of their own, so a
+        // reference no longer pushes the date of the batch below it out of line.
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
+            <thead>
+              <tr className="border-b border-slate-100 text-slate-400">
+                <th className="px-2 py-1.5 text-left font-medium">Received</th>
+                <th className="px-2 py-1.5 text-right font-medium">Capital</th>
+                <th className="px-2 py-1.5 text-right font-medium">Accounts</th>
+                <th className="px-2 py-1.5 text-left font-medium">Reference</th>
+                <th className="px-2 py-1.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((h: Handover) => (
+                <tr key={h.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-2 py-1.5 text-slate-500 tabular-nums">{formatDate(h.receivedAt)}</td>
+                  {/* STRUCK THROUGH, NOT REMOVED. The figure is what the sheet said; the line
+                      through it is what the firm did about it. */}
+                  <td className={`px-2 py-1.5 text-right tabular-nums whitespace-nowrap ${h.discardedAt ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                    {formatCurrency(h.capitalAmount)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-400">
+                    {h.accountsCount != null ? `${h.accountsCount} accounts` : ''}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-400">
+                    {h.reference && <span className="block max-w-[16rem] truncate" title={h.reference}>{h.reference}</span>}
+                  </td>
+                  {/* SAID IN WORDS AS WELL AS IN A LINE. A strikethrough alone is not a state to
+                      anybody reading this aloud down a telephone, and it is not a state at all to
+                      somebody who cannot see it. */}
+                  <td className="px-2 py-1.5">
+                    {h.discardedAt && (
+                      <span className="text-[var(--c-gold-deep)]">
+                        discarded {formatDate(h.discardedAt)}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>

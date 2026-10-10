@@ -493,11 +493,11 @@ export function SigningPanel({
       {error && <p className="text-xs text-negative-700 mt-2">{error}</p>}
 
       {rows && rows.length > 0 && (
-        <ul className="mt-3 space-y-1.5">
+        <ul className="mt-3 divide-y divide-slate-50">
           {rows.map((r) => (
-            <li key={r.id} className="flex flex-wrap items-baseline justify-between gap-x-2 text-xs">
-              <span className="text-slate-700">{r.title}</span>
-              <span className="flex items-baseline gap-2">
+            <li key={r.id} className="flex items-center justify-between gap-2 py-1 text-[12px] whitespace-nowrap min-w-0 hover:bg-slate-50">
+              <span className="min-w-0 truncate text-slate-700" title={r.title}>{r.title}</span>
+              <span className="flex items-baseline gap-2 shrink-0">
                 {/*
                   SENDING THE SIGNED COPY BACK IS OFFERED ONLY ONCE IT EXISTS, which is the whole
                   of the condition: a request still waiting has nothing to attach. The copy itself

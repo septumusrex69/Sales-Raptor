@@ -737,22 +737,22 @@ export function AccountsList() {
               narrower than the card), so a column is as wide as somebody made it and the list
               scrolls sideways instead. See columnWidths.ts.
             */}
-            <table className="min-w-full text-sm"
+            <table className="min-w-full text-[12.5px] whitespace-nowrap"
               style={{ tableLayout: 'fixed', width: visibleColumns.reduce((t, k) => t + widths[k], canAllocate ? 40 : 0) }}>
               <colgroup>
                 {canAllocate && <col style={{ width: 40 }} />}
                 {visibleColumns.map((k) => <col key={k} style={{ width: widths[k] }} />)}
               </colgroup>
               <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                <tr className="text-left text-slate-400 border-b border-slate-100">
                   {canAllocate && (
-                    <th className="pl-4 pr-1 py-2.5 w-8">
+                    <th className="pl-3 pr-1 py-1.5 w-8">
                       <input type="checkbox" className="accent-brand-600" checked={allOnPageTicked}
                         onChange={togglePage} aria-label="Select every account on this page" />
                     </th>
                   )}
-                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className="px-4 py-2.5 font-medium">Account</ResizableTh>
-                  <ResizableTh label="Debtor" width={widths.debtor} onWidth={(px) => setWidth('debtor', px)} className="px-4 py-2.5 font-medium">Debtor</ResizableTh>
+                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className={`${canAllocate ? 'px-2' : 'pl-3 pr-2'} py-1.5 font-medium`}>Account</ResizableTh>
+                  <ResizableTh label="Debtor" width={widths.debtor} onWidth={(px) => setWidth('debtor', px)} className="px-2 py-1.5 font-medium">Debtor</ResizableTh>
                   {/*
                     WHOSE BOOK THE ACCOUNT IS ON, at the firm's asking, and beside the debtor
                     because the two names are the two parties to the debt.
@@ -762,11 +762,11 @@ export function AccountsList() {
                     tile and in the scope line. A column of one repeated value is the "warning that
                     fires when nothing is wrong" in table form.
                   */}
-                  {!companyId && <ResizableTh label="Client" width={widths.client} onWidth={(px) => setWidth('client', px)} className="px-4 py-2.5 font-medium">Client</ResizableTh>}
+                  {!companyId && <ResizableTh label="Client" width={widths.client} onWidth={(px) => setWidth('client', px)} className="px-2 py-1.5 font-medium">Client</ResizableTh>}
                   {/* THE FIRM: "something on there that can be added is the hand-over date as
                       well." It is how old the matter is, which is the first thing asked of a row
                       nobody has worked -- and it is what prescription runs from. */}
-                  <ResizableTh label="Handed over" width={widths.handed} onWidth={(px) => setWidth('handed', px)} className="px-4 py-2.5 font-medium">Handed over</ResizableTh>
+                  <ResizableTh label="Handed over" width={widths.handed} onWidth={(px) => setWidth('handed', px)} className="px-2 py-1.5 font-medium">Handed over</ResizableTh>
                   {/*
                     THE FIVE FIGURES THE FIRM ASKED FOR, IN THE ORDER THEY ASKED FOR THEM:
                     "capital, fees, interest, paid, balance." They build to the balance left to
@@ -774,15 +774,15 @@ export function AccountsList() {
                     the same words the account's own summary uses, so a collector moving between
                     the two is reading one statement rather than learning a second layout.
                   */}
-                  <ResizableTh label="Capital" width={widths.capital} onWidth={(px) => setWidth('capital', px)} className="px-4 py-2.5 font-medium text-right">Capital</ResizableTh>
-                  <ResizableTh label="Fees" width={widths.fees} onWidth={(px) => setWidth('fees', px)} className="px-4 py-2.5 font-medium text-right">Fees</ResizableTh>
-                  <ResizableTh label="Interest" width={widths.interest} onWidth={(px) => setWidth('interest', px)} className="px-4 py-2.5 font-medium text-right">Interest</ResizableTh>
-                  <ResizableTh label="Paid" width={widths.paid} onWidth={(px) => setWidth('paid', px)} className="px-4 py-2.5 font-medium text-right">Paid</ResizableTh>
-                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-4 py-2.5 font-medium text-right">Balance</ResizableTh>
-                  <ResizableTh label="Rate" width={widths.rate} onWidth={(px) => setWidth('rate', px)} className="px-4 py-2.5 font-medium text-right">Rate</ResizableTh>
-                  <ResizableTh label="Position" width={widths.position} onWidth={(px) => setWidth('position', px)} className="px-4 py-2.5 font-medium">Position</ResizableTh>
-                  <ResizableTh label="Desk" width={widths.desk} onWidth={(px) => setWidth('desk', px)} className="px-4 py-2.5 font-medium">Desk</ResizableTh>
-                  <ResizableTh label="Last worked" width={widths.worked} onWidth={(px) => setWidth('worked', px)} className="px-4 py-2.5 font-medium">Last worked</ResizableTh>
+                  <ResizableTh label="Capital" width={widths.capital} onWidth={(px) => setWidth('capital', px)} className="px-2 py-1.5 font-medium text-right">Capital</ResizableTh>
+                  <ResizableTh label="Fees" width={widths.fees} onWidth={(px) => setWidth('fees', px)} className="px-2 py-1.5 font-medium text-right">Fees</ResizableTh>
+                  <ResizableTh label="Interest" width={widths.interest} onWidth={(px) => setWidth('interest', px)} className="px-2 py-1.5 font-medium text-right">Interest</ResizableTh>
+                  <ResizableTh label="Paid" width={widths.paid} onWidth={(px) => setWidth('paid', px)} className="px-2 py-1.5 font-medium text-right">Paid</ResizableTh>
+                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-2 py-1.5 font-medium text-right">Balance</ResizableTh>
+                  <ResizableTh label="Rate" width={widths.rate} onWidth={(px) => setWidth('rate', px)} className="px-2 py-1.5 font-medium text-right">Rate</ResizableTh>
+                  <ResizableTh label="Position" width={widths.position} onWidth={(px) => setWidth('position', px)} className="px-2 py-1.5 font-medium">Position</ResizableTh>
+                  <ResizableTh label="Desk" width={widths.desk} onWidth={(px) => setWidth('desk', px)} className="px-2 py-1.5 font-medium">Desk</ResizableTh>
+                  <ResizableTh label="Last worked" width={widths.worked} onWidth={(px) => setWidth('worked', px)} className="pl-2 pr-3 py-1.5 font-medium">Last worked</ResizableTh>
                 </tr>
               </thead>
               <tbody>
@@ -791,22 +791,28 @@ export function AccountsList() {
                   const desk = a.assignedTo ? users.find((u) => u.id === a.assignedTo)?.name : null
                   return (
                     <tr key={a.id} className={`border-b border-slate-50 last:border-0 ${
-                      allMatching || ticked.has(a.id) ? 'bg-brand-50/50' : 'hover:bg-slate-50/60'}`}>
+                      allMatching || ticked.has(a.id) ? 'bg-brand-50/50' : 'hover:bg-slate-50'}`}>
                       {canAllocate && (
-                        <td className="pl-4 pr-1 py-2.5">
+                        <td className="pl-3 pr-1 py-1.5">
                           <input type="checkbox" className="accent-brand-600"
                             checked={allMatching || ticked.has(a.id)}
                             onChange={() => toggle(a.id)}
                             aria-label={`Select ${a.accountNumber ?? 'this account'}`} />
                         </td>
                       )}
-                      <td className="px-4 py-2.5">
+                      {/* ONE LINE A ROW, at the firm's asking ("thin, sleek, easy to read" -- the
+                          checking list). The client's reference used to sit UNDER the account number,
+                          which doubled every row's height; it now follows it after a dot, and the
+                          column's width decides how much shows, with the whole of it on the title. */}
+                      <td className={`${canAllocate ? 'px-2' : 'pl-3 pr-2'} py-1.5 truncate`}
+                        title={a.clientReference ? `${a.accountNumber ?? '—'} · ${a.clientReference}` : undefined}>
                         <Link to={`/accounts/${a.id}`} className="font-medium text-brand-700 hover:underline">
                           {a.accountNumber ?? '—'}
                         </Link>
-                        {a.clientReference && <span className="block text-[11px] text-slate-400">{a.clientReference}</span>}
+                        {a.clientReference && <span className="text-slate-400"> · {a.clientReference}</span>}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-700">
+                      <td className="px-2 py-1.5 text-slate-700 truncate"
+                        title={[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || undefined}>
                         {[a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ') || '—'}
                       </td>
                       {/* TRUNCATED, WITH THE WHOLE NAME ON THE TITLE. Client names run long --
@@ -814,15 +820,15 @@ export function AccountsList() {
                           height of its row on a page of a hundred. How much shows is the column's
                           width now, which the reader sets: double-click its edge for the whole name. */}
                       {!companyId && (
-                        <td className="px-4 py-2.5 text-slate-500 truncate"
+                        <td className="px-2 py-1.5 text-slate-500 truncate"
                           title={a.companyName ?? undefined}>
                           {a.companyName ?? '—'}
                         </td>
                       )}
-                      <td className="px-4 py-2.5 text-slate-500">
+                      <td className="px-2 py-1.5 text-slate-500">
                         {a.handoverDate ? formatDate(a.handoverDate) : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">{formatCurrency(a.capitalHandedOver)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-700">{formatCurrency(a.capitalHandedOver)}</td>
                       {/*
                         A DASH UNTIL THE LEDGER ANSWERS, AND A DASH IF IT NEVER DOES.
                         
@@ -836,18 +842,18 @@ export function AccountsList() {
                         they would be a distinction a collector scanning a book does not need and
                         the firm did not ask for.
                       */}
-                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                         {balances.has(a.id)
                           ? formatCurrency(balances.get(a.id)!.fees + balances.get(a.id)!.receiptFees)
                           : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                         {balances.has(a.id) ? formatCurrency(balances.get(a.id)!.interest) : '—'}
                       </td>
                       {/* PAID COMES OFF THE SAME READING AS THE REST, not off `paymentsToDate` --
                           that is the imported figure and it is not net of a reversal, so the two
                           disagree the day somebody reverses a payment. */}
-                      <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                         {balances.has(a.id)
                           ? (balances.get(a.id)!.payments ? formatCurrency(balances.get(a.id)!.payments) : '—')
                           : '—'}
@@ -861,7 +867,7 @@ export function AccountsList() {
                         trusting. `cappedBy` is computeBalance's own answer, so the sentence here and
                         the account page's cannot disagree.
                       */}
-                      <td className="px-4 py-2.5 text-right tabular-nums font-medium text-slate-800">
+                      <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-800">
                         {/*
                           AND THE HOVER NAMES WHICH CHARGE GAVE WAY, now that the firm has decided
                           it. Their rule: "interest precedes Annexure B fees in an in duplum
@@ -879,7 +885,7 @@ export function AccountsList() {
                           </span>
                         ) : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
+                      <td className="px-2 py-1.5 text-right tabular-nums">
                         {a.commissionRate === null ? (
                           <span className="text-slate-400">—</span>
                         ) : drift ? (
@@ -890,13 +896,13 @@ export function AccountsList() {
                           <span className="text-slate-600">{pct(a.commissionRate)}</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-2 py-1.5">
                         <PositionPill account={a} />
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">
+                      <td className="px-2 py-1.5 text-slate-500">
                         {desk ?? <span className="text-amber-600" title="Nobody is carrying this account.">Unallocated</span>}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-500">{a.lastActionAt ? formatDate(a.lastActionAt) : '—'}</td>
+                      <td className="pl-2 pr-3 py-1.5 text-slate-500">{a.lastActionAt ? formatDate(a.lastActionAt) : '—'}</td>
                     </tr>
                   )
                 })}

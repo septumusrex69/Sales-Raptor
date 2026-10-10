@@ -82,8 +82,8 @@ ok('every row in the list carries one',
  * div inside a button is invalid markup that React will render and the browser will re-parent.
  */
 ok('...as a span, because the row is a button', !/<div/.test(summary))
-/* The narrow column gets a smaller one, for the same reason its rows drop the sender's address. */
-ok('the reading pane column gets a smaller one', /size=\{tight \? 32 : 36\}/.test(summary))
+/* The list row is one thin line now (the firm's checking-list look), so its face is the smaller. */
+ok('the list row takes a smaller one than the pane, being one line', /size=\{tight \? 32 : 22\}/.test(summary))
 
 /* ---------- 2. the message's own heading ---------- */
 

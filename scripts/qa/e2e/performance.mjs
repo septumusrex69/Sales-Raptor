@@ -679,7 +679,10 @@ try {
 
   /* ---------- the clerk sheet ---------- */
 
-  const headers = async () => (await page.locator('th').allInnerTexts()).map((h) => h.trim())
+  /* Upper-cased here rather than read as drawn: the headings are sentence case now, in the
+     checking-list look the firm asked for across the app, and what this guards is which columns
+     exist, not the case they are set in. */
+  const headers = async () => (await page.locator('th').allInnerTexts()).map((h) => h.trim().toUpperCase())
   const shown = await headers()
   t.ok('the tables have header cells at all', shown.length > 8)
   t.ok('the clerk sheet carries the target', shown.includes('TARGET'))
@@ -713,7 +716,7 @@ try {
    */
   const clerkHeaders = await page.locator('table').nth(1).locator('thead th').allInnerTexts()
   t.check('the clerk sheet\u2019s columns are in the order the firm asked for',
-    clerkHeaders.map((h) => h.trim()).join(' | '),
+    clerkHeaders.map((h) => h.trim().toUpperCase()).join(' | '),
     '# | CLERK | TEAM | TARGET | TODAY | PERIOD TO DATE | ACCOUNTS | PAYMENTS '
     + '| AVERAGE PAYMENT | ACHIEVED | GAP VS PACE | NEEDED / DAY | STATUS')
 
@@ -734,7 +737,8 @@ try {
    */
   const names = await clerkRows.evaluateAll((rows) => rows.map((r) => {
     const lines = (r.querySelectorAll('td')[1]?.innerText ?? '').split('\n')
-      .map((l) => l.replace(/\(you\)$/, '').trim()).filter(Boolean)
+      /* Since 10 Oct the grade rides on the name's own line (" · Senior"), the thin-list look. */
+      .map((l) => l.replace(/\s*·\s*(Elite|Senior|Skilled|Junior|Ungraded)\s*$/, '').replace(/\(you\)/, '').trim()).filter(Boolean)
     return lines.filter((l) => !/^[A-Z]{1,3}$/.test(l)
       && !['Elite', 'Senior', 'Skilled', 'Junior', 'Ungraded'].includes(l))[0] ?? ''
   }))

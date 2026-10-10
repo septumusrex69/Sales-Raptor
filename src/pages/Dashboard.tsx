@@ -538,27 +538,28 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         </div>
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 py-2.5">
+            /* One line a task, the checking-list look: what it is about trails the title in grey. */
+            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
               <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
-                <Circle size={18} />
+                <Circle size={15} />
               </button>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-slate-700 truncate flex items-center gap-1.5">
-                  {t.title}
-                  {t.autoRescheduledFrom && (
-                    <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
-                      Auto-moved
-                    </span>
-                  )}
-                </p>
-                <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
-              </div>
+              <p className="min-w-0 flex-1 flex items-center gap-1.5">
+                <span className="min-w-0 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
+                  <span className="font-medium text-slate-700">{t.title}</span>
+                  <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
+                </span>
+                {t.autoRescheduledFrom && (
+                  <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
+                    Auto-moved
+                  </span>
+                )}
+              </p>
               <PriorityBadge priority={t.priority} />
-              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
+              <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
                 {daysAgoLabel(t.dueDate)}
               </span>
-              <UserAvatar userId={t.ownerId} size={24} />
-              <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+              <UserAvatar userId={t.ownerId} size={18} />
+              <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
                 Reschedule
               </button>
             </div>
@@ -649,33 +650,34 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
             />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                  <th className="font-medium px-5 py-2.5">Deal</th>
-                  <th className="font-medium px-3 py-2.5">Company</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Size</th>
-                  <th className="font-medium px-3 py-2.5">Stage</th>
-                  <th className="font-medium px-3 py-2.5">Close Date</th>
+                <tr className="text-left border-y border-slate-100 text-slate-400">
+                  <th className="font-medium px-3 py-2">Deal</th>
+                  <th className="font-medium px-2 py-2">Company</th>
+                  <th className="font-medium px-2 py-2 text-right">Size</th>
+                  <th className="font-medium px-2 py-2">Stage</th>
+                  <th className="font-medium px-2 py-2">Close Date</th>
                 </tr>
               </thead>
               <tbody>
                 {topDeals.map((d) => (
-                  <tr key={d.id} className="border-t border-slate-50 hover:bg-slate-50/60">
-                    <td className="px-5 py-2.5">
-                      <Link to={`/deals/${d.id}`} className="font-medium text-slate-700 hover:text-brand-600">
+                  <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
+                    <td className="px-3 py-1.5">
+                      <Link to={`/deals/${d.id}`} title={d.name}
+                        className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
                         {d.name}
                       </Link>
                     </td>
-                    <td className="px-3 py-2.5 text-slate-500">{companyById(d.companyId)?.name}</td>
-                    <td className="px-3 py-2.5 text-right font-medium text-slate-700 tabular-nums whitespace-nowrap">
+                    <td className="px-2 py-1.5 text-slate-500">{companyById(d.companyId)?.name}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-700 whitespace-nowrap">
                       {formatCurrency(dealSize(d))}
                       <span className="ml-1.5 text-[10.5px] font-normal text-slate-400">{dealSizeLabel(d)}</span>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-1.5">
                       <StageBadge stage={d.stage} />
                     </td>
-                    <td className="px-3 py-2.5 text-slate-500">{formatDate(d.expectedCloseDate)}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{formatDate(d.expectedCloseDate)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -687,14 +689,12 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           <div className="p-5 pb-0">
             <CardHeader title="Recent Activities" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
           </div>
-          <div className="px-5 pb-5 space-y-3.5 max-h-80 overflow-y-auto">
+          <div className="px-5 pb-5 divide-y divide-slate-50 max-h-80 overflow-y-auto">
             {recentActivities.map((a) => (
-              <div key={a.id} className="flex gap-3">
-                <UserAvatar userId={a.userId} size={26} />
-                <div className="min-w-0">
-                  <p className="text-[13px] text-slate-700 leading-snug">{a.subject}</p>
-                  <p className="text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
-                </div>
+              <div key={a.id} className="flex items-center gap-2 py-1.5 text-[12.5px] whitespace-nowrap">
+                <UserAvatar userId={a.userId} size={18} />
+                <p className="min-w-0 flex-1 truncate text-slate-700" title={a.subject}>{a.subject}</p>
+                <p className="shrink-0 text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
               </div>
             ))}
           </div>

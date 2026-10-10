@@ -31,24 +31,27 @@ export function OtherAccountsPanel({ rows }: { rows: OtherAccount[] }) {
           ? 'One linked account, on the same identity number.'
           : `${rows.length} linked accounts, on the same identity number.`} />
 
-      <ul className="divide-y divide-slate-100 -mx-1">
+      {/* ONE LINE AN ACCOUNT, the checking list's density (the firm: "thin, sleek, easy to
+          read"): the reference, then whose book it is on after a dot, the balance hard right. */}
+      <ul className="divide-y divide-slate-50 -mx-1">
         {ordered.map((a) => (
           <li key={a.id}>
             <Link to={`/accounts/${a.id}`}
-              className="flex items-baseline justify-between gap-3 px-1 py-2 rounded
+              title={[a.reference ?? 'No reference', a.clientName ?? 'Unknown client', a.writtenOff ? 'written off' : null].filter(Boolean).join(' · ')}
+              className="flex items-center justify-between gap-3 px-1 py-1.5 rounded text-[12.5px] whitespace-nowrap
                 hover:bg-[var(--tint-steel-alt)]">
-              <span className="min-w-0">
-                <span className="block text-[13.5px] font-medium text-brand-700">
+              <span className="min-w-0 truncate">
+                <span className="font-medium text-brand-700">
                   {a.reference ?? 'No reference'}
                 </span>
                 {/* WHOSE BOOK IT IS ON. The group crosses clients, so the reference on its own
                     would leave somebody guessing which client to phone about it. */}
-                <span className="block text-[11.5px] text-slate-400 truncate">
-                  {a.clientName ?? 'Unknown client'}
+                <span className="text-slate-400">
+                  {' · '}{a.clientName ?? 'Unknown client'}
                   {a.writtenOff && ' · written off'}
                 </span>
               </span>
-              <span className="text-[13px] text-slate-600 shrink-0 tabular-nums">
+              <span className="text-slate-600 shrink-0 tabular-nums whitespace-nowrap">
                 {a.balance === null ? '—' : formatCurrency(a.balance)}
               </span>
             </Link>

@@ -140,7 +140,7 @@ export function EmailsPanel({
           onSelect={(e) => select(e)}
           emptyDetail="Pick a message on the left to read it."
           renderRow={(e) => (
-            <span className={`block px-4 py-2.5 ${e.direction === 'in' && !e.readAt ? 'bg-positive-50/40' : ''}`}>
+            <span className={`block px-3 py-1.5 ${e.direction === 'in' && !e.readAt ? 'bg-positive-50/40' : ''}`}>
               <EmailSummary email={e} tight />
             </span>
           )}
@@ -166,7 +166,7 @@ export function EmailsPanel({
           )}
         />
       ) : (
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-slate-50">
           {emails.map((e) => (
             <EmailRow key={e.id} email={e} expanded={open === e.id}
               onToggle={() => toggle(e)}
@@ -190,37 +190,65 @@ function EmailSummary({ email, tight }: { email: AccountEmail; tight?: boolean }
   const inbound = email.direction === 'in'
   const unread = inbound && !email.readAt
   const Icon = inbound && email.readAt ? MailOpen : Mail
-  return (
-    <span className="flex items-start gap-3">
-      {/* Inbound takes the positive colour, like a payment does: the debtor made contact, which
-          is the outcome the whole account is trying to produce. */}
-      <span className={`mt-0.5 shrink-0 grid place-items-center w-7 h-7 rounded-full ${
-        inbound ? 'bg-positive-50 text-positive' : 'bg-brand-50 text-brand-500'}`}>
-        <Icon size={14} />
+  const fee = !tight && email.chargedExclVat !== null && (
+    <span className={`shrink-0 text-[11px] tabular-nums whitespace-nowrap ${
+      email.chargedExclVat > 0 ? 'text-slate-500' : 'text-slate-300'}`}>
+      {email.chargedExclVat > 0 ? formatMoney(email.chargedExclVat) : 'no charge'}
+    </span>
+  )
+  const who = (
+    <>
+      {unread && <span className="font-semibold text-positive">Unread · </span>}
+      {inbound ? 'From' : 'To'} {email.debtorAddress}
+      {' · '}{relativeDayLabel(email.occurredAt)}
+      {email.sentByName && !inbound && !tight && <> · {email.sentByName}</>}
+    </>
+  )
+  /* Inbound takes the positive colour, like a payment does: the debtor made contact, which is the
+     outcome the whole account is trying to produce. */
+  const icon = (
+    <span className={`shrink-0 grid place-items-center w-5 h-5 rounded-full ${
+      inbound ? 'bg-positive-50 text-positive' : 'bg-brand-50 text-brand-500'}`}>
+      <Icon size={11} />
+    </span>
+  )
+  /*
+   * ONE LINE A MESSAGE IN THE LIST, at the firm's asking: "wherever in this whole app there are a
+   * lot of things listed under each other... it should look like the checking list: thin, sleek,
+   * easy to read." The subject, then who and when after it in grey, then the fee hard right. The
+   * reading pane's narrow column keeps its two short lines -- there is no width there for one.
+   */
+  if (!tight) {
+    return (
+      <span className="flex items-center gap-2 text-[12.5px] whitespace-nowrap min-w-0">
+        {icon}
+        {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0" />}
+        <span className="min-w-0 flex-1 truncate">
+          <span className={unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}>
+            {email.subject || '(no subject)'}
+          </span>
+          <span className="text-slate-400"> · {who}</span>
+        </span>
+        {email.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
+        {/* The fee sits with the row in the list; in the reading pane's narrow column it would
+            crowd the subject, and the pane's own header carries the detail instead. */}
+        {fee}
       </span>
+    )
+  }
+  return (
+    <span className="flex items-start gap-2">
+      <span className="mt-0.5">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           {unread && <span className="w-1.5 h-1.5 rounded-full bg-positive shrink-0 self-center" />}
-          <span className={`text-sm truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
+          <span className={`text-[12.5px] truncate ${unread ? 'font-semibold text-navy-950' : 'font-medium text-slate-800'}`}>
             {email.subject || '(no subject)'}
           </span>
           {email.attachmentNames.length > 0 && <Paperclip size={12} className="shrink-0 text-slate-400" />}
         </span>
-        <span className="block text-xs text-slate-400 mt-0.5 truncate">
-          {unread && <span className="font-semibold text-positive">Unread · </span>}
-          {inbound ? 'From' : 'To'} {email.debtorAddress}
-          {' · '}{relativeDayLabel(email.occurredAt)}
-          {email.sentByName && !inbound && !tight && <> · {email.sentByName}</>}
-        </span>
+        <span className="block text-[11px] text-slate-400 truncate">{who}</span>
       </span>
-      {/* The fee sits with the row in the list; in the reading pane's narrow column it would
-          crowd the subject, and the pane's own header carries the detail instead. */}
-      {!tight && email.chargedExclVat !== null && (
-        <span className={`shrink-0 text-[11px] tabular-nums pt-0.5 ${
-          email.chargedExclVat > 0 ? 'text-slate-500' : 'text-slate-300'}`}>
-          {email.chargedExclVat > 0 ? formatMoney(email.chargedExclVat) : 'no charge'}
-        </span>
-      )}
     </span>
   )
 }
@@ -428,15 +456,15 @@ function EmailRow({
   return (
     <li className={unread ? 'bg-positive-50/40' : undefined}>
       <button onClick={onToggle} aria-expanded={expanded}
-        className="w-full text-left px-5 py-3 flex items-start gap-3 hover:bg-slate-50">
+        className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50">
         <span className="min-w-0 flex-1"><EmailSummary email={email} /></span>
-        <span className="shrink-0 pt-0.5 text-slate-400">
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        <span className="shrink-0 text-slate-400">
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
       </button>
 
       {expanded && (
-        <div className="px-5 pb-4 pl-[3.75rem]">
+        <div className="px-5 pb-4 pl-10">
           <EmailBody email={email} canSend={canSend} onClassify={onClassify}
             onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onUnread={onUnread} />

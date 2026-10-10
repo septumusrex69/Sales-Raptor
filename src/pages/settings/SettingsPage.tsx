@@ -309,8 +309,8 @@ function DepartmentGroup({ group, columns, renderRow, forceOpen = false }: {
   const folded = collapsed && !forceOpen
   return (
     <Fragment>
-      <tr className="border-t border-slate-100 bg-slate-50/70">
-        <th colSpan={columns} className="text-left px-5 py-2">
+      <tr className="border-y border-slate-100 bg-slate-50/70">
+        <th colSpan={columns} className="text-left px-3 py-1.5 whitespace-normal">
           <button type="button" onClick={toggle}
             className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-600 hover:text-slate-900"
             aria-expanded={!folded}>
@@ -403,17 +403,17 @@ function UsersTab() {
   /* The row exactly as it was, lifted so the groups below can each draw their own people. */
   const renderRow = (u: User) => (
             <Fragment key={u.id}>
-              <tr className="border-t border-slate-50">
-                <td className="px-5 py-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <UserAvatar userId={u.id} size={26} />
-                    <span className="font-medium text-slate-700">{u.name}</span>
+              <tr className="border-b border-slate-50 hover:bg-slate-50">
+                <td className="px-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <UserAvatar userId={u.id} size={20} />
+                    <span className="font-medium text-slate-700 max-w-[14rem] truncate" title={u.name}>{u.name}</span>
                   </div>
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <select
-                      className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
                       value={u.role}
                       onChange={(e) => updateUser(u.id, { role: e.target.value as UserRole })}
                     >
@@ -425,10 +425,10 @@ function UsersTab() {
                     <span className="text-slate-500">{u.role}</span>
                   )}
                 </td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <select
-                      className="text-sm text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      className="text-[12px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
                       value={u.teamId ?? ''}
                       onChange={(e) => updateUser(u.id, { teamId: e.target.value || undefined })}
                     >
@@ -494,26 +494,26 @@ function UsersTab() {
                     )
                   })()}
                 </td>
-                <td className="px-3 py-2.5 text-slate-500">{u.email}</td>
-                <td className="px-3 py-2.5">
+                <td className="px-2 py-1.5 text-slate-500 max-w-[16rem] truncate" title={u.email}>{u.email}</td>
+                <td className="px-2 py-1.5">
                   {isAdmin ? (
                     <button
                       onClick={() => updateUser(u.id, { status: u.status === 'Active' ? 'Inactive' : 'Active' })}
-                      className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}
+                      className={`badge !px-2 !py-0.5 !text-[11px] ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}
                     >
                       {u.status}
                     </button>
                   ) : (
-                    <span className={`badge ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
+                    <span className={`badge !px-2 !py-0.5 !text-[11px] ${u.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{u.status}</span>
                   )}
                 </td>
                 {isAdmin && (
-                  <td className="px-3 py-2.5">
+                  <td className="px-2 py-1.5">
                     <ResetLoginButton email={u.email} />
                   </td>
                 )}
                 {isAdmin && (
-                  <td className="px-3 py-2.5">
+                  <td className="px-2 py-1.5">
                     <div className="flex items-center gap-2.5">
                       <button onClick={() => setEmailUser(u)} className="text-slate-400 hover:text-brand-600" title="Manage email connection">
                         <Mail size={14} />
@@ -622,16 +622,16 @@ function UsersTab() {
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-              <th className="font-medium px-5 py-2.5">User</th>
-              <th className="font-medium px-3 py-2.5">Role</th>
-              <th className="font-medium px-3 py-2.5">Team</th>
-              <th className="font-medium px-3 py-2.5">Email</th>
-              <th className="font-medium px-3 py-2.5">Status</th>
-              {isAdmin && <th className="font-medium px-3 py-2.5">Login</th>}
-              {isAdmin && <th className="font-medium px-3 py-2.5"></th>}
+            <tr className="text-left border-y border-slate-100 text-slate-400">
+              <th className="font-medium px-3 py-2">User</th>
+              <th className="font-medium px-2 py-2">Role</th>
+              <th className="font-medium px-2 py-2">Team</th>
+              <th className="font-medium px-2 py-2">Email</th>
+              <th className="font-medium px-2 py-2">Status</th>
+              {isAdmin && <th className="font-medium px-2 py-2">Login</th>}
+              {isAdmin && <th className="font-medium px-2 py-2"></th>}
             </tr>
           </thead>
           <tbody>
@@ -657,8 +657,8 @@ function UsersTab() {
             */}
             {grouped.archived.length > 0 && (
               <Fragment>
-                <tr className="border-t border-slate-100 bg-slate-50/70">
-                  <th colSpan={columns} className="text-left px-5 py-2">
+                <tr className="border-y border-slate-100 bg-slate-50/70">
+                  <th colSpan={columns} className="text-left px-3 py-1.5 whitespace-normal">
                     <button type="button" onClick={() => setShowArchived((v) => !v)}
                       className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500 hover:text-slate-700">
                       {showArchived ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -898,7 +898,7 @@ function ResetLoginButton({ email }: { email: string }) {
       <button onClick={handleClick} disabled={state === 'sending'} className="text-xs font-medium text-brand-600 hover:underline disabled:opacity-50">
         {state === 'sending' ? 'Sending…' : 'Send login link'}
       </button>
-      {error && <p className="text-[11px] text-[var(--c-rust-deep)] mt-0.5 max-w-[160px]">{error}</p>}
+      {error && <p className="text-[11px] text-[var(--c-rust-deep)] mt-0.5 max-w-[160px] whitespace-normal">{error}</p>}
     </div>
   )
 }
@@ -1314,8 +1314,8 @@ function TargetsTab() {
             sales metrics that mean nothing on the book to find the one line they came for.
           */}
           {(['sales', 'collections'] as const).map((side) => (
-            <div key={side} className="space-y-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 pt-2 px-1">
+            <div key={side}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 pt-2 pb-1 px-1">
                 {side === 'sales' ? 'Sales' : 'Collections'}
               </p>
               {TARGET_METRICS.filter((def) => def.side === side).map((def) => (
@@ -1379,14 +1379,21 @@ function TargetRow({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[1fr_130px_130px] gap-3 items-center py-2 border-t border-slate-50">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-700">
-          {label}
-          {unit === 'currency' && <span className="ml-1.5 text-[11px] font-normal text-slate-400">in rand</span>}
-        </p>
-        <p className="text-[11.5px] text-slate-400 leading-snug">{description}</p>
-      </div>
+    /* One line per metric, the firm's checking-list look: what the metric means trails its name in
+       grey and is whole in the tooltip, and a rand target's own reading sits on the same line
+       rather than on a third one under the boxes. */
+    <div className="grid grid-cols-1 sm:grid-cols-[1fr_130px_130px] gap-x-3 gap-y-1 items-center py-1 border-t border-slate-50">
+      <p className="min-w-0 truncate text-[12.5px]" title={description}>
+        <span className="font-medium text-slate-700">{label}</span>
+        {unit === 'currency' && <span className="ml-1.5 text-[11px] font-normal text-slate-400">in rand</span>}
+        {existing && unit === 'currency' && (
+          <span className="text-slate-500 tabular-nums">
+            {' '}&middot; {formatCurrency(existing.targetValue)} a month
+            {existing.thresholdValue != null && `, minimum ${formatCurrency(existing.thresholdValue)}`}
+          </span>
+        )}
+        <span className="text-slate-400"> &middot; {description}</span>
+      </p>
       <input
         type="number"
         min={0}
@@ -1397,7 +1404,7 @@ function TargetRow({
         onBlur={commit}
         placeholder="—"
         aria-label={`${label} target`}
-        className={inputClass}
+        className={`${inputClass} !py-1 !text-[12.5px]`}
       />
       <input
         type="number"
@@ -1409,14 +1416,8 @@ function TargetRow({
         onBlur={commit}
         placeholder="optional"
         aria-label={`${label} minimum`}
-        className={inputClass}
+        className={`${inputClass} !py-1 !text-[12.5px]`}
       />
-      {existing && unit === 'currency' && (
-        <p className="sm:col-span-3 text-[11px] text-slate-400 -mt-1">
-          {formatCurrency(existing.targetValue)} a month
-          {existing.thresholdValue != null && `, minimum ${formatCurrency(existing.thresholdValue)}`}
-        </p>
-      )}
       <input type="hidden" value={metricId} readOnly />
     </div>
   )
@@ -1435,12 +1436,15 @@ function TeamsTab() {
   return (
     <Card>
       <CardHeader title="Teams" subtitle="Group salespeople into teams" />
-      <div className="space-y-3">
+      {/* The checking-list look, as on every list the firm reads down: a thin rule between teams
+          rather than a boxed card each, the name, kind and head count on one line, and the
+          members as small chips under it. */}
+      <div className="divide-y divide-slate-100 border-y border-slate-100 text-[12.5px]">
         {teams.map((t) => {
           const unassigned = users.filter((u) => u.teamId !== t.id)
           return (
-            <div key={t.id} className="border border-slate-100 rounded-xl p-3.5">
-              <div className="flex items-center justify-between">
+            <div key={t.id} className="py-1.5 px-1">
+              <div className="flex items-center justify-between gap-3 whitespace-nowrap">
                 {editingTeamId === t.id ? (
                   <form
                     className="flex items-center gap-2 flex-1"
@@ -1465,16 +1469,14 @@ function TeamsTab() {
                     </button>
                   </form>
                 ) : (
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold text-slate-700">{t.name}</p>
-                      <span
-                        className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${TEAM_KIND_TINT[t.kind] ?? TEAM_KIND_TINT.Sales}`}
-                      >
-                        {t.kind}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400">{t.memberIds.length} members</p>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <p className="font-semibold text-slate-700 truncate" title={t.name}>{t.name}</p>
+                    <span
+                      className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md ${TEAM_KIND_TINT[t.kind] ?? TEAM_KIND_TINT.Sales}`}
+                    >
+                      {t.kind}
+                    </span>
+                    <p className="shrink-0 text-slate-400">&middot; {t.memberIds.length} members</p>
                   </div>
                 )}
                 {isAdmin && editingTeamId !== t.id && (
@@ -1482,7 +1484,7 @@ function TeamsTab() {
                     <select
                       value={t.kind}
                       onChange={(e) => updateTeam(t.id, { kind: e.target.value as TeamKind })}
-                      className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none"
+                      className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none"
                       title="Which dashboard this team's members land on"
                     >
                       {TEAM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
@@ -1503,13 +1505,13 @@ function TeamsTab() {
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2 mt-3">
+              <div className="flex flex-wrap items-center gap-1 mt-1">
                 {t.memberIds.map((id) => {
                   const member = users.find((u) => u.id === id)
                   return (
-                    <div key={id} className="flex items-center gap-1.5 bg-slate-50 rounded-full pl-1 pr-2 py-1">
-                      <UserAvatar userId={id} size={20} />
-                      <span className="text-xs text-slate-600">{member?.name ?? 'Unknown'}</span>
+                    <div key={id} className="flex items-center gap-1 bg-slate-50 rounded-full pl-0.5 pr-1.5 py-0.5">
+                      <UserAvatar userId={id} size={16} />
+                      <span className="text-[11px] text-slate-600 whitespace-nowrap">{member?.name ?? 'Unknown'}</span>
                       {isAdmin && (
                         <button onClick={() => updateUser(id, { teamId: undefined })} className="text-slate-400 hover:text-[var(--c-rust-deep)]" title="Remove from team">
                           <X size={12} />
@@ -1521,7 +1523,7 @@ function TeamsTab() {
               </div>
               {isAdmin && unassigned.length > 0 && (
                 <select
-                  className="text-sm text-slate-500 border border-slate-200 rounded-lg px-2 py-1 bg-white outline-none mt-2.5"
+                  className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 bg-white outline-none mt-1"
                   value=""
                   onChange={(e) => {
                     if (e.target.value) updateUser(e.target.value, { teamId: t.id })
@@ -1606,14 +1608,14 @@ function PipelinesTab() {
   return (
     <Card>
       <CardHeader title="Pipelines" subtitle="Customise your sales pipeline stages" />
-      <div className="space-y-2">
+      <div className="border-y border-slate-100 text-[12.5px]">
         {stages.map((s, i) => (
-          <div key={s} className="flex items-center gap-3 border border-slate-100 rounded-lg px-3.5 py-2.5">
-            <span className="text-xs text-slate-400 w-5">{i + 1}</span>
-            <span className="text-sm font-medium text-slate-700 flex-1">{s}</span>
+          <div key={s} className="flex items-center gap-3 border-b border-slate-50 last:border-b-0 px-3 py-1.5 hover:bg-slate-50">
+            <span className="text-slate-400 w-5 tabular-nums">{i + 1}</span>
+            <span className="font-medium text-slate-700 flex-1 truncate">{s}</span>
             {!(['Won', 'Rejected'] as string[]).includes(s) && (
-              <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-1 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
-                <X size={14} />
+              <button onClick={() => setStages((prev) => prev.filter((x) => x !== s))} className="p-0.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
+                <X size={13} />
               </button>
             )}
           </div>
@@ -1652,27 +1654,27 @@ function CustomFieldsTab() {
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-[12.5px] whitespace-nowrap">
           <thead>
-            <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-              <th className="font-medium px-5 py-2.5">Field</th>
-              <th className="font-medium px-3 py-2.5">Related To</th>
-              <th className="font-medium px-3 py-2.5">Type</th>
-              <th className="font-medium px-3 py-2.5">Status</th>
+            <tr className="text-left border-y border-slate-100 text-slate-400">
+              <th className="font-medium px-3 py-2">Field</th>
+              <th className="font-medium px-2 py-2">Related To</th>
+              <th className="font-medium px-2 py-2">Type</th>
+              <th className="font-medium px-2 py-2">Status</th>
               <th className="w-10"></th>
             </tr>
           </thead>
           <tbody>
             {fields.map((f) => (
-              <tr key={f.id} className="border-t border-slate-50">
-                <td className="px-5 py-2.5 font-medium text-slate-700">{f.name}</td>
-                <td className="px-3 py-2.5 text-slate-500">{f.relatedTo}</td>
-                <td className="px-3 py-2.5 text-slate-500">{f.type}</td>
-                <td className="px-3 py-2.5">
-                  <span className={`badge ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
+              <tr key={f.id} className="border-b border-slate-50 hover:bg-slate-50">
+                <td className="px-3 py-1.5 font-medium text-slate-700 max-w-[16rem] truncate" title={f.name}>{f.name}</td>
+                <td className="px-2 py-1.5 text-slate-500">{f.relatedTo}</td>
+                <td className="px-2 py-1.5 text-slate-500">{f.type}</td>
+                <td className="px-2 py-1.5">
+                  <span className={`badge !px-2 !py-0.5 !text-[11px] ${f.status === 'Active' ? 'bg-[var(--tint-green)] text-[var(--c-green)]' : 'bg-slate-100 text-slate-500'}`}>{f.status}</span>
                 </td>
-                <td className="px-3 py-2.5">
-                  <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
+                <td className="px-2 py-1.5">
+                  <button onClick={() => setFields((prev) => prev.filter((x) => x.id !== f.id))} className="p-0.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
                     <Trash2 size={14} />
                   </button>
                 </td>
@@ -1891,8 +1893,8 @@ function NotificationsTab() {
       <CardHeader title="Notifications" subtitle="Choose which events notify you" />
       <div className="divide-y divide-slate-50">
         {NOTIFICATION_TYPES.map((t) => (
-          <div key={t} className="flex items-center justify-between py-2.5">
-            <span className="text-sm text-slate-700">{t}</span>
+          <div key={t} className="flex items-center justify-between py-1.5">
+            <span className="text-[12.5px] text-slate-700">{t}</span>
             <Toggle checked={enabled[t]} onChange={(v) => setEnabled((prev) => ({ ...prev, [t]: v }))} />
           </div>
         ))}
@@ -2162,19 +2164,19 @@ function BuzzBoxIntegrationCard() {
             <div>
               <p className="text-xs font-semibold text-slate-500 mb-2">Everyone’s extensions</p>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-[12.5px] whitespace-nowrap">
                   <thead>
-                    <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                    <tr className="text-left text-slate-400 border-b border-slate-100">
                       <th className="font-medium px-2 py-1.5">Person</th>
                       <th className="font-medium px-2 py-1.5 w-72">Extension</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeUsers.map((u) => (
-                      <tr key={u.id} className="border-b border-slate-50">
+                      <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50">
                         <td className="px-2 py-1.5">
                           <div className="flex items-center gap-2">
-                            <UserAvatar userId={u.id} size={22} />
+                            <UserAvatar userId={u.id} size={20} />
                             <span className="text-slate-700">{u.name}</span>
                           </div>
                         </td>

@@ -142,19 +142,23 @@ export function QueryPanel({ accountId, queries, users, actor, onChange, onRaise
           <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-slate-600">
             {closed.length} closed
           </summary>
-          <div className="space-y-2 mt-2">
+          {/* ONE LINE A CLOSED QUERY (the firm: "thin, sleek, easy to read"). What was asked and
+              what was done about it follow the date and the outcome, truncated, with the whole of
+              both on the title. */}
+          <div className="mt-2 divide-y divide-slate-50">
             {closed.map((q) => (
-              <div key={q.id} className="text-xs">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-slate-400 tabular-nums shrink-0">{formatDate(q.closedAt ?? q.raisedAt)}</span>
-                  {q.outcome && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${OUTCOME_CHIP[q.outcome]}`}>
-                      {QUERY_OUTCOME_LABEL[q.outcome]}
-                    </span>
-                  )}
-                </div>
-                <p className="text-slate-600 mt-0.5 wrap-anywhere">{q.description}</p>
-                {q.outcomeAction && <p className="text-slate-400 mt-0.5">{q.outcomeAction}</p>}
+              <div key={q.id} className="flex items-center gap-2 py-1 text-[12px] whitespace-nowrap min-w-0 hover:bg-slate-50"
+                title={[q.description, q.outcomeAction].filter(Boolean).join(' · ')}>
+                <span className="text-slate-400 tabular-nums shrink-0">{formatDate(q.closedAt ?? q.raisedAt)}</span>
+                {q.outcome && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${OUTCOME_CHIP[q.outcome]}`}>
+                    {QUERY_OUTCOME_LABEL[q.outcome]}
+                  </span>
+                )}
+                <span className="min-w-0 truncate text-slate-600">
+                  {q.description}
+                  {q.outcomeAction && <span className="text-slate-400"> · {q.outcomeAction}</span>}
+                </span>
               </div>
             ))}
           </div>

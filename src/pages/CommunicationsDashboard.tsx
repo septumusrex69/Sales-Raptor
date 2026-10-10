@@ -425,12 +425,12 @@ export function CommunicationsDashboard() {
             {rankedByCoefficient.slice(0, 3).map(({ company, rollup }) => {
               const pct = collectionsCoefficient(rollup) ?? 0
               return (
-                <Link key={company.id} to={`/companies/${company.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">{company.name}</p>
-                    <p className="text-xs text-slate-400">{(rollup.accountCount ?? 0).toLocaleString()} accounts</p>
-                  </div>
-                  <span className="text-sm font-bold" style={{ color: TONE_HEX[coefficientTone(pct)] }}>
+                <Link key={company.id} to={`/companies/${company.id}`} className="flex items-center justify-between gap-3 py-1.5 text-[12.5px] whitespace-nowrap hover:bg-slate-50 -mx-1 px-1 rounded-md">
+                  <p className="min-w-0 truncate" title={company.name}>
+                    <span className="font-medium text-slate-700">{company.name}</span>
+                    <span className="text-slate-400"> &middot; {(rollup.accountCount ?? 0).toLocaleString()} accounts</span>
+                  </p>
+                  <span className="shrink-0 font-bold tabular-nums" style={{ color: TONE_HEX[coefficientTone(pct)] }}>
                     {pct.toFixed(1)}%
                   </span>
                 </Link>
@@ -445,10 +445,10 @@ export function CommunicationsDashboard() {
           <CardHeader title="Communications Team" subtitle="Click a column to sort" />
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                <th className="font-medium px-5 py-2.5">Team Member</th>
+              <tr className="text-left border-y border-slate-100 text-slate-400">
+                <th className="font-medium px-3 py-2">Team Member</th>
                 {(
                   [
                     { key: 'courtesyCalls', label: 'Courtesy Calls' },
@@ -461,7 +461,7 @@ export function CommunicationsDashboard() {
                   <th
                     key={c.key}
                     onClick={() => setSortKey(c.key)}
-                    className="font-medium px-3 py-2.5 text-right cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
+                    className="font-medium px-2 py-2 text-right cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
                   >
                     {c.label}
                     {sortKey === c.key ? ' ▼' : ''}
@@ -472,24 +472,24 @@ export function CommunicationsDashboard() {
             <tbody>
               {sortedLeaderboard.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center text-slate-400 text-sm py-8">
+                  <td colSpan={6} className="text-center text-slate-400 py-6 whitespace-normal">
                     No Communications team members yet.
                   </td>
                 </tr>
               ) : (
                 sortedLeaderboard.map((r, i) => (
-                  <tr key={r.memberId} className={i === 0 ? 'border-t border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-t border-slate-50 hover:bg-slate-50/60'}>
-                    <td className="px-5 py-2.5">
+                  <tr key={r.memberId} className={i === 0 ? 'border-b border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-b border-slate-50 hover:bg-slate-50'}>
+                    <td className="px-3 py-1.5">
                       <span className="flex items-center gap-2 font-medium text-slate-700">
-                        <UserAvatar userId={r.memberId} size={24} />
+                        <UserAvatar userId={r.memberId} size={18} />
                         {r.name}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">{r.courtesyCalls}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">{r.meetings}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">{r.handovers}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">{r.dealsWon}</td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">{formatCurrency(r.revenueWon)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.courtesyCalls}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.meetings}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.handovers}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.dealsWon}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{formatCurrency(r.revenueWon)}</td>
                   </tr>
                 ))
               )}
@@ -504,33 +504,34 @@ export function CommunicationsDashboard() {
             <CardHeader title="Recent Deals Closed" action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>} />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-left text-xs text-slate-400 border-t border-slate-100">
-                  <th className="font-medium px-5 py-2.5">Deal</th>
-                  <th className="font-medium px-3 py-2.5">Client</th>
-                  <th className="font-medium px-3 py-2.5 text-right">Value</th>
-                  <th className="font-medium px-3 py-2.5">Closed By</th>
+                <tr className="text-left border-y border-slate-100 text-slate-400">
+                  <th className="font-medium px-3 py-2">Deal</th>
+                  <th className="font-medium px-2 py-2">Client</th>
+                  <th className="font-medium px-2 py-2 text-right">Value</th>
+                  <th className="font-medium px-2 py-2">Closed By</th>
                 </tr>
               </thead>
               <tbody>
                 {recentDeals.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="text-center text-slate-400 text-sm py-8">
+                    <td colSpan={4} className="text-center text-slate-400 py-6 whitespace-normal">
                       No deals closed yet.
                     </td>
                   </tr>
                 ) : (
                   recentDeals.map((d) => (
-                    <tr key={d.id} className="border-t border-slate-50 hover:bg-slate-50/60">
-                      <td className="px-5 py-2.5">
-                        <Link to={`/deals/${d.id}`} className="font-medium text-slate-700 hover:text-brand-600">
+                    <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5">
+                        <Link to={`/deals/${d.id}`} title={d.name}
+                          className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
                           {d.name}
                         </Link>
                       </td>
-                      <td className="px-3 py-2.5 text-slate-500">{companyById(d.companyId)?.name}</td>
-                      <td className="px-3 py-2.5 text-right font-medium text-slate-700">{formatCurrency(d.value)}</td>
-                      <td className="px-3 py-2.5 text-slate-500">{userById(d.ownerId)?.name}</td>
+                      <td className="px-2 py-1.5 text-slate-500">{companyById(d.companyId)?.name}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-700">{formatCurrency(d.value)}</td>
+                      <td className="px-2 py-1.5 text-slate-500">{userById(d.ownerId)?.name}</td>
                     </tr>
                   ))
                 )}
@@ -543,17 +544,15 @@ export function CommunicationsDashboard() {
           <div className="p-5 pb-0">
             <CardHeader title="Recent Activity" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
           </div>
-          <div className="px-5 pb-5 space-y-3.5 max-h-80 overflow-y-auto">
+          <div className="px-5 pb-5 divide-y divide-slate-50 max-h-80 overflow-y-auto">
             {recentActivities.length === 0 ? (
               <p className="text-sm text-slate-400">No activity recorded yet.</p>
             ) : (
               recentActivities.map((a) => (
-                <div key={a.id} className="flex gap-3">
-                  <UserAvatar userId={a.userId} size={26} />
-                  <div className="min-w-0">
-                    <p className="text-[13px] text-slate-700 leading-snug">{a.subject}</p>
-                    <p className="text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
-                  </div>
+                <div key={a.id} className="flex items-center gap-2 py-1.5 text-[12.5px] whitespace-nowrap">
+                  <UserAvatar userId={a.userId} size={18} />
+                  <p className="min-w-0 flex-1 truncate text-slate-700" title={a.subject}>{a.subject}</p>
+                  <p className="shrink-0 text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
                 </div>
               ))
             )}
@@ -567,17 +566,17 @@ export function CommunicationsDashboard() {
         </div>
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 py-2.5">
+            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
               <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
-                <Circle size={18} />
+                <Circle size={15} />
               </button>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-slate-700 truncate">{t.title}</p>
-                <p className="text-[11px] text-slate-400">{t.relatedToLabel ?? t.type}</p>
-              </div>
-              <span className={`text-xs font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{daysAgoLabel(t.dueDate)}</span>
-              <UserAvatar userId={t.ownerId} size={24} />
-              <button onClick={() => setRescheduleTask(t)} className="text-xs font-medium text-brand-600 hover:underline shrink-0">
+              <p className="min-w-0 flex-1 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
+                <span className="font-medium text-slate-700">{t.title}</span>
+                <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
+              </p>
+              <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{daysAgoLabel(t.dueDate)}</span>
+              <UserAvatar userId={t.ownerId} size={18} />
+              <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
                 Reschedule
               </button>
             </div>

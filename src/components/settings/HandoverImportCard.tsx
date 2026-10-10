@@ -572,10 +572,12 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
       {batches.length > 0 && (
         <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5">
           <p className="text-xs font-medium text-slate-500">Handovers already in</p>
-          <ul className="mt-1.5 space-y-1.5">
+          {/* One line a batch, the checking-list look: what it was, then the warning, then the
+              button, with whatever does not fit cut off and whole in the tooltip. */}
+          <ul className="mt-1 divide-y divide-slate-100">
             {batches.map((b) => (
-              <li key={b.handoverId} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px]">
-                <span className="text-slate-700">
+              <li key={b.handoverId} className="flex items-baseline gap-x-2 py-1 text-[12.5px] whitespace-nowrap">
+                <span className="min-w-0 truncate text-slate-700 tabular-nums">
                   {b.reference ?? 'A handover'} · {b.accounts.toLocaleString('en-ZA')}
                   {b.accounts === 1 ? ' account' : ' accounts'} · {formatCurrency(b.capital)}
                 </span>
@@ -585,17 +587,17 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
                   a wrongly imported batch is exactly the case where the handover email has gone.
                 */}
                 {b.noticesSent > 0 && (
-                  <span className="text-[11px] text-amber-700">
+                  <span className="shrink-0 text-[11px] text-amber-700">
                     {b.noticesSent} notice{b.noticesSent === 1 ? '' : 's'} already sent to debtors
                   </span>
                 )}
                 {b.blockers.length > 0 ? (
-                  <span className="text-[11px] text-slate-400" title={b.blockers.join(' ')}>
+                  <span className="min-w-0 truncate text-[11px] text-slate-400" title={b.blockers.join(' ')}>
                     Cannot be undone — {b.blockers[0]}
                   </span>
                 ) : canDiscard ? (
                   <button type="button" onClick={() => { setDiscarding(b); setTyped('') }}
-                    className="text-[12px] font-medium text-negative-700 hover:underline">
+                    className="shrink-0 text-[12px] font-medium text-negative-700 hover:underline">
                     Discard
                   </button>
                 ) : null}
@@ -775,12 +777,13 @@ export function HandoverImportCard({ forCompanyId }: { forCompanyId?: string | n
           <div className="space-y-1.5">
             {openDrafts.map((d) => (
               <div key={d.id}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200">
+                className="flex items-center gap-3 px-3 py-1.5 rounded-md border border-slate-200 text-[12.5px] whitespace-nowrap">
+                {/* One line: the file, then whose and when in grey after it. */}
                 <button type="button" onClick={() => void load(d.id)}
-                  className="flex-1 min-w-0 text-left">
-                  <span className="block text-sm text-slate-700 truncate">{d.filename}</span>
-                  <span className="block text-[11px] text-slate-400">
-                    {clients.find((c) => c.id === d.companyId)?.name ?? 'Unknown client'}
+                  className="flex-1 min-w-0 text-left truncate">
+                  <span className="text-slate-700">{d.filename}</span>
+                  <span className="text-slate-400">
+                    {' · '}{clients.find((c) => c.id === d.companyId)?.name ?? 'Unknown client'}
                     {' · '}{new Date(d.createdAt).toLocaleDateString('en-ZA')}
                   </span>
                 </button>

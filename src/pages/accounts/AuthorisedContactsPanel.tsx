@@ -67,39 +67,54 @@ export function AuthorisedContactsPanel({ accountId, contacts, actorId, onChange
       )}
 
       {contacts.length > 0 && (
-        <ul className="mt-3 divide-y divide-slate-100">
+        <ul className="mt-3 divide-y divide-slate-50">
           {contacts.map((c) => {
             const live = isLive(c, today)
             const tell = mayBeTold(c.capacity, c.proofOnFile)
             return (
-              <li key={c.id} className="py-2">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                  <span className="text-[13px] font-medium text-slate-800">{c.name}</span>
-                  <span className={`text-[11px] ${live ? 'text-[var(--c-green)]' : 'text-slate-400'}`}>
+              /*
+                TWO SHORT LINES, NOT FIVE (the firm: "thin, sleek, easy to read"). Who they are on
+                the first, with the authority hard right; what may be said and the proof behind it
+                on the second. The second line is NOT folded into a tooltip: what this person may
+                be told is the one thing a collector must read before they speak, so it stays on
+                the screen -- it truncates only where the panel runs out, with the whole on the
+                title.
+              */
+              <li key={c.id} className="py-1 text-[12px] hover:bg-slate-50">
+                <div className="flex items-center gap-2 whitespace-nowrap min-w-0">
+                  <span className="min-w-0 truncate" title={[c.name, capacityLabel(c.capacity), c.contact].filter(Boolean).join(' · ')}>
+                    <span className="font-medium text-slate-800">{c.name}</span>
+                    <span className="text-slate-400"> &middot; {capacityLabel(c.capacity)}
+                      {c.contact ? <> &middot; {c.contact}</> : null}
+                    </span>
+                  </span>
+                  <span className={`ml-auto shrink-0 text-[11px] ${live ? 'text-[var(--c-green)]' : 'text-slate-400'}`}>
                     {live ? <><ShieldCheck size={11} className="inline" /> Authorised</> : 'Authorises nothing'}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500">{capacityLabel(c.capacity)}
-                  {c.contact ? <> &middot; {c.contact}</> : null}
-                </p>
                 {/* WHAT MAY BE SAID, in the matrix's own words -- so the collector reads the
                     answer instead of working it out from the capacity. */}
-                <p className="text-[11px] text-slate-600">
+                <p className="text-[11px] text-slate-600 truncate"
+                  title={tell === 'everything' ? 'May be told everything on the account.'
+                    : tell === 'own_liability'
+                      ? 'The principal debt and their own liability only. Nothing else about the debtor.'
+                      : 'Nothing. Not the balance, not the creditor, not whether the account exists.'}>
                   {tell === 'everything' ? 'May be told everything on the account.'
                     : tell === 'own_liability'
                       ? 'The principal debt and their own liability only. Nothing else about the debtor.'
                       : 'Nothing. Not the balance, not the creditor, not whether the account exists.'}
+                  {c.proofOnFile ? (
+                    <span className="text-slate-400">
+                      {' '}&middot; {c.proof ?? 'Proof on file'}
+                      {c.verifiedAt ? <> &middot; verified {shortDate(c.verifiedAt.slice(0, 10))}</> : null}
+                      {c.expiresOn ? <> &middot; expires {shortDate(c.expiresOn)}</> : null}
+                    </span>
+                  ) : null}
                 </p>
-                {c.proofOnFile ? (
-                  <p className="text-[11px] text-slate-400">
-                    {c.proof ?? 'Proof on file'}
-                    {c.verifiedAt ? <> &middot; verified {shortDate(c.verifiedAt.slice(0, 10))}</> : null}
-                    {c.expiresOn ? <> &middot; expires {shortDate(c.expiresOn)}</> : null}
-                  </p>
-                ) : (
+                {!c.proofOnFile && (
                   /* NAMED, NOT RANKED. The thing that is missing is the one sentence that gets the
                      row working, and it is the capacity's own requirement rather than a guess. */
-                  <p className="mt-0.5 text-[11px] text-[var(--c-rust-deep)]">
+                  <p className="text-[11px] text-[var(--c-rust-deep)]">
                     Still needed: {CAPACITIES.find((x) => x.id === c.capacity)?.proof || 'nothing will authorise this capacity'}
                     {CAPACITIES.find((x) => x.id === c.capacity)?.proof && (
                       <button type="button" onClick={() => { setProving(c); setError(null) }}

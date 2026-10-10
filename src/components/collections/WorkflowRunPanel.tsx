@@ -368,18 +368,22 @@ function PastHistory({ story }: { story: StoryEvent[] }) {
           className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <ul className="mt-3 space-y-2">
+        /* ONE LINE AN EVENT (the firm: "thin, sleek, easy to read"): the date, the mark, what
+           happened, and the detail after a dot -- truncated where the rail runs out, with the
+           whole of it on the title. */
+        <ul className="mt-2 divide-y divide-slate-50">
           {oldest.map((e) => {
             const mark = STORY_MARK[e.kind]
             return (
-              <li key={`h:${e.id}`} className="flex items-start gap-2.5">
+              <li key={`h:${e.id}`} className="flex items-center gap-2 py-1 text-[12px] whitespace-nowrap"
+                title={[e.title, e.detail].filter(Boolean).join(' · ')}>
                 <span className="w-[74px] shrink-0 text-[11px] text-slate-500 tabular-nums">
                   {shortDate(e.on)}
                 </span>
-                <mark.icon size={12} className="mt-0.5 shrink-0 text-slate-400" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] text-slate-700">{e.title}</span>
-                  {e.detail && <span className="block text-[11px] leading-snug text-slate-400">{e.detail}</span>}
+                <mark.icon size={12} className="shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="text-slate-700">{e.title}</span>
+                  {e.detail && <span className="text-[11px] text-slate-400"> · {e.detail}</span>}
                 </span>
               </li>
             )

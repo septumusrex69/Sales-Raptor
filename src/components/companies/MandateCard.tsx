@@ -335,23 +335,26 @@ export function MandateCard({
       )}
 
       {docs !== null && docs.length > 0 && (
-        <div className="divide-y divide-slate-50 mt-2">
+        // One line a document, the checking list's density, which the firm asked for on every
+        // list: the kind, size, date and uploader ride after the name instead of under it.
+        <div className="mt-2">
           {docs.map((d) => (
-            <div key={d.id} className="flex items-center gap-3 py-2.5">
-              <FileText size={16} className="text-slate-300 shrink-0" />
-              <div className="min-w-0 flex-1">
+            <div key={d.id} className="flex items-center gap-2.5 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <FileText size={14} className="text-slate-300 shrink-0" />
+              <span className="min-w-0 flex-1 truncate" title={[d.name, d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName].filter(Boolean).join(' · ')}>
                 <button type="button" onClick={() => open(d)}
-                  className="text-sm text-slate-800 hover:text-brand-600 hover:underline text-left break-words">
+                  className="text-slate-800 hover:text-brand-600 hover:underline text-left">
                   {d.name}
                 </button>
-                <p className="text-[11px] text-slate-400">
+                <span className="text-slate-400">
+                  {' · '}
                   {[d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName]
                     .filter(Boolean).join(' · ')}
-                </p>
-              </div>
+                </span>
+              </span>
               <button type="button" onClick={() => open(d)} disabled={opening === d.id}
                 className="text-slate-400 hover:text-brand-600 shrink-0 disabled:opacity-50" title="Open">
-                {opening === d.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                {opening === d.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
               </button>
               {/* Always visible, never hover-only: the firm works on an iPad and there is no
                   hover on a touch screen, so a hidden control does not exist for them. */}
@@ -359,7 +362,7 @@ export function MandateCard({
                 <button type="button" onClick={() => setDeleting(d)}
                   className="text-slate-300 hover:text-negative shrink-0 p-1"
                   title={`Delete ${d.name}`} aria-label={`Delete ${d.name}`}>
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
                 </button>
               )}
             </div>

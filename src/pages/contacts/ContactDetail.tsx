@@ -78,14 +78,14 @@ export function ContactDetail() {
       {contactDeals.length === 0 ? (
         <p className="text-sm text-slate-400">No deals linked to this contact yet.</p>
       ) : (
-        <div className="divide-y divide-slate-50">
+        // Every list on this page is the checking list's density, which the firm asked for
+        // throughout: 12.5px, one line a row, nothing wrapping, money that cannot break.
+        <div>
           {contactDeals.map((d) => (
-            <Link key={d.id} to={`/deals/${d.id}`} className="flex items-center justify-between py-2.5 hover:bg-slate-50/60 -mx-1 px-1 rounded-lg">
-              <span className="text-sm font-medium text-slate-700">{d.name}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-slate-500">{formatCurrency(d.value)}</span>
-                <StageBadge stage={d.stage} />
-              </div>
+            <Link key={d.id} to={`/deals/${d.id}`} className="-mx-1 px-1 flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+              <span className="ml-auto shrink-0 text-right tabular-nums whitespace-nowrap text-slate-500">{formatCurrency(d.value)}</span>
+              <span className="shrink-0"><StageBadge stage={d.stage} /></span>
             </Link>
           ))}
         </div>
@@ -100,11 +100,11 @@ export function ContactDetail() {
       {contactActivities.length === 0 ? (
         <p className="text-sm text-slate-400">No activity recorded yet.</p>
       ) : (
-        <div className="space-y-3">
+        <div>
           {contactActivities.slice(0, 8).map((a) => (
-            <div key={a.id} className="flex justify-between text-sm border-b border-slate-50 pb-2.5 last:border-0">
-              <span className="text-slate-700">{a.subject}</span>
-              <span className="text-xs text-slate-400">{formatDateTime(a.activityDate)}</span>
+            <div key={a.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="text-slate-700 truncate min-w-0" title={a.subject}>{a.subject}</span>
+              <span className="ml-auto shrink-0 text-slate-400 tabular-nums">{formatDateTime(a.activityDate)}</span>
             </div>
           ))}
         </div>
@@ -119,11 +119,14 @@ export function ContactDetail() {
       {notes.length === 0 ? (
         <p className="text-sm text-slate-400">No notes yet.</p>
       ) : (
-        <div className="space-y-2.5">
+        // A note is what somebody wrote, so it may still wrap — cutting it to one line would hide
+        // it. What changed is the box around each one and the date under it: the date now sits
+        // on the same line, at the right, as on every other list.
+        <div>
           {notes.map((n) => (
-            <div key={n.id} className="bg-[var(--tint-gold)] border border-[var(--tint-gold-pale)] rounded-lg p-3">
-              <p className="text-sm text-slate-700">{n.notes || n.subject}</p>
-              <p className="text-[11px] text-slate-400 mt-1">{formatDateTime(n.activityDate)}</p>
+            <div key={n.id} className="flex items-start gap-3 py-1.5 text-[12.5px] border-b border-slate-50 last:border-0">
+              <p className="text-slate-700 min-w-0 flex-1">{n.notes || n.subject}</p>
+              <p className="shrink-0 whitespace-nowrap text-[11.5px] text-slate-400 tabular-nums">{formatDateTime(n.activityDate)}</p>
             </div>
           ))}
         </div>
@@ -172,11 +175,11 @@ export function ContactDetail() {
       {contactTasks.length === 0 ? (
         <p className="text-sm text-slate-400">No tasks yet.</p>
       ) : (
-        <div className="space-y-2">
+        <div>
           {contactTasks.map((t) => (
-            <div key={t.id} className="text-sm">
-              <p className="text-slate-700">{t.title}</p>
-              <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
+            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+              <span className="text-slate-700 truncate min-w-0" title={t.title}>{t.title}</span>
+              <span className="ml-auto shrink-0 text-slate-400">Due {formatDate(t.dueDate)}</span>
             </div>
           ))}
         </div>

@@ -350,21 +350,21 @@ export function DealDetail() {
           <Plus size={13} /> Add Task
         </button>
       </div>
-      <div className="px-5 pb-5 divide-y divide-slate-50">
+      {/* One line a task — the checking list's density, which the firm asked for on every list.
+          The type and due date ride after the title instead of making each row two. */}
+      <div className="px-5 pb-5">
         {dealTasks.length === 0 && <p className="text-sm text-slate-400">No tasks yet.</p>}
         {dealTasks.map((t) => (
-          <div key={t.id} className="flex items-center gap-3 py-2.5">
+          <div key={t.id} className="flex items-center gap-2.5 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
             <input
               type="checkbox"
               checked={t.status === 'Completed'}
               onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? new Date().toISOString() : undefined })}
-              className="w-4 h-4 accent-brand-600"
+              className="w-3.5 h-3.5 accent-brand-600 shrink-0"
             />
-            <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{t.title}</p>
-              <p className="text-xs text-slate-400">{t.type} · Due {formatDate(t.dueDate)}</p>
-            </div>
-            <UserAvatar userId={t.ownerId} size={22} />
+            <span className={`truncate min-w-0 font-medium ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`} title={t.title}>{t.title}</span>
+            <span className="ml-auto shrink-0 text-slate-400">{t.type} · Due {formatDate(t.dueDate)}</span>
+            <UserAvatar userId={t.ownerId} size={18} />
           </div>
         ))}
       </div>
@@ -380,34 +380,56 @@ export function DealDetail() {
           <Plus size={13} /> Create Proposal
         </button>
       </div>
-      <div className="px-5 pb-5 space-y-3">
+      {/* A row a proposal, not a card a proposal: the checking list's shape, which the firm
+          asked for on every list. The description becomes the service's tooltip and its own
+          truncated column; the six status buttons shrink to fit the row and scroll sideways
+          with it on an iPad rather than wrapping under it. */}
+      <div className="px-5 pb-5">
         {dealProposals.length === 0 && <p className="text-sm text-slate-400">No proposals yet.</p>}
-        {dealProposals.map((p) => (
-          <div key={p.id} className="border border-slate-100 rounded-xl p-3.5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-700">{p.service}</p>
-                <p className="text-xs text-slate-400 mt-0.5">Valid until {formatDate(p.validityDate)}</p>
-              </div>
-              <ProposalStatusBadge status={p.status} />
-            </div>
-            <p className="text-lg font-bold text-slate-800 mt-2">{formatCurrency(p.pricing)}</p>
-            {p.description && <p className="text-xs text-slate-500 mt-1">{p.description}</p>}
-            <div className="flex flex-wrap gap-1.5 mt-3">
-              {(['Draft', 'Sent', 'Viewed', 'Accepted', 'Declined', 'Expired'] as ProposalStatus[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => updateProposal(p.id, { status: s })}
-                  className={`text-xs font-medium px-2.5 py-1 rounded-full border ${
-                    p.status === s ? 'bg-brand-600 text-white border-brand-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                  }`}
-                >
-                  Mark {s}
-                </button>
-              ))}
-            </div>
+        {dealProposals.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12.5px] whitespace-nowrap">
+              <thead>
+                <tr className="border-b border-slate-100 text-slate-400">
+                  <th className="px-2 py-1.5 text-left font-medium">Service</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Valid until</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Price</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Status</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Description</th>
+                  <th className="px-2 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {dealProposals.map((p) => (
+                  <tr key={p.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <td className="px-2 py-1.5 font-medium text-slate-700">{p.service}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{formatDate(p.validityDate)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-semibold text-slate-800">{formatCurrency(p.pricing)}</td>
+                    <td className="px-2 py-1.5"><ProposalStatusBadge status={p.status} /></td>
+                    <td className="px-2 py-1.5 text-slate-500">
+                      {p.description ? <span className="block max-w-[16rem] truncate" title={p.description}>{p.description}</span> : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex gap-1">
+                        {(['Draft', 'Sent', 'Viewed', 'Accepted', 'Declined', 'Expired'] as ProposalStatus[]).map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => updateProposal(p.id, { status: s })}
+                            className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${
+                              p.status === s ? 'bg-brand-600 text-white border-brand-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            Mark {s}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
+        )}
       </div>
     </Card>
   )
@@ -426,16 +448,14 @@ export function DealDetail() {
           <Upload size={13} /> Upload Document
         </button>
       </div>
-      <div className="px-5 pb-5 divide-y divide-slate-50">
+      <div className="px-5 pb-5">
         {docs.map((d) => (
-          <div key={d.id} className="flex items-center gap-3 py-2.5">
-            <FileText size={18} className="text-slate-400 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-700 truncate">{d.name}</p>
-              <p className="text-xs text-slate-400">{d.size} · Uploaded {formatDate(d.uploadedAt)}</p>
-            </div>
-            <button onClick={() => setDocs((prev) => prev.filter((x) => x.id !== d.id))} className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50">
-              <Trash2 size={14} />
+          <div key={d.id} className="flex items-center gap-2.5 py-1 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
+            <FileText size={14} className="text-slate-400 shrink-0" />
+            <span className="font-medium text-slate-700 truncate min-w-0" title={d.name}>{d.name}</span>
+            <span className="ml-auto shrink-0 text-slate-400">{d.size} · Uploaded {formatDate(d.uploadedAt)}</span>
+            <button onClick={() => setDocs((prev) => prev.filter((x) => x.id !== d.id))} className="p-1 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50">
+              <Trash2 size={13} />
             </button>
           </div>
         ))}
@@ -449,7 +469,7 @@ export function DealDetail() {
       <div className="p-5">
         <h3 className="font-semibold text-slate-800 text-[15px]">History</h3>
       </div>
-      <div className="px-5 pb-5 space-y-3">
+      <div className="px-5 pb-5">
         <HistoryRow label="Deal created" date={deal.createdAt} />
         {dealActivities
           .filter((a) => ['Deal Stage Change', 'Deal update', 'Deal Won', 'Deal Rejected'].includes(a.type))
@@ -733,9 +753,9 @@ export function DealDetail() {
 
 function HistoryRow({ label, date }: { label: string; date: string }) {
   return (
-    <div className="flex items-center justify-between text-sm border-b border-slate-50 pb-2.5 last:border-0">
-      <span className="text-slate-600">{label}</span>
-      <span className="text-xs text-slate-400">{formatDateTime(date)}</span>
+    <div className="flex items-center justify-between gap-3 text-[12.5px] whitespace-nowrap border-b border-slate-50 py-1.5 last:border-0">
+      <span className="text-slate-600 truncate min-w-0" title={label}>{label}</span>
+      <span className="text-slate-400 shrink-0 tabular-nums">{formatDateTime(date)}</span>
     </div>
   )
 }

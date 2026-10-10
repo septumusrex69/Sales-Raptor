@@ -93,11 +93,11 @@ export function CommissionCard({ company: stored }: { company: Company }) {
       )}
 
       {hasScale ? (
-        <ul className="space-y-1.5">
+        <ul>
           {bands.map((b, i) => {
             const from = tierStart(i === 0 ? null : bands[i - 1].upTo)
             return (
-              <li key={i} className="flex items-baseline justify-between gap-3 text-sm tabular-nums">
+              <li key={i} className="flex items-baseline justify-between gap-3 py-1 text-[12.5px] tabular-nums whitespace-nowrap border-b border-slate-50 last:border-0">
                 <span className="text-slate-600">
                   {from === null ? '—' : money(from)}
                   {b.upTo === null ? ' and above' : ` up to ${money(b.upTo)}`}

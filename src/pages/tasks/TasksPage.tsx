@@ -407,25 +407,28 @@ export function TasksPage() {
               {plan.meetings.length === 1 ? 'Meeting' : 'Meetings'} — where you have to be
             </span>
           </div>
-          <div className="divide-y divide-slate-50">
+          {/* Every list on this page is one line a row at 12.5px -- the checking list's density,
+              which the firm asked for on every list in the app. What used to be a second line
+              under each title now rides after it in grey. */}
+          <div>
             {plan.meetings.map((m) => (
-              <div key={m.id} className="flex items-center gap-3 px-5 py-3">
+              <div key={m.id} className="flex items-center gap-3 px-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
                 {/* The clock in its own column so the eye runs down the times, and a whole-day
                     event says so rather than showing a 00:00 nobody meant. */}
-                <span className="w-14 shrink-0 text-xs font-semibold tabular-nums text-slate-600">
+                <span className="w-14 shrink-0 font-semibold tabular-nums text-slate-600">
                   {meetingTime(m) ?? 'All day'}
                 </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-700 truncate">{m.title}</p>
+                <div className="min-w-0 flex-1 flex items-center gap-2">
+                  <span className="font-medium text-slate-700 truncate min-w-0" title={m.title}>{m.title}</span>
                   {/* WHO IT IS WITH, FIRST. The firm's point on the calendar is the same here: a
                       subject names the subject, and what you want at nine in the morning is who
                       you are sitting with. */}
-                  <p className="text-xs text-slate-400 flex items-center gap-2 truncate">
+                  <span className="text-slate-400 flex items-center gap-2 min-w-0">
                     {meetingWith(m, [currentUser?.email ?? '']) && (
                       <span className="truncate">with {meetingWith(m, [currentUser?.email ?? ''])}</span>
                     )}
                     {m.location && (
-                      <span className="inline-flex items-center gap-1 truncate">
+                      <span className="inline-flex items-center gap-1 truncate" title={m.location}>
                         <MapPin size={11} className="shrink-0" /> {m.location}
                       </span>
                     )}
@@ -434,7 +437,7 @@ export function TasksPage() {
                         <Users size={11} /> {m.attendees.length}
                       </span>
                     )}
-                  </p>
+                  </span>
                 </div>
                 {/*
                   JOIN, STRAIGHT OFF THE DAY'S LIST. THE FIRM: "if the link is pulled in there into
@@ -445,8 +448,8 @@ export function TasksPage() {
                 {joinLink(m.notes, m.location) && (
                   <a href={joinLink(m.notes, m.location) as string}
                     target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5
-                      rounded-lg border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 shrink-0">
+                    className="inline-flex items-center gap-1 text-[12px] font-semibold px-2.5 py-1
+                      rounded-md border border-gold-500 bg-gold-400 text-navy-950 hover:bg-gold-500 shrink-0">
                     <Video size={12} /> Join
                   </a>
                 )}
@@ -509,19 +512,19 @@ export function TasksPage() {
               {plan.tickets.length === 1 ? 'Ticket' : 'Tickets'} — what somebody is waiting on
             </span>
           </div>
-          <div className="divide-y divide-slate-50">
+          <div>
             {plan.tickets.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 px-5 py-3">
+              <div key={t.id} className="flex items-center gap-3 px-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
                 {/* WHAT KIND, in its own column so the eye can skip the disputes -- they are the
                     ones with a clock on them. */}
                 <span className="w-20 shrink-0 text-[11px] font-semibold uppercase tracking-wide
                   text-slate-400">
                   {t.kind === 'dispute' ? 'Dispute' : t.kind === 'request' ? 'Request' : 'Help'}
                 </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-700 truncate">{t.description}</p>
-                  {t.debtorName && <p className="text-xs text-slate-400 truncate">{t.debtorName}</p>}
-                </div>
+                <span className="min-w-0 flex-1 truncate" title={t.debtorName ? `${t.description} · ${t.debtorName}` : t.description}>
+                  <span className="font-medium text-slate-700">{t.description}</span>
+                  {t.debtorName && <span className="text-slate-400"> · {t.debtorName}</span>}
+                </span>
                 <Link to={`/queries/${t.id}`}
                   className="text-xs font-medium text-brand-600 hover:underline shrink-0">
                   Open
@@ -533,32 +536,32 @@ export function TasksPage() {
       )}
 
       <Card padded={false}>
-        <div className="divide-y divide-slate-50">
+        <div>
           {filtered.map((t) => {
             const overdue = new Date(t.dueDate) < today && t.status !== 'Completed' && t.status !== 'Cancelled'
             return (
-              <div key={t.id} className="flex items-center gap-3 px-5 py-3">
+              <div key={t.id} className="flex items-center gap-3 px-3 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
                 <input
                   type="checkbox"
                   checked={t.status === 'Completed'}
                   onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? new Date().toISOString() : undefined })}
-                  className="w-4 h-4 accent-brand-600 shrink-0"
+                  className="w-3.5 h-3.5 accent-brand-600 shrink-0"
                 />
-                <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-medium truncate flex items-center gap-1.5 ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                  <span className={`font-medium truncate min-w-0 ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`} title={t.title}>
                     {t.title}
-                    {t.autoRescheduledFrom && t.status !== 'Completed' && (
-                      <span
-                        title={`Originally due ${formatDate(t.autoRescheduledFrom)} — missed and auto-moved to today`}
-                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1.5 py-0.5 rounded normal-case"
-                      >
-                        Auto-moved from {formatDate(t.autoRescheduledFrom)}
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {t.type} {t.relatedToLabel ? `· ${t.relatedToLabel}` : ''}
-                  </p>
+                  </span>
+                  {t.autoRescheduledFrom && t.status !== 'Completed' && (
+                    <span
+                      title={`Originally due ${formatDate(t.autoRescheduledFrom)} — missed and auto-moved to today`}
+                      className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1.5 py-0.5 rounded normal-case"
+                    >
+                      Auto-moved from {formatDate(t.autoRescheduledFrom)}
+                    </span>
+                  )}
+                  <span className="text-slate-400 truncate min-w-0" title={t.relatedToLabel}>
+                    · {t.type} {t.relatedToLabel ? `· ${t.relatedToLabel}` : ''}
+                  </span>
                 </div>
                 <PriorityBadge priority={t.priority} />
                 <TaskStatusBadge status={t.status} />
@@ -571,12 +574,12 @@ export function TasksPage() {
                   day's list a missing time next to three timed ones reads as something that
                   failed to load. See dayPlan.taskTime for how a task with no time is told apart.
                 */}
-                <span className={`text-xs font-medium w-24 text-right shrink-0 ${overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
+                <span className={`font-medium w-24 text-right tabular-nums shrink-0 ${overdue ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
                   {dayShown
                     ? (taskTime(t) ?? <span className="text-slate-300">Any time</span>)
                     : formatDate(t.dueDate)}
                 </span>
-                <UserAvatar userId={t.ownerId} size={24} />
+                <UserAvatar userId={t.ownerId} size={18} />
                 {/*
                   EDIT, RESCHEDULE, CANCEL. THE FIRM: "you should also be able to edit a task, the
                   name of the task, and also cancel a task -- the cancel reason."

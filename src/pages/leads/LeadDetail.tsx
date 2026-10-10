@@ -224,41 +224,56 @@ export function LeadDetail() {
           Just {lead.firstName} so far. Add anyone else you deal with at {lead.companyName}.
         </p>
       ) : (
-        <div className="space-y-1">
-          {leadContacts.map((c) => (
-            <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 hover:bg-slate-50 -mx-1 px-2 py-2 rounded-lg">
-              <Link to={`/contacts/${c.id}`} className="flex items-center gap-2.5 min-w-0">
-                <UserAvatar userId={c.ownerId} size={30} />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-700 hover:text-brand-600 truncate">
-                    {c.firstName} {c.lastName}
-                  </p>
-                  <p className="text-xs text-slate-400 truncate">{c.jobTitle}</p>
-                </div>
-              </Link>
-              <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0">
-                {c.phone && (
-                  <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
-                )}
-                {c.mobile && (
-                  <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
-                    <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
-                  </PhoneLink>
-                )}
-                {c.email && (
-                  <span className="inline-flex items-center gap-1">
-                    <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
-                      <Mail size={11} />
+        // The checking list's shape, which the firm asked for on every list in the app: one
+        // line a person, job title after the name, each number in a column of its own so a
+        // second contact's phone sits under the first's rather than wherever it wrapped to.
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
+            <tbody>
+              {leadContacts.map((c) => (
+                <tr key={c.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-2 py-1.5">
+                    <Link to={`/contacts/${c.id}`} className="inline-flex items-center gap-2 max-w-[16rem]" title={`${c.firstName} ${c.lastName}${c.jobTitle ? ` · ${c.jobTitle}` : ''}`}>
+                      <UserAvatar userId={c.ownerId} size={18} />
+                      <span className="truncate">
+                        <span className="font-medium text-slate-700 hover:text-brand-600">
+                          {c.firstName} {c.lastName}
+                        </span>
+                        {c.jobTitle && <span className="text-slate-400"> · {c.jobTitle}</span>}
+                      </span>
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.phone && (
+                      <PhoneLink number={c.phone} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }} />
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.mobile && (
+                      <PhoneLink number={c.mobile} iconSize={11} className="inline-flex items-center gap-1 hover:text-brand-600" log={{ label: `${c.firstName} ${c.lastName}`, leadId: lead.id, contactId: c.id, companyId: lead.companyId }}>
+                        <Phone size={11} /> {c.mobile} <span className="text-slate-300">mobile</span>
+                      </PhoneLink>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => setContactEmailTarget(c)} className="text-slate-400 hover:text-brand-600" title="Send email">
+                          <Mail size={11} />
+                        </button>
+                        {c.email}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
+                      <Pencil size={12} />
                     </button>
-                    {c.email}
-                  </span>
-                )}
-                <button onClick={() => setEditContact(c)} className="text-slate-300 hover:text-brand-600" title="Edit contact">
-                  <Pencil size={12} />
-                </button>
-              </div>
-            </div>
-          ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>
@@ -326,23 +341,31 @@ export function LeadDetail() {
   const dealsPanel = resultingDeals.length > 0 && (
       <Card>
         <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
-        <div className="space-y-2">
-          {resultingDeals.map((d) => (
-            <Link
-              key={d.id}
-              to={`/deals/${d.id}`}
-              className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
-            >
-              <div>
-                <p className="text-sm font-medium text-slate-700">{d.name}</p>
-                {d.service && <p className="text-xs text-slate-400">{d.service}</p>}
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-slate-700">{formatCurrency(d.value)}</span>
-                <StageBadge stage={d.stage} />
-              </div>
-            </Link>
-          ))}
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
+            <thead>
+              <tr className="border-b border-slate-100 text-slate-400">
+                <th className="px-3 py-1.5 text-left font-medium">Deal</th>
+                <th className="px-2 py-1.5 text-left font-medium">Service</th>
+                <th className="px-2 py-1.5 text-right font-medium">Value</th>
+                <th className="px-3 py-1.5 text-left font-medium">Stage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resultingDeals.map((d) => (
+                <tr key={d.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-3 py-1.5">
+                    <Link to={`/deals/${d.id}`} title={d.name} className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
+                      {d.name}
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500">{d.service || <span className="text-slate-300">—</span>}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-medium text-slate-700">{formatCurrency(d.value)}</td>
+                  <td className="px-3 py-1.5"><StageBadge stage={d.stage} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </Card>
   )
@@ -425,13 +448,17 @@ export function LeadDetail() {
       {leadTasks.length === 0 ? (
         <p className="text-sm text-slate-400">No tasks yet.</p>
       ) : (
-        <div className="space-y-2">
-          {leadTasks.map((t) => (
-            <div key={t.id} className="text-sm">
-              <p className="text-slate-700">{t.title}</p>
-              <p className="text-xs text-slate-400">Due {formatDate(t.dueDate)}</p>
-            </div>
-          ))}
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
+            <tbody>
+              {leadTasks.map((t) => (
+                <tr key={t.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                  <td className="px-3 py-1.5 text-slate-700"><span className="block max-w-[24rem] truncate" title={t.title}>{t.title}</span></td>
+                  <td className="px-3 py-1.5 text-right text-slate-400">Due {formatDate(t.dueDate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>

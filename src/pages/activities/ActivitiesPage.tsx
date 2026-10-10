@@ -110,57 +110,63 @@ export function ActivitiesPage() {
         <span className="text-xs text-slate-400 ml-auto">{filtered.length} activities</span>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
         {Object.entries(grouped).map(([day, items]) => (
           <div key={day}>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{day}</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">{day}</p>
             <Card padded={false}>
-              <div className="divide-y divide-slate-50">
-                {items.map((a) => {
-                  const Icon = ICONS[a.type]
-                  const lead = leadById(a.leadId)
-                  const deal = deals.find((d) => d.id === a.dealId)
-                  const co = companyById(a.companyId)
-                  return (
-                    <div key={a.id} className="flex items-start gap-3 px-5 py-3">
-                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${ICON_COLORS[a.type]}`}>
-                        <Icon size={15} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-slate-700">{a.subject}</p>
-                        {a.notes && <p className="text-xs text-slate-500 mt-0.5">{a.notes}</p>}
-                        <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                          <UserAvatar userId={a.userId} size={16} />
-                          <span>{formatDateTime(a.activityDate)}</span>
-                          {lead && (
-                            <>
-                              ·{' '}
-                              <Link to={`/leads/${lead.id}`} className="text-brand-600 hover:underline">
-                                {lead.firstName} {lead.lastName}
-                              </Link>
-                            </>
-                          )}
-                          {deal && (
-                            <>
-                              ·{' '}
-                              <Link to={`/deals/${deal.id}`} className="text-brand-600 hover:underline">
-                                {deal.name}
-                              </Link>
-                            </>
-                          )}
-                          {co && !deal && !lead && (
-                            <>
-                              ·{' '}
-                              <Link to={`/companies/${co.id}`} className="text-brand-600 hover:underline">
-                                {co.name}
-                              </Link>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
+              {/* A ROW AN ACTIVITY, in the checking list's shape, which the firm asked for on every
+                  list in the app. The notes used to be a second line and who/when/regarding a
+                  third; the notes now ride after the subject (whole in the tooltip) and the rest
+                  are columns, so a day of thirty calls is thirty lines. */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12.5px] whitespace-nowrap">
+                  <tbody>
+                    {items.map((a) => {
+                      const Icon = ICONS[a.type]
+                      const lead = leadById(a.leadId)
+                      const deal = deals.find((d) => d.id === a.dealId)
+                      const co = companyById(a.companyId)
+                      return (
+                        <tr key={a.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                          <td className="pl-3 pr-1 py-1.5 w-7">
+                            <span className={`w-5 h-5 rounded-md flex items-center justify-center ${ICON_COLORS[a.type]}`} title={a.type}>
+                              <Icon size={12} />
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span className="block max-w-[32rem] truncate" title={a.notes ? `${a.subject} · ${a.notes}` : a.subject}>
+                              <span className="font-medium text-slate-700">{a.subject}</span>
+                              {a.notes && <span className="text-slate-500"> · {a.notes}</span>}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span className="block max-w-[16rem] truncate">
+                              {lead && (
+                                <Link to={`/leads/${lead.id}`} className="text-brand-600 hover:underline">
+                                  {lead.firstName} {lead.lastName}
+                                </Link>
+                              )}
+                              {lead && deal && <span className="text-slate-400"> · </span>}
+                              {deal && (
+                                <Link to={`/deals/${deal.id}`} className="text-brand-600 hover:underline">
+                                  {deal.name}
+                                </Link>
+                              )}
+                              {co && !deal && !lead && (
+                                <Link to={`/companies/${co.id}`} className="text-brand-600 hover:underline">
+                                  {co.name}
+                                </Link>
+                              )}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 w-6"><UserAvatar userId={a.userId} size={16} /></td>
+                          <td className="pl-2 pr-3 py-1.5 text-right text-slate-400 tabular-nums">{formatDateTime(a.activityDate)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             </Card>
           </div>

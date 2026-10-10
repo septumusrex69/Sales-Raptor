@@ -141,57 +141,79 @@ export function ClientQueries({ companyId, section }: {
           {showClosed ? 'Nothing closed yet.' : words.empty}
         </p>
       ) : (
-        <div className="divide-y divide-slate-50">
-          {shown.map((q) => {
-            const stale = isStale(q, TODAY)
-            return (
-              <div key={q.id} className="px-5 py-3 flex flex-wrap items-start gap-x-4 gap-y-1.5">
-                <div className="min-w-0 flex-1">
-                  {/*
-                    THE QUERY OPENS THE QUERY. THE FIRM: "if you click on that little query for
-                    this date's handover sheet, then it goes in there." It used to link only to
-                    the account, which answers a different question -- and a query about a whole
-                    handover sheet has no account to open at all.
-                  */}
-                  <Link to={`/queries/${q.id}`}
-                    className="block text-sm text-slate-800 line-clamp-3 wrap-anywhere hover:text-brand-600">
-                    {q.description}
-                  </Link>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {/* The debtor still goes to the debtor. A batch has none, so it is named
-                        without a link rather than linked to nothing. */}
-                    {q.accountId ? (
-                      <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
-                        {q.debtorName}
+        // A ROW A QUERY, the checking list's shape, which the firm asked for on every list in
+        // the app. The description used to run to three lines with the debtor, the account and
+        // who raised it as a fourth under it; each is now a column, and the description is one
+        // line with the whole of it in its tooltip and on the query's own page a click away.
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
+            <thead>
+              <tr className="border-b border-slate-100 text-slate-400">
+                <th className="px-3 py-1.5 text-left font-medium">Query</th>
+                <th className="px-2 py-1.5 text-left font-medium">Debtor</th>
+                <th className="px-2 py-1.5 text-left font-medium">Account</th>
+                <th className="px-2 py-1.5 text-left font-medium">Category</th>
+                <th className="px-2 py-1.5 text-left font-medium">Raised by</th>
+                <th className="px-2 py-1.5 text-left font-medium">Outcome</th>
+                <th className="px-2 py-1.5 text-left font-medium">Stage</th>
+                <th className="px-3 py-1.5 text-right font-medium">Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((q) => {
+                const stale = isStale(q, TODAY)
+                return (
+                  <tr key={q.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <td className="px-3 py-1.5">
+                      {/*
+                        THE QUERY OPENS THE QUERY. THE FIRM: "if you click on that little query for
+                        this date's handover sheet, then it goes in there." It used to link only to
+                        the account, which answers a different question -- and a query about a whole
+                        handover sheet has no account to open at all.
+                      */}
+                      <Link to={`/queries/${q.id}`} title={q.description}
+                        className="block max-w-[20rem] truncate text-slate-800 hover:text-brand-600">
+                        {q.description}
                       </Link>
-                    ) : q.debtorName}
-                    {q.accountNumber && <> · {q.accountNumber}</>}
-                    {q.category && <> · {q.category}</>}
-                    {q.raisedByName && <> · raised by {q.raisedByName}</>}
-                  </p>
-                  {q.outcomeAction && (
-                    <p className="text-[11px] text-slate-500 mt-0.5">Outcome: {q.outcomeAction}</p>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  {q.status === 'open' ? (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${STAGE_CHIP[q.stage]}`}>
-                      {QUERY_STAGE_LABEL[q.stage]}
-                    </span>
-                  ) : q.outcome ? (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-                      {QUERY_OUTCOME_LABEL[q.outcome]}
-                    </span>
-                  ) : null}
-                  <p className={`text-[11px] mt-0.5 ${stale ? 'text-negative' : 'text-slate-400'}`}>
-                    {q.status === 'closed'
-                      ? formatDate(q.closedAt ?? q.raisedAt)
-                      : stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
-                  </p>
-                </div>
-              </div>
-            )
-          })}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {/* The debtor still goes to the debtor. A batch has none, so it is named
+                          without a link rather than linked to nothing. */}
+                      <span className="block max-w-[14rem] truncate" title={q.debtorName}>
+                        {q.accountId ? (
+                          <Link to={`/accounts/${q.accountId}`} className="text-brand-600 hover:underline">
+                            {q.debtorName}
+                          </Link>
+                        ) : <span className="text-slate-500">{q.debtorName}</span>}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 text-slate-500 tabular-nums">{q.accountNumber}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{q.category}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{q.raisedByName}</td>
+                    <td className="px-2 py-1.5 text-slate-500">
+                      {q.outcomeAction && <span className="block max-w-[14rem] truncate" title={`Outcome: ${q.outcomeAction}`}>Outcome: {q.outcomeAction}</span>}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {q.status === 'open' ? (
+                        <span className={`text-[11px] px-2 py-0.5 rounded ${STAGE_CHIP[q.stage]}`}>
+                          {QUERY_STAGE_LABEL[q.stage]}
+                        </span>
+                      ) : q.outcome ? (
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500">
+                          {QUERY_OUTCOME_LABEL[q.outcome]}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${stale ? 'text-negative' : 'text-slate-400'}`}>
+                      {q.status === 'closed'
+                        ? formatDate(q.closedAt ?? q.raisedAt)
+                        : stale ? `chase — ${formatDate(q.chaseOn!)}` : `${ageInDays(q)} days old`}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>

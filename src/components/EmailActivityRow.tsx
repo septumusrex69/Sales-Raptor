@@ -41,9 +41,9 @@ function DirectionBadge({ kind }: { kind: Direction }) {
     <span
       title={`${label} — ${hint}`}
       style={{ backgroundColor: tint, color }}
-      className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
+      className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
     >
-      <Icon size={14} strokeWidth={2.4} />
+      <Icon size={12} strokeWidth={2.4} />
     </span>
   )
 }
@@ -222,11 +222,14 @@ export function EmailActivityRow({
 
   return (
     <div className={open ? 'bg-slate-50/80' : ''}>
-      <button onClick={toggle} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-slate-50" aria-expanded={open}>
+      {/* The checking list's density, which the firm asked for on every list: 12.5px, one line,
+          a row the height of its text. The opened body below keeps its reading size — that is
+          a paragraph, not a row. */}
+      <button onClick={toggle} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-slate-50" aria-expanded={open}>
         <DirectionBadge kind={kind} />
         <span className="flex-1 min-w-0 flex items-baseline gap-2">
-          <span className={`text-[14.5px] shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
-          {!open && body && <span className="text-[13.5px] text-slate-400 truncate min-w-0">{body}</span>}
+          <span className={`text-[12.5px] shrink-0 max-w-[55%] truncate ${isUnread ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>{subject}</span>
+          {!open && body && <span className="text-[12.5px] text-slate-400 truncate min-w-0">{body}</span>}
         </span>
         <span className="flex items-center gap-2.5 shrink-0">
           {dealLabel && (
@@ -241,12 +244,12 @@ export function EmailActivityRow({
           )}
           {attachments.length > 0 && <Paperclip size={13} className="text-slate-400" />}
           {isUnread && <span className="w-2 h-2 rounded-full bg-brand-500" title="Unread" />}
-          <span className="text-[12px] text-slate-400 tabular-nums">{emailTimeLabel(activity.activityDate)}</span>
+          <span className="text-[12px] text-slate-400 tabular-nums whitespace-nowrap">{emailTimeLabel(activity.activityDate)}</span>
         </span>
       </button>
 
       {open && (
-        <div className="pl-[46px] pr-3 pb-3.5">
+        <div className="pl-[42px] pr-3 pb-3.5">
           {/*
             THE ACTIONS COME FIRST, and they used to come last. The firm, on the same card on an
             account: "to put these things at the top, currently it's still at the bottom, so if

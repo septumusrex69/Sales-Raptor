@@ -571,7 +571,7 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
         row stacks and each value sits next to its own label's worth of context, so a header
         would be pointing at nothing.
       */}
-      <div className={`${DIARY_GRID} hidden @3xl:grid pb-1.5 border-b border-slate-100`}>
+      <div className={`${DIARY_GRID} hidden @3xl:grid px-1 py-1.5 border-b border-slate-100`}>
         <span className={COL_HEAD}>
           {/* Select all — and "all" means exactly what is on screen, nothing below the fold. */}
           {picked && onPick && rows.length > 0 && (
@@ -590,12 +590,13 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
           )}
           Account
         </span>
-        <span className={COL_HEAD}>Work &amp; position</span>
+        <span className={COL_HEAD}>Work</span>
+        <span className={COL_HEAD}>Position</span>
         <span className={COL_HEAD}>Client</span>
         <span className={`${COL_HEAD} text-right`}>Outstanding</span>
         <span />
       </div>
-      <ul className="divide-y divide-slate-100">
+      <ul className="divide-y divide-slate-50">
         {rows.map((row) => (
           <DiaryRowItem key={row.id} row={row} today={today} onComplete={onComplete} onMove={onMove}
             picked={picked?.has(row.id)} onPick={onPick && (() => onPick(row.id))} />
@@ -626,10 +627,18 @@ export function DiaryList({ rows, today, empty, onComplete, onMove, picked, onPi
  * ten rem to the right of the values underneath it. The firm spotted it immediately. A fixed
  * track means the header and the rows cannot disagree, whatever either happens to contain.
  */
+/*
+ * ONE LINE A ROW ONCE THERE IS ROOM, at the firm's asking: "wherever in this whole app there are a
+ * lot of things listed under each other... it should look like the checking list: thin, sleek, easy
+ * to read." The note about why an account is back used to sit on a second line under the name, and
+ * the position on a second line under the work; the note now follows the name after a dot, and
+ * the position has a column of its own. Narrow, the row still folds -- a list in half a panel has
+ * no width for six columns, and a sideways scroll in a diary is worse than a second line.
+ */
 const DIARY_GRID =
-  'grid gap-x-3 gap-y-1.5 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_9.5rem_11rem_7.5rem_10rem] @3xl:items-center'
+  'grid gap-x-3 gap-y-1 grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_8.5rem_8.5rem_10rem_7rem_9.5rem] @3xl:items-center'
 
-const COL_HEAD = 'text-[10px] font-semibold uppercase tracking-wide text-slate-400'
+const COL_HEAD = 'text-[12.5px] font-medium text-slate-400'
 
 /*
  * The account's rung, derived the same way it is everywhere else — from the status, the
@@ -687,53 +696,59 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
   const canOpenClient = canViewClients(currentUser)
 
   return (
-    <li className="py-2.5">
+    <li className="px-1 py-1.5 text-[12.5px] hover:bg-slate-50">
       <div className={DIARY_GRID}>
-        {/* The account: who, and why it is back. */}
-        <div className="col-span-2 @3xl:col-span-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            {onPick && (
-              <input type="checkbox" checked={!!picked} onChange={onPick}
-                className="rounded border-slate-300 shrink-0"
-                title={`Select ${debtorName(row)}`} />
-            )}
-            <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
-              className="font-medium text-sm text-slate-800 hover:text-[var(--c-steel)] truncate">
-              {debtorName(row)}
-            </Link>
-            {prescribing && (
-              <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]"
-                title={`Prescribes ${longDate(row.account.prescriptionDate as string)} — after that it cannot be enforced`}>
-                prescribing
-              </span>
-            )}
-            {late && (
-              <span className="text-[11px] font-medium text-[var(--c-rust)]"
-                title={`Was due ${longDate(row.dueOn)}`}>
-                {late}
-              </span>
-            )}
-            {/*
-              CARRIED, AND SAID ON THE ROW ITSELF.
-              A new account that missed its day is now sitting in today's list, so without this
-              it is indistinguishable from one that landed this morning -- and the collector
-              cannot tell which of the fifteen in front of them is the one the team leader is
-              about to ask about. It counts WORKING days, so an account that sat over a weekend
-              does not claim to have been ignored for three.
-            */}
-            {carriedFor > 0 && (
-              <span className="text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 px-2 py-0.5"
-                title={`A new account, still due ${longDate(row.dueOn)} and not worked`}>
-                Carried {carriedFor === 1 ? 'a day' : `${carriedFor} days`}
-              </span>
-            )}
-          </div>
+        {/* The account: who, and why it is back -- on one line, the why after a dot. */}
+        <div className="col-span-2 @3xl:col-span-1 min-w-0 flex items-center gap-x-2 whitespace-nowrap">
+          {onPick && (
+            <input type="checkbox" checked={!!picked} onChange={onPick}
+              className="rounded border-slate-300 shrink-0"
+              title={`Select ${debtorName(row)}`} />
+          )}
+          <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
+            className="font-medium text-slate-800 hover:text-[var(--c-steel)] truncate max-w-[16rem] shrink-0"
+            title={debtorName(row)}>
+            {debtorName(row)}
+          </Link>
+          {prescribing && (
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--tint-rust-deep)] text-[var(--c-rust-deep)]"
+              title={`Prescribes ${longDate(row.account.prescriptionDate as string)} — after that it cannot be enforced`}>
+              prescribing
+            </span>
+          )}
+          {late && (
+            <span className="shrink-0 text-[11px] font-medium text-[var(--c-rust)]"
+              title={`Was due ${longDate(row.dueOn)}`}>
+              {late}
+            </span>
+          )}
+          {/*
+            CARRIED, AND SAID ON THE ROW ITSELF.
+            A new account that missed its day is now sitting in today's list, so without this
+            it is indistinguishable from one that landed this morning -- and the collector
+            cannot tell which of the fifteen in front of them is the one the team leader is
+            about to ask about. It counts WORKING days, so an account that sat over a weekend
+            does not claim to have been ignored for three.
+          */}
+          {carriedFor > 0 && (
+            <span className="shrink-0 text-[11px] font-medium rounded-full bg-amber-100 text-amber-800 px-2 py-0.5"
+              title={`A new account, still due ${longDate(row.dueOn)} and not worked`}>
+              Carried {carriedFor === 1 ? 'a day' : `${carriedFor} days`}
+            </span>
+          )}
           {/*
             Why it is back, in the words of whoever booked it. This is the field the imported
             book does not have, and the reason an agent currently has to read a whole timeline
-            before they can pick up the phone.
+            before they can pick up the phone. Inline after the name now, truncated where the
+            column runs out, with the whole of it on the title.
           */}
-          <p className="text-xs text-slate-500 mt-0.5 truncate">
+          <span className="min-w-0 truncate text-[12px] text-slate-500"
+            title={[
+              row.createdBy && row.ownerId && row.createdBy !== row.ownerId && row.createdByName
+                ? `Referred by ${row.createdByName}.` : null,
+              row.reason || row.account.mainComment || 'No note about why',
+            ].filter(Boolean).join(' ')}>
+            <span className="text-slate-300">· </span>
             {/*
               WHO SENT IT, where somebody else did. A collector booking their own next date is the
               ordinary case and needs no byline; work that arrived from a team leader is a
@@ -747,27 +762,29 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
               <span className="text-brand-700">Referred by {row.createdByName}. </span>
             )}
             {row.reason || row.account.mainComment || <span className="text-slate-300">No note about why</span>}
-          </p>
+          </span>
         </div>
 
         {/*
-          TWO DIFFERENT FACTS, STACKED, and the firm asked for both by name.
+          TWO DIFFERENT FACTS, TWO COLUMNS, and the firm asked for both by name.
 
           The chip is the WORK: why this account is back today, which is also where it sits on
           the ladder. It is self-managed — a collector picks it when they finish an account — and
           it answers "what am I about to do".
 
-          The line under it is the ACCOUNT'S POSITION: the rung the client is told it is on. It
+          The next column is the ACCOUNT'S POSITION: the rung the client is told it is on. It
           answers "what is this account", which is a different question and was not on this
           screen at all. A list showing only "Follow-up" against seven rows says nothing about
           whether they are disputes, promises or refusals.
         */}
         <div className="min-w-0">
-          <span className="inline-block max-w-full truncate text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
+          <span className="inline-block max-w-full truncate align-middle whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600"
             title={meta.why}>
             {meta.label}
           </span>
-          <span className={`block truncate text-[11px] mt-0.5 ${positionTone(row)}`}
+        </div>
+        <div className="min-w-0">
+          <span className={`block truncate whitespace-nowrap text-[12px] ${positionTone(row)}`}
             title={DESK_POSITIONS[positionOfRow(row)].meaning}>
             {DESK_POSITIONS[positionOfRow(row)].label}
           </span>
@@ -775,7 +792,7 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
 
         {/* Client. Truncated in the column, whole in the tooltip — a client called "Mzansi
             Micro-Lending (Pty) Ltd" is unreadable at eleven rem and unmistakable on hover. */}
-        <div className="min-w-0 text-xs text-slate-500">
+        <div className="min-w-0 text-[12.5px] text-slate-500 whitespace-nowrap">
           {client
             ? canOpenClient
               ? <Link to={`/companies/${client.id}`} title={client.name}
@@ -784,23 +801,23 @@ export function DiaryRowItem({ row, today, onComplete, onMove, picked, onPick }:
             : <span className="text-slate-300" title="This account is not linked to a client">—</span>}
         </div>
 
-        <div className="text-sm font-medium text-slate-700 tabular-nums @3xl:text-right">
+        <div className="font-medium text-slate-700 tabular-nums whitespace-nowrap @3xl:text-right">
           {formatCurrency(row.account.capitalOutstanding)}
         </div>
 
         <div className="flex items-center justify-end gap-2">
           <button onClick={() => onMove(row)}
-            className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+            className="text-[12px] font-medium px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             title="Move it to another day. The original entry keeps its date and says who moved it.">
             Move
           </button>
           <button onClick={() => onComplete(row)}
-            className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
+            className="text-[12px] font-medium px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
             Done
           </button>
           <Link to={`/accounts/${row.accountId}?diary=${row.id}`}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Open the account">
-            <ChevronRight size={16} />
+            className="p-1 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Open the account">
+            <ChevronRight size={14} />
           </Link>
         </div>
       </div>
@@ -1015,26 +1032,29 @@ function TeamLoad({ loads, today, adrift }: { loads: AgentLoad[]; today: string;
 function TeamRows({ loads, today }: { loads: AgentLoad[]; today: string }) {
   const { users } = useAppStore()
   return (
-    <ul className="divide-y divide-slate-100 -my-2">
+    /* One line a person, the checking list's density (the firm: "thin, sleek, easy to read");
+       too narrow for it, the row scrolls sideways in the card rather than folding. */
+    <div className="overflow-x-auto -my-1">
+    <ul className="divide-y divide-slate-50 text-[12.5px] whitespace-nowrap">
       {loads.map((l) => {
         const person = users.find((u) => u.id === l.ownerId)
         const load = dayLoad({ date: today, booked: l.due, capacity: person?.diaryCapacity })
         return (
-          <li key={l.ownerId ?? 'unassigned'} className="py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <li key={l.ownerId ?? 'unassigned'} className="px-1 py-1.5 flex items-center gap-x-4 hover:bg-slate-50">
             <Link to={`/diary?who=${l.ownerId ?? ''}&tab=Backlog`}
-              className="font-medium text-sm text-slate-800 hover:text-[var(--c-steel)] min-w-[9rem]">
+              className="font-medium text-slate-800 hover:text-[var(--c-steel)] min-w-[9rem] max-w-[16rem] truncate">
               {person?.name ?? <span className="text-slate-400 italic">Nobody — unassigned</span>}
             </Link>
-            <span className="text-xs text-slate-500">{l.due} due · {dayLoadSentence(load)}</span>
+            <span className="text-slate-500 tabular-nums">{l.due} due · {dayLoadSentence(load)}</span>
             {l.overdue > 0 && (
-              <span className="text-xs font-medium text-[var(--c-rust)]">
+              <span className="font-medium text-[var(--c-rust)] tabular-nums">
                 {l.overdue} behind{l.oldest ? `, oldest ${shortDate(l.oldest)}` : ''}
               </span>
             )}
             <div className="flex-1" />
             {l.overdue > 0 && (
               <Link to={`/diary?who=${l.ownerId ?? ''}&tab=Backlog`}
-                className="inline-flex items-center gap-1 text-xs font-medium text-[var(--c-steel)] hover:underline">
+                className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--c-steel)] hover:underline">
                 <Users size={12} /> Re-diarise
               </Link>
             )}
@@ -1042,6 +1062,7 @@ function TeamRows({ loads, today }: { loads: AgentLoad[]; today: string }) {
         )
       })}
     </ul>
+    </div>
   )
 }
 

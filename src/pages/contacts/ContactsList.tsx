@@ -54,37 +54,37 @@ export function ContactsList() {
 
       <Card padded={false}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="text-left text-xs text-slate-400">
-                <th className="font-medium px-5 py-3">Name</th>
-                <th className="font-medium px-3 py-3">Company</th>
-                <th className="font-medium px-3 py-3">Job Title</th>
-                <th className="font-medium px-3 py-3">Email</th>
-                <th className="font-medium px-3 py-3">Phone</th>
-                <th className="font-medium px-3 py-3">Owner</th>
-                <th className="font-medium px-3 py-3 text-center">Active Deals</th>
-                <th className="font-medium px-3 py-3">Last Contact</th>
+              <tr className="text-left text-slate-400 border-b border-slate-100">
+                <th className="font-medium px-3 py-1.5">Name</th>
+                <th className="font-medium px-2 py-1.5">Company</th>
+                <th className="font-medium px-2 py-1.5">Job Title</th>
+                <th className="font-medium px-2 py-1.5">Email</th>
+                <th className="font-medium px-2 py-1.5">Phone</th>
+                <th className="font-medium px-2 py-1.5">Owner</th>
+                <th className="font-medium px-2 py-1.5 text-center">Active Deals</th>
+                <th className="font-medium px-2 py-1.5">Last Contact</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((c) => (
-                <tr key={c.id} onClick={() => navigate(`/contacts/${c.id}`)} className="border-t border-slate-50 hover:bg-slate-50/60 cursor-pointer">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <UserAvatar userId={c.ownerId} size={26} />
+                <tr key={c.id} onClick={() => navigate(`/contacts/${c.id}`)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer">
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <UserAvatar userId={c.ownerId} size={18} />
                       <Link to={`/contacts/${c.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-slate-700 hover:text-brand-600">
                         {c.firstName} {c.lastName}
                       </Link>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-slate-500">{companyById(c.companyId)?.name ?? '—'}</td>
-                  <td className="px-3 py-3 text-slate-500">{c.jobTitle ?? '—'}</td>
-                  <td className="px-3 py-3 text-slate-500">{c.email ?? '—'}</td>
-                  <td className="px-3 py-3 text-slate-500">{c.phone ?? c.mobile ?? '—'}</td>
-                  <td className="px-3 py-3 text-slate-500">{userById(c.ownerId)?.name}</td>
-                  <td className="px-3 py-3 text-center text-slate-600 font-medium">{activeDealsFor(c.id)}</td>
-                  <td className="px-3 py-3 text-slate-500">{formatDate(c.lastContactAt)}</td>
+                  <td className="px-2 py-1.5 text-slate-500"><span className="block max-w-[16rem] truncate" title={companyById(c.companyId)?.name}>{companyById(c.companyId)?.name ?? '—'}</span></td>
+                  <td className="px-2 py-1.5 text-slate-500">{c.jobTitle ?? '—'}</td>
+                  <td className="px-2 py-1.5 text-slate-500">{c.email ?? '—'}</td>
+                  <td className="px-2 py-1.5 text-slate-500">{c.phone ?? c.mobile ?? '—'}</td>
+                  <td className="px-2 py-1.5 text-slate-500">{userById(c.ownerId)?.name}</td>
+                  <td className="px-2 py-1.5 text-center tabular-nums text-slate-600 font-medium">{activeDealsFor(c.id)}</td>
+                  <td className="px-2 py-1.5 text-slate-500">{formatDate(c.lastContactAt)}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
