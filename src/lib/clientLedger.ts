@@ -10,8 +10,8 @@ import type { ClientEntry } from './business'
  * of their ledger; the payments behind one are its detail, opened by a click.
  *
  * WHAT IS FOLDED, AND WHAT STANDS ALONE. Money collected or owed on an account (held, owed, a
- * reversal, a re-split) belongs to the payover whose period covers the day it was booked -- the
- * same eleventh-to-tenth window the run was built from -- and a set-off or a release that names a
+ * reversal, a re-split) belongs to the run that claimed it (a PTC rides the NEXT payover, so not
+ * always the one its date falls in), else to the payover whose period covers its day; and a set-off or a release that names a
  * run belongs to that run. Everything else is an event of its own in the client's eyes and keeps
  * its own line: the payover being PAID to them, a charge waiting for the next payover, an invoice
  * raised, an invoice paid. Money booked after the last run is one line for its cycle, saying it is
@@ -104,7 +104,13 @@ export function ledgerByPayover(entries: ClientEntry[], runs: LedgerRun[]): Ledg
     if (RUN_OWN.has(e.kind) && run) {
       g = runGroup(run)
     } else if (FOLDED.has(e.kind)) {
-      const covering = live.find((r) => r.periodStart <= e.on && e.on <= r.periodEnd)
+      /*
+       * THE RUN THAT CLAIMED IT, where the database says (client_ledger names it), and only then
+       * the run whose period covers the day. A PTC rides the NEXT payover (10 Oct) -- captured on
+       * 15 October it is on the run paid on 11 November, whose period ended on the 10th -- so for a
+       * PTC the date alone would put it a month late.
+       */
+      const covering = run ?? live.find((r) => r.periodStart <= e.on && e.on <= r.periodEnd)
       if (covering) {
         g = runGroup(covering)
       } else {

@@ -201,7 +201,7 @@ check('...which it does exactly once, in that one function',
  * should be running in the payment run."
  */
 ok('a run claims a cycle by the date the payment was allocated',
-  /and p\.allocated_on <= v_end\s*\n\s*and \(p\.allocated_on >= p_period_start/.test(build ?? ''))
+  /and p\.allocated_on <= case when a\.paid_to_client\s+then public\.payover_pays_on\(v_end\) - 1 else v_end end\s*\n\s*and \(p\.allocated_on >= p_period_start/.test(build ?? ''))
 no('...not by the date somebody typed on it',
   /received_at >= p_period_start/.test(build ?? ''))
 no('...and not by when the row happened to be written',
@@ -275,8 +275,8 @@ ok('approving early demands a real reason and keeps who gave it',
   && /perform public\.approve_payover_run\(p_run\)/.test(early))
 const buildLive = liveBody('build_payover_run') ?? ''
 ok('money processed after an early approval rides the next run, not none',
-  /or exists \(select 1 from public\.payover_runs e\s+where e\.company_id = p_company\s+and e\.status in \('approved', 'sent', 'paid'\)\s+and p\.allocated_on between e\.period_start and e\.period_end\)/.test(buildLive))
-ok('...and refresh looks for it', /p\.allocated_on between e\.period_start and e\.period_end/.test(refresh))
+  /or exists \(select 1 from public\.payover_runs e\s+where e\.company_id = p_company\s+and e\.status in \('approved', 'sent', 'paid'\)\s+and p\.allocated_on between e\.period_start\s+and case when a\.paid_to_client\s+then public\.payover_pays_on\(e\.period_end\) - 1 else e\.period_end end\)/.test(buildLive))
+ok('...and refresh looks for it', /p\.allocated_on between e\.period_start\s+and case when a\.paid_to_client\s+then public\.payover_pays_on\(e\.period_end\) - 1 else e\.period_end end/.test(refresh))
 ok('...opening a box that asks which cycle', /function BuildRunModal\(/.test(queue))
 ok('...defaulting to the one running now', /useState\(cycle\.periodStart\)/.test(queue))
 /* FORWARD AS WELL AS BACK, which is not a mistake: nothing waits for a period to end, and

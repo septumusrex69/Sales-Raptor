@@ -72,6 +72,11 @@ ok('...with its number and what it was for', /Invoice INV-7: Withdrawal fee/.tes
 const charge = rows.find((r) => r.lines[0]?.kind === 'charge_pending')
 check('a charge waiting for a payover is a line of its own, and says so', charge?.state, 'Comes off the next payover')
 
+/* A PTC captured on 15 Oct rides the run paid on 11 Nov (period 11 Sep - 10 Oct): the run the
+   database names wins over the date, which would put it in the October-November cycle. */
+const ptcRows = ledgerByPayover([e('2026-10-15', 'owed', -900, { runId: 'r10' })], runs)
+check('a PTC on a run whose period it falls after is folded into THAT run', ptcRows[0]?.key, 'run:r10')
+
 const open = by('open:2026-10-11')
 ok('money after the last run is one line for its cycle', !!open && open.lines.length === 1)
 check('...saying it is not on a payover yet', open?.state, 'Not on a payover yet')
