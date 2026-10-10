@@ -322,7 +322,7 @@ check('the line uses the first name', greetingLine(new Date('2026-09-18T08:00:00
 check('...and greets nobody by name rather than nobody',
   greetingLine(new Date('2026-09-18T08:00:00'), ''), 'Good morning')
 check('...including where it is null', greetingLine(new Date('2026-09-18T08:00:00'), null), 'Good morning')
-ok('the hero renders it', /greetingLine\(new Date\(\), currentUser\?\.name\)/.test(hero))
+ok('the hero renders it', /greetingLine\(clockNow\(\), currentUser\?\.name\)/.test(hero))
 
 /* ---------- the photograph ---------- */
 

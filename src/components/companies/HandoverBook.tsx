@@ -2,11 +2,12 @@ import { Card, CardHeader } from '../ui/Card'
 import { formatCurrency, formatDate } from '../../data/mockData'
 import { useAppStore } from '../../store/AppStore'
 import type { Company, Handover } from '../../types'
+import { clockNowMs } from '../../lib/clock.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 
 function daysSince(iso: string): number {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / DAY)
+  return Math.floor((clockNowMs() - new Date(iso).getTime()) / DAY)
 }
 
 /**

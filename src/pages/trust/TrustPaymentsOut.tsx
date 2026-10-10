@@ -13,6 +13,7 @@ import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
 import { totalToPay, transferReference, type PaidOut, type PaymentToMake } from '../../lib/paymentsOut'
 import { shortDate } from '../../lib/trustCycles'
+import { clockNowMs, clockToday } from '../../lib/clock.ts'
 
 /**
  * PAYMENTS TO MAKE OUT OF TRUST, AND WHAT HAS GONE.
@@ -44,8 +45,8 @@ export function TrustPaymentsOut() {
   /* Payments out confirmed from the statement only (Trust settings): then there is no Mark paid. */
   const [statementOnly, setStatementOnly] = useState(false)
 
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
-  const since = new Date(Date.now() - 90 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  const today = clockToday()
+  const since = new Date(clockNowMs() - 90 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 
   const load = useCallback(async () => {
     try {

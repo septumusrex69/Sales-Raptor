@@ -12,6 +12,7 @@
  */
 import { supabase } from './supabase'
 import { CAPACITIES, mayBeTold, type TellLevel } from './callScripts.ts'
+import { clockNow } from './clock.ts'
 
 /** Named by hand, like every mapper here. See the warning about silent drops in CLAUDE.md. */
 const COLUMNS = 'id, account_id, name, capacity, contact, proof, proof_on_file, '
@@ -94,7 +95,7 @@ export async function addAuthorisedContact(input: {
        * though somebody had checked.
        */
       verified_by: input.proofOnFile ? input.actorId : null,
-      verified_at: input.proofOnFile ? new Date().toISOString() : null,
+      verified_at: input.proofOnFile ? clockNow().toISOString() : null,
       expires_on: input.expiresOn || null,
       notes: (input.notes ?? '').trim() || null,
       created_by: input.actorId,
@@ -124,7 +125,7 @@ export async function recordProof(input: {
       proof: input.proof.trim(),
       proof_on_file: true,
       verified_by: input.actorId,
-      verified_at: new Date().toISOString(),
+      verified_at: clockNow().toISOString(),
     })
     .eq('id', input.id)
   if (error) throw new Error(error.message)

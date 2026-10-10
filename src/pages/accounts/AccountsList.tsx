@@ -12,6 +12,7 @@ import {
   hasCommissionDrift,
   type BookFacets, type BookSummary, type DebtorAccount,
 } from '../../lib/accountBook'
+import { clockNow } from '../../lib/clock.ts'
 /* THE ACCOUNT PAGE'S OWN ARITHMETIC, not a second one -- see balanceInput.ts and the note on
    `balances` below. */
 import { computeBalance, type BalanceBreakdown } from '../../lib/accountBalance.ts'
@@ -175,7 +176,7 @@ export function AccountsList() {
     [teams],
   )
   const query = useMemo(
-    () => queryFromParams(new URLSearchParams(key), new Date(), { teamMembers }),
+    () => queryFromParams(new URLSearchParams(key), clockNow(), { teamMembers }),
     [key, teamMembers],
   )
 

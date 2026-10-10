@@ -51,7 +51,7 @@ export interface DueStep {
    *
    * Only `!== 'held'` is read from it here, which is true of every value.
    */
-  state: 'pending' | 'held' | 'sent' | 'cancelled' | 'failed'
+  state: 'pending' | 'held' | 'sent' | 'cancelled' | 'failed' | 'skipped'
   /** The reason already on it, if it is already held. What a new reason is compared against. */
   note: string | null
   run_id: string
@@ -75,7 +75,7 @@ export interface DueStep {
 }
 
 export type StepOutcome = {
-  result: 'sent' | 'held' | 'stillHeld' | 'failed'
+  result: 'sent' | 'held' | 'stillHeld' | 'failed' | 'skipped'
   note: string | null
   /** How many people were told, where this was news. */
   told?: number
@@ -93,6 +93,15 @@ export async function runOneStep(
    * question asked long afterwards, and "the system" is not an answer.
    */
   releasedBy?: string,
+  /**
+   * THE FIRM'S CLOCK, AND WHETHER TO SEND AT ALL (prompt 10).
+   *
+   * `now` is the moment a send is stamped with -- the database's raptor_now(), which on staging is
+   * the staging clock's day. `skipSends` is a staging clock JUMP: the step is decided exactly as it
+   * would have been that morning, and if it would have gone it is recorded 'skipped' instead of
+   * sent -- no message, no fee (nothing was sent, so nothing is chargeable under Annexure B).
+   */
+  options: { now?: Date; skipSends?: boolean } = {},
 ): Promise<StepOutcome> {
   const run = step.workflow_runs
 
@@ -483,14 +492,23 @@ export async function runOneStep(
     released: Boolean(releasedBy),
     afterStepSent: node.afterMinutes === null
       ? undefined
-      : priorRes.data?.state === 'sent',
+      /* A step skipped by a staging clock jump stands in for one sent: its pair was skipped with it,
+         and holding the SMS on an email that was never going to go would be a hold nobody can clear. */
+      : priorRes.data?.state === 'sent' || priorRes.data?.state === 'skipped',
   })
 
   if (!plan.can) return hold(plan.note ?? 'This step cannot go out yet.', about(account, node.label, collector?.id ?? null))
 
   /* ---------- it goes ---------- */
 
-  const sentAt = new Date().toISOString()
+  /* A STAGING CLOCK JUMP: it would have gone today, and it does not. Recorded, not sent. */
+  if (options.skipSends) {
+    const note = 'Skipped (staging clock jump): it fell due on a day the clock jumped over, so it was not sent.'
+    await admin.from('workflow_run_steps').update({ state: 'skipped', note }).eq('id', step.id)
+    return { result: 'skipped', note }
+  }
+
+  const sentAt = (options.now ?? new Date()).toISOString()
   /* The account_emails row this send files, so the fee raised further down can correct the price
      written on it. Null on an SMS, and on an email whose filing failed. */
   let filedEmailId: string | null = null

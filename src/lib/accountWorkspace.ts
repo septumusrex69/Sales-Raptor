@@ -16,6 +16,7 @@ import { normaliseRegistrationNumber, type DebtorKind } from './debtorIdentity.t
 import { parseWindows, type ContactWindow } from './contactWindows.ts'
 import { nextDueDate, type Arrangement } from './arrangements'
 import type { CancelCause } from './promiseRules.ts'
+import { clockNow, clockToday } from './clock.ts'
 
 export {
   nextDueDate, describeArrangement, ARRANGEMENT_LABEL, WEEKDAYS, type Arrangement,
@@ -240,7 +241,7 @@ const toPromise = (r: any): PromiseToPay => ({
  * a row whose truth depends on when it was last written. `status` records what a person decided;
  * this computes what the calendar says.
  */
-export function isOverdue(p: PromiseToPay, today = new Date().toISOString().slice(0, 10)): boolean {
+export function isOverdue(p: PromiseToPay, today = clockToday()): boolean {
   return p.status === 'open' && p.dueOn < today
 }
 
@@ -375,7 +376,7 @@ export async function addContact(input: {
       is_primary: input.isPrimary ?? false,
       /* NULL RATHER THAN false, because the column is a DATE: "nobody has confirmed it" and
          "confirmed on this day" are the two states, and there is no third. */
-      verified_at: input.verified ? new Date().toISOString() : null,
+      verified_at: input.verified ? clockNow().toISOString() : null,
     })
     .select('*')
     .single()
@@ -422,7 +423,7 @@ function sameValue(kind: ContactKind, value: string): string {
 export async function verifyContact(id: string, verifiedBy: string | null): Promise<AccountContact> {
   const { data, error } = await supabase
     .from('account_contacts')
-    .update({ verified_at: new Date().toISOString(), verified_by: verifiedBy })
+    .update({ verified_at: clockNow().toISOString(), verified_by: verifiedBy })
     .eq('id', id)
     .select('*')
     .single()
@@ -437,7 +438,7 @@ export async function verifyContact(id: string, verifiedBy: string | null): Prom
 export async function retireContact(id: string, reason: string): Promise<AccountContact> {
   const { data, error } = await supabase
     .from('account_contacts')
-    .update({ retired_at: new Date().toISOString(), retired_reason: reason || null, is_primary: false })
+    .update({ retired_at: clockNow().toISOString(), retired_reason: reason || null, is_primary: false })
     .eq('id', id)
     .select('*')
     .single()
@@ -564,7 +565,7 @@ export async function resolvePromise(
     .from('promises_to_pay')
     .update({
       status,
-      resolved_at: new Date().toISOString(),
+      resolved_at: clockNow().toISOString(),
       resolved_by: resolvedBy,
       /* Written in the SAME update as the status, which is what lets the trigger read the cause
          off NEW: a second update would fire it with the column still null and the account would
@@ -830,7 +831,7 @@ export async function saveMainComment(
     .from('debtor_accounts')
     .update({
       main_comment: body || null,
-      main_comment_at: new Date().toISOString(),
+      main_comment_at: clockNow().toISOString(),
       main_comment_by: byId,
     })
     .eq('id', accountId)

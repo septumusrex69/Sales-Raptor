@@ -109,6 +109,8 @@ export const RUN_STEP_WORDS: Record<RunStepState, { label: string; tone: 'done' 
   held: { label: 'Waiting on you', tone: 'attention' },
   failed: { label: 'Did not send', tone: 'attention' },
   cancelled: { label: 'Cancelled', tone: 'off' },
+  /* Staging only: the clock jumped over its day, so it was recorded and not sent. */
+  skipped: { label: 'Skipped (staging clock jump)', tone: 'off' },
 }
 
 /**
@@ -139,7 +141,7 @@ export type StepShape = 'sent' | 'stopped' | 'waiting' | 'cancelled'
 export function shapeOf(step: RunStep): StepShape {
   if (step.state === 'sent') return 'sent'
   if (step.state === 'held' || step.state === 'failed') return 'stopped'
-  if (step.state === 'cancelled') return 'cancelled'
+  if (step.state === 'cancelled' || step.state === 'skipped') return 'cancelled'
   return 'waiting'
 }
 

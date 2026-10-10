@@ -7,6 +7,7 @@ import { smsCost, smsSafeValues } from '../../lib/smsSegments'
 import { scheduleFor } from '../../lib/annexureB'
 import { missingFieldsNote } from '../../lib/messageTemplates'
 import { UseTemplate } from '../../components/library/UseTemplate'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * Write a debtor an SMS.
@@ -83,7 +84,7 @@ export function SmsModal({ accountId, debtorKind, numbers, values, initialText, 
   )
 
   const cost = smsCost(text)
-  const rate = scheduleFor(new Date()).items.find((i) => i.id === '1c')?.amount ?? 0
+  const rate = scheduleFor(clockNow()).items.find((i) => i.id === '1c')?.amount ?? 0
   const price = rate * Math.max(1, cost.segments)
 
   async function send() {

@@ -8,8 +8,11 @@ import {
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL,
   type ClientSection, type QueryStage, type QueueRow,
 } from '../../lib/accountQueries'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /** The app's own palette, same as the board and the card on the account. */
 const STAGE_CHIP: Record<QueryStage, string> = {
@@ -161,7 +164,7 @@ export function ClientQueries({ companyId, section }: {
             </thead>
             <tbody>
               {shown.map((q) => {
-                const stale = isStale(q, TODAY)
+                const stale = isStale(q, TODAY())
                 return (
                   <tr key={q.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                     <td className="px-3 py-1.5">

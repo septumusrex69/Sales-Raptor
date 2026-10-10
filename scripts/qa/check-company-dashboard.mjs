@@ -170,7 +170,7 @@ const quiet = fn.slice(fn.indexOf('quiet_accounts integer'))
 ok('an account that has never been actioned is counted separately',
   /never_actioned integer/.test(fn))
 ok('...and is NOT folded into the quiet count',
-  /last_action_at is not null[\s\S]{0,120}last_action_at < \(current_date - p_quiet_days\)/.test(quiet))
+  /last_action_at is not null[\s\S]{0,120}last_action_at < \(public\.raptor_today\(\) - p_quiet_days\)/.test(quiet))
 ok('...and the screen explains the second number rather than hiding it',
   /have no action recorded in\s*\n?\s*Raptor yet/.test(page))
 

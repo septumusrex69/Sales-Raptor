@@ -35,6 +35,7 @@ import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
 import type { WonDealDetails } from '../../store/AppStore'
+import { clockNow } from '../../lib/clock.ts'
 
 
 interface MockDocument {
@@ -110,7 +111,7 @@ export function DealDetail() {
   const [taskOpen, setTaskOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [docs, setDocs] = useState<MockDocument[]>([
-    { id: 'doc1', name: 'Signed_MSA.pdf', uploadedAt: new Date().toISOString(), size: '212 KB' },
+    { id: 'doc1', name: 'Signed_MSA.pdf', uploadedAt: clockNow().toISOString(), size: '212 KB' },
   ])
 
   const dealActivities = useMemo(() => activities.filter((a) => a.dealId === id).sort((a, b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()), [activities, id])
@@ -359,7 +360,7 @@ export function DealDetail() {
             <input
               type="checkbox"
               checked={t.status === 'Completed'}
-              onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? new Date().toISOString() : undefined })}
+              onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? clockNow().toISOString() : undefined })}
               className="w-3.5 h-3.5 accent-brand-600 shrink-0"
             />
             <span className={`truncate min-w-0 font-medium ${t.status === 'Completed' ? 'text-slate-400 line-through' : 'text-slate-700'}`} title={t.title}>{t.title}</span>
@@ -441,7 +442,7 @@ export function DealDetail() {
         <h3 className="font-semibold text-slate-800 text-[15px]">Documents</h3>
         <button
           onClick={() =>
-            setDocs((prev) => [{ id: `doc${prev.length + 1}`, name: `Document_${prev.length + 1}.pdf`, uploadedAt: new Date().toISOString(), size: `${(Math.random() * 500 + 50).toFixed(0)} KB` }, ...prev])
+            setDocs((prev) => [{ id: `doc${prev.length + 1}`, name: `Document_${prev.length + 1}.pdf`, uploadedAt: clockNow().toISOString(), size: `${(Math.random() * 500 + 50).toFixed(0)} KB` }, ...prev])
           }
           className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:underline"
         >
@@ -558,7 +559,7 @@ export function DealDetail() {
         placeholder="Where does this deal stand? Two lines is plenty."
         onSave={(text) => updateDeal(deal.id, {
           mainComment: text || undefined,
-          mainCommentAt: new Date().toISOString(),
+          mainCommentAt: clockNow().toISOString(),
           mainCommentBy: currentUser?.id,
         })}
         summary={(

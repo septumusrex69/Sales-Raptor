@@ -5,6 +5,7 @@ import { useTheme } from '../../store/ThemeContext'
 import { targetLaps } from '../../lib/collectionPace.ts'
 import { greetingLine } from '../../lib/greeting.ts'
 import { formatCurrency } from '../../data/mockData'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * The hero, to the firm's own design — and it belongs to the COMPANY dashboard.
@@ -103,7 +104,7 @@ export function CollectionsHero({ figures, filters, action, progress }: {
         <div className="flex items-start justify-between gap-8">
           <div>
             <p className="text-[11px] font-medium uppercase tracking-[0.34em] text-white/60">
-              {greetingLine(new Date(), currentUser?.name)}
+              {greetingLine(clockNow(), currentUser?.name)}
             </p>
             <span className="mt-3 block h-px w-14 bg-[var(--ch-gold)]" />
             {/*

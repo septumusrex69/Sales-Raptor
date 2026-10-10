@@ -113,8 +113,8 @@ const liveFn = (name) => {
 }
 const trig = liveFn('record_account_desk_change')
 ok('an imported account with a clerk is theirs from its handover date',
-  /tg_op = 'INSERT' and new\.import_batch_id is not null\s+and new\.assigned_to is not null and new\.handover_date is not null\s+then least\(now\(\), new\.handover_date::timestamp at time zone 'Africa\/Johannesburg'\)/.test(trig))
-ok('...and every other change from now()', /else now\(\) end/.test(trig))
+  /tg_op = 'INSERT' and new\.import_batch_id is not null\s+and new\.assigned_to is not null and new\.handover_date is not null\s+then least\(public\.raptor_now\(\), new\.handover_date::timestamp at time zone 'Africa\/Johannesburg'\)/.test(trig))
+ok('...and every other change from now (the firm’s clock)', /else public\.raptor_now\(\) end/.test(trig))
 ok('...and a move to or from nobody is still recorded', /new\.assigned_to is distinct from old\.assigned_to/.test(trig))
 
 /* ---------------- 4: money no desk held ---------------- */

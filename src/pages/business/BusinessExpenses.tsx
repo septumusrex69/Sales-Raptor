@@ -10,6 +10,7 @@ import {
 } from '../../lib/businessMonth'
 import { cancelExpense, fetchExpenses, recordExpense } from '../../lib/businessApi'
 import { fetchFirmSettings } from '../../lib/firmSettings'
+import { clockNow, clockToday } from '../../lib/clock.ts'
 
 /**
  * WHAT THE FIRM SPENT.
@@ -28,7 +29,7 @@ import { fetchFirmSettings } from '../../lib/firmSettings'
  * no delete policy at all, so Postgres would refuse a delete anyway.
  */
 export function BusinessExpenses() {
-  const now = thisMonth(new Date())
+  const now = thisMonth(clockNow())
   const [year, setYear] = useState(now.year)
   const [month, setMonth] = useState(now.month)
   const [rows, setRows] = useState<BusinessExpense[]>([])
@@ -205,7 +206,7 @@ export function BusinessExpenses() {
 }
 
 function RecordExpenseModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = clockToday()
   const [incurredOn, setIncurredOn] = useState(today)
   const [category, setCategory] = useState<ExpenseCategory>('Other')
   const [supplier, setSupplier] = useState('')

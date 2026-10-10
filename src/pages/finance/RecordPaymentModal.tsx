@@ -10,6 +10,7 @@ import {
 import { chargePtcConfirmation } from '../../lib/accountCharges'
 import { chargeMessage } from '../../lib/accountCharges'
 import { useAuth } from '../../store/AuthContext'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * RECORDING ONE PAYMENT BY HAND.
@@ -42,7 +43,7 @@ export function RecordPaymentModal({ onClose, onDone, fixedAccount }: {
   fixedAccount?: { id: string; caseNumber: string | null; accountNumber: string | null; name: string }
 }) {
   const { currentUser } = useAuth()
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  const today = clockToday()
 
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<DebtorAccount[]>([])

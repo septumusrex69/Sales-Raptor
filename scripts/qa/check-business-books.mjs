@@ -100,7 +100,10 @@ for (const m of [1, 6, 12]) {
 check('this month is read off the date', thisMonth(new Date('2026-10-05T12:00:00Z')),
   { year: 2026, month: 10 })
 /* THE LAST DAY OF A MONTH IS STILL THAT MONTH, which an off-by-one in the month index breaks. */
-check('...including its last day', thisMonth(new Date('2026-10-31T22:00:00Z')),
+/* 10:00 UTC, not 22:00: thisMonth reads the machine's own zone, and 22:00 UTC on the 31st is already
+   1 November in Johannesburg -- this check was red on any machine set to SAST. Midday is the last
+   day in every zone the firm could be in. */
+check('...including its last day', thisMonth(new Date('2026-10-31T10:00:00Z')),
   { year: 2026, month: 10 })
 ok('and the label names the month', /2026/.test(monthLabel(2026, 10)))
 

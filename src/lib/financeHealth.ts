@@ -35,6 +35,7 @@
  * otherwise read as a clean bill of health on a table nobody has written to.
  */
 import { scheduleFor, type AnnexureBSchedule } from './annexureB.ts'
+import { clockNow } from './clock.ts'
 
 export type FinanceSeverity = 'broken' | 'suspect'
 
@@ -268,7 +269,7 @@ export function auditAccount(
    * ceiling applies to the running total rather than to any one fee.
    */
   if (a.fees.length > 0) {
-    const today = scheduleAt(new Date().toISOString())
+    const today = scheduleAt(clockNow().toISOString())
     const ceiling = Math.min(a.capitalOutstanding, today.itemsOneToSevenCeiling)
     if (ceiling > 0 && cappedTotal > ceiling + CENT) {
       /*

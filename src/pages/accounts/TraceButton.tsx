@@ -16,6 +16,7 @@ import { searchKeyProblem, traceSearchKey } from '../../lib/traceStore.ts'
 import { isValidSaId } from '../../lib/newDebtor'
 import { scheduleFor } from '../../lib/annexureB'
 import type { ChargeResult } from '../../lib/accountCharges'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * WHAT IT COST, SAID ONCE.
@@ -165,7 +166,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
    * today -- CLAUDE.md's rule, and the reason this takes a date at all. The same schedule decides
    * how many buttons there are, so the row and the price can never describe different tariffs.
    */
-  const schedule = scheduleFor(new Date())
+  const schedule = scheduleFor(clockNow())
   const rate = schedule.items.find((i) => i.id === '4c')?.amount ?? 0
   const counts = bureauSearchCounts(schedule)
   /*
@@ -228,7 +229,7 @@ export function TraceButton({ accountId, actor, debtorKind, idNumber, debtorName
     /* Fire and forget: a ledger that will not load costs the detail line, never the trace. */
     void fetchLedgers(accountId)
       .then((l) => setTracing(tracingThisMonth(
-        l.fees, new Date().toISOString(), MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)))
+        l.fees, clockNow().toISOString(), MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)))
       .catch(() => setTracing(null))
   }
 

@@ -121,7 +121,7 @@ ok('...but only a dispute, not a help or litigation query',
  * midnight the two disagree about the date, and started_on is what every step of the sequence is
  * counted from. Ten business days from the wrong day is the wrong day.
  */
-ok('the run starts on the firm’s day, not the server’s', /todayInJohannesburg\(\)/.test(start))
+ok('the run starts on the firm’s day, not the server’s', /await firmClock\(admin\)/.test(start))
 ok('...and the run records who started it', /started_by: caller\.id/.test(start))
 /* Dated by the app, because the working-day calendar is workingDays.ts and a second copy in SQL
    would be the one that is wrong about Heritage Day in the year nobody checks. */
@@ -135,7 +135,7 @@ ok('the steps are dated by the planner', /planUnplannedRuns\(admin, \[accountId\
  * caller to runOneStep is what lifts that one refusal -- the person pressed a button that says
  * what it sends.
  */
-ok('what is due today is sent now', /runOneStep\(admin, step, today, caller\.id\)/.test(start))
+ok('what is due today is sent now', /runOneStep\(admin, step, today, caller\.id, \{ now \}\)/.test(start))
 ok('...and only this run’s steps', /\.eq\('run_id', created\.id\)/.test(start))
 /* A step due LATER is not dragged forward by the press. */
 ok('...and only what has come due', /\.lte\('due_on', today\)/.test(start))

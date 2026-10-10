@@ -68,7 +68,8 @@ export async function expireDefaultedPromises(
      */
     const { error: bad } = await admin
       .from('promises_to_pay')
-      .update({ status: 'broken', resolved_at: new Date().toISOString() })
+      /* The firm's now (the staging clock's on staging), the same moment the window was measured to. */
+      .update({ status: 'broken', resolved_at: now.toISOString() })
       .eq('id', row.id)
       .eq('status', 'defaulted')
     if (!bad) out.push({ promiseId: row.id, accountId: row.account_id })

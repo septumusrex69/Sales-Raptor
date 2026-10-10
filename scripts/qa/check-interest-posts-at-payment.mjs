@@ -136,7 +136,7 @@ ok('...and reports it as the interest before the split',
  * 7 April 2026 was previewed against the R610 cap and charged at R502.
  */
 ok('the preview day defaults to today but can be given',
-  /v_day date := coalesce\(p_as_at, current_date\)/.test(preview))
+  /v_day date := coalesce\(p_as_at, public\.raptor_today\(\)\)/.test(preview))
 ok('...and the item 9 tariff is read on that day, not on today',
   /item = '9' and v_day >= effective_from/.test(preview))
 ok('...with no current_date left in the tariff lookup',

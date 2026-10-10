@@ -16,6 +16,7 @@ import { cycleLabel, overdueCycles } from '../../lib/trustCycles'
 import { PayoverCheck, PtcAgeAnalysis, PtcByPayover } from './TrustPtc'
 import { trustChecks, trustHeadline, trustVerdict } from '../../lib/trustBalance'
 import { firmHeldLines, firmHeldSum, type FirmHeld } from '../../lib/firmHeld'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * IS THE TRUST ACCOUNT RIGHT, AND WHOSE PAYOVER IS EACH PART OF IT WAITING FOR?
@@ -134,7 +135,7 @@ export function TrustOverview() {
    * zone is off by one for a third of the day. `en-CA` is the shortest way to a real ISO date out
    * of Intl; `toISOString` would hand back UTC, which is the bug.
    */
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  const today = clockToday()
   /*
    * THE FOUR CHECKS, BUILT FROM THE FIGURES ALREADY ON THE PAGE. `rand` is handed in rather than
    * reached for inside, so the sentences are formatted by the same money function as every figure

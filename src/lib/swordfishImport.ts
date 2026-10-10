@@ -29,6 +29,7 @@ import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
 import { settledThroughDefault } from './trustCycles.ts'
 import { readDebtorsPerClient, type ContactRow, type NoteRow, type PromiseRow } from './swordfishDebtors.ts'
+import { clockNow } from './clock.ts'
 
 export interface SwordfishExports {
   accounts: CsvRow[]
@@ -318,7 +319,7 @@ function* walk(specs: SwordfishClientSpec[]): Generator<SwordfishClientSpec> {
 }
 
 export function buildImportPlan(exports: SwordfishExports, options: BuildOptions): ImportPlan {
-  const { ownerId, only: onlyRaw, now = new Date() } = options
+  const { ownerId, only: onlyRaw, now = clockNow() } = options
   const only = onlyRaw?.toLowerCase()
   const nowIso = now.toISOString()
   const today = nowIso.slice(0, 10)

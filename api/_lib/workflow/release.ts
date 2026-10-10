@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
-import { todayInJohannesburg } from './locale.js'
+import { firmClock } from './clock.js'
 import { runOneStep, type DueStep } from './step.js'
 import { mayActOnAccount } from './who.js'
 
@@ -105,7 +105,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * OVERDUE IS FINE, and is most of the point: a step that came due on Tuesday and was held goes
    * out today, which is why this is `>` and not `!==`.
    */
-  const today = todayInJohannesburg()
+  /* The firm's day as the database keeps it -- the staging clock's, on staging (prompt 10). */
+  const { today, now } = await firmClock(admin)
   if (step.due_on > today) {
     res.status(409).json({
       error: `That step is not due until ${step.due_on}. It says something that is not true yet, `
@@ -126,7 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * -- {{today}} is merged from here. Its CHARGE is still priced on the step's own due date,
    * which planSend decides and which is CLAUDE.md's rule about the action's date.
    */
-  const outcome = await runOneStep(admin, step, today, caller.id)
+  const outcome = await runOneStep(admin, step, today, caller.id, { now })
 
   /*
    * AND THE SMS THAT GOES WITH IT, ON THE SAME PRESS.
@@ -165,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .order('due_on', { ascending: true })
     for (const s of (behind ?? []) as unknown as DueStep[]) {
       try {
-        companions.push(await runOneStep(admin, s, today, caller.id))
+        companions.push(await runOneStep(admin, s, today, caller.id, { now }))
       } catch (e) {
         /* One message's failure is not the other's: the notice HAS gone, and saying so while
            reporting what happened to the SMS is the honest account of the press. */

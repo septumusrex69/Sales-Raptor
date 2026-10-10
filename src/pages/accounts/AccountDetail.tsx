@@ -90,6 +90,7 @@ import {
   type AccountEmail,
 } from '../../lib/accountEmails'
 import { EmailsPanel } from './EmailsPanel'
+import { clockNow, clockToday } from '../../lib/clock.ts'
 /* The same four helpers the mailbox answers its own mail with. Written once, so a reply-all from
    an account and a reply-all from the mailbox cannot disagree about who is on a thread. */
 import { forwardBody, forwardSubject, recipientLine, replyAllTo } from '../../lib/emailRules'
@@ -157,7 +158,9 @@ type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'Documents'
  */
 const LAYOUT_KEY = 'raptor.account.layout'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * One debtor account: who to call, what the story is, and what is owed.
@@ -667,7 +670,7 @@ export function AccountDetail() {
 
   const ceiling = useMemo(() => {
     if (!account) return null
-    const schedule = scheduleFor(account.lastActionAt ?? account.handoverDate ?? new Date().toISOString())
+    const schedule = scheduleFor(account.lastActionAt ?? account.handoverDate ?? clockNow().toISOString())
     return { limit: feeCeiling(account.capitalHandedOver, schedule) }
   }, [account])
 
@@ -798,7 +801,7 @@ export function AccountDetail() {
         debtorIdNumber: account.debtorIdNumber,
         contacts: workspace?.contacts ?? [],
         firm,
-        today: dayKey(new Date()),
+        today: dayKey(clockNow()),
         money: formatMoney,
         /*
          * THE INSTALMENT THE ARRANGEMENT NOTICES QUOTE: the earliest one not yet paid, decided by
@@ -918,7 +921,7 @@ export function AccountDetail() {
           totalPromised: live.totalPromised,
           instalmentsKept: live.instalmentsKept,
           arrangement: live.arrangement,
-          due: instalmentsDue(live, new Date().toISOString().slice(0, 10)),
+          due: instalmentsDue(live, clockToday()),
         })
         : null,
     }
@@ -1117,7 +1120,7 @@ export function AccountDetail() {
       /* OFF THE LEDGER THE PAGE ALREADY HOLDS, so saying what tracing cost needs no request of
          its own. Counted exactly as the engine counts -- see tracingThisMonth. */
       tracingMonth={ledgers
-        ? tracingThisMonth(ledgers.fees, new Date().toISOString(),
+        ? tracingThisMonth(ledgers.fees, clockNow().toISOString(),
             MONTHLY_LIMIT[TRACING_ACTION_CODE] ?? 4)
         : null}
       traceAction={(
@@ -1411,7 +1414,7 @@ export function AccountDetail() {
          * monthly report -- "the reports go out on the 11th" -- is true of this panel too: a
          * follow-up booked for last Tuesday is not something the firm "will" do.
          */
-        asAt: new Date().toISOString().slice(0, 10),
+        asAt: clockToday(),
       })}
       /*
         CLIENT_POSITIONS here, deliberately, where every other position on this screen reads from
@@ -1703,7 +1706,7 @@ export function AccountDetail() {
           label="Next promise"
           value={due ? formatMoney(due.amount) : '—'}
           note={due ? `due ${formatDate(due.dueOn)}` : 'none outstanding'}
-          danger={!!due && isOverdue(due, TODAY)}
+          danger={!!due && isOverdue(due, TODAY())}
         />
         {/*
           THE POSITION, NOT THE COLUMN. This tile read "Active: Activated · no flags", which is
@@ -3410,7 +3413,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
               )}
               <label className="block text-[11px] text-slate-500">
                 {arrangement === 'once_off' ? 'Due on' : 'First instalment due on'}
-                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY}
+                <input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} min={TODAY()}
                   className="w-full text-sm rounded-lg border border-slate-200 px-2 py-1.5 mt-0.5" />
               </label>
               {arrangement !== 'once_off' && dueOn && (
@@ -3497,7 +3500,7 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
 
       <div className="space-y-2">
         {outstanding.map((p) => {
-          const late = isOverdue(p, TODAY)
+          const late = isOverdue(p, TODAY())
           return (
             <div key={p.id} className={`p-3 rounded-lg border ${late ? 'border-negative-100 bg-negative-50' : 'border-gold-100 bg-gold-50'}`}>
               <div className="flex items-baseline justify-between gap-2">
@@ -4770,7 +4773,7 @@ function StatementTable({
       </div>
       {breakdown && breakdown.balance > 0 && (
         <p className="text-[11px] text-slate-400 mt-3">
-          Quoted as at {formatDate(TODAY)}. Interest continues to run, so a settlement paid later
+          Quoted as at {formatDate(TODAY())}. Interest continues to run, so a settlement paid later
           will differ.
         </p>
       )}

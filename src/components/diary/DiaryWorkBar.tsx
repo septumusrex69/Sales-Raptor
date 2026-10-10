@@ -19,6 +19,7 @@ import {
   CALL_OUTCOMES, EMPTY_OUTCOME, outcomeReady, type CallOutcome, type OutcomeChoice,
 } from '../../lib/callOutcome.ts'
 import { recordOutcome } from '../../lib/recordOutcome.ts'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * The accounts finished in this run of the diary.
@@ -90,7 +91,7 @@ export function DiaryWorkBar({ account, onWorked }: {
   const { currentUser } = useAuth()
 
   const entryId = params.get('diary')
-  const today = new Date().toISOString().slice(0, 10)
+  const today = clockToday()
 
   const [queue, setQueue] = useState<DiaryRow[] | null>(null)
   const [done, setDone] = useState(0)

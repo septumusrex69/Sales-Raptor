@@ -115,7 +115,7 @@ ok('dated when the money came in, not when it was typed',
   /\(p_received_on::timestamp at time zone 'Africa\/Johannesburg'\)/.test(fn ?? ''))
 /* A DATE IN THE FUTURE lands in a cycle that has not been cut. */
 ok('...and never in the future',
-  /p_received_on > \(now\(\) at time zone 'Africa\/Johannesburg'\)::date/.test(fn ?? ''))
+  /p_received_on > public\.raptor_today\(\)/.test(fn ?? ''))
 
 /* ---------------- who may record one ---------------- */
 
@@ -285,7 +285,7 @@ ok('a payment knows which bank line it came from',
   /add column if not exists bank_line_id uuid references public\.bank_statement_lines\(id\)/.test(sql))
 ok('...and every part of a split carries it', /created_by, bank_line_id/.test(split ?? ''))
 /* THE LINE IS TAKEN OFF SUSPENSE, or it would be offered for splitting a second time. */
-ok('...and the line leaves suspense', /set status = 'allocated', placed_at = now\(\)/.test(split ?? ''))
+ok('...and the line leaves suspense', /set status = 'allocated', placed_at = public\.raptor_now\(\)/.test(split ?? ''))
 
 /* THE SCREEN WILL NOT OFFER AN UNBALANCED SPLIT EITHER, so nobody types five rows and then meets
    the database's refusal. Compared in CENTS -- two floats compared for equality is how a split

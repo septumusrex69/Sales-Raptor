@@ -13,9 +13,10 @@
  */
 import { supabase } from './supabase'
 import { fetchAllRows } from './fetchAll.ts'
+import { clockNow, clockToday } from './clock.ts'
 /* The firm's own day, not the server's. A dispute taken at one in the morning in Johannesburg is
    eleven the previous night in UTC, and a date filed under yesterday is what a notice quotes. */
-const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+const todayIso = () => clockToday()
 import { refreshNavCounts } from './navCounts'
 import { addNote, type AccountNote } from './accountWorkspace'
 import { chargeItem, type ChargeResult } from './accountCharges'
@@ -173,13 +174,13 @@ const toQuery = (r: any): AccountQuery => ({
 })
 
 /** Open, and nobody has touched it for a while. The way a query dies is quietly. */
-export function isStale(q: AccountQuery, today = new Date().toISOString().slice(0, 10)): boolean {
+export function isStale(q: AccountQuery, today = clockToday()): boolean {
   if (q.status === 'closed') return false
   return !!q.chaseOn && q.chaseOn < today
 }
 
 /** Days since it was raised. What a queue is sorted by when nothing else is urgent. */
-export function ageInDays(q: AccountQuery, now = new Date()): number {
+export function ageInDays(q: AccountQuery, now = clockNow()): number {
   return Math.max(0, Math.floor((now.getTime() - new Date(q.raisedAt).getTime()) / 86_400_000))
 }
 
@@ -792,7 +793,7 @@ export async function updateQuery(
     // Recorded once, the first time it goes out: how long a client has actually had it is the
     // question that matters when a query goes quiet.
     if (patch.stage === 'client') {
-      row.sent_to_client_at = new Date().toISOString()
+      row.sent_to_client_at = clockNow().toISOString()
       row.sent_to_client_by = context.actorId
     }
   }
@@ -1052,7 +1053,7 @@ export async function closeQuery(
       outcome_action: decision.action?.trim() || null,
       outcome_amount: decision.amount ?? null,
       outcome_effect: decision.effect ?? null,
-      closed_at: new Date().toISOString(),
+      closed_at: clockNow().toISOString(),
       closed_by: context.actorId,
       closed_by_name: context.actorName,
       updated_at: new Date().toISOString(),

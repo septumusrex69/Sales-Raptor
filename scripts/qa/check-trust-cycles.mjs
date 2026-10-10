@@ -321,8 +321,8 @@ ok('"totals match" is said only when no check is open',
  * TODAY IS READ ON THE FIRM'S CLOCK. "How many days until the 11th" against a browser in another
  * zone is wrong for a third of every day, and toISOString would hand back UTC.
  */
-ok("today is taken on the firm's clock",
-  /toLocaleDateString\('en-CA', \{ timeZone: 'Africa\/Johannesburg' \}\)/.test(page))
+/* clockToday() is Johannesburg's day on the firm's clock (lib/clock; prompt 10), never UTC's. */
+ok("today is taken on the firm's clock", /clockToday\(\)/.test(page))
 no('...and never from toISOString', /toISOString\(\)/.test(page))
 
 /* THE SETTING IS REACHABLE FROM THE SCREEN THAT QUOTES IT. Raptor guessed the date; the firm has

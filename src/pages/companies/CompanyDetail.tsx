@@ -57,6 +57,7 @@ import { ClientPayoversPanel } from '../../components/companies/ClientPayoversPa
 import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
 import { supabase } from '../../lib/supabase'
+import { clockNow } from '../../lib/clock.ts'
 
 /*
  * ACCOUNT IS A TAB, NOT A PANEL ON THE OVERVIEW, and it is gated separately from the rest of the
@@ -690,7 +691,7 @@ export function CompanyDetail() {
         placeholder="Where does this client stand? Two lines is plenty."
         onSave={(text) => updateCompany(company.id, {
           mainComment: text || undefined,
-          mainCommentAt: new Date().toISOString(),
+          mainCommentAt: clockNow().toISOString(),
           mainCommentBy: currentUser?.id,
         })}
         summary={(

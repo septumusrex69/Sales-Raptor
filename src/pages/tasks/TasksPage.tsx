@@ -22,6 +22,7 @@ import { fetchOpenQueries } from '../../lib/accountQueries.ts'
 import { TaskDayPicker } from '../../components/tasks/TaskDayPicker'
 import type { Task, TaskPriority, TaskType, User } from '../../types'
 import { isAssignableOwner } from '../../lib/permissions'
+import { clockNow } from '../../lib/clock.ts'
 
 /*
  * THE FIRM: "I think it's important to see next week as well."
@@ -468,7 +469,7 @@ export function TasksPage() {
                   onClick={() => {
                     addTask({
                       title: prepareTitle(m.title),
-                      dueDate: prepareOn(dayShown ?? localDay(new Date()), localDay(new Date())),
+                      dueDate: prepareOn(dayShown ?? localDay(clockNow()), localDay(clockNow())),
                       /* "Research" is the firm's own word for reading up before something. There
                          is no 'Preparation' in TaskType and adding one for this would be a tenth
                          word for a thing the list already has. */
@@ -544,7 +545,7 @@ export function TasksPage() {
                 <input
                   type="checkbox"
                   checked={t.status === 'Completed'}
-                  onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? new Date().toISOString() : undefined })}
+                  onChange={(e) => updateTask(t.id, { status: e.target.checked ? 'Completed' : 'Not Started', completedAt: e.target.checked ? clockNow().toISOString() : undefined })}
                   className="w-3.5 h-3.5 accent-brand-600 shrink-0"
                 />
                 <div className="min-w-0 flex-1 flex items-center gap-1.5">
@@ -646,7 +647,7 @@ export function TasksPage() {
             updateTask(cancelTask.id, {
               status: 'Cancelled',
               cancelReason: reason,
-              cancelledAt: new Date().toISOString(),
+              cancelledAt: clockNow().toISOString(),
             })
             setCancelTask(null)
           }}

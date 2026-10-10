@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
-import { todayInJohannesburg } from './locale.js'
+import { firmClock } from './clock.js'
 import { isStagingDatabase, isTestAccount, daysToNextStep } from '../../../src/lib/testClock.js'
 import run from './run.js'
 
@@ -82,7 +82,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * forward while it is paused fights the re-dating that happens when it is let go. A tick that
    * moves nothing because everything is held is the correct answer and the screen says so.
    */
-  const today = todayInJohannesburg()
+  /* The firm's day as the database keeps it -- the staging clock's, on staging (prompt 10). */
+  const { today } = await firmClock(admin)
   const { data: pending, error: stepsError } = await admin
     .from('workflow_run_steps')
     .select('due_on, workflow_runs!inner(account_id, state)')

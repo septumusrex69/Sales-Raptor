@@ -8,6 +8,7 @@ import { bulkMove, moveEntry, debtorName, type DiaryRow } from '../../lib/diary.
 import { DEFAULT_DIARY_CAPACITY, planSpread, type DayLoad } from '../../lib/diaryPriority.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * Move work that was missed onto days somebody can actually do it.
@@ -38,7 +39,7 @@ export function MoveDiaryModal({ entries, ownerId, capacity, onClose, onDone }: 
   const { currentUser } = useAuth()
   const { users } = useAppStore()
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = clockToday()
   const bulk = entries.length > 1
 
   const [startOn, setStartOn] = useState(() => addWorkingDays(today, 1))

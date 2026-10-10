@@ -66,7 +66,7 @@ ok('...not read off resolved_at', !/defaulted_at.*resolved_at|resolved_at as def
 
 const stamp = fnAt('stamp_promise_default')
 ok('the stamp is written by the database', stamp !== null)
-ok('...on the way in', /new\.status = 'defaulted' and coalesce\(old\.status, ''\) <> 'defaulted'[\s\S]{0,80}?defaulted_at := now\(\)/.test(stamp ?? ''))
+ok('...on the way in', /new\.status = 'defaulted' and coalesce\(old\.status, ''\) <> 'defaulted'[\s\S]{0,80}?defaulted_at := public\.raptor_now\(\)/.test(stamp ?? ''))
 /*
  * CLEARED ONLY ON THE WAY BACK TO `open`. A revived arrangement carrying yesterday's stamp is
  * broken again by the next morning's sweep. A BROKEN one keeps it, because that is the record of
@@ -163,7 +163,7 @@ ok('...and not on default', !/new\.status = 'defaulted'/.test(resume ?? ''))
  * needs a thing that wakes up. The morning sweep already does.
  */
 ok('the sweep ends the windows that have run out',
-  /const expired = await expireDefaultedPromises\(admin, accountIds\)/.test(sweep))
+  /const expired = await expireDefaultedPromises\(admin, accountIds, now\)/.test(sweep))
 /*
  * BEFORE THE RE-DATING, AND THAT IS THE LOAD-BEARING HALF. Breaking a promise resumes the paused
  * section 129; redateResumedRuns then moves whatever had not gone by the working days the hold

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { adminClient, requireCaller } from '../auth.js'
-import { todayInJohannesburg } from './locale.js'
+import { firmClock } from './clock.js'
 import { planUnplannedRuns } from './plan.js'
 import { runOneStep, type DueStep } from './step.js'
 import { mayActOnAccount } from './who.js'
@@ -208,7 +208,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * in winter; around midnight the two disagree about the date, and started_on is what every step
    * of the sequence is counted from -- ten business days from the wrong day is the wrong day.
    */
-  const today = todayInJohannesburg()
+  /* The firm's day as the database keeps it -- the staging clock's, on staging (prompt 10). */
+  const { today, now } = await firmClock(admin)
   const { data: created, error: insertError } = await admin.from('workflow_runs')
     .insert({ account_id: accountId, version_id: versionId, started_on: today, started_by: caller.id })
     .select('id').single()
@@ -279,10 +280,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .limit(1)
     .maybeSingle()
 
-  const outcome = { sent: 0, held: 0, stillHeld: 0, failed: 0, notes: [] as string[] }
+  /* `skipped` cannot happen here (only a staging clock jump skips), and is counted so the tally is total. */
+  const outcome = { sent: 0, held: 0, stillHeld: 0, failed: 0, skipped: 0, notes: [] as string[] }
   for (const step of due as DueStep[]) {
     try {
-      const what = await runOneStep(admin, step, today, caller.id)
+      const what = await runOneStep(admin, step, today, caller.id, { now })
       outcome[what.result] += 1
       if (what.note) outcome.notes.push(what.note)
     } catch (e) {

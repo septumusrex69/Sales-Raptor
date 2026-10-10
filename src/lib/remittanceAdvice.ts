@@ -26,6 +26,7 @@ import { paymentReference } from './paymentsOut.ts'
 import type { RunPayment } from './payover'
 import { rand } from './money.js'
 import { buildXlsx, type Cell } from './xlsxWrite.js'
+import { clockNow } from './clock.js'
 
 export interface RemittanceFirm {
   name: string
@@ -450,7 +451,7 @@ export function adviceFromRun(
     run: {
       invoiceNumber: run.invoice_number,
       periodStart: run.period_start, periodEnd: run.period_end,
-      issuedOn: (run.approved_at ?? new Date().toISOString()).slice(0, 10),
+      issuedOn: (run.approved_at ?? clockNow().toISOString()).slice(0, 10),
       trustCapital: run.trust_capital, trustCommission: run.trust_commission,
       dueToClient: run.due_to_client, ptcReceived: run.ptc_received,
       ptcFeesTaken: run.ptc_fees_taken, ptcCapital: run.ptc_capital,

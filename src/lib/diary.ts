@@ -17,6 +17,7 @@ import { addNote } from './accountWorkspace.ts'
 import {
   type DiaryKind, calendarStrip, isMissed, sortDiary,
 } from './diaryPriority.ts'
+import { clockNow } from './clock.ts'
 
 export interface DiaryEntry {
   id: string
@@ -375,7 +376,7 @@ export async function diarise(input: {
    */
   const { error: supersedeError } = await supabase
     .from('diary_entries')
-    .update({ state: 'moved', moved_at: new Date().toISOString(), moved_by: input.actor.id })
+    .update({ state: 'moved', moved_at: clockNow().toISOString(), moved_by: input.actor.id })
     .eq('account_id', input.accountId)
     .eq('state', 'open')
   if (supersedeError) throw new Error(supersedeError.message)
@@ -423,7 +424,7 @@ export async function completeEntry(input: {
 }): Promise<DiaryEntry> {
   const { data, error } = await supabase.from('diary_entries').update({
     state: 'done',
-    done_at: new Date().toISOString(),
+    done_at: clockNow().toISOString(),
     done_by: input.actor.id,
     outcome: input.outcome?.trim() || null,
   }).eq('id', input.id).eq('state', 'open').select('*').single()

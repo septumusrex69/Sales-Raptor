@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { addNote } from './accountWorkspace.ts'
 import { frozenByLabel, type FrozenBy } from './clientPosition.ts'
+import { clockNow } from './clock.ts'
 
 /**
  * Stopping and restarting work on an account.
@@ -49,7 +50,7 @@ export async function freezeAccount(input: {
       status: FROZEN_STATUS,
       frozen_by: input.by,
       frozen_reason: reason,
-      frozen_at: new Date().toISOString(),
+      frozen_at: clockNow().toISOString(),
       frozen_by_user: input.actor.id,
     })
     .eq('id', input.accountId)
@@ -146,7 +147,7 @@ export async function askClient(input: {
     .update({
       client_action_ask: ask,
       client_action_due: input.dueOn || null,
-      client_action_raised_at: new Date().toISOString(),
+      client_action_raised_at: clockNow().toISOString(),
       client_action_raised_by: input.actor.id,
     })
     .eq('id', input.accountId)

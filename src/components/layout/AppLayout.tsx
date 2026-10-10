@@ -1,6 +1,9 @@
 import { Outlet, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { notePage } from '../../lib/backLink'
+import type { FirmClock } from '../../lib/clock.ts'
+import { loadClock } from '../../lib/clockLoad'
+import { StagingClockBar } from './StagingClockBar'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { TitleSlotProvider } from './TitleSlot'
@@ -78,14 +81,30 @@ export function AppLayout() {
   /* Remembered for the next page's back link (lib/backLink): this page's address and name. */
   useEffect(() => { notePage(location.pathname, location.search, title) }, [location.pathname, location.search, title])
 
+  /*
+   * THE FIRM'S CLOCK, READ ONCE PER PAGE LOAD AND BEFORE ANY PAGE DRAWS (prompt 10).
+   *
+   * Every date decision in the app reads lib/clock, and lib/clock is only right once this has
+   * answered -- so the page waits for it. Not long: one small read, and a failure releases the page
+   * on the machine's own clock rather than holding it (clockLoad says why that is the right answer).
+   */
+  const [clock, setClock] = useState<FirmClock | null>(null)
+  const [clockRead, setClockRead] = useState(false)
+  useEffect(() => {
+    let live = true
+    void loadClock().then((c) => { if (live) { setClock(c); setClockRead(true) } })
+    return () => { live = false }
+  }, [])
+
   return (
     <TitleSlotProvider>
       <div className="app-layout flex h-dvh w-full overflow-hidden">
         <Sidebar />
         <div className="app-content flex-1 flex flex-col min-w-0">
+          <StagingClockBar clock={clock} />
           <Topbar title={title} />
           <main className="app-main flex-1 overflow-y-auto p-6">
-            <Outlet />
+            {clockRead ? <Outlet /> : null}
           </main>
         </div>
         {/*

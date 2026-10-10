@@ -17,6 +17,7 @@ import { todayIso } from '../../lib/reminderTime.ts'
 import {
   capacityLabel, isLive, type AuthorisedContact,
 } from '../../lib/authorisedContacts.ts'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * THE SCRIPT IN FRONT OF THE COLLECTOR WHILE THE DEBTOR IS ON THE LINE.
@@ -119,7 +120,7 @@ export function CallScriptPanel({
   const hours = useMemo(() => {
     /* firmClock gives "17:40" in Johannesburg -- the firm's own clock, not the browser's, which is
        the one that matters for a rule about when the firm may ring. */
-    const [h, m] = firmClock(new Date()).split(':').map(Number)
+    const [h, m] = firmClock(clockNow()).split(':').map(Number)
     return callHoursProblem(todayIso(), h * 60 + m)
   }, [])
 

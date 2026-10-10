@@ -6,6 +6,7 @@ import { rand } from '../../lib/money'
 import { monthBounds, monthLabel, thisMonth } from '../../lib/businessMonth'
 import { fetchIncome } from '../../lib/businessApi'
 import { INCOME_PARTS, incomeTotals, type IncomeRow } from '../../lib/businessIncome'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * WHAT THE FIRM EARNED.
@@ -23,7 +24,7 @@ import { INCOME_PARTS, incomeTotals, type IncomeRow } from '../../lib/businessIn
  * that is not one of the named parts is shown as itself. See businessIncome.ts.
  */
 export function BusinessIncome() {
-  const now = thisMonth(new Date())
+  const now = thisMonth(clockNow())
   const [year, setYear] = useState(now.year)
   const [month, setMonth] = useState(now.month)
   const [rows, setRows] = useState<IncomeRow[]>([])

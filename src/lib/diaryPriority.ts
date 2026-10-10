@@ -11,6 +11,7 @@
  * scripts/qa/check-diary-priority.mjs reads both and fails if they drift apart.
  */
 import { isWorkingDay } from './workingDays.ts'
+import { clockNow } from './clock.ts'
 
 /**
  * The kinds of work that land in a collections diary.
@@ -599,7 +600,7 @@ export function shiftMonth(anchor: string, months: number): string {
 }
 
 /** Today, as the app means it: the local day, not a UTC timestamp. */
-export function todayIso(now = new Date()): string {
+export function todayIso(now = clockNow()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 

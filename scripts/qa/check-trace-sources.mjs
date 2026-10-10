@@ -191,7 +191,7 @@ ok('...which the button asks for', /bureauSearchCounts\(schedule\)/.test(button)
 /* ONE SCHEDULE FOR THE PRICE AND THE COUNT, or the row and the rand figure under it can describe
    two different gazettes. */
 ok('...the same schedule the price comes off',
-  /const schedule = scheduleFor\(new Date\(\)\)/.test(button)
+  /const schedule = scheduleFor\(clockNow\(\)\)/.test(button)
   && /schedule\.items\.find\(\(i\) => i\.id === '4c'\)/.test(button))
 /* COUNTED ONLY WHERE COUNTING MEANS SOMETHING, and the predicate is the same one the charge uses. */
 ok('only a bureau search is counted', /const counted = source\.kind === 'credit_bureau'/.test(button))

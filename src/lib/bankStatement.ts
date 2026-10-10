@@ -320,3 +320,21 @@ export function summarise(lines: BankLine[]): StatementSummary {
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
+
+/**
+ * THE FIRST LINE DATED AFTER `today`, or null.
+ *
+ * A STATEMENT CANNOT RUN AHEAD OF THE CLOCK (prompt 10). On staging the clock may stand at 11 July
+ * while the bank's file runs to September; importing it would put August's receipts into a July
+ * cycle that has not happened yet. The database refuses the whole statement (import_bank_lines);
+ * this is the same rule asked before the upload, so the refusal names the line in the firm's words
+ * rather than arriving as an error from the server. On production `today` is today, and a real
+ * statement never has a line in the future -- the rule costs nothing there.
+ */
+export function firstLineAfter<T extends { date: string }>(lines: T[], today: string): T | null {
+  let first: T | null = null
+  for (const l of lines) {
+    if (l.date > today && (!first || l.date < first.date)) first = l
+  }
+  return first
+}

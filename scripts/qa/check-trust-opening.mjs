@@ -60,7 +60,7 @@ ok('the setter was found', setter.length > 200)
 ok('Administrator with the trust tick only',
   /if not public\.has_capability\('finance\.view'\) or public\.current_user_role\(\) <> 'Administrator' then\s*raise exception/.test(setter))
 ok('...never in the future, on the firm\'s clock',
-  /if p_as_at > \(now\(\) at time zone 'Africa\/Johannesburg'\)::date then\s*raise exception/.test(setter))
+  /if p_as_at > public\.raptor_today\(\) then\s*raise exception/.test(setter))
 ok('...with a reason of a sentence', /length\(v_reason\) < 10 then\s*raise exception/.test(setter))
 ok('...logged, old and new, with the reason',
   /insert into public\.finance_setting_changes \(setting, old_value, new_value, reason, changed_by\)/.test(setter)

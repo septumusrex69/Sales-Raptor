@@ -125,10 +125,10 @@ ok('a step that never waited for anybody is unaffected', ordinary.can)
 /* ------------------------------------------------ one path, not two */
 
 ok('the step machinery is its own module', step.length > 0)
-ok('the morning run goes through it', /runOneStep\(admin, step, today\)/.test(runner))
-ok('...and so does the release', /runOneStep\(admin, step, today, caller\.id\)/.test(route))
+ok('the morning run goes through it', /runOneStep\(admin, step, today, undefined, \{ now, skipSends \}\)/.test(runner))
+ok('...and so does the release', /runOneStep\(admin, step, today, caller\.id, \{ now \}\)/.test(route))
 ok('...on the firm\u2019s day rather than the server\u2019s',
-  /const today = todayInJohannesburg\(\)/.test(route))
+  /const \{ today, now \} = await firmClock\(admin\)/.test(route))
 
 /*
  * AND NOT BEFORE THE DAY IT FALLS ON.

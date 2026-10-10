@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { adminClient, requireCaller } from '../auth.js'
-import { todayInJohannesburg } from './locale.js'
+import { firmClock } from './clock.js'
 import { planUnplannedRuns, redateResumedRuns } from './plan.js'
 import { expireDefaultedPromises } from './promises.js'
 import { runOneStep, type DueStep } from './step.js'
@@ -123,8 +124,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * THE FIRM'S TODAY, NOT THE SERVER'S. The function runs in Paris (vercel.json pins cdg1) and
    * the firm is in Johannesburg, two hours ahead in winter and one in summer. Around midnight the
    * two disagree about what day it is, and a step dated tomorrow would go out tonight.
+   *
+   * AND ON STAGING, THE STAGING CLOCK'S (prompt 10). The database decides -- raptor_today() is the
+   * real Johannesburg day everywhere but a staging database whose clock has been moved. Read off
+   * the server's own clock instead, the 06:00 cron on a staging clock standing at 11 July would
+   * send every step dated up to the real October morning.
    */
-  const today = todayInJohannesburg()
+  const clock = await firmClock(admin)
+  const result = await sweep(admin, { accountIds, today: clock.today, now: clock.now })
+  if ('error' in result) {
+    res.status(500).json({ error: result.error })
+    return
+  }
+  res.status(200).json({ ok: true, ...result })
+}
+
+export interface SweepOptions {
+  accountIds: string[]
+  /** The firm's day, yyyy-mm-dd -- firmClock's, so the staging clock's on staging. */
+  today: string
+  /** The firm's now, for the stamps a send writes. */
+  now: Date
+  /**
+   * A STAGING CLOCK JUMP: everything that would have happened on the day happens -- promises run
+   * out, runs are planned and re-dated, steps fall due -- except that nothing is SENT. A due step is
+   * recorded 'skipped' instead (staging has a live SMS gateway, and a debtor's real inbox may be on
+   * a test account). See api/_lib/workflow/clock.ts.
+   */
+  skipSends?: boolean
+  budgetMs?: number
+}
+
+/**
+ * ONE MORNING'S PASS, for whichever day the caller says it is. The cron and the app's nudge call it
+ * for today; the staging clock calls it once for every day it jumps over, in date order.
+ */
+export async function sweep(admin: SupabaseClient, options: SweepOptions) {
+  const { accountIds, today, now, skipSends = false, budgetMs = BUDGET_MS } = options
 
   /*
    * END ANY 48 HOURS THAT HAVE RUN OUT, BEFORE ANYTHING ELSE IN THE PASS.
@@ -136,7 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * next morning's sweep would find four notices overdue and send them at once -- which is the
    * failure the pause exists to prevent.
    */
-  const expired = await expireDefaultedPromises(admin, accountIds)
+  const expired = await expireDefaultedPromises(admin, accountIds, now)
 
   /*
    * DATE WHATEVER HAS NOT BEEN DATED, NEXT. A run created by the allocation trigger has no steps
@@ -189,10 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .limit(200)
   if (accountIds.length) query = query.in('workflow_runs.account_id', accountIds)
   const { data: due, error } = await query
-  if (error) {
-    res.status(500).json({ error: error.message })
-    return
-  }
+  if (error) return { error: error.message }
 
   /*
    * THE NOTICE BEFORE THE SMS BEHIND IT, IN THE SWEEP AS WELL AS ON THE SCREEN.
@@ -225,7 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
      Counted apart because the first is news and the second is the state of the floor -- a run
      reporting "held: 40" every morning would read as forty things going wrong daily. */
   const outcome = {
-    considered: steps.length, sent: 0, held: 0, stillHeld: 0, failed: 0,
+    considered: steps.length, sent: 0, held: 0, stillHeld: 0, failed: 0, skipped: 0,
     told: 0, notes: [] as string[],
   }
 
@@ -245,9 +278,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const startedAt = Date.now()
   let left = 0
   for (const step of steps) {
-    if (Date.now() - startedAt > BUDGET_MS) { left += 1; continue }
+    if (Date.now() - startedAt > budgetMs) { left += 1; continue }
     try {
-      const what = await runOneStep(admin, step, today)
+      const what = await runOneStep(admin, step, today, undefined, { now, skipSends })
       outcome[what.result] += 1
       outcome.told += what.told ?? 0
       /* Only what is new goes in the notes. A standing hold is already on the step. */
@@ -264,8 +297,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  res.status(200).json({
-    ok: true, today,
+  return {
+    today,
     /*
      * WHAT THIS PASS DID NOT REACH. Zero means finished; anything else is the caller's cue to
      * call again. The browser loops on it after a hand-out, and the timer simply picks the rest
@@ -284,6 +317,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     redated: redated.reduce((n, r) => n + r.moved, 0),
     planProblems: planned.filter((p) => p.problem !== null).map((p) => `${p.runId}: ${p.problem}`),
     ...outcome,
-  })
+  }
 }
 

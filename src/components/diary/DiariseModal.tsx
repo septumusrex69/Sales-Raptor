@@ -16,6 +16,7 @@ import {
 } from '../../lib/reminderTime.ts'
 import { addWorkingDays } from '../../lib/workingDays.ts'
 import { DictateButton } from '../ui/Dictate'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * When does this account come back?
@@ -51,7 +52,7 @@ export function DiariseModal({ accountId, accountLabel, prescriptionDate, defaul
   const { currentUser } = useAuth()
   const { users } = useAppStore()
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = clockToday()
   // Always the person doing the diarising. See the note where the picker used to be.
   const ownerId = defaultOwnerId ?? currentUser?.id ?? null
   // Five working days out: far enough that a debtor has had time to do what they said, near

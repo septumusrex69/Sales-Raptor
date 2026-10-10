@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { Modal, FormField, inputClass, controlClass } from '../ui/Modal'
 import { HARD_STOP_HOLDS, HOLD_REASONS, type HoldReason } from '../../lib/accountBooks'
 import { holdAccount, releaseAccount } from '../../lib/accountHoldApi'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * PUTTING AN ACCOUNT ON HOLD, AND TAKING IT OFF AGAIN.
@@ -35,7 +36,7 @@ export function HoldAccountModal({ accountId, caseNumber, onClose, onDone }: {
      pick anyway. Pre-filled rather than blank: a required field nobody can guess at is a field
      people fill with today's date to get past it. */
   const [reviewOn, setReviewOn] = useState(() => {
-    const d = new Date()
+    const d = clockNow()
     d.setMonth(d.getMonth() + 1)
     return d.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
   })

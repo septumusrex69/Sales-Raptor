@@ -14,6 +14,7 @@ import {
   consultationNote, dialledNote, noAnswerNote,
   ATTEMPT_DESCRIPTION, ATTEMPT_ITEM_ID, CONSULTATION_DESCRIPTION, CONSULTATION_ITEM_ID,
 } from './callRules.ts'
+import { clockNow } from './clock.ts'
 
 export * from './callRules.ts'
 
@@ -143,7 +144,7 @@ export async function recordConsultation(input: {
    */
   if (input.callId) {
     const { data: claimed } = await supabase.from('account_calls')
-      .update({ consultation_charged_at: new Date().toISOString() })
+      .update({ consultation_charged_at: clockNow().toISOString() })
       .eq('id', input.callId)
       .is('consultation_charged_at', null)
       .select('id')

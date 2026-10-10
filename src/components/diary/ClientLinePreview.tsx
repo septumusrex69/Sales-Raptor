@@ -2,6 +2,7 @@ import { CLIENT_FLAGS, CLIENT_POSITIONS, positionReport } from '../../lib/client
 import { clientLine } from '../../lib/accountNarrative.ts'
 import type { DiaryKind } from '../../lib/diaryPriority.ts'
 import { CALL_OUTCOMES, type CallOutcome } from '../../lib/callOutcome.ts'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * What the client will read, shown at the moment the next date is booked.
@@ -49,7 +50,7 @@ export function ClientLinePreview({ account, next, chosen, promise, className = 
     openQueryWithClient: account.clientActionAsk !== null,
   })
   const flag = CLIENT_FLAGS[report.flag]
-  const today = new Date().toISOString().slice(0, 10)
+  const today = clockToday()
   const line = clientLine({
     /* Today, because this box only opens when somebody is working the account. */
     lastAttemptOn: today,

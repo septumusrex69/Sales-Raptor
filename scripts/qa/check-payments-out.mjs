@@ -108,7 +108,7 @@ ok('the match screen offers runs marked paid and not yet on the statement',
   /r\.status = 'paid' and not exists \(select 1 from public\.bank_statement_lines x where x\.payover_run_id = r\.id\)/.test(cands))
 ok('...and refunds not yet on the statement', /o\.bank_line_id is null and o\.cancelled_at is null/.test(cands))
 const markRefund = liveFn('mark_refund_paid')
-ok('a refund can be marked paid by hand, with a reference', /if v_ref is null then/.test(markRefund) && /set paid_at = coalesce\(p_paid_at, now\(\)\), paid_reference = v_ref/.test(markRefund))
+ok('a refund can be marked paid by hand, with a reference', /if v_ref is null then/.test(markRefund) && /set paid_at = coalesce\(p_paid_at, public\.raptor_now\(\)\), paid_reference = v_ref/.test(markRefund))
 ok('...only while it is still due', /where id = p_refund and paid_at is null and cancelled_at is null/.test(markRefund))
 ok('...behind the trust tick', /has_capability\('finance\.view'\)/.test(markRefund))
 const history = liveFn('payments_out_paid')

@@ -29,6 +29,7 @@
 import { supabase } from './supabase'
 import { discardNoteBody, discardNoteSubject } from './importNote'
 import { formatCurrency } from '../data/mockData'
+import { clockNow } from './clock.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON. */
 
@@ -165,7 +166,7 @@ export async function discardHandover(input: {
   const { error: markErr } = await supabase
     .from('handovers')
     .update({
-      discarded_at: new Date().toISOString(),
+      discarded_at: clockNow().toISOString(),
       discarded_by: input.by,
       discarded_reason: input.reason,
     })
@@ -203,7 +204,7 @@ export async function discardHandover(input: {
           reason: input.reason,
           noticesSent: input.noticesSent,
         }),
-        activity_date: new Date().toISOString(),
+        activity_date: clockNow().toISOString(),
       })
     } catch { /* see above: the reversal happened; a note that did not file is not a failed one. */ }
   }

@@ -19,6 +19,8 @@
  */
 import { supabase } from './supabase'
 import { allocationOf, type Allocation } from './allocationRules'
+import { clockToday } from './clock.ts'
+import { firstLineAfter } from './bankStatement.ts'
 
 export type RunStatus = 'needs_review' | 'ready' | 'approved' | 'sent' | 'paid' | 'void'
 
@@ -432,7 +434,7 @@ export async function approveRunEarly(runId: string, reason: string): Promise<vo
 
 /** Today in Johannesburg, which is the date the database closes a cycle on. */
 export function todaySast(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  return clockToday()
 }
 
 /** The cycle has not ended yet, so approving now needs a reason. */
@@ -831,6 +833,12 @@ export async function importBankLines(input: {
     description: string; direction: string; reference: string | null
   }[]
 }): Promise<ImportOutcome> {
+  /* "Dated after today" -- refused whole, before anything is sent (bankStatement.firstLineAfter). */
+  const late = firstLineAfter(input.lines, clockToday())
+  if (late) {
+    throw new Error(`That statement has a line dated ${late.date}, after today (${clockToday()}). `
+      + 'A statement cannot be dated after today.')
+  }
   const { data, error } = await supabase.rpc('import_bank_lines', {
     p_account: input.bankAccount,
     p_label: input.bankAccountLabel,

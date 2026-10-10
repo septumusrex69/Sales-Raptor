@@ -250,7 +250,7 @@ ok('...and is carried once', /r\.carried_out_run_id is null/.test(build))
 /* YESTERDAY'S CYCLE, which on the 11th is the one that just closed. Read off `now()` it would
    build the cycle that started five minutes earlier -- an empty run for every client. */
 ok('the close defaults to the cycle that just ended',
-  /public\.payover_cycle_start\(now\(\) - interval '1 day'\)/.test(close))
+  /public\.payover_cycle_start\(public\.raptor_now\(\) - interval '1 day'\)/.test(close))
 /* 00:05 IN JOHANNESBURG IS 22:05 UTC ON THE 10th. The server is UTC and South Africa has no
    daylight saving, so the schedule reads like the wrong day and is the right instant. */
 ok('it is scheduled', /cron\.schedule\(\s*\n\s*'close-payover-cycle',\s*\n\s*'5 22 10 \* \*'/.test(sql))

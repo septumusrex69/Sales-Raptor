@@ -376,7 +376,7 @@ ok('...and a way back', /unrejectPayment\(id\)/.test(queue))
 /* TODAY'S ONLY. The record is permanent and `payments_rejected` answers for any day; a strip of
    fifty Put it back buttons over the queue is noise on a screen whose job is the queue. */
 ok('...and it is today’s, not every rejection ever',
-  /fetchRejectedPayments\(new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\)/.test(queue))
+  /fetchRejectedPayments\(clockToday\(\)\)/.test(queue))
 
 /*
  * AND THE STRIP SURVIVES AN EMPTY QUEUE, because rejecting the last receipt is HOW the queue

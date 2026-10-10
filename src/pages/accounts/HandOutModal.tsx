@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../store/AuthContext'
 import { AlertTriangle, CalendarClock, Loader2, UserCheck } from 'lucide-react'
 import { Modal, FormField, inputClass } from '../../components/ui/Modal'
+import { clockToday } from '../../lib/clock.ts'
 /* The picker a collector uses on their own diary. On one account a leader books somebody else's
    day with the same grid -- see the note where it is drawn. */
 import { DiaryDatePicker } from '../../components/diary/DiaryDatePicker'
@@ -78,7 +79,7 @@ export function HandOutModal({
 }) {
   const [context, setContext] = useState<HandOutContext | null>(null)
   const [chosen, setChosen] = useState<Set<string>>(new Set())
-  const [startOn, setStartOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [startOn, setStartOn] = useState(() => clockToday())
   const [windowDays, setWindowDays] = useState(DEFAULT_WINDOW)
   const [mode, setMode] = useState<HandOutMode>('allocate_and_refer')
   /*
@@ -717,7 +718,7 @@ export function HandOutModal({
                           capacity={chosenOne.capacity}
                           value={startOn}
                           onChange={setStartOn}
-                          today={new Date().toISOString().slice(0, 10)}
+                          today={clockToday()}
                           weeks={2}
                         />
                       ) : (

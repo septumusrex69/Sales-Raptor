@@ -283,7 +283,7 @@ ok('...and both screens offer that control',
  */
 ok('...and a date outside the period is pulled back into it',
   /if \(picked < period\.start\) return period\.start/.test(hook))
-ok('...and never past today', /new Date\(\) > period\.end \? period\.end : new Date\(\)/.test(hook))
+ok('...and never past today', /clockNow\(\) > period\.end \? period\.end : clockNow\(\)/.test(hook))
 
 ok('the month header is a progress bar', /<MonthProgress/.test(page))
 ok('...and the company screen draws the same one', /<MonthProgress/.test(company))

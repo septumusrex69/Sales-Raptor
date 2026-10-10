@@ -10,6 +10,7 @@ import {
   contactKindFor, linkedHow, linkedNumber, promotedNote, savesAs,
   type FiledTrace, type TraceItem, type TraceItemKind, type TraceOutcome,
 } from './traceStore.ts'
+import { clockNow } from './clock.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -110,7 +111,7 @@ export async function recordTraceOutcome(input: {
 }): Promise<void> {
   const { error } = await supabase.from('account_trace_items').update({
     outcome: input.outcome,
-    outcome_at: input.outcome === null ? null : new Date().toISOString(),
+    outcome_at: input.outcome === null ? null : clockNow().toISOString(),
     outcome_by: input.outcome === null ? null : input.actor.id,
     outcome_note: input.note?.trim() || null,
   }).eq('id', input.itemId)

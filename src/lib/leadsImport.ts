@@ -1,6 +1,7 @@
 import type {
   LeadClassification, LeadSource, LeadStatus, ProductService, RejectionReason,
 } from '../types'
+import { clockNow } from './clock.ts'
 
 /**
  * The sales team's leads workbook, read into Raptor's `leads` table.
@@ -796,7 +797,7 @@ export function leadInsertRows(
    * For the handful of leads whose start date the spreadsheet never had. Passed in rather than
    * read from the clock so this function stays pure and the tests stay deterministic.
    */
-  undated: string = new Date().toISOString(),
+  undated: string = clockNow().toISOString(),
 ): Record<string, unknown>[] {
   const resolved: LeadOwners = typeof owners === 'string' ? { fallback: owners } : owners
   return plan.rows.map((r) => ({

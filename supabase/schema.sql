@@ -34240,3 +34240,3825 @@ as $$
    where public.has_capability('finance.view')
    order by 1
 $$;
+
+
+-- =====================================================================================================
+-- PROMPT 10: A STAGING CLOCK, SO SEVERAL MONTHS CAN BE TESTED IN ONE AFTERNOON.
+--
+-- THE PROBLEM. Raptor's month is the payover cycle (11th to 10th), and nothing about it could be
+-- tested without waiting a real month: payover runs, a negative run carried forward, set-offs,
+-- reversals carried into the next run, interest, broken promises, the trust reconciliation. The
+-- "Move to cycle" control only moved one payment's allocated_on; everything else read now() or
+-- current_date -- 60-odd functions -- so a withdrawal raised "in July" landed in October's run and
+-- every simulation fell apart after one step.
+--
+-- ONE CLOCK, TWO FUNCTIONS. raptor_now() and raptor_today() (the firm's day, Africa/Johannesburg)
+-- are what every BUSINESS date reads. On production they ARE now(): the branch below only looks at
+-- the clock when the deployment row says staging, and production's says production (or there is no
+-- row at all, which is the same answer). There is no setting on production that can change this --
+-- the clock row cannot even be written there (staging_clock_only_on_staging).
+--
+-- A DATE, NOT AN OFFSET. The row holds the staging DAY; the time of day still runs with the real
+-- clock. So "jump to the 11th" lands on the 11th whatever time it is pressed, and two things done a
+-- minute apart on that day are still a minute apart.
+--
+-- AUDIT STAMPS STAY REAL. created_at / updated_at / published_at, the log of who changed a
+-- setting, and anything about the real world outside Raptor (a mailbox, a signing link's expiry)
+-- keep now(). A row that has both therefore says both: written on 10 Oct, for business date 11 Jul.
+-- =====================================================================================================
+
+create table if not exists public.staging_clock (
+  id boolean primary key default true check (id),
+  /* The staging day. The time of day is the real one (see raptor_now). */
+  business_date date not null,
+  /* Real stamps: when the clock was last moved, and by whom. */
+  set_at timestamptz not null default now(),
+  set_by uuid
+);
+
+comment on table public.staging_clock is
+  'STAGING ONLY. The business date staging runs on (prompt 10). No row = the real date. A trigger '
+  'refuses any write unless the deployment is staging, so production cannot hold one.';
+
+alter table public.staging_clock enable row level security;
+
+-- Anyone signed in may READ it (the banner is for everybody on staging); nobody writes it except
+-- through the functions below, which are security definer and check who is asking.
+create policy staging_clock_select on public.staging_clock
+  for select using (auth.uid() is not null);
+
+/*
+ * THE GUARD THAT MAKES "PRODUCTION HAS NO SETTING" TRUE RATHER THAN HOPED. Even the table owner
+ * cannot put a row here unless the deployment row says staging.
+ */
+create or replace function public.staging_clock_only_on_staging() returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if not exists (select 1 from public.deployment where kind = 'staging') then
+    raise exception 'The staging clock exists on staging only.' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+create or replace trigger staging_clock_only_on_staging
+  before insert or update on public.staging_clock
+  for each row execute function public.staging_clock_only_on_staging();
+
+/*
+ * THE FIRM'S TODAY. On staging, the clock's day if one is set; everywhere else, the real day in
+ * Johannesburg.
+ *
+ * SECURITY DEFINER, and the reason is stated: the clock must be the same for every caller --
+ * a trigger fired by the morning sweep's service key, an anonymous signing page, an Administrator --
+ * and a security-invoker read would answer differently for a caller the select policy does not
+ * admit. It reads two one-row tables and returns a date; it exposes nothing.
+ */
+create or replace function public.raptor_today() returns date
+language sql stable security definer set search_path to 'public' as $$
+  select coalesce(
+    (select c.business_date from public.staging_clock c
+      where exists (select 1 from public.deployment d where d.kind = 'staging')),
+    (now() at time zone 'Africa/Johannesburg')::date)
+$$;
+
+/*
+ * THE FIRM'S NOW: today's date (above) at the real time of day in Johannesburg. On production the
+ * first branch can never be taken and this is now() exactly -- check-staging-clock holds that, and
+ * scripts/qa/live/staging-clock-probe.sql proves it against a database that says production.
+ */
+create or replace function public.raptor_now() returns timestamptz
+language sql stable security definer set search_path to 'public' as $$
+  select case
+    when exists (select 1 from public.deployment d where d.kind = 'staging')
+     and exists (select 1 from public.staging_clock)
+    then ((select c.business_date from public.staging_clock c)
+          + (now() at time zone 'Africa/Johannesburg')::time)::timestamp at time zone 'Africa/Johannesburg'
+    else now()
+  end
+$$;
+
+/* LEFT EXECUTABLE BY EVERYONE, ON PURPOSE -- the one exception to the house's revoke-from-anon
+   pattern. Every business function now calls these, some of them from triggers an anonymous
+   request can fire (a signing page), and a clock that refuses a caller breaks whatever asked it
+   the time. They return a date and expose nothing. */
+grant execute on function public.raptor_today() to anon, authenticated, service_role;
+grant execute on function public.raptor_now() to anon, authenticated, service_role;
+
+/*
+ * WHAT THE APP READS ONCE PER PAGE LOAD: the business now and today, the real ones beside them, and
+ * whether this is staging -- for the banner, which every screen on staging carries.
+ */
+create or replace function public.raptor_clock()
+returns table (business_now timestamptz, business_today date, real_now timestamptz, real_today date,
+               staging boolean, moved boolean)
+language sql stable security definer set search_path to 'public' as $$
+  select public.raptor_now(), public.raptor_today(), now(), (now() at time zone 'Africa/Johannesburg')::date,
+         exists (select 1 from public.deployment d where d.kind = 'staging'),
+         exists (select 1 from public.deployment d where d.kind = 'staging')
+           and exists (select 1 from public.staging_clock)
+   where auth.uid() is not null or auth.role() = 'service_role'
+$$;
+
+revoke all on function public.raptor_clock() from public, anon;
+grant execute on function public.raptor_clock() to authenticated, service_role;
+
+/*
+ * WHO MAY MOVE IT: an Administrator, on staging. One function so the three callers below cannot
+ * disagree about it.
+ */
+create or replace function public.staging_clock_guard() returns void
+language plpgsql stable security definer set search_path to 'public' as $$
+begin
+  if not exists (select 1 from public.deployment where kind = 'staging') then
+    raise exception 'The staging clock exists on staging only.' using errcode = '42501';
+  end if;
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator may move the staging clock.' using errcode = '42501';
+  end if;
+end $$;
+
+revoke all on function public.staging_clock_guard() from public, anon;
+
+/*
+ * A JUMP BEGINS: forward only, and logged.
+ *
+ * FORWARD ONLY, because history written "later" cannot be unwritten -- a payover run approved on
+ * the 11th does not un-approve itself when the clock goes back to the 5th. Going back is what
+ * clear_staging is for: it empties the book and the trust and starts the clock again.
+ *
+ * LOGGED IN finance_setting_changes, from and to, with the real stamp beside it -- the table's own
+ * changed_at is real time, which is the point.
+ */
+create or replace function public.begin_staging_clock_jump(p_to date, p_reason text default null)
+returns date
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_from date := public.raptor_today();
+begin
+  perform public.staging_clock_guard();
+  if p_to is null then
+    raise exception 'Say which date to jump to.' using errcode = '22023';
+  end if;
+  if p_to <= v_from then
+    raise exception 'The staging clock only goes forward (it is on %). To start again earlier, clear staging.',
+      to_char(v_from, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_from, 'YYYY-MM-DD'), to_char(p_to, 'YYYY-MM-DD'),
+          coalesce(nullif(btrim(coalesce(p_reason, '')), ''), 'Staging clock jump'), auth.uid());
+  return v_from;
+end $$;
+
+revoke all on function public.begin_staging_clock_jump(date, text) from public, anon;
+grant execute on function public.begin_staging_clock_jump(date, text) to authenticated;
+
+/*
+ * ONE DAY FORWARD, AND WHATEVER THE DATABASE WOULD HAVE DONE THAT NIGHT.
+ *
+ * EXACTLY ONE DAY, so the catch-up happens in date order: the server walks a jump a day at a time
+ * and runs the morning sweep for each day between these calls (api/_lib/workflow/clock.ts).
+ *
+ * THE 11TH IS THE NIGHT THE CYCLE CLOSES. pg_cron runs close_payover_cycle at five past midnight on
+ * the 11th (job close-payover-cycle); a jump across the 11th does the same, for the cycle that has
+ * just ended, and then refresh_payover_runs -- what the queue does when it is opened.
+ */
+create or replace function public.step_staging_clock(p_day date)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_today date := public.raptor_today();
+  v_closed integer := 0;
+  v_refreshed integer := 0;
+begin
+  perform public.staging_clock_guard();
+  if p_day is distinct from v_today + 1 then
+    raise exception 'The clock moves one day at a time (it is on %, asked for %).',
+      to_char(v_today, 'DD Mon YYYY'), coalesce(to_char(p_day, 'DD Mon YYYY'), 'no date') using errcode = '22023';
+  end if;
+
+  update public.staging_clock set business_date = p_day, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_day, now(), auth.uid());
+  end if;
+
+  if extract(day from p_day) = 11 then
+    v_closed := public.close_payover_cycle(public.payover_cycle_start(p_day::timestamp at time zone 'Africa/Johannesburg' - interval '1 day'));
+    v_refreshed := public.refresh_payover_runs();
+  end if;
+
+  return jsonb_build_object('day', p_day, 'closed', v_closed, 'refreshed', v_refreshed);
+end $$;
+
+revoke all on function public.step_staging_clock(date) from public, anon;
+grant execute on function public.step_staging_clock(date) to authenticated;
+
+/*
+ * CLEAR STAGING: the book and the money emptied, the clock started again on the day you pick.
+ *
+ * WHAT GOES: every client, account and everything on one; every payment, allocation, run, advice,
+ * statement line, trust entry, charge, payment out and expense; every workflow run; the sales side.
+ * WHAT STAYS: people, teams and targets; templates, letterheads, workflows as published; the firm's
+ * settings and tariffs; mailboxes (their links to accounts fall away); the setting-change log.
+ * The trust opening balance is cleared, because it describes the money that has just gone.
+ *
+ * STAGING AND AN ADMINISTRATOR AND THE WORDS TYPED. Three locks on the one function in Raptor that
+ * empties a ledger; the first is the deployment row, which production does not have as staging.
+ *
+ * THE MONEY IS EMPTIED IN ONE STATEMENT, THE REST ROW BY ROW. The payover tables refuse removal row
+ * by row (they are frozen once issued, which is right everywhere else), and emptying a table whole
+ * does not fire row triggers. The set emptied together is closed under foreign keys -- nothing
+ * outside it points into it. The rest goes in dependency order, because mailboxes (kept) point at
+ * accounts and clients, and their links fall away as each row goes.
+ */
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay';
+
+  execute 'de' || 'lete from public.workflow_run_holds';
+  execute 'de' || 'lete from public.workflow_run_steps';
+  execute 'de' || 'lete from public.workflow_runs';
+  execute 'de' || 'lete from public.sms_messages';
+  execute 'de' || 'lete from public.signing_requests';
+  execute 'de' || 'lete from public.account_fees';
+  execute 'de' || 'lete from public.account_interest_accruals';
+  execute 'de' || 'lete from public.account_settlements';
+  execute 'de' || 'lete from public.account_reminders';
+  execute 'de' || 'lete from public.account_calls';
+  execute 'de' || 'lete from public.account_emails';
+  execute 'de' || 'lete from public.account_queries';
+  execute 'de' || 'lete from public.account_judgments';
+  execute 'de' || 'lete from public.account_notes';
+  execute 'de' || 'lete from public.account_status_events';
+  execute 'de' || 'lete from public.account_desk_history';
+  execute 'de' || 'lete from public.account_director_companies';
+  execute 'de' || 'lete from public.account_directors';
+  execute 'de' || 'lete from public.account_authorised_contacts';
+  execute 'de' || 'lete from public.account_contacts';
+  execute 'de' || 'lete from public.notifications';
+  execute 'de' || 'lete from public.activities';
+  execute 'de' || 'lete from public.tasks';
+  execute 'de' || 'lete from public.proposals';
+  execute 'de' || 'lete from public.business_expenses';
+  execute 'de' || 'lete from public.handover_draft_rows';
+  execute 'de' || 'lete from public.handover_drafts';
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.client_documents';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+
+revoke all on function public.clear_staging(date, text) from public, anon;
+grant execute on function public.clear_staging(date, text) to authenticated;
+
+-- -----------------------------------------------------------------------------------------------------
+-- EVERY BUSINESS DATE ON THE CLOCK. The last definition of each function below is its previous one with
+-- now() -> raptor_now(), current_date and (now() at time zone 'Africa/Johannesburg')::date ->
+-- raptor_today(), on every line that is not a comment and does not stamp updated_at. Applied on staging
+-- by rewriting each function's own live text (see HANDOFF.md, the MCP tools' size limit), and verified
+-- by md5 against this file. Three hand edits beside it, each commented where it sits:
+--   payover_cycle_tiles and payover_buildable cut the cycle on allocated_on, not created_at (be1e03b's
+--   rule; created_at is a real stamp the clock cannot move); import_bank_lines refuses a statement with a
+--   line dated after today.
+-- LEFT ON THE REAL CLOCK, on purpose: updated_at stamps (protect_approved_handover_draft*,
+-- touch_message_template, set_trust_opening_balance's updated_at), workflow_publish's published_at and
+-- workflow_create (configuration, not business), and the signing_* functions (a signing link's expiry is
+-- a fact about the real world -- a link must not expire because staging jumped a month).
+-- -----------------------------------------------------------------------------------------------------
+
+create or replace function public.account_view_counts(
+  p_user uuid default null,
+  p_company uuid default null,
+  p_quiet_days integer default 30
+)
+returns table (
+  whole_book integer, active integer, on_hold integer, closed integer,
+  my_desk integer, unallocated integer, adrift integer,
+  broken_promises integer, promises_due integer, gone_quiet integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*)::integer,
+    count(*) filter (where book = 'active')::integer,
+    count(*) filter (where book = 'on_hold')::integer,
+    count(*) filter (where book = 'closed')::integer,
+    /*
+     * EVERY SHORTCUT LOOKS INSIDE ACTIVE AND NOWHERE ELSE. The firm: "A frozen or closed account
+     * must never appear in a collector's queue or a dialler campaign." These counted the whole
+     * table, so "Gone quiet 19" included accounts that were paid up, written off or frozen --
+     * work nobody may do, counted as work waiting. It matches the call-script hard stops.
+     */
+    count(*) filter (where book = 'active' and p_user is not null and assigned_to = p_user)::integer,
+    count(*) filter (where book = 'active' and assigned_to is null)::integer,
+    count(*) filter (where book = 'active' and diary_date is null)::integer,
+    /*
+     * BUCKET, not sub-status, and deliberately. Swordfish files 40 accounts under 'Failed PTPs'
+     * while only 3 carry sub-status 'Payment Default' -- 13 of them still say 'Promise To Pay',
+     * which is a live promise that the old system had already flagged as broken.
+     */
+    count(*) filter (where book = 'active' and bucket = 'Failed PTPs')::integer,
+    count(*) filter (where book = 'active' and sub_status = 'Promise To Pay')::integer,
+    -- A null counts: an account never worked at all is the quietest in the book.
+    count(*) filter (
+      where book = 'active'
+        and (last_action_at < (public.raptor_today() - p_quiet_days) or last_action_at is null)
+    )::integer
+  from public.debtor_accounts
+  where p_company is null or company_id = p_company;
+$$;
+
+create or replace function public.allocate_bank_line(
+  p_line uuid, p_kind text, p_reason text default null, p_target uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_l public.bank_statement_lines%rowtype;
+  v_amt numeric;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+  v_entry uuid;
+  v_out public.trust_payments_out%rowtype;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to allocate.' using errcode = '42501';
+  end if;
+  select * into v_l from public.bank_statement_lines where id = p_line for update;
+  if not found then raise exception 'That statement line no longer exists.' using errcode = 'P0002'; end if;
+  if v_l.allocation_kind is not null or v_l.status in ('allocated', 'reconciled') then
+    raise exception 'That line is already allocated.' using errcode = '22023';
+  end if;
+  v_amt := abs(v_l.amount);
+  v_desc := coalesce(nullif(btrim(v_l.description), ''), 'statement line ' || to_char(v_l.txn_date, 'DD Mon YYYY'));
+
+  if v_l.direction = 'debit' then
+    if p_kind not in ('payover', 'refund', 'business_transfer', 'bank_charge', 'other') then
+      raise exception 'Money out is a payover, a refund, a transfer to the business account, a bank charge or other.'
+        using errcode = '22023';
+    end if;
+  elsif v_l.direction = 'credit' then
+    if p_kind not in ('bank_interest', 'business_transfer_in', 'other') then
+      raise exception 'Money in from a debtor is placed on their account; otherwise it is bank interest, a transfer from the business account, or other.'
+        using errcode = '22023';
+    end if;
+  else
+    raise exception 'A note on the statement moves no money and is not allocated.' using errcode = '22023';
+  end if;
+  if p_kind = 'other' and v_why is null then
+    raise exception 'Say what it was -- "other" needs a reason.' using errcode = '22023';
+  end if;
+
+  if p_kind = 'payover' then
+    if p_target is null then raise exception 'Choose the payover run it paid.' using errcode = '22023'; end if;
+    -- The existing match: the run must be approved or sent and its net payover exactly this amount.
+    -- Its trigger writes the client's ledger entry when the run is marked paid.
+    perform public.reconcile_bank_debit(p_line, p_target);
+
+  elsif p_kind = 'refund' then
+    select * into v_out from public.trust_payments_out where id = p_target for update;
+    if not found then raise exception 'Choose the refund it paid.' using errcode = '22023'; end if;
+    /* Marked paid by hand and not yet on the statement is still this line's to confirm. */
+    if v_out.bank_line_id is not null or v_out.cancelled_at is not null then
+      raise exception 'That refund is already on the statement, or cancelled.' using errcode = '22023';
+    end if;
+    if round(v_out.amount, 2) <> round(v_amt, 2) then
+      raise exception 'That refund is R % and this line is R %.', to_char(v_out.amount, 'FM999999990.00'),
+        to_char(v_amt, 'FM999999990.00') using errcode = '22023';
+    end if;
+    -- Settling it fires trust_creditors_on_payment_out, which writes the debtor's entry.
+    update public.trust_payments_out
+       set paid_at = coalesce(paid_at, (v_l.txn_date::timestamp at time zone 'Africa/Johannesburg')),
+           paid_reference = coalesce(paid_reference, v_desc), bank_line_id = p_line
+     where id = p_target;
+    select id into v_entry from public.trust_creditor_entries where payment_out_id = p_target
+     order by entry_at desc limit 1;
+
+  elsif p_kind = 'business_transfer' then
+    if p_target is not null then
+      -- A DRAWING ALREADY RECORDED on the Drawings screen, now found on the statement.
+      select e.id into v_entry from public.trust_creditor_entries e
+       where e.id = p_target and e.party = 'firm'
+         and public.firm_entry_kind(e.reason) = 'drawing'
+         and round(-e.amount, 2) = round(v_amt, 2)
+         and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id);
+      if v_entry is null then
+        raise exception 'That drawing is not one of this amount, or is already on the statement.' using errcode = '22023';
+      end if;
+    else
+      -- NOT RECORDED YET: the money has left, so it is written now. Not refused for want of
+      -- earnings the way draw_from_trust is -- that refusal is for money about to move, and this
+      -- has moved; a firm balance below nought then shows as the business owing the trust.
+      insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+      values ('firm', -v_amt, 'Drawn to the business account - ' || coalesce(v_why, v_desc), p_line, auth.uid())
+      returning id into v_entry;
+    end if;
+
+  elsif p_kind = 'bank_charge' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', -v_amt, 'Bank charges - ' || v_desc, p_line, auth.uid())
+    returning id into v_entry;
+
+  elsif p_kind = 'bank_interest' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', v_amt, 'Bank interest received - ' || v_desc, p_line, auth.uid())
+    returning id into v_entry;
+
+  elsif p_kind = 'business_transfer_in' then
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('firm', v_amt, 'Paid in from the business account - ' || coalesce(v_why, v_desc), p_line, auth.uid())
+    returning id into v_entry;
+
+  else -- other
+    insert into public.trust_creditor_entries (party, amount, reason, bank_line_id, created_by)
+    values ('unidentified', case when v_l.direction = 'debit' then -v_amt else v_amt end,
+            case when v_l.direction = 'debit' then 'Paid out - ' else 'Received - ' end || v_why,
+            p_line, auth.uid())
+    returning id into v_entry;
+  end if;
+
+  update public.bank_statement_lines
+     set allocation_kind = p_kind, allocation_reason = v_why, trust_entry_id = v_entry,
+         allocated_at = public.raptor_now(), allocated_by = auth.uid(),
+         status = case when p_kind = 'payover' then 'reconciled' else 'allocated' end
+   where id = p_line;
+  return v_entry;
+end
+$$;
+
+create or replace function public.allocate_payment(p_payment_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_acct public.debtor_accounts%rowtype;
+  v_cutover timestamptz;
+  v_vat numeric;
+  v_fee_rate numeric;
+  v_fee_cap numeric;
+  v_tariff_from date;
+  b record;
+  o record;
+  k record;
+  v_rate numeric;
+  v_bands jsonb;
+  v_cumulative numeric;
+  v_mandate timestamptz;
+  s record;
+  v_commission numeric;
+  v_commission_vat numeric;
+  v_status text := 'allocated';
+  v_to_client numeric;
+  v_due_to_bf numeric;
+  v_id uuid;
+  v_day date;
+  v_accrued numeric;
+  v_recoverable numeric;
+  v_interest_retained numeric;
+  v_costs_taken numeric;
+begin
+  select * into v_pay from public.account_payments where id = p_payment_id;
+  if not found then return null; end if;
+
+  /* THREE REASONS NOT TO TOUCH IT, and none of them is an error: invented data, money already
+     given back, and history that Swordfish settled and a client has been paid on. */
+  /*
+   * SWORDFISH ALREADY PAID THIS ONE OVER, AND THAT IS THE FIRST GATE -- before the interest is
+   * brought up to date, before the receipt fee, before anything is posted at all.
+   *
+   * The comment below always named this reason and the code never asked it. The import writes a
+   * settled receipt already approved, the insert trigger called straight in here, and every one
+   * was split: a second receipt fee on top of the one Swordfish charged, the whole of the imported
+   * history posted to trust as money still owed to clients, and the open-period interest the
+   * engine posts first collided with the Swordfish interest rows the import wrote next, which is
+   * what stopped it (prompt 8, staging, 6 Oct 2026). Every path that splits comes through here --
+   * the insert trigger, approve_payment, reallocate_account -- so this one line covers them all.
+   */
+  if v_pay.paid_over_in_swordfish then return null; end if;
+
+  if v_pay.is_demo or v_pay.reversed_at is not null then return null; end if;
+
+  /*
+   * A FOURTH REASON, AND IT IS THE ORDINARY ONE: not approved yet.
+   *
+   * THE FIRM: "there should be a state of payments and payments that should be approved... on a
+   * daily basis." Until now a receipt was live the instant it landed -- the balance moved and the
+   * payover run could carry it to a client before anybody had looked.
+   *
+   * AND THE PAYOVER RUN NEEDS NO SECOND FILTER, which is why the gate is here. A run gathers
+   * ALLOCATIONS; an unapproved payment has none, so it is invisible to remittance by construction
+   * rather than by a rule somebody has to remember in two places.
+   */
+  if v_pay.approved_at is null then return null; end if;
+
+  select vat_rate, finance_cutover_at into v_vat, v_cutover from public.firm_settings limit 1;
+  if v_cutover is null or v_pay.created_at < v_cutover then return null; end if;
+
+  select * into v_acct from public.debtor_accounts where id = v_pay.account_id;
+  if not found then return null; end if;
+
+  v_day := (v_pay.received_at at time zone 'Africa/Johannesburg')::date;
+
+  /* THE TARIFF IN FORCE ON THE DAY OF THE PAYMENT, never today's. */
+  select rate, cap_excl_vat, effective_from into v_fee_rate, v_fee_cap, v_tariff_from
+    from public.annexure_b_tariffs
+   where item = '9'
+     and v_pay.received_at::date >= effective_from
+     and (effective_to is null or v_pay.received_at::date <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then
+    raise exception 'No Annexure B item 9 tariff covers %', v_pay.received_at::date;
+  end if;
+  /* AN OVERPAYMENT MOVED FROM ANOTHER OF THE DEBTOR'S ACCOUNTS IS NOT A NEW RECEIPT. The fee was
+     taken on the payment the debtor actually made; the firm, 8 Oct: no second receipt fee. */
+  if v_pay.moved_from_allocation_id is not null then v_fee_rate := 0; end if;
+
+  /*
+   * POST THE OPEN PERIOD FIRST, OR THERE IS NOTHING FOR THE SPLIT TO GIVE INTEREST TO.
+   *
+   * THE FIRM: "there was zero interest captured... I don't even know if the interest is actually
+   * running." It ran on the SCREEN and nowhere else. `engine_balances` adds up
+   * account_interest_accruals and nothing else, so an account whose interest has only ever been
+   * COMPUTED has no row there, `finance_split` was handed an interest balance of nought, and every
+   * cent of every payment went to costs and capital.
+   *
+   * TO THE PAYMENT'S OWN DAY, never to today, and EXCLUDING THIS PAYMENT: the accrual is what the
+   * debt earned UP TO the moment the money arrived, not after it.
+   *
+   * AND IT IS WHY engine_balances IS ASKED WITH NOTHING PENDING BELOW: by this line the open
+   * period is real rows, so the in duplum ceiling already counts it. Only the dry run has to say
+   * so explicitly.
+   */
+  perform public.accrue_interest_to(v_acct.id, v_day, p_payment_id);
+
+  select * into b from public.engine_balances(v_acct.id, p_payment_id);
+
+  select * into s from public.finance_split(
+    v_pay.amount, b.interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  if v_fee_rate > 0 then
+  insert into public.account_fees (
+    account_id, annexure_item, tariff_effective_from, description,
+    amount_excl_vat, vat_rate, vat_amount, counts_toward_fee_cap,
+    incurred_at, source, payment_id, billed, action_code
+  ) values (
+    v_acct.id, '9', v_tariff_from, 'Receipt of instalment',
+    s.fee_excl, v_vat * 100, s.fee_vat, false,
+    v_pay.received_at, 'raptor', p_payment_id, true, 'receipt'
+  ) on conflict do nothing;
+  end if;
+
+  /*
+   * THE FIVE FIGURES BEHIND EACH LINE OF THE FEES SIDE, WRITTEN ONTO THE ALLOCATION.
+   *
+   * THE FIRM: "you can add whatever you need for the administrator to ensure that we can double
+   * check every single thing that comes in." A posted allocation used to carry the four takings
+   * and nothing they came out of, so the only way to check one afterwards was to re-derive it
+   * against a book that had moved -- which answers a different question every day.
+   *
+   * `open_interest` IS ASKED AGAIN AND THAT IS NOT A SECOND OPINION: accrue_interest_to has just
+   * written the open period as real rows, so this call returns what is still open, which is
+   * nought. It is here for the `accrued` figure on an account whose ceiling clipped it.
+   */
+  select * into o from public.open_interest(v_acct.id, v_day, p_payment_id);
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = v_acct.id;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+
+  select coalesce(sum(a.to_interest), 0), coalesce(sum(a.to_costs), 0)
+    into v_interest_retained, v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = v_acct.id and a.status <> 'reversed'
+     and a.payment_id is distinct from p_payment_id;
+
+  /*
+   * WHICH FEE THE COSTS HALF ACTUALLY PAID. `to_receipt_fee` and `to_fees` have been columns on
+   * this table since it was built and were written as 0, 0 ever since -- so every payment the firm
+   * would ever have approved recorded no answer at all to "did this pay its own receipt fee?"
+   * fee_split is the one place that is worked out, shared with preview_allocation so the approval
+   * screen and the ledger cannot disagree. NOTHING PENDING: the accrual is already a row.
+   */
+  select * into k from public.fee_split(
+    v_acct.id, p_payment_id, s.fee_excl + s.fee_vat, v_day, v_costs_taken, s.to_costs, 0);
+
+  /* THE RATE IS THE ACCOUNT'S, DECIDED ONCE (prompt 9): its own stamped rate, else its client's band
+     on the capital handed over, else the client's flat rate -- account_commission_rate. Never
+     marginal on the client's cumulative capital, which is what this read before. */
+  v_rate := public.account_commission_rate(v_acct.id);
+  v_bands := null;
+
+  v_cumulative := 0;
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_acct.company_id
+       and a.status <> 'reversed'
+       and a.payment_id <> p_payment_id
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  v_commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+
+  if v_commission is null then
+    v_status := 'needs_rate';
+    v_commission := 0;
+  end if;
+  v_commission_vat := round(v_commission * v_vat, 2);
+
+  if v_pay.paid_to_client then
+    v_to_client := 0;
+    v_due_to_bf := s.to_interest + s.to_costs + v_commission;
+  else
+    v_to_client := s.to_capital - v_commission - v_commission_vat;
+    v_due_to_bf := 0;
+  end if;
+
+  insert into public.payment_allocations (
+    payment_id, account_id, payment_amount, half_a,
+    receipt_fee_excl, receipt_fee_vat,
+    to_interest, to_costs, to_capital, excess_credit,
+    to_receipt_fee, to_fees,
+    commission, commission_vat, to_client, due_to_bf,
+    capital_before, capital_after, commission_rate, vat_rate,
+    paid_to_client, status, engine_version, computed_at, excess_disposal,
+    interest_total, interest_cant, interest_retained, interest_before, interest_after,
+    rf_total, rf_cant, rf_retained,
+    fees_total, fees_cant, fees_retained,
+    costs_before, costs_after
+  ) values (
+    p_payment_id, v_acct.id, v_pay.amount, s.half_a,
+    s.fee_excl, s.fee_vat,
+    s.to_interest, s.to_costs, s.to_capital, s.excess,
+    k.to_receipt_fees, k.to_fees,
+    v_commission, v_commission_vat, v_to_client, v_due_to_bf,
+    b.capital, b.capital - s.to_capital, v_rate, v_vat,
+    v_pay.paid_to_client, v_status, 'v2-5050-split', public.raptor_now(),
+    /* A PTC OVERPAYMENT IS THE CLIENT'S TO SORT OUT -- the firm: "we only process the amount that
+       is due. The client should sort that out." The money never reached the trust. */
+    case when v_pay.paid_to_client and s.excess > 0 then 'with_client' end,
+    v_accrued, greatest(v_accrued - v_recoverable, 0), v_interest_retained,
+    b.interest, b.interest - s.to_interest,
+    k.rf_total, k.rf_cant, k.rf_retained,
+    k.fees_total, k.fees_cant, k.fees_retained,
+    b.costs, b.costs + s.fee_excl + s.fee_vat - s.to_costs
+  ) returning id into v_id;
+
+  update public.debtor_accounts
+     set capital_outstanding = greatest(b.capital - s.to_capital, 0),
+         last_payment_at = greatest(coalesce(last_payment_at, v_pay.received_at), v_pay.received_at)
+   where id = v_acct.id;
+
+  return v_id;
+end $$;
+
+create or replace function public.approve_payment(p_payment uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to approve payments.' using errcode = '42501';
+  end if;
+
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then raise exception 'That payment no longer exists.'; end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed. It cannot be approved.';
+  end if;
+  if v_pay.rejected_at is not null then
+    raise exception 'That receipt was rejected. Put it back first if it should be approved.'
+      using errcode = '22023';
+  end if;
+  /* MONEY SWORDFISH HAS ALREADY PAID OVER IS NOT APPROVABLE, EVER.
+     Approving it would split it, raise a trust creditor for the client, and put it in a Raptor
+     payover run -- paying the client a second time for money they were remitted years ago. It is
+     refused here as well as being kept out of the queue, because the queue is a list and this is
+     the rule. */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It is history and cannot be approved again.'
+      using errcode = '22023';
+  end if;
+  /* ALREADY APPROVED IS A NO-OP, NOT A FAILURE: two people pressing Approve all at the same
+     moment is the ordinary case on a morning's list, and the second must not see an error. */
+  if v_pay.approved_at is not null then return p_payment; end if;
+
+  /* THE ALLOCATION DATE IS SET HERE, AND ONLY HERE.
+     THE FIRM: "if a payment was made a PTC, let's say on the 5th of September and only processed
+     today, it will only be processed with this import date... or if a payment was in suspense, it
+     was made on the 5th of September, it missed the first payment run in which it was supposed to
+     be. So it should be running in the payment run."
+     Both are the same rule: the day the money is PROCESSED decides which payover it goes out on,
+     and the day the debtor paid is a different fact that stays on received_at. Approval is the
+     single moment a payment is processed, so one place sets it and a released-from-suspense
+     receipt needs no special case -- it comes back to this queue and is approved like any other.
+     THE FIRM'S DAY, not the server's: the database is UTC and Johannesburg is ahead of it, so
+     around midnight the two disagree about which cycle a receipt falls in. */
+  update public.account_payments
+     set approved_at = public.raptor_now(), approved_by = auth.uid(),
+         allocated_on = public.raptor_today()
+   where id = p_payment;
+
+  /* AND THE SPLIT HAPPENS NOW, which is the whole point of the gate. */
+  perform public.allocate_payment(p_payment);
+  return p_payment;
+end $$;
+
+create or replace function public.approve_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+  v_end date;
+  v_early text;
+  v_why text;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select status, period_end, early_reason into v_status, v_end, v_early from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if not public.payover_run_is_open(v_status) then
+    raise exception 'That run is already %.', v_status;
+  end if;
+  /* NOT BEFORE THE CYCLE HAS CLOSED WITHOUT A REASON (the firm, 8 Oct: "there should be a good
+     reason"). approve_payover_run_early writes one; anything arriving later in the cycle goes to
+     the next run (build_payover_run). */
+  if v_end >= public.raptor_today() and nullif(btrim(coalesce(v_early, '')), '') is null then
+    raise exception 'This cycle runs until %. To approve it before then, give the reason.',
+      to_char(v_end, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  select string_agg(b.detail, '; ') into v_why from public.payover_run_blockers(p_run) b;
+  if v_why is not null then
+    raise exception 'This run cannot be approved yet: %', v_why;
+  end if;
+
+  update public.payover_runs
+     set status = 'approved', approved_by = auth.uid(), approved_at = public.raptor_now()
+   where id = p_run;
+end $$;
+
+create or replace function public.approve_payover_run_early(p_run uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) < 10 then
+    raise exception 'Say why this run is being approved before its cycle closes.' using errcode = '22023';
+  end if;
+  update public.payover_runs
+     set early_reason = btrim(p_reason), early_by = auth.uid(), early_at = public.raptor_now()
+   where id = p_run and public.payover_run_is_open(status);
+  if not found then raise exception 'That run is not open to approve.' using errcode = '22023'; end if;
+  /* The ordinary approval, blockers and all. If it refuses, the reason goes with it. */
+  perform public.approve_payover_run(p_run);
+end $$;
+
+create or replace function public.approve_settlement(
+  p_id uuid, p_expires_on date, p_evidence text, p_amount numeric default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        v_why text := nullif(btrim(coalesce(p_evidence, '')), '');
+        v_amount numeric := round(coalesce(p_amount, 0), 2);
+begin
+  if not public.has_capability('settlement.approve') then
+    raise exception 'Recording a client''s approval is not yours to do.' using errcode = '42501';
+  end if;
+  select * into v_s from public.account_settlements where id = p_id for update;
+  if not found then raise exception 'That offer no longer exists.' using errcode = 'P0002'; end if;
+  if v_s.status not in ('proposed', 'approved') then
+    raise exception 'That offer was % and cannot be approved now. Put a new one up.', v_s.status
+      using errcode = '22023';
+  end if;
+  if p_expires_on is null or p_expires_on < public.settlement_today() then
+    raise exception 'An approved settlement needs an expiry that has not passed.' using errcode = '22023';
+  end if;
+  if v_why is null then
+    raise exception 'Say how the client approved it - in writing, or it did not happen.'
+      using errcode = '22023';
+  end if;
+  if v_amount = 0 then v_amount := v_s.amount; end if;
+  if v_amount < 0 or v_amount >= v_s.balance_at_offer then
+    raise exception 'A settlement is less than the balance and more than nothing.' using errcode = '22023';
+  end if;
+  update public.account_settlements
+     set status = 'approved', amount = v_amount, expires_on = p_expires_on,
+         approved_by = auth.uid(), approved_at = public.raptor_now(), approval_evidence = v_why
+   where id = p_id;
+end
+$$;
+
+create or replace function public.bureau_removal_task(p_account uuid, p_ending text, p_why text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_owner uuid;
+  v_task uuid;
+begin
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then return null; end if;
+
+  -- NOTHING TO REMOVE IF NOTHING WAS LISTED. A task telling somebody to delist an account that was
+  -- never listed is the warning that fires when nothing is wrong, and people stop reading those.
+  if coalesce(btrim(v_a.bureaus_listed), '') = '' and v_a.listing_date is null then
+    return null;
+  end if;
+  if p_ending not in ('paid_up', 'settled', 'withdrawn') then
+    return null;
+  end if;
+
+  select assigned_to into v_owner from public.debtor_accounts where id = p_account;
+  if v_owner is null then
+    select p.id into v_owner from public.companies c
+      left join public.profiles p on p.name = c.liaison where c.id = v_a.company_id;
+  end if;
+  if v_owner is null then return null; end if;
+
+  insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                            related_to_label)
+  values (
+    'Remove the credit bureau listing on ' || coalesce(v_a.case_number, 'this account')
+      || ' - ' || case p_ending when 'paid_up' then 'paid in full'
+                                when 'settled' then 'settled'
+                                else 'withdrawn by the client' end
+      || coalesce(' (' || nullif(btrim(v_a.bureaus_listed), '') || ')', ''),
+    'Admin', 'Not Started', 'High', v_owner, public.raptor_today() + 2, v_a.company_id,
+    coalesce(v_a.case_number, 'Account'))
+  returning id into v_task;
+  return v_task;
+end $$;
+
+create or replace function public.cancel_client_charge(p_charge uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_c public.client_charges%rowtype;
+  v_status text;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why it is being cancelled.' using errcode = '22023';
+  end if;
+  select * into v_c from public.client_charges where id = p_charge;
+  if not found then raise exception 'That charge no longer exists.' using errcode = 'P0002'; end if;
+  if v_c.cancelled_at is not null then return; end if;
+  if v_c.paid_at is not null then
+    raise exception 'That charge has been paid. A refund is a credit, not a cancellation.'
+      using errcode = '22023';
+  end if;
+  if v_c.payover_run_id is not null then
+    select status into v_status from public.payover_runs where id = v_c.payover_run_id;
+    if not public.payover_run_is_open(coalesce(v_status, 'paid')) then
+      raise exception 'That charge is on a payover that has already gone out. Credit it in the next run instead.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  update public.client_charges
+     set cancelled_at = public.raptor_now(), cancelled_reason = v_reason, payover_run_id = null
+   where id = p_charge;
+end $$;
+
+create or replace function public.close_as_settled(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s record;
+begin
+  select * into v_s from public.account_settlement(
+    (select account_id from public.account_settlements where id = p_id)) where id = p_id;
+  if not found then
+    raise exception 'That offer is not the live one on its account.' using errcode = 'P0002';
+  end if;
+  if v_s.status <> 'approved' then
+    raise exception 'Only an approved settlement can be paid.' using errcode = '22023';
+  end if;
+  if v_s.paid_toward < v_s.amount then
+    raise exception 'R % of R % has reached the trust account. A part payment does not settle it.',
+      to_char(v_s.paid_toward, 'FM999999990.00'), to_char(v_s.amount, 'FM999999990.00')
+      using errcode = '22023';
+  end if;
+  update public.account_settlements
+     set status = 'paid', closed_by = auth.uid(), closed_at = public.raptor_now(),
+         closed_reason = 'Paid in full by ' || to_char(v_s.expires_on, 'DD Mon YYYY')
+   where id = p_id;
+  perform public.settle_account(v_s.account_id, 'settled',
+    'Settlement of R' || to_char(v_s.amount, 'FM999999990.00') || ' paid, approved by the client ('
+      || v_s.approval_evidence || ')');
+end
+$$;
+
+create or replace function public.close_payover_cycle(p_period_start date default null)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_start date := coalesce(p_period_start, public.payover_cycle_start(public.raptor_now() - interval '1 day'));
+  v_end date := public.payover_cycle_end(v_start);
+  v_company uuid;
+  v_count integer := 0;
+begin
+  for v_company in
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.account_payments p on p.id = a.payment_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       /* THE SAME COLUMN THE BUILD CLAIMS ON, and check-payover-runs holds the two together
+          in one loop for exactly this reason: written on different columns, a month's money
+          moves between the close and the build and every total still reconciles, so nothing
+          anywhere reports it. See build_payover_run for why created_at was never this. */
+       and not p.paid_over_in_swordfish
+       and p.allocated_on >= v_start
+       and p.allocated_on <= v_end
+    union
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.payover_runs r on r.id = a.payover_run_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    union
+    select r.company_id
+      from public.payover_runs r
+     where r.status in ('approved', 'sent', 'paid')
+       and r.net_payover < 0
+       and r.carried_out_run_id is null
+       and r.period_start < v_start
+  loop
+    if exists (select 1 from public.payover_runs
+                where company_id = v_company and period_start = v_start
+                  and not public.payover_run_is_open(status)) then
+      continue;
+    end if;
+    perform public.build_payover_run(v_company, v_start);
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end $$;
+
+create or replace function public.close_settlement_offer(p_id uuid, p_as text, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if p_as not in ('declined', 'withdrawn') then
+    raise exception 'An offer is declined or withdrawn.' using errcode = '22023';
+  end if;
+  select * into v_s from public.account_settlements where id = p_id for update;
+  if not found then raise exception 'That offer no longer exists.' using errcode = 'P0002'; end if;
+  if v_s.status not in ('proposed', 'approved') then
+    raise exception 'That offer is already %.', v_s.status using errcode = '22023';
+  end if;
+  if not (public.has_capability('settlement.approve')
+          or (p_as = 'withdrawn' and v_s.status = 'proposed' and v_s.proposed_by = auth.uid())) then
+    raise exception 'That is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why.' using errcode = '22023';
+  end if;
+  update public.account_settlements
+     set status = p_as, closed_by = auth.uid(), closed_at = public.raptor_now(), closed_reason = v_why
+   where id = p_id;
+end
+$$;
+
+create or replace function public.company_snapshot(
+  p_from date,
+  p_to date,
+  p_quiet_days integer default 30
+)
+returns table (
+  intake_accounts integer,
+  intake_clients integer,
+  intake_capital numeric,
+  book_accounts integer,
+  book_capital numeric,
+  book_clients integer,
+  active_accounts integer,
+  active_capital numeric,
+  active_clients integer,
+  unallocated_active integer,
+  quiet_accounts integer,
+  never_actioned integer
+)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*) filter (where handover_date between p_from and p_to)::integer,
+    count(distinct company_id) filter (where handover_date between p_from and p_to)::integer,
+    coalesce(sum(capital_handed_over) filter (where handover_date between p_from and p_to), 0),
+    count(*)::integer,
+    coalesce(sum(capital_handed_over), 0),
+    count(distinct company_id)::integer,
+    count(*) filter (where status ilike 'Active%')::integer,
+    coalesce(sum(capital_outstanding) filter (where status ilike 'Active%'), 0),
+    count(distinct company_id) filter (where status ilike 'Active%')::integer,
+    count(*) filter (where status ilike 'Active%' and assigned_to is null)::integer,
+    count(*) filter (
+      where status ilike 'Active%'
+        and last_action_at is not null
+        and last_action_at < (public.raptor_today() - p_quiet_days)
+    )::integer,
+    count(*) filter (where status ilike 'Active%' and last_action_at is null)::integer
+  from public.debtor_accounts;
+$$;
+
+create or replace function public.dispose_excess_credit(
+  p_allocation uuid, p_disposal text, p_reason text,
+  p_payable_to text default null, p_move_to uuid default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_status text;
+  v_out uuid;
+  v_months integer;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_until date;
+  v_company uuid;
+  v_from_case text;
+  v_to_case text;
+  v_received timestamptz;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to decide what happens to an overpayment.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is going that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if coalesce(v_a.excess_credit, 0) <= 0 then
+    raise exception 'There is no overpayment on that receipt to decide about.' using errcode = '22023';
+  end if;
+  if v_a.excess_disposal is not null then
+    raise exception 'That overpayment has already been dealt with.' using errcode = '22023';
+  end if;
+
+  -- IT IS DECIDED BEFORE THE PAYOVER GOES OUT, NOT AFTER. The excess is what holds the run on
+  -- needs_review; once the run is issued its figures are an invoice the client has, and moving the
+  -- money then would be changing what they were told.
+  if v_a.payover_run_id is not null then
+    select status into v_status from public.payover_runs where id = v_a.payover_run_id;
+    if not public.payover_run_is_open(coalesce(v_status, 'paid')) then
+      raise exception 'That receipt is on a payover that has gone out. The credit belongs in the next run.'
+        using errcode = '22023';
+    end if;
+  end if;
+
+  if p_disposal = 'refund' then
+    if nullif(btrim(coalesce(p_payable_to, '')), '') is null then
+      raise exception 'Say who the refund is payable to.' using errcode = '22023';
+    end if;
+    insert into public.trust_payments_out (
+      account_id, kind, amount, payable_to, reason, instructed_by)
+    values (v_a.account_id, 'refund', v_a.excess_credit, btrim(p_payable_to), v_why, auth.uid())
+    returning id into v_out;
+
+  elsif p_disposal = 'moved' then
+    if p_move_to is null then
+      raise exception 'Say which account it moves to.' using errcode = '22023';
+    end if;
+    if p_move_to = v_a.account_id then
+      raise exception 'That is the account it is already on.' using errcode = '22023';
+    end if;
+    if not exists (select 1 from public.debtor_accounts where id = p_move_to) then
+      raise exception 'That account no longer exists.' using errcode = '22023';
+    end if;
+
+  elsif p_disposal = 'parked' then
+    /*
+     * PARKED IS A DECISION TO WAIT, NOT A DECISION ABOUT THE MONEY.
+     *
+     * The firm, on the small ones: "who are we going to pay five rand to? We're going to give the
+     * guy a call, and the costs are going to be already more than 20 rand." Refunding a sum smaller
+     * than the phone call costs more than it returns -- but the money is still the DEBTOR'S until
+     * somebody says otherwise, so nothing moves in the trust ledger here. It simply stops holding
+     * the payover run and gets a date to come back on.
+     */
+    select coalesce(parked_credit_months, 6) into v_months from public.firm_settings limit 1;
+    v_until := public.raptor_today() + (coalesce(v_months, 6) || ' months')::interval;
+
+  elsif p_disposal <> 'released' then
+    raise exception 'An overpayment is refunded, moved to another account, released to the client, or parked.'
+      using errcode = '22023';
+  end if;
+
+  update public.payment_allocations
+     set excess_disposal = p_disposal,
+         excess_decided_at = public.raptor_now(),
+         excess_decided_by = auth.uid(),
+         excess_moved_to = case when p_disposal = 'moved' then p_move_to end,
+         excess_parked_until = v_until,
+         excess_payment_out_id = v_out
+   where id = p_allocation;
+
+  /*
+   * A MOVE MOVES THE MONEY. It used to record where it should go and do nothing else: the credit
+   * stayed on the first account and nothing reached the second. The firm, 8 Oct: "If it's being
+   * moved to another account, then that will be allocated." So: the credit comes off the first
+   * account in the trust ledger, and lands on the second as an approved payment that the engine
+   * splits there like any other -- interest, costs, capital, commission. It is not new money: no
+   * second receipt fee (the firm's ruling) and no collection total counts it twice. Dated as the
+   * debtor paid it; the trust total does not move, because the money never left the bank.
+   */
+  if p_disposal = 'moved' then
+    select d.company_id, d.case_number into v_company, v_from_case
+      from public.debtor_accounts d where d.id = v_a.account_id;
+    select d.case_number into v_to_case from public.debtor_accounts d where d.id = p_move_to;
+    select p.received_at into v_received from public.account_payments p where p.id = v_a.payment_id;
+    insert into public.trust_creditor_entries (
+      party, company_id, account_id, amount, reason, payment_id, allocation_id)
+    values ('debtor', v_company, v_a.account_id, -v_a.excess_credit,
+      'Overpayment moved to ' || coalesce(v_to_case, 'another of the debtor''s accounts'),
+      v_a.payment_id, v_a.id);
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, created_by,
+      approved_at, approved_by, allocated_on, moved_from_allocation_id
+    ) values (
+      p_move_to, coalesce(v_received, public.raptor_now()), v_a.excess_credit, 'Moved overpayment', v_from_case,
+      'moved', 'Overpayment moved from ' || coalesce(v_from_case, 'another account') || ': ' || v_why,
+      auth.uid(), public.raptor_now(), auth.uid(), public.raptor_today(), v_a.id
+    );
+  end if;
+
+  if v_a.payover_run_id is not null then
+    perform public.recompute_payover_run(v_a.payover_run_id);
+  end if;
+  return v_out;
+end $$;
+
+create or replace function public.expected_from_promises(
+  p_from date default null, p_to date default null)
+returns table (
+  account_id uuid, company_id uuid, client text, case_number text, debtor text,
+  promises integer, promised numeric, bf_share numeric, client_share numeric, vat numeric,
+  first_due date, last_due date
+)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_from date := coalesce(p_from, public.raptor_today());
+  v_to date := coalesce(p_to, public.payover_cycle_end(public.payover_cycle_start(public.raptor_now())));
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  acc record; pr record; b record; s record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric;
+  v_commission numeric; v_interest numeric; v_costs numeric; v_capital numeric;
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  /* TODAY'S TARIFF, because the promises are due from today onwards. */
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and public.raptor_today() >= effective_from
+     and (effective_to is null or public.raptor_today() <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  for acc in
+    select d.id, d.company_id, c.name as client, d.case_number,
+           public.debtor_full_name(d.debtor_first_name, d.debtor_second_name, d.debtor_surname) as debtor,
+           public.account_commission_rate(d.id) as rate,
+           null::jsonb as commission_bands, c.mandate_signed_at
+      from public.debtor_accounts d
+      join public.companies c on c.id = d.company_id
+     where exists (
+       select 1 from public.promises_to_pay p
+        where p.account_id = d.id
+          and p.due_on between v_from and v_to
+          /* OPEN ONES ONLY. A promise already kept is money that has arrived and is in the run
+             already; a broken or cancelled one is not expected from anybody. */
+          and p.status not in ('kept', 'broken', 'cancelled')
+          and p.amount > 0)
+  loop
+    select * into b from public.engine_balances(acc.id, null);
+    v_interest := b.interest; v_costs := b.costs; v_capital := b.capital;
+
+    v_rate := acc.rate; v_bands := acc.commission_bands; v_mandate := acc.mandate_signed_at;
+    v_cumulative := 0;
+    if v_bands is not null then
+      select coalesce(sum(a.to_capital), 0) into v_cumulative
+        from public.payment_allocations a
+        join public.debtor_accounts d2 on d2.id = a.account_id
+       where d2.company_id = acc.company_id and a.status <> 'reversed'
+         and (v_mandate is null or a.computed_at >= v_mandate);
+    end if;
+
+    account_id := acc.id; company_id := acc.company_id; client := acc.client;
+    case_number := acc.case_number; debtor := acc.debtor;
+    promises := 0; promised := 0; bf_share := 0; client_share := 0; vat := 0;
+    first_due := null; last_due := null;
+
+    for pr in
+      select p.amount, p.due_on
+        from public.promises_to_pay p
+       where p.account_id = acc.id
+         and p.due_on between v_from and v_to
+         and p.status not in ('kept', 'broken', 'cancelled')
+         and p.amount > 0
+       order by p.due_on, p.id
+    loop
+      select * into s from public.finance_split(
+        pr.amount, v_interest, v_costs, v_capital, v_vat, v_fee_rate, v_fee_cap);
+
+      v_commission := coalesce(
+        public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative), 0);
+      v_cumulative := v_cumulative + s.to_capital;
+
+      promises := promises + 1;
+      promised := promised + pr.amount;
+      /* WHAT BF EARNS: interest and costs recovered plus commission. The VAT is SARS's and is
+         reported beside it rather than inside it, exactly as the account preview does. */
+      bf_share := bf_share + s.to_interest + s.to_costs + v_commission;
+      client_share := client_share + s.to_capital - v_commission - round(v_commission * v_vat, 2);
+      vat := vat + round(v_commission * v_vat, 2);
+      if first_due is null then first_due := pr.due_on; end if;
+      last_due := pr.due_on;
+
+      /* AND THE BALANCES MOVE ON, which is the point of the walk. */
+      v_interest := v_interest - s.to_interest;
+      v_costs := v_costs + s.fee_excl + s.fee_vat - s.to_costs;
+      v_capital := v_capital - s.to_capital;
+    end loop;
+
+    if promises > 0 then return next; end if;
+  end loop;
+end $$;
+
+create or replace function public.fee_split(
+  p_account uuid,
+  /* The payment whose own fee row must be left out -- see the header. */
+  p_exclude_payment uuid,
+  /* The item 9 fee this payment raises, INCLUDING VAT, and the day it is raised on. */
+  p_new_fee_incl numeric,
+  p_new_fee_day date,
+  /* What earlier payments have already taken out of the pool, and what this one takes. */
+  p_taken_before numeric,
+  p_to_costs numeric,
+  /* Interest that has not been posted yet and is about to be. The dry run has some; the posting
+     has none, because it writes the accrual before it asks. Without it the preview and the ledger
+     disagreed about what the ceiling refuses -- R57,01 against R62,63 on RRC00005, the difference
+     being exactly the R5,62 of interest the approval was about to post. */
+  p_interest_pending numeric default 0
+)
+returns table (
+  rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric,
+  fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with room as (select public.in_duplum_cost_room(p_account, p_interest_pending) as mm),
+  fee_rows as (
+    select 0 as sk, f.id, f.incurred_at,
+           (f.counts_toward_fee_cap is not true) as is_receipt,
+           f.amount_excl_vat + coalesce(f.vat_amount, 0) as incl,
+           /* RECOVERABLE BY THE ENGINE'S OWN RULE, not the money position view's plainer one:
+              engine_balances gathers the pool with fee_stands() and `billed is not false`, and it
+              is that pool to_costs came out of. The view's reading would make the two buckets fail
+              to add back on an account carrying an imported Promise to Pay. */
+           (public.fee_stands(f.cancelled_at, f.legacy_name) and f.billed is not false) as stands
+      from public.account_fees f
+     where f.account_id = p_account
+       and (p_exclude_payment is null
+            or coalesce(f.payment_id, '00000000-0000-0000-0000-000000000000'::uuid)
+               is distinct from p_exclude_payment)
+    union all
+    select 1, '00000000-0000-0000-0000-000000000000'::uuid,
+           coalesce(p_new_fee_day, public.raptor_today())::timestamptz,
+           true, greatest(coalesce(p_new_fee_incl, 0), 0), true
+  ),
+  /* What the ceiling had already been spent on by the time this fee's turn came, oldest first. */
+  roomed as (
+    select r.*,
+           coalesce(sum(case when r.stands then r.incl else 0 end)
+             over (order by date(r.incurred_at), r.sk, r.incurred_at, r.id
+                   rows between unbounded preceding and 1 preceding), 0) as raised_before
+      from fee_rows r
+  ),
+  payable as (
+    select r.sk, r.id, r.incurred_at, r.is_receipt, r.incl,
+           case when not r.stands then 0
+                /* The new receipt fee is outside the clip -- see the header. */
+                when r.sk = 1 then r.incl
+                else least(greatest((select mm from room) - r.raised_before, 0), r.incl) end as can
+      from roomed r
+  ),
+  /* And what earlier payments had settled by the time this fee's turn came -- over `can`, not
+     `incl`, because a payment can only ever have settled what was within the ceiling. */
+  ordered as (
+    select p.*,
+           coalesce(sum(p.can) over (order by date(p.incurred_at), p.sk, p.incurred_at, p.id
+                                     rows between unbounded preceding and 1 preceding), 0)
+             as settled_before
+      from payable p
+  ),
+  split as (
+    select o.is_receipt, o.incl, o.can,
+           least(greatest(coalesce(p_taken_before, 0) - o.settled_before, 0), o.can) as was,
+           least(greatest(coalesce(p_taken_before, 0) + coalesce(p_to_costs, 0)
+                          - o.settled_before, 0), o.can) as now_
+      from ordered o
+  )
+  select
+    coalesce(sum(incl) filter (where is_receipt), 0),
+    coalesce(sum(incl - can) filter (where is_receipt), 0),
+    coalesce(sum(was) filter (where is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where is_receipt), 0),
+    coalesce(sum(incl) filter (where not is_receipt), 0),
+    coalesce(sum(incl - can) filter (where not is_receipt), 0),
+    coalesce(sum(was) filter (where not is_receipt), 0),
+    coalesce(sum(now_ - was) filter (where not is_receipt), 0)
+  from split
+$$;
+
+create or replace function public.hold_account(
+  p_account uuid, p_reason text, p_review_on date, p_note text default null)
+returns integer
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_note, '')), '');
+  v_paused integer := 0;
+begin
+  if not public.has_capability('book.freeze') then
+    raise exception 'Putting an account on hold is not yours to do.' using errcode = '42501';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book = 'closed' then
+    raise exception 'That account is closed. Re-open it before putting it on hold.' using errcode = '22023';
+  end if;
+  if p_review_on is null then
+    raise exception 'An account on hold needs a date to come back and look at it.' using errcode = '22023';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is going on hold.' using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set hold_reason = p_reason, hold_note = v_why, hold_review_on = p_review_on,
+         hold_since = public.raptor_now(), hold_by = auth.uid()
+   where id = p_account;
+
+  -- PAUSED AT THE NODE IT HAD REACHED, NOT CANCELLED. A hold is a decision to wait; the three
+  -- things that take an account OUT of a workflow are a promise, a dispute and payment in full,
+  -- and none of them is this. Same mechanism the promise hold uses, so one resume path serves all.
+  insert into public.workflow_run_holds (run_id, cause, cause_id, reason, started_by)
+  select r.id, 'on_hold', p_account,
+         'On hold: ' || p_reason || ' - ' || v_why, auth.uid()
+    from public.workflow_runs r
+   where r.account_id = p_account and r.state = 'running';
+  get diagnostics v_paused = row_count;
+
+  update public.workflow_runs set state = 'held'
+   where account_id = p_account and state = 'running';
+
+  return v_paused;
+end $$;
+
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+  v_late date;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to import into.' using errcode = '42501';
+  end if;
+
+  -- A STATEMENT CANNOT RUN AHEAD OF THE CLOCK (prompt 10): a line dated after today refuses the
+  -- whole statement, before anything is written, so it cannot be half imported.
+  select min((l->>'date')::date) filter (where (l->>'date')::date > public.raptor_today())
+    into v_late from jsonb_array_elements(p_lines) l;
+  if v_late is not null then
+    raise exception 'That statement has a line dated %, after today (%). A statement cannot be dated after today.',
+      to_char(v_late, 'DD Mon YYYY'), to_char(public.raptor_today(), 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'note' then 'excluded' else 'unallocated' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- EXACTLY ONE ACCOUNT, OR NOBODY. account_number is the reference the DEBTOR knows and types.
+    -- It is not unique the way case_number is, so a reference naming two accounts is counted and
+    -- left for a person -- guessing credits one debtor with another's money, and a payment is
+    -- immutable once processed. (array_agg, not min(): there is no min(uuid).)
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.account_number) = v_ref;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid()
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = public.raptor_now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;
+
+create or replace function public.mark_client_charge_paid(
+  p_charge uuid, p_reference text default null, p_paid_at timestamptz default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_c public.client_charges%rowtype;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select * into v_c from public.client_charges where id = p_charge;
+  if not found then raise exception 'That charge no longer exists.' using errcode = 'P0002'; end if;
+  if v_c.cancelled_at is not null then
+    raise exception 'That charge was cancelled.' using errcode = '22023';
+  end if;
+  if v_c.payover_run_id is not null then
+    raise exception 'That charge comes off a payover, so the client does not pay it separately.'
+      using errcode = '22023';
+  end if;
+  if v_c.paid_at is not null then return; end if;
+
+  update public.client_charges
+     set paid_at = coalesce(p_paid_at, public.raptor_now()),
+         paid_reference = nullif(btrim(coalesce(p_reference, '')), '')
+   where id = p_charge;
+end $$;
+
+create or replace function public.mark_payover_run_paid(
+  p_run uuid, p_reference text, p_paid_at timestamptz default public.raptor_now())
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  /* WHEN THE STATEMENT IS THE ONLY WAY (the firm, for go-live): nothing is paid until the bank says so. */
+  if coalesce((select payouts_statement_only from public.firm_settings limit 1), false) then
+    raise exception 'Payments out are confirmed from the bank statement only. Import the statement and allocate the line under Exceptions.' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(p_reference, '')), '') is null then
+    raise exception 'Say which EFT paid it -- the reference is what reconciles this invoice to the bank.';
+  end if;
+  /* NOTHING IS PAID ON A RUN BELOW NIL (10 Oct): the client owes the firm, and the next run brings
+     it forward as its opening line whether or not this one is marked. Marking it paid would write
+     a payment out of money that never left the account. */
+  if (select net_payover from public.payover_runs where id = p_run) < 0 then
+    raise exception 'This run is below nil: the client owes us, and it comes off their next payover. There is nothing to pay.'
+      using errcode = '22023';
+  end if;
+  update public.payover_runs
+     set status = 'paid', paid_at = p_paid_at, eft_reference = btrim(p_reference)
+   where id = p_run and status in ('approved', 'sent');
+  if not found then raise exception 'Only an approved or sent run can be marked paid.'; end if;
+end $$;
+
+create or replace function public.mark_payover_run_sent(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  update public.payover_runs set status = 'sent', sent_at = public.raptor_now()
+   where id = p_run and status = 'approved';
+  if not found then raise exception 'Only an approved run can be sent.'; end if;
+end $$;
+
+create or replace function public.mark_refund_paid(p_refund uuid, p_reference text, p_paid_at timestamptz)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Paying out of the trust account is not yours to record.' using errcode = '42501';
+  end if;
+  /* WHEN THE STATEMENT IS THE ONLY WAY (the firm, for go-live): nothing is paid until the bank says so. */
+  if coalesce((select payouts_statement_only from public.firm_settings limit 1), false) then
+    raise exception 'Payments out are confirmed from the bank statement only. Import the statement and allocate the line under Exceptions.' using errcode = '42501';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which EFT paid it -- the reference is what ties it to the bank statement.' using errcode = '22023';
+  end if;
+  update public.trust_payments_out
+     set paid_at = coalesce(p_paid_at, public.raptor_now()), paid_reference = v_ref
+   where id = p_refund and paid_at is null and cancelled_at is null;
+  if not found then
+    raise exception 'Only a refund that is still due can be marked paid.' using errcode = '22023';
+  end if;
+end $$;
+
+create or replace function public.nav_counts()
+returns table (mail integer, tasks integer, disputes integer, diary integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    -- UNREAD mail, whether or not it has been matched. Junk excluded: it is not work. Sent
+    -- excluded: we wrote it, and it is not waiting on anybody.
+    --
+    -- This used to count only mail that still needed matching, on the theory that a matched
+    -- message is already dealt with. In practice almost everything matches itself on arrival --
+    -- every message in the book did -- so the badge sat at nought for ever and a new email
+    -- arrived with nothing on the sidebar to say so. Unread is the thing a person actually
+    -- clears, by reading it, and it is what somebody means when they ask whether mail has come.
+    (select count(*)::integer from public.user_emails
+      where user_id = auth.uid()
+        and is_junk = false
+        and is_sent = false
+        and read_at is null),
+    -- Mine, still open, and due by the end of today. Not "all my tasks", which would be a
+    -- permanent number nobody could ever clear.
+    (select count(*)::integer from public.tasks
+      where owner_id = auth.uid()
+        and status not in ('Completed', 'Cancelled')
+        and due_date < date_trunc('day', public.raptor_now()) + interval '1 day'),
+    -- Disputes waiting on ME, not every dispute the firm has open. The difference between a
+    -- number somebody works and a number that sits at 20 forever.
+    -- Lowercase 'closed'. account_queries.status is one of open / with_client / answered /
+    -- closed, so "not closed" is the whole of the open book, not just stage 'open'.
+    (select count(*)::integer from public.account_queries
+      where owner_id = auth.uid()
+        and status <> 'closed'),
+    -- My diary: what is due today, plus what I am already behind on.
+    --
+    -- The arrears are INCLUDED on purpose, even though including them risks exactly the failure
+    -- this file warns about -- a badge that never reaches zero stops being read. The alternative
+    -- is worse: a book arrived here with 279 overdue entries, and a badge that showed only
+    -- today's work would read "4" to somebody three months behind. The number has to be able to
+    -- frighten, or it is not telling the truth. It reaches zero when the diary is genuinely
+    -- clear, which is the condition the firm actually wants to manage towards.
+    (select count(*)::integer from public.diary_entries
+      where owner_id = auth.uid()
+        and state = 'open'
+        and due_on <= public.raptor_today());
+$$;
+
+create or replace function public.parked_credits()
+returns table(allocation_id uuid, account_id uuid, case_number text, debtor text,
+              client text, amount numeric, parked_on date, ripe_on date, ripe boolean,
+              taken_at timestamptz, reason text)
+language sql stable security definer set search_path to 'public'
+as $$
+  select a.id, a.account_id, d.case_number,
+         coalesce(nullif(btrim(coalesce(d.debtor_first_name, d.debtor_initials, '')
+           || ' ' || coalesce(d.debtor_surname, '')), ''), 'Unknown debtor'),
+         c.name, a.excess_credit,
+         (a.excess_decided_at at time zone 'Africa/Johannesburg')::date,
+         a.excess_parked_until,
+         a.excess_parked_until <= public.raptor_today(),
+         a.excess_taken_at,
+         a.excess_taken_reason
+    from public.payment_allocations a
+    join public.debtor_accounts d on d.id = a.account_id
+    left join public.companies c on c.id = d.company_id
+   where public.has_capability('finance.view')
+     and a.excess_disposal = 'parked'
+   order by a.excess_parked_until
+$$;
+
+create or replace function public.payover_cycle_now()
+returns table (period_start date, period_end date, days_left integer, today date)
+language plpgsql stable security definer set search_path to 'public'
+as $$
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  return query
+  select s, public.payover_cycle_end(s),
+         (public.payover_cycle_end(s) - public.raptor_today())::integer,
+         public.raptor_today()
+    from (select public.payover_cycle_start(public.raptor_now()) as s) c;
+end $$;
+
+create or replace function public.payover_cycle_tiles(p_period_start date default null)
+returns table (
+  money_received numeric, due_to_clients numeric,
+  unmatched_count integer, unmatched_amount numeric,
+  waiting_count integer, needs_review_count integer, ready_count integer
+)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cyc as (select coalesce(p_period_start, public.payover_cycle_start(public.raptor_now())) as s),
+  bounds as (
+    select s, (s::timestamp) at time zone 'Africa/Johannesburg' as f,
+           ((public.payover_cycle_end(s) + 1)::timestamp) at time zone 'Africa/Johannesburg' as t
+      from cyc
+  )
+  select
+    coalesce((select sum(a.payment_amount) from public.payment_allocations a
+               join public.account_payments p on p.id = a.payment_id, bounds b
+              where a.status <> 'reversed' and not a.paid_to_client
+                /* allocated_on, not created_at: the cycle a payment is in is the day it was processed
+                   (be1e03b), and created_at is a real stamp the staging clock cannot move. */
+                and p.allocated_on >= b.s and p.allocated_on <= public.payover_cycle_end(b.s)), 0),
+    coalesce((select sum(r.net_payover) from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status <> 'void'), 0),
+    0, 0,
+    coalesce((select count(*)::integer from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status in ('needs_review', 'ready', 'approved', 'sent')), 0),
+    coalesce((select count(*)::integer from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status = 'needs_review'), 0),
+    coalesce((select count(*)::integer from public.payover_runs r, cyc
+               where r.period_start = cyc.s and r.status = 'ready'), 0)
+   where public.current_user_role() = 'Administrator'
+$$;
+
+create or replace function public.payover_buildable(p_period_start date)
+returns table(
+  company_id uuid, client text, client_code text,
+  payments integer, received numeric,
+  run_id uuid, run_status text, invoice_number text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with bounds as (
+    select (p_period_start::timestamp) at time zone 'Africa/Johannesburg' as lo,
+           ((public.payover_cycle_end(p_period_start) + 1)::timestamp) at time zone 'Africa/Johannesburg' as hi
+  ),
+  money as (
+    select d.company_id,
+           count(*)::integer as payments,
+           sum(coalesce(a.payment_amount, 0)) as received
+      from public.payment_allocations a
+      join public.account_payments p on p.id = a.payment_id
+      join public.debtor_accounts d on d.id = a.account_id
+      cross join bounds b
+     where a.status <> 'reversed'
+       and not p.is_demo
+       /* allocated_on, not created_at -- see payover_cycle_tiles. */
+       and p.allocated_on >= p_period_start
+       and p.allocated_on <= public.payover_cycle_end(p_period_start)
+     group by d.company_id
+  )
+  select c.id, c.name, c.code,
+         coalesce(m.payments, 0), coalesce(m.received, 0),
+         r.id, r.status, r.invoice_number
+    from public.companies c
+    left join money m on m.company_id = c.id
+    left join public.payover_runs r
+           on r.company_id = c.id and r.period_start = p_period_start and r.status <> 'void'
+   where public.current_user_role() = 'Administrator'
+     and (coalesce(m.payments, 0) > 0 or r.id is not null)
+   order by coalesce(m.received, 0) desc, c.name
+$$;
+
+create or replace function public.place_bank_line(p_line uuid, p_account uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_payment uuid;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to place a receipt in.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  -- The three ways this could put money somewhere it does not belong, each refused by name.
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be placed against an account.';
+  end if;
+  if v_line.payment_id is not null then
+    raise exception 'That receipt has already been placed.';
+  end if;
+  if not exists (select 1 from public.debtor_accounts where id = p_account) then
+    raise exception 'That account no longer exists.';
+  end if;
+
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details, source, paid_to_client,
+    created_by, bank_line_id
+  ) values (
+    p_account,
+    (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+    v_line.amount, 'EFT',
+    coalesce(v_line.reference, left(v_line.description, 60)),
+    v_line.description, 'bank', false, auth.uid(), p_line
+  ) returning id into v_payment;
+
+  update public.bank_statement_lines
+     set status = 'allocated', account_id = p_account, payment_id = v_payment,
+         placed_at = public.raptor_now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_payment;
+end $$;
+
+create or replace function public.preview_allocation(p_account uuid, p_amount numeric, p_paid_to_client boolean default false, p_as_at date default null::date, p_exclude_payment uuid default null::uuid)
+returns table(receipt_fee_excl numeric, receipt_fee_vat numeric, to_interest numeric, to_costs numeric, to_capital numeric, excess_credit numeric, commission numeric, commission_vat numeric, to_client numeric, due_to_bf numeric, bf_takes numeric, interest_before numeric, costs_before numeric, capital_before numeric, interest_after numeric, costs_after numeric, capital_after numeric, has_rate boolean, interest_open numeric, interest_open_from date, interest_total numeric, interest_cant numeric, interest_retained numeric, rf_total numeric, rf_cant numeric, rf_retained numeric, to_receipt_fees numeric, fees_total numeric, fees_cant numeric, fees_retained numeric, to_fees numeric)
+language plpgsql stable security definer set search_path to 'public'
+as $$
+declare
+  v_vat numeric; v_fee_rate numeric; v_fee_cap numeric;
+  b record; s record; o record; k record;
+  v_rate numeric; v_bands jsonb; v_mandate timestamptz; v_cumulative numeric := 0;
+  v_company uuid;
+  v_day date := coalesce(p_as_at, public.raptor_today());
+  v_interest numeric;
+  v_accrued numeric; v_recoverable numeric;
+  v_costs_taken numeric;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select vat_rate into v_vat from public.firm_settings limit 1;
+  select rate, cap_excl_vat into v_fee_rate, v_fee_cap
+    from public.annexure_b_tariffs
+   where item = '9' and v_day >= effective_from
+     and (effective_to is null or v_day <= effective_to)
+   order by effective_from desc limit 1;
+  if v_fee_rate is null then return; end if;
+
+  /*
+   * THE OPEN PERIOD FIRST, AND THAT ORDER IS THE FIX.
+   *
+   * It is the same call allocate_payment makes before it posts, with the same day and the same
+   * exclusion, so the figure below is the figure that will be posted. `recoverable` rather than
+   * `accrued`, because engine_balances counts the recoverable half of every posted row and in
+   * duplum binds a split the same way it binds a ledger.
+   *
+   * AND IT IS ASKED BEFORE THE BALANCES SO IT CAN BE PASSED TO THEM -- and to fee_split, which
+   * reads the same ceiling. in_duplum_cost_room counts POSTED accruals; the open period is not one
+   * yet. Asked afterwards and not passed, an account at its ceiling was handed the whole ceiling
+   * for costs and then given the open interest on top -- R385,62 of non-capital against a R380,00
+   * ceiling on RRC00005, which is the thing the ceiling exists to stop. The posting was always
+   * right, because it writes the accrual first; only the dry run promised the firm something the
+   * engine would not do. Found by probing a real approval against its own preview.
+   */
+  select * into o from public.open_interest(p_account, v_day, p_exclude_payment);
+  interest_open := coalesce(o.recoverable, 0);
+  interest_open_from := o.from_day;
+
+  select * into b from public.engine_balances(p_account, p_exclude_payment, interest_open);
+  v_interest := b.interest + interest_open;
+
+  select * into s from public.finance_split(
+    greatest(coalesce(p_amount, 0), 0), v_interest, b.costs, b.capital, v_vat, v_fee_rate, v_fee_cap);
+
+  /* ---------------------------------------------------------------- INTEREST: a, cannot take, b */
+  select coalesce(sum(ia.amount_accrued), 0), coalesce(sum(ia.amount_recoverable), 0)
+    into v_accrued, v_recoverable
+    from public.account_interest_accruals ia where ia.account_id = p_account;
+  v_accrued := v_accrued + coalesce(o.accrued, 0);
+  v_recoverable := v_recoverable + coalesce(o.recoverable, 0);
+  interest_total := v_accrued;
+  interest_cant := greatest(v_accrued - v_recoverable, 0);
+  select coalesce(sum(a.to_interest), 0) into interest_retained
+    from public.payment_allocations a
+   where a.account_id = p_account and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id is distinct from p_exclude_payment);
+
+  /* ------------------------------------------------- THE COSTS POOL, SPLIT BY THE SHARED FUNCTION */
+  select coalesce(sum(a.to_costs), 0) into v_costs_taken
+    from public.payment_allocations a
+   where a.account_id = p_account and a.status <> 'reversed'
+     and (p_exclude_payment is null or a.payment_id is distinct from p_exclude_payment);
+
+  select * into k from public.fee_split(
+    p_account, p_exclude_payment, s.fee_excl + s.fee_vat, v_day, v_costs_taken, s.to_costs,
+    interest_open);
+  rf_total := k.rf_total; rf_cant := k.rf_cant; rf_retained := k.rf_retained;
+  to_receipt_fees := k.to_receipt_fees;
+  fees_total := k.fees_total; fees_cant := k.fees_cant; fees_retained := k.fees_retained;
+  to_fees := k.to_fees;
+
+  /* THE RATE IS THE ACCOUNT'S, DECIDED ONCE (prompt 9): its own stamped rate, else its client's band
+     on the capital handed over, else the client's flat rate -- account_commission_rate. Never
+     marginal on the client's cumulative capital, which is what this read before. */
+  select d.company_id into v_company from public.debtor_accounts d where d.id = p_account;
+  v_rate := public.account_commission_rate(p_account);
+  v_bands := null;
+
+  if v_bands is not null then
+    select coalesce(sum(a.to_capital), 0) into v_cumulative
+      from public.payment_allocations a
+      join public.debtor_accounts d on d.id = a.account_id
+     where d.company_id = v_company and a.status <> 'reversed'
+       and (v_mandate is null or a.computed_at >= v_mandate);
+  end if;
+
+  commission := public.finance_commission(s.to_capital, v_rate, v_bands, v_cumulative);
+  has_rate := commission is not null;
+  if commission is null then commission := 0; end if;
+  commission_vat := round(commission * v_vat, 2);
+
+  receipt_fee_excl := s.fee_excl;
+  receipt_fee_vat := s.fee_vat;
+  to_interest := s.to_interest;
+  to_costs := s.to_costs;
+  to_capital := s.to_capital;
+  excess_credit := s.excess;
+
+  if p_paid_to_client then
+    to_client := 0;
+    due_to_bf := s.to_interest + s.to_costs + commission;
+  else
+    to_client := s.to_capital - commission - commission_vat;
+    due_to_bf := 0;
+  end if;
+  bf_takes := s.to_interest + s.to_costs + commission;
+
+  interest_before := v_interest; costs_before := b.costs; capital_before := b.capital;
+  interest_after := v_interest - s.to_interest;
+  costs_after := b.costs + s.fee_excl + s.fee_vat - s.to_costs;
+  capital_after := b.capital - s.to_capital;
+  return next;
+end $$;
+
+create or replace function public.ptc_ageing()
+returns table(company_id uuid, client text, owed numeric, since date, run_id uuid,
+              invoice_number text, invoiced boolean)
+language sql stable security definer set search_path to 'public'
+as $$
+  with recursive head as (
+    -- THE SHORTFALL STILL STANDING: a run below nil that has not been carried into another.
+    select r.id, r.company_id, r.net_payover, r.period_end, r.invoice_number, r.id as cur
+      from public.payover_runs r
+     where r.status <> 'void' and r.net_payover < 0 and r.carried_out_run_id is null
+  ), back as (
+    -- WALKED BACK through the runs that carried it, so a debt keeps the date it was first invoiced.
+    select h.id as head_id, h.cur, (select period_end from public.payover_runs where id = h.cur) as period_end
+      from head h
+    union all
+    select b.head_id, p.id, p.period_end
+      from back b join public.payover_runs p on p.carried_out_run_id = b.cur
+  ), first as (
+    select head_id, min(period_end) as first_end from back group by head_id
+  )
+  select h.company_id, co.name, round(-h.net_payover, 2),
+         public.payover_pays_on(f.first_end), h.id, h.invoice_number,
+         public.payover_pays_on(f.first_end) <= public.raptor_today()
+    from head h
+    join first f on f.head_id = h.id
+    join public.companies co on co.id = h.company_id
+   where public.has_capability('finance.view')
+   order by public.payover_pays_on(f.first_end), co.name
+$$;
+
+create or replace function public.raise_client_charge(
+  p_company uuid, p_kind text, p_description text, p_amount numeric,
+  p_vat numeric default 0, p_settlement text default 'set_off',
+  p_account uuid default null, p_raised_on date default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_what text := nullif(btrim(coalesce(p_description, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if v_what is null then
+    raise exception 'Say what the client is being charged for.' using errcode = '22023';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A charge is an amount the client owes, so it has to be more than nothing.'
+      using errcode = '22023';
+  end if;
+
+  insert into public.client_charges (
+    company_id, account_id, kind, description, amount, vat, settlement, raised_by, raised_on)
+  values (
+    p_company, p_account, p_kind, v_what, round(p_amount, 2), round(coalesce(p_vat, 0), 2),
+    p_settlement, auth.uid(),
+    coalesce(p_raised_on, public.raptor_today()))
+  returning id into v_id;
+  return v_id;
+end $$;
+
+create or replace function public.reconcile_bank_debit(p_line uuid, p_run uuid)
+returns void language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_status text;
+  v_net numeric;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to reconcile.' using errcode = '42501';
+  end if;
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  if v_line.direction <> 'debit' then
+    raise exception 'Only money paid out can settle a payover run.';
+  end if;
+  if v_line.payover_run_id is not null then
+    raise exception 'That payment out is already against a run.';
+  end if;
+  select status, net_payover into v_status, v_net from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  /* A RUN MARKED PAID BY HAND IS STILL MATCHED WHEN ITS DEBIT ARRIVES (the firm, 8 Oct: a payment
+     can be completed from the run or from Payments to make, and the statement confirms it) --
+     once. Its paid_at and reference are kept; only the line is tied to it. */
+  if v_status not in ('approved', 'sent', 'paid') then
+    raise exception 'Only an approved, sent or paid run can be settled, and that one is %.', v_status;
+  end if;
+  if v_status = 'paid' and exists (select 1 from public.bank_statement_lines x where x.payover_run_id = p_run) then
+    raise exception 'That run is already on the statement.';
+  end if;
+  /*
+   * THE AMOUNTS MUST AGREE. The statement's debit is negative and the run's net payover is
+   * positive, so they are compared as magnitudes. A mismatch is not something to round past: it
+   * means either the wrong run was picked or the firm paid a different figure from the one on the
+   * remittance advice the client received, and both are worth stopping for.
+   */
+  if abs(v_line.amount) <> v_net then
+    raise exception 'That payment out is % and the run is %. Pick the run that matches, or ask why they differ.',
+      to_char(abs(v_line.amount), 'FM999999990.00'), to_char(v_net, 'FM999999990.00');
+  end if;
+  update public.bank_statement_lines
+     set payover_run_id = p_run, status = 'reconciled',
+         placed_at = public.raptor_now(), placed_by = auth.uid()
+   where id = p_line;
+  /* AND THE RUN IS PAID, witnessed rather than asserted. Only from sent/approved -- the same
+     transition mark_payover_run_paid allows, so the two routes cannot disagree. */
+  update public.payover_runs
+     set status = 'paid', paid_at = coalesce(paid_at, (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg')),
+         eft_reference = coalesce(eft_reference, left(v_line.description, 80))
+   where id = p_run and status in ('approved', 'sent');
+end $$;
+
+create or replace function public.record_account_desk_change() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  -- `is distinct from` rather than <>, so a move to or from NULL (unallocated) is recorded. With
+  -- <> those two transitions are silently dropped -- exactly the ones a team leader performs
+  -- when somebody leaves.
+  if tg_op = 'INSERT' or (new.assigned_to is distinct from old.assigned_to) then
+    insert into public.account_desk_history (account_id, user_id, effective_from, source, changed_by)
+    values (new.id, new.assigned_to,
+            -- AN ACCOUNT IMPORTED ONTO ITS SWORDFISH CLERK'S DESK HAS BEEN THEIRS SINCE IT WAS LOADED,
+            -- not since the import: the receipts already in the month are their work, and dated from
+            -- now() they belonged to nobody (the firm, 8 Oct: the clerks could not see it under
+            -- their names). The same assumption the original backfill made, from the handover date,
+            -- on the firm's own day (SAST midnight, or a payment early that morning falls before it).
+            case when tg_op = 'INSERT' and new.import_batch_id is not null
+                      and new.assigned_to is not null and new.handover_date is not null
+                 then least(public.raptor_now(), new.handover_date::timestamp at time zone 'Africa/Johannesburg')
+                 else public.raptor_now() end,
+            case when tg_op = 'INSERT' then 'import' else 'change' end, auth.uid());
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.record_manual_payment(
+  p_account uuid,
+  p_amount numeric,
+  p_received_on date,
+  p_paid_to_client boolean,
+  p_method text default 'EFT',
+  p_reference text default null,
+  p_details text default null,
+  p_confirm_duplicate boolean default false,
+  p_proof_document uuid default null
+) returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_payment uuid;
+  v_dupes integer;
+  v_doc_account uuid;
+  v_doc_payment uuid;
+  v_reference text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_handover date;
+begin
+  if not public.may_record_payment() then
+    raise exception 'You are not allowed to record payments.' using errcode = '42501';
+  end if;
+
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'A payment has to be more than nothing.';
+  end if;
+  if p_received_on is null then
+    raise exception 'Say when the money was received.';
+  end if;
+  -- NOT IN THE FUTURE: it would land in a payover cycle that has not been cut, and change what a
+  -- client is owed this month for money that has not arrived.
+  if p_received_on > public.raptor_today() then
+    raise exception 'That date is in the future. A payment is recorded when the money is in.';
+  end if;
+  -- NOT BEFORE THE ACCOUNT EXISTED.
+  --
+  -- THE FIRM, READING A TRANSACTION LIST: "it looks funny, like and disorganized. Things should
+  -- happen chronologically, and it didn't happen here." Two payments dated 28 September sat above
+  -- "Capital handed over" on the 29th -- correctly, by date, and unreadably: money coming off a
+  -- debt that did not exist yet, and a running balance four thousand rand negative before the
+  -- first debit.
+  --
+  -- THE STATEMENT NOW OPENS WITH THE HANDOVER WHATEVER ITS DATE, because that is the opening
+  -- balance rather than a movement. This is the other half: the case should not arise. The firm
+  -- had nothing to receive before the client gave them the account, and none of the 1 070 payments
+  -- that came across from Swordfish predates its own handover -- only back-dated test capture did.
+  --
+  -- ON the handover day is fine. Before it is not.
+  select handover_date into v_handover from public.debtor_accounts where id = p_account;
+  if not found then
+    raise exception 'That account no longer exists.';
+  end if;
+  if v_handover is not null and p_received_on < v_handover then
+    raise exception 'That date is before the account was handed over on %. The firm had nothing to receive yet.',
+      to_char(v_handover, 'DD Mon YYYY');
+  end if;
+
+  -- THE REFERENCE IS COMPULSORY, and the firm asked for it looking at the box: "this reference
+  -- here should be compulsory."
+  --
+  -- IT IS WHAT TIES A CAPTURED PAYMENT BACK TO SOMETHING OUTSIDE RAPTOR. Money that arrives on a
+  -- bank statement carries the debtor's own reference and is matched on it; a payment typed in by
+  -- hand has nothing at all unless somebody writes it down. The firm said why when the statement
+  -- import was built: "all the reference numbers used on the bank should be saved as well per
+  -- payment, so that if we, for example, in the future have to reverse a payment" -- a reversal
+  -- three months later has to be findable in the bank's own records, and "R 5 000, 29 September"
+  -- is not a way to find it.
+  --
+  -- ON A PTC IT IS THE CLIENT'S REFERENCE, not ours. The firm never saw that money; what is being
+  -- recorded is a claim, and the reference is how the claim can be checked against the client's
+  -- own books when they query the commission.
+  --
+  -- REFUSED BEFORE ANYTHING IS WRITTEN, like the proof below and for the same reason:
+  -- account_payments has no delete, so a payment recorded without one could only be reversed.
+  if v_reference is null then
+    raise exception 'Put the reference on it — the one on the bank statement, or the client''s own.'
+      using errcode = '23502';
+  end if;
+
+  -- THE PROOF, AND ONLY ON A PTC. Checked BEFORE anything is written, so a refusal leaves no
+  -- payment behind -- a PTC recorded and then failing to attach its confirmation is exactly the
+  -- state this rule exists to prevent, and account_payments cannot be deleted.
+  if coalesce(p_paid_to_client, false) then
+    if p_proof_document is null then
+      raise exception 'A PTC needs the client''s confirmation attached — a PDF, an email, a screenshot.'
+        using errcode = '23514';
+    end if;
+    select account_id, payment_id into v_doc_account, v_doc_payment
+      from public.account_documents where id = p_proof_document;
+    if v_doc_account is null then
+      raise exception 'That confirmation is no longer on the account.';
+    end if;
+    -- ON THIS ACCOUNT. A document id from another debtor's file would attach one client's proof
+    -- to another client's invoice.
+    if v_doc_account <> p_account then
+      raise exception 'That confirmation belongs to a different account.';
+    end if;
+    -- AND NOT ALREADY SPENT. One confirmation proves one payment; re-used, a single letter from a
+    -- client would justify a second reduction of the debt.
+    if v_doc_payment is not null then
+      raise exception 'That confirmation is already the proof of another payment.';
+    end if;
+  end if;
+
+  -- THE DUPLICATE IS A QUESTION, NOT A REFUSAL: a debtor genuinely can pay the same amount twice
+  -- in a day. But it is ASKED, because account_payments has no delete. A reversed payment never
+  -- counts -- re-capturing one that bounced and came back must not be blocked.
+  if not p_confirm_duplicate then
+    select count(*) into v_dupes
+      from public.account_payments
+     where account_id = p_account
+       and amount = p_amount
+       and reversed_at is null
+       and (received_at at time zone 'Africa/Johannesburg')::date = p_received_on;
+    if v_dupes > 0 then
+      raise exception 'There is already a payment of % on this account on %. Confirm if this is a second one.',
+        to_char(p_amount, 'FM999999990.00'), to_char(p_received_on, 'YYYY-MM-DD')
+        using errcode = '23505';
+    end if;
+  end if;
+
+  -- received_at IS THE DAY THE MONEY CAME IN, not the day it was typed: the payover cycle cuts on
+  -- it, so a PTC a client reports three weeks late belongs in the month the debtor actually paid.
+  insert into public.account_payments (
+    account_id, received_at, amount, method, reference, details,
+    source, paid_to_client, created_by
+  ) values (
+    p_account,
+    (p_received_on::timestamp at time zone 'Africa/Johannesburg'),
+    p_amount,
+    coalesce(nullif(btrim(p_method), ''), 'EFT'),
+    v_reference,
+    nullif(btrim(p_details), ''),
+    'manual', coalesce(p_paid_to_client, false), auth.uid()
+  ) returning id into v_payment;
+
+  -- THE PROOF IS TIED TO THE PAYMENT, so the document list says what it is for and the payment can
+  -- be traced back to what justified it.
+  if p_proof_document is not null then
+    update public.account_documents set payment_id = v_payment where id = p_proof_document;
+  end if;
+
+  return v_payment;
+end $$;
+
+create or replace function public.refresh_payover_runs()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_open date := public.payover_cycle_start(public.raptor_now());
+  v_last date := public.payover_cycle_start(((v_open - 1)::timestamp) at time zone 'Africa/Johannesburg');
+  v_cycle date;
+  v_end date;
+  v_company uuid;
+  v_count integer := 0;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  foreach v_cycle in array array[v_last, v_open] loop
+    v_end := public.payover_cycle_end(v_cycle);
+    for v_company in
+      select distinct d.company_id
+        from public.payment_allocations a
+        join public.account_payments p on p.id = a.payment_id
+        join public.debtor_accounts d on d.id = a.account_id
+       where a.payover_run_id is null
+         and a.status <> 'reversed'
+         and not p.is_demo
+         and not p.paid_over_in_swordfish
+         /* A PTC rides the next payover: the same window build_payover_run claims it on. */
+         and p.allocated_on <= case when a.paid_to_client
+                                    then public.payover_ptc_until(v_end) else v_end end
+         and (p.allocated_on >= v_cycle
+              /* late for a run approved early: build_payover_run claims it into this one */
+              or exists (select 1 from public.payover_runs e
+                          where e.company_id = d.company_id
+                            and e.status in ('approved', 'sent', 'paid')
+                            and p.allocated_on between e.period_start
+                              and case when a.paid_to_client
+                                       then public.payover_ptc_until(e.period_end) else e.period_end end))
+      union
+      select r.company_id from public.payover_runs r
+       where r.period_start = v_cycle and public.payover_run_is_open(r.status)
+    loop
+      if exists (select 1 from public.payover_runs
+                  where company_id = v_company and period_start = v_cycle
+                    and not public.payover_run_is_open(status)) then
+        continue;
+      end if;
+      perform public.build_payover_run(v_company, v_cycle);
+      v_count := v_count + 1;
+    end loop;
+  end loop;
+  return v_count;
+end $$;
+
+create or replace function public.reject_payment(
+  p_payment uuid, p_reason text, p_not_a_receipt boolean default false)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_line uuid;
+  v_siblings integer;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to reject a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why it is being rejected.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.approved_at is not null then
+    raise exception 'That payment has been approved and split. Reverse it instead.' using errcode = '22023';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed.' using errcode = '22023';
+  end if;
+  /* ALREADY REJECTED IS A NO-OP, NOT A FAILURE -- the same reason approve_payment gives: two
+     people clearing one morning's queue is the ordinary case, and the second must not see an
+     error for work that is already done. */
+  if v_pay.rejected_at is not null then return; end if;
+
+  v_line := coalesce(
+    v_pay.bank_line_id,
+    (select l.id from public.bank_statement_lines l where l.payment_id = p_payment));
+
+  update public.account_payments
+     set rejected_at = public.raptor_now(), rejected_by = auth.uid(), rejection_reason = v_reason,
+         bank_line_id = v_line,
+         suspended_at = null, suspense_reason = null
+   where id = p_payment;
+
+  if v_line is not null then
+    select count(*) into v_siblings
+      from public.account_payments s
+     where s.bank_line_id = v_line and s.id <> p_payment
+       and s.rejected_at is null and s.reversed_at is null;
+    if v_siblings = 0 then
+      update public.bank_statement_lines
+         set status = case when p_not_a_receipt then 'excluded' else 'unallocated' end,
+             payment_id = null,
+             account_id = case when p_not_a_receipt then account_id else null end,
+             placed_at = null, placed_by = null
+       where id = v_line;
+    end if;
+  end if;
+end $$;
+
+create or replace function public.release_account(p_account uuid, p_note text default null)
+returns integer
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_note, '')), '');
+  v_resumed integer := 0;
+begin
+  -- THE SAME TICK AS A FREEZE, and it fails CLOSED: has_capability is never NULL.
+  if not public.has_capability('book.freeze') then
+    raise exception 'Taking an account off hold is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is coming back onto the active book.' using errcode = '22023';
+  end if;
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.book = 'active' then
+    raise exception 'That account is already on the active book.' using errcode = '22023';
+  end if;
+
+  -- BOTH DOORS BACK, because an account reaches On hold two ways: a hold the firm placed, and the
+  -- Frozen status it was imported with. Clearing one and not the other leaves the account exactly
+  -- where it was with its reason gone, which is worse than refusing.
+  update public.debtor_accounts
+     set hold_reason = null, hold_note = v_why, hold_review_on = null,
+         hold_since = null, hold_by = auth.uid(),
+         frozen_reason = null, frozen_by = null, frozen_at = null, frozen_by_user = null,
+         -- 'Active: Unfrozen' is the inherited vocabulary's word for an account coming back, and
+         -- the status history now records where it came FROM, so the label need not.
+         status = case when status ~~* 'Frozen%' then 'Active: Unfrozen' else status end,
+         -- A CLOSED ACCOUNT RE-OPENS, and its closure is cleared rather than kept alongside -- two
+         -- states at once is what `book` exists to stop.
+         ended_as = null, ended_on = null, ended_reason = null, ended_note = null,
+         ended_by = null, ended_at = null
+   where id = p_account;
+
+  -- WHAT WAS PAUSED BY THE HOLD, LET GO. A run held for a promise or a dispute stays held: those
+  -- are the debtor's own doing and the hold ends when the promise or the dispute does.
+  update public.workflow_run_holds h
+     set ended_on = public.raptor_today(),
+         ended_reason = coalesce(h.ended_reason, 'Back on the active book - ' || v_why)
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account
+     and h.cause = 'on_hold' and h.ended_on is null;
+  get diagnostics v_resumed = row_count;
+
+  update public.workflow_runs r set state = 'running'
+   where r.account_id = p_account and r.state = 'held'
+     and not exists (select 1 from public.workflow_run_holds h
+                      where h.run_id = r.id and h.ended_on is null);
+
+  return v_resumed;
+end $$;
+
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') then
+    raise exception 'You are not allowed to reverse a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+  /*
+   * NOR ONE SWORDFISH ALREADY PAID OVER. Reversing writes a fresh copy of an approved payment for
+   * the engine to split, and the copy does not carry the flag -- so this would have turned frozen
+   * history into a Raptor receipt, fees, trust and all. Imported history is frozen at what was
+   * imported (CLAUDE.md); a correction to it is the firm's decision, made case by case.
+   */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It is history and cannot be reversed here.'
+      using errcode = '22023';
+  end if;
+
+  /* NOR ONE WHOSE OVERPAYMENT WAS MOVED. Reversing re-splits a copy, which would make a second
+     undecided overpayment of money already sitting on the other account -- free to be moved
+     or refunded twice. */
+  if exists (select 1 from public.payment_allocations a where a.payment_id = p_payment
+               and a.status <> 'reversed' and a.excess_disposal = 'moved') then
+    raise exception 'Its overpayment was moved to another of the debtor''s accounts. Reversing it here would count that money twice.'
+      using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = public.raptor_now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id,
+      moved_from_allocation_id
+    ) values (
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo, v_pay.bank_line_id, auth.uid(), v_pay.id,
+      v_pay.moved_from_allocation_id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+create or replace function public.reverse_payment_allocation() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.reversed_at is null or old.reversed_at is not null then return new; end if;
+
+  update public.account_fees
+     set cancelled_at = public.raptor_now(),
+         cancel_reason = coalesce(new.reversal_reason, 'The payment was reversed')
+   where payment_id = new.id and annexure_item = '9' and source = 'raptor' and cancelled_at is null;
+
+  /* The invoiced part, which the replay below will not touch. */
+  update public.debtor_accounts d
+     set capital_outstanding = coalesce(d.capital_outstanding, 0) + x.cap
+    from (select a.account_id, sum(a.to_capital) as cap
+            from public.payment_allocations a
+           where a.payment_id = new.id
+             and a.status <> 'reversed'
+             and public.allocation_is_invoiced(a.payover_run_id)
+           group by a.account_id) x
+   where d.id = x.account_id;
+
+  /* THE TRUST LEDGER TAKES BACK AN INVOICED SPLIT TOO (10 Oct). Every entry the allocation wrote
+     -- the client's share, the firm's fees, a debtor's credit, a released overpayment -- answered
+     by its opposite, exactly as reallocate_account does for the un-invoiced ones it removes. The
+     client then owes back what it was paid from this receipt (set off by the reversal line on
+     its next run), and the firm gives back fees it earned on money that was not this debtor's.
+     Without this the ledger kept the client square while the next run took the money back, and a
+     copy approved again on the same account credited -- and paid -- the client a second time. */
+  insert into public.trust_creditor_entries (party, company_id, account_id, amount, reason, payment_id, allocation_id)
+  select e.party, e.company_id, e.account_id, -e.amount, 'Payment reversed: ' || e.reason,
+         e.payment_id, e.allocation_id
+    from public.trust_creditor_entries e
+    join public.payment_allocations a on a.id = e.allocation_id
+   where a.payment_id = new.id
+     and a.status <> 'reversed'
+     and public.allocation_is_invoiced(a.payover_run_id);
+
+  /* MARKED, NOT DELETED, WHERE IT IS ALREADY IN AN APPROVED RUN: the invoice stands and the
+     correction is a negative line in the next one. reallocate_account leaves those rows be. */
+  update public.payment_allocations
+     set status = 'reversed'
+   where payment_id = new.id;
+
+  perform public.reallocate_account(new.account_id);
+  return new;
+end $$;
+
+create or replace function public.set_trust_opening_balance(p_amount numeric, p_as_at date, p_reason text)
+returns void language plpgsql security invoker set search_path to 'public'
+as $$
+declare
+  v_old_amount numeric;
+  v_old_date date;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.has_capability('finance.view') or public.current_user_role() <> 'Administrator' then
+    raise exception 'Only an Administrator with the trust account may set its opening balance.' using errcode = '42501';
+  end if;
+  if p_amount is null or p_as_at is null then
+    raise exception 'An opening balance is an amount AND the day it was the balance.' using errcode = '22023';
+  end if;
+  if p_as_at > public.raptor_today() then
+    raise exception 'The opening balance cannot be dated in the future.' using errcode = '22023';
+  end if;
+  if v_reason is null or length(v_reason) < 10 then
+    raise exception 'Say where the figure comes from (for example, which bank statement).' using errcode = '22023';
+  end if;
+
+  select trust_opening_balance, trust_opening_date into v_old_amount, v_old_date
+    from public.firm_settings where id = true;
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = round(p_amount, 2), trust_opening_date = p_as_at,
+         updated_at = now(), updated_by = auth.uid()
+   where id = true;
+  if not found then
+    raise exception 'The firm''s settings row is missing.';
+  end if;
+  perform set_config('raptor.trust_opening', '', true);
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('trust_opening_balance',
+          case when v_old_date is null then 'Not set'
+               else to_char(v_old_amount, 'FM999999999990.00') || ' at the end of ' || v_old_date end,
+          to_char(round(p_amount, 2), 'FM999999999990.00') || ' at the end of ' || p_as_at,
+          v_reason, auth.uid());
+end;
+$$;
+
+create or replace function public.settle_account(
+  p_account uuid, p_as text, p_reason text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_liaison uuid;
+  v_client text;
+  v_task uuid;
+begin
+  -- SETTLED IS ITS OWN ENDING, NOT A KIND OF WRITE-OFF. Swordfish says "Settled by way of
+  -- compromise" and the firm reads it as a third thing: the debtor paid something and both sides
+  -- agreed that was the end of it. Folded into written_off it would read on every report as a debt
+  -- nobody recovered, which is the opposite of what happened.
+  if p_as not in ('paid_up', 'settled', 'written_off') then
+    raise exception 'An account is settled as paid up, settled or written off. A withdrawal is its own thing.'
+      using errcode = '22023';
+  end if;
+  if p_as = 'written_off' and not public.has_capability('finance.view') then
+    raise exception 'Writing an account off is not yours to do.' using errcode = '42501';
+  end if;
+  if p_as in ('paid_up', 'settled') and not public.may_record_payment() then
+    raise exception 'Closing an account that way is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is ending that way.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = p_as, ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop,
+         -- and a hold left standing would put it back in the manager's review queue for ever.
+         hold_reason = null, hold_review_on = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE. A held step is stopped with the rest: it has not gone, and a
+  -- section 129 sitting pending on a paid-up account is a notice one release away from a debtor
+  -- who owes nothing.
+  perform public.stop_workflows_on_close(p_account, 'The account was closed - ' || v_why);
+  perform public.bureau_removal_task(p_account, p_as, v_why);
+
+  if p_as = 'written_off' then
+    select c.name, p.id into v_client, v_liaison
+      from public.companies c
+      left join public.profiles p on p.name = c.liaison
+     where c.id = v_a.company_id;
+
+    if v_liaison is not null then
+      insert into public.tasks (title, type, status, priority, owner_id, due_date, company_id,
+                                related_to_label)
+      values (
+        'Tell ' || coalesce(v_client, 'the client') || ' that '
+          || coalesce(v_a.case_number, 'an account') || ' was written off - ' || v_why,
+        'Call', 'Not Started', 'Medium', v_liaison, public.raptor_today() + 1, v_a.company_id,
+        coalesce(v_a.case_number, 'Account'))
+      returning id into v_task;
+    end if;
+  end if;
+
+  return v_task;
+end $$;
+
+create or replace function public.settlement_today()
+returns date
+language sql
+stable
+set search_path to 'public'
+as $$ select public.raptor_today() $$;
+
+create or replace function public.split_bank_line(p_line uuid, p_parts jsonb)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_line public.bank_statement_lines;
+  v_part jsonb;
+  v_total numeric := 0;
+  v_count integer := 0;
+  v_account uuid;
+  v_amount numeric;
+  v_payment uuid;
+begin
+  if not public.may_record_payment() then
+    raise exception 'You are not allowed to record payments.' using errcode = '42501';
+  end if;
+
+  select * into v_line from public.bank_statement_lines where id = p_line;
+  if v_line.id is null then raise exception 'That statement line no longer exists.'; end if;
+  if v_line.direction <> 'credit' then
+    raise exception 'Only money received can be split between accounts.';
+  end if;
+  if v_line.payment_id is not null or v_line.status = 'allocated' then
+    raise exception 'That receipt has already been placed.';
+  end if;
+
+  -- THE PARTS MUST ADD UP TO THE PAYMENT, EXACTLY, AND THIS IS THE RULE THE FUNCTION IS FOR.
+  -- Short, and money the bank received belongs to nobody and leaves the trust account
+  -- unreconciled; over, and the firm has credited debtors with more than arrived and will remit
+  -- clients for it. Neither is recoverable once a remittance has gone out, because
+  -- account_payments has no delete. CHECKED BEFORE ANYTHING IS WRITTEN, so a split that does not
+  -- balance creates no payments at all rather than three of five.
+  if p_parts is null or jsonb_array_length(p_parts) < 2 then
+    raise exception 'A split needs at least two accounts. Use Place it for a single account.';
+  end if;
+
+  for v_part in select * from jsonb_array_elements(p_parts) loop
+    v_amount := (v_part->>'amount')::numeric;
+    if v_amount is null or v_amount <= 0 then
+      raise exception 'Every part of a split has to be more than nothing.';
+    end if;
+    v_total := v_total + v_amount;
+  end loop;
+
+  if v_total <> v_line.amount then
+    raise exception 'The parts come to % and the payment was %. A split has to account for all of it.',
+      to_char(v_total, 'FM999999990.00'), to_char(v_line.amount, 'FM999999990.00');
+  end if;
+
+  for v_part in select * from jsonb_array_elements(p_parts) loop
+    v_account := (v_part->>'account_id')::uuid;
+    if not exists (select 1 from public.debtor_accounts where id = v_account) then
+      raise exception 'One of those accounts no longer exists.';
+    end if;
+  end loop;
+
+  for v_part in select * from jsonb_array_elements(p_parts) loop
+    v_account := (v_part->>'account_id')::uuid;
+    v_amount := (v_part->>'amount')::numeric;
+    -- EACH PART IS AN ORDINARY PAYMENT: unapproved like every other, split by the engine on
+    -- approval, carrying the bank line so the five can be found together later. `details` keeps
+    -- the bank's own words, which is what somebody reads when asking why a debtor was credited
+    -- R900 out of a R5 000 deposit.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details,
+      source, paid_to_client, created_by, bank_line_id
+    ) values (
+      v_account,
+      (v_line.txn_date::timestamp at time zone 'Africa/Johannesburg'),
+      v_amount, 'EFT',
+      coalesce(v_line.reference, left(v_line.description, 60)),
+      v_line.description, 'bank', false, auth.uid(), p_line
+    ) returning id into v_payment;
+    v_count := v_count + 1;
+  end loop;
+
+  -- THE LINE IS PLACED, AND ITS OWN payment_id STAYS NULL -- no single payment is the answer. The
+  -- reverse link carries that, and the status is what keeps it off the suspense list.
+  update public.bank_statement_lines
+     set status = 'allocated', placed_at = public.raptor_now(), placed_by = auth.uid()
+   where id = p_line;
+
+  return v_count;
+end $$;
+
+create or replace function public.stamp_promise_default() returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  if new.status = 'defaulted' and coalesce(old.status, '') <> 'defaulted' then
+    new.defaulted_at := public.raptor_now();
+  elsif new.status = 'open' then
+    new.defaulted_at := null;
+  end if;
+  return new;
+end $$;
+
+create or replace function public.stop_workflows_on_close(p_account uuid, p_reason text)
+returns integer
+language plpgsql security definer set search_path to 'public'
+as $$
+declare v_cancelled integer := 0;
+begin
+  with live as (
+    select id from public.workflow_runs
+     where account_id = p_account and state in ('running', 'held')
+  ), killed as (
+    update public.workflow_run_steps s set state = 'cancelled', note = p_reason
+      from live where s.run_id = live.id and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_run_holds h
+     set ended_on = public.raptor_today(),
+         ended_reason = coalesce(h.ended_reason, p_reason)
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account
+     and r.state in ('running', 'held') and h.ended_on is null;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = p_reason, left_at = public.raptor_now()
+   where account_id = p_account and state in ('running', 'held');
+
+  return v_cancelled;
+end $$;
+
+create or replace function public.suspend_payment(p_payment uuid, p_reason text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+begin
+  -- THE SAME PEOPLE WHO WORK THE QUEUE. Parking is a decision about a receipt sitting in that
+  -- list, so it belongs to whoever may clear the list.
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to move a payment to suspense.' using errcode = '42501';
+  end if;
+  -- THE REASON IS NOT DECORATION. It is the whole of what the next person has to go on: a receipt
+  -- in suspense with no words is one nobody can place without asking who parked it and why.
+  if v_reason is null then
+    raise exception 'Say why it is going to suspense.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.approved_at is not null then
+    raise exception 'That payment has been approved and split. Reverse it instead.' using errcode = '22023';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment was reversed.' using errcode = '22023';
+  end if;
+  -- ALREADY THERE IS A NO-OP, NOT A FAILURE: two people clearing one morning's queue is ordinary,
+  -- and the second must not see an error for agreeing with the first.
+  if v_pay.suspended_at is not null then return; end if;
+
+  update public.account_payments
+     set suspended_at = public.raptor_now(), suspense_reason = v_reason
+   where id = p_payment;
+end $$;
+
+create or replace function public.take_parked_credit(p_allocation uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.payment_allocations%rowtype;
+  v_id uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Taking a parked credit is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why it is being taken.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.payment_allocations where id = p_allocation;
+  if not found then raise exception 'That allocation no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.excess_disposal is distinct from 'parked' then
+    raise exception 'That overpayment is not parked.' using errcode = '22023';
+  end if;
+  if v_a.excess_taken_at is not null then
+    raise exception 'That credit has already been taken.' using errcode = '22023';
+  end if;
+  /*
+   * IT WAITS OUT ITS PERIOD. The firm's instruction was "taken to the firm after a period" -- the
+   * period is the point. Taking it the day it is parked is keeping a debtor's money, not giving up
+   * on returning it, and the difference is the only thing that makes this defensible.
+   */
+  if v_a.excess_parked_until > public.raptor_today() then
+    raise exception 'That credit is parked until %. It cannot be taken before then.',
+      to_char(v_a.excess_parked_until, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  /*
+   * TWO ENTRIES, NOT AN EDIT. The ledger is append-only and has no update or delete policy at all
+   * -- check-financial-immutability exists to keep it that way. So the debtor's balance is reduced
+   * by a new negative entry and the firm's raised by a matching positive one, and the pair carries
+   * the allocation it came from. Nothing that was written is rewritten.
+   */
+  insert into public.trust_creditor_entries (party, account_id, allocation_id, amount, reason, created_by)
+  values ('debtor', v_a.account_id, p_allocation, -round(v_a.excess_credit, 2),
+          'Parked credit taken to the firm - ' || v_why, auth.uid());
+
+  insert into public.trust_creditor_entries (party, account_id, allocation_id, amount, reason, created_by)
+  values ('firm', v_a.account_id, p_allocation, round(v_a.excess_credit, 2),
+          'Parked credit taken to the firm - ' || v_why, auth.uid())
+  returning id into v_id;
+
+  update public.payment_allocations
+     set excess_taken_at = public.raptor_now(), excess_taken_by = auth.uid(), excess_taken_reason = v_why
+   where id = p_allocation;
+
+  return v_id;
+end $$;
+
+create or replace function public.trust_by_cycle()
+returns table (
+  period_start date, period_end date, pays_on date, is_open boolean,
+  to_clients numeric, firm_earned numeric, firm_moved numeric,
+  to_debtors numeric, unplaced numeric, held numeric,
+  runs integer, runs_paid integer, runs_to_do integer)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with today as (select public.raptor_today() as d),
+  placed as (
+    select
+      coalesce(
+        r.period_start,
+        public.payover_cycle_start(coalesce(p.allocated_on::timestamptz, p.created_at)),
+        public.payover_cycle_start(coalesce(ap.allocated_on::timestamptz, ap.created_at)),
+        public.payover_cycle_start(e.entry_at)) as cyc,
+      e.party,
+      e.amount,
+      -- A FIRM ENTRY WITH A RECEIPT BEHIND IT WAS EARNED. One without is a drawing, a correction
+      -- or a parked credit taken over, and none of those is a month's earnings.
+      (e.payment_id is not null or e.allocation_id is not null) as from_receipt
+      from public.trust_creditor_entries e
+      left join public.account_payments p on p.id = e.payment_id
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.payover_runs r on r.id = e.payover_run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client'), 0) as to_clients,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_moved,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as to_debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unplaced,
+      coalesce(sum(amount), 0) as held
+      from placed
+     group by cyc
+  )
+  select a.cyc,
+         public.payover_cycle_end(a.cyc),
+         public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         t.d <= public.payover_cycle_end(a.cyc),
+         round(a.to_clients, 2), round(a.firm_earned, 2), round(a.firm_moved, 2),
+         round(a.to_debtors, 2), round(a.unplaced, 2), round(a.held, 2),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status <> 'void'), 0),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status = 'paid'), 0),
+         -- WHAT IS LEFT TO DO ON IT, which is the actionable half: a closed cycle with money in it
+         -- and nothing built is a different problem from one where four runs are sitting approved.
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc
+                      and r.status in ('draft', 'approved', 'sent')), 0)
+    from agg a, today t
+   where public.has_capability('finance.view')
+     -- A CYCLE THAT NETS TO NOTHING IS A CYCLE THAT HAS BEEN PAID, and drawing it as a row of
+     -- zeroes would bury the two that have not under a year of settled months.
+     and (round(a.held, 2) <> 0 or round(a.to_clients, 2) <> 0
+          or round(a.firm_earned, 2) <> 0 or round(a.to_debtors, 2) <> 0)
+   -- OLDEST FIRST: THE ONE THAT LEAVES SOONEST IS THE ONE AT THE TOP. Newest first put the cycle
+   -- still being collected above the one going out in five days, which is backwards twice over --
+   -- it is the wrong end of the firm's own sentence ("what is for this month's payover? And what is
+   -- for next month's payover?"), and a cycle that has gone PAST its day is the one thing on this
+   -- table somebody has to act on, which newest-first buries at the bottom.
+   order by a.cyc asc
+$$;
+
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           r.paid_at is not null as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0) as clients_open,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         public.raptor_today() <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;
+
+create or replace function public.unallocated_batches(p_days integer default 14)
+returns table (
+  handover_id uuid,
+  reference text,
+  company_id uuid,
+  company_name text,
+  received_at timestamptz,
+  unallocated integer,
+  total integer
+)
+language sql
+security invoker
+set search_path to 'public'
+as $$
+  select h.id,
+         h.reference,
+         h.company_id,
+         c.name,
+         h.received_at,
+         count(*) filter (where a.assigned_to is null)::integer,
+         count(*)::integer
+    from public.handovers h
+    join public.debtor_accounts a on a.handover_id = h.id
+    left join public.companies c on c.id = h.company_id
+   where h.received_at >= public.raptor_now() - make_interval(days => greatest(p_days, 0))
+   group by h.id, h.reference, h.company_id, c.name, h.received_at
+  having count(*) filter (where a.assigned_to is null) > 0
+   order by h.received_at desc
+$$;
+
+create or replace function public.unreject_payment(p_payment uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_line public.bank_statement_lines%rowtype;
+  v_siblings integer;
+begin
+  if not public.may_approve_payment() then
+    raise exception 'You are not allowed to change a payment.' using errcode = '42501';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.rejected_at is null then return; end if;
+
+  if v_pay.bank_line_id is not null then
+    select * into v_line from public.bank_statement_lines where id = v_pay.bank_line_id;
+    if v_line.payment_id is not null and v_line.payment_id <> p_payment then
+      raise exception 'That receipt has since been placed on another payment, so this one cannot come back.'
+        using errcode = '22023';
+    end if;
+    select count(*) into v_siblings
+      from public.account_payments s
+     where s.bank_line_id = v_pay.bank_line_id and s.id <> p_payment
+       and s.rejected_at is null and s.reversed_at is null;
+  end if;
+
+  update public.account_payments
+     set rejected_at = null, rejected_by = null, rejection_reason = null
+   where id = p_payment;
+
+  if v_pay.bank_line_id is not null then
+    update public.bank_statement_lines
+       set status = 'allocated',
+           payment_id = case when v_siblings = 0 then p_payment else payment_id end,
+           account_id = coalesce(account_id, case when v_siblings = 0 then v_pay.account_id end),
+           placed_at = coalesce(placed_at, public.raptor_now()),
+           placed_by = coalesce(placed_by, auth.uid())
+     where id = v_pay.bank_line_id;
+  end if;
+end $$;
+
+create or replace function public.withdraw_account(
+  p_account uuid, p_reason text,
+  p_fees boolean default true, p_interest boolean default false, p_commission boolean default false,
+  p_amount numeric default null, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_a public.debtor_accounts%rowtype;
+  v_b record;
+  v_excl numeric := 0;
+  v_vatable numeric := 0;
+  v_vat numeric := 0;
+  v_charge uuid;
+  v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_desc text;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Withdrawing an account is not yours to do.' using errcode = '42501';
+  end if;
+  if v_why is null then
+    raise exception 'Say why the client is withdrawing it.' using errcode = '22023';
+  end if;
+
+  select * into v_a from public.debtor_accounts where id = p_account;
+  if not found then raise exception 'That account no longer exists.' using errcode = 'P0002'; end if;
+  if v_a.ended_as is not null then
+    raise exception 'That account is already closed as %.', v_a.ended_as using errcode = '22023';
+  end if;
+
+  select * into v_b from public.withdrawal_basis(p_account);
+
+  if p_amount is not null then
+    if p_amount < 0 then
+      raise exception 'A withdrawal charge cannot be negative.' using errcode = '22023';
+    end if;
+    v_excl := round(p_amount, 2);
+    v_vatable := v_excl;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account') || ' - agreed amount';
+  else
+    if p_fees then v_excl := v_excl + v_b.fees; v_vatable := v_vatable + v_b.fees; end if;
+    if p_interest then v_excl := v_excl + v_b.interest; end if;
+    if p_commission then v_excl := v_excl + v_b.commission; v_vatable := v_vatable + v_b.commission; end if;
+    v_desc := 'Withdrawal of ' || coalesce(v_a.case_number, 'the account')
+      || case when p_fees and p_interest and p_commission then ' - fees, interest and commission'
+              when p_fees and p_interest then ' - fees and interest'
+              when p_fees and p_commission then ' - fees and commission'
+              when p_fees then ' - fees'
+              when p_interest then ' - interest'
+              when p_commission then ' - commission'
+              else ' - no charge' end;
+  end if;
+
+  v_vat := round(v_vatable * coalesce(v_b.vat_rate, 0.15), 2);
+
+  /*
+   * THE CHARGE GOES TO THE CLIENT, NEVER ONTO THE ACCOUNT'S OWN LEDGER. A withdrawal fee that found
+   * its way into account_fees would be a charge the DEBTOR never incurred, on a file the client has
+   * taken back -- and it would ride in duplum and the Annexure B cap with it. The firm invoices its
+   * client; the tariff is between the firm and the debtor, and the two are not the same book.
+   */
+  if v_excl > 0 then
+    v_charge := public.raise_client_charge(
+      p_company => v_a.company_id, p_kind => 'withdrawal', p_description => v_desc,
+      p_amount => v_excl, p_vat => v_vat, p_settlement => 'set_off', p_account => p_account);
+  end if;
+
+  update public.debtor_accounts
+     set ended_as = 'withdrawn', ended_on = public.raptor_today(), ended_reason = v_why,
+         ended_note = nullif(btrim(coalesce(p_note, '')), ''),
+         ended_by = auth.uid(), ended_at = public.raptor_now(),
+         -- A CLOSED ACCOUNT IS NOT ALSO ON HOLD. Two states at once is what `book` exists to stop.
+         hold_reason = null, hold_review_on = null
+   where id = p_account;
+
+  -- CLOSING STOPS EVERY SEQUENCE, and a withdrawal above all: the client has taken the file back,
+  -- so a notice going out on it afterwards is the firm writing to a debtor on nobody's mandate.
+  perform public.stop_workflows_on_close(p_account, 'Withdrawn by the client - ' || v_why);
+  -- AND THE LISTING COMES OFF. The firm has no claim left on an account it has handed back, so an
+  -- adverse record still standing in its name is one nobody is entitled to keep there.
+  perform public.bureau_removal_task(p_account, 'withdrawn', v_why);
+
+  return v_charge;
+end $$;
+
+create or replace function public.workflow_exit_account(
+  p_account_id uuid, p_event text, p_reason text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+  v_cancelled integer := 0;
+begin
+  v_reason := coalesce(p_reason, case p_event
+    when 'promise'      then 'A promise to pay was made'
+    when 'dispute'      then 'A dispute was raised'
+    when 'paid_in_full' then 'The account was paid in full'
+  end);
+  if v_reason is null then
+    raise exception 'Unknown workflow exit event "%". It is one of promise, dispute, paid_in_full.', p_event;
+  end if;
+
+  -- ONLY WHAT HAS NOT HAPPENED YET: a step that was SENT stays sent. It is the record of a notice
+  -- that reached a debtor, and rewriting it would be rewriting the file an attorney reads
+  -- eighteen months later. A HELD step is cancelled with the rest -- it has not gone, and leaving
+  -- it on a collector's list is how a section 129 goes out three weeks after the debtor agreed
+  -- to pay.
+  with live as (
+    select id from public.workflow_runs
+     where account_id = p_account_id and state in ('running', 'held')
+  ), killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = v_reason
+      from live
+     where s.run_id = live.id and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_run_holds h
+     set ended_on = public.raptor_today(),
+         ended_reason = coalesce(h.ended_reason, 'The sequence ended')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state in ('running', 'held')
+     and h.ended_on is null;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = v_reason, left_at = public.raptor_now()
+   where account_id = p_account_id and state in ('running', 'held');
+
+  return v_cancelled;
+end $$;
+
+create or replace function public.workflow_on_promise_cancelled() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_reason text;
+begin
+  if new.status <> 'cancelled' or coalesce(old.status, '') = 'cancelled' then
+    return new;
+  end if;
+
+  v_reason := 'The arrangement was cancelled'
+    || case new.cancel_cause
+         when 'disputed' then ': the debtor disputes the account'
+         when 'refusing' then ': the debtor will not pay'
+         when 'replaced' then ': it is being recorded again'
+         else ''
+       end;
+
+  /*
+   * ONE: THE ARRANGEMENT'S OWN SEQUENCE STOPS.
+   *
+   * Not workflow_exit_account, which ends EVERY live run on the account -- including the section
+   * 129 this is about to release. Only the sequence whose whole subject is the arrangement: its
+   * reminder, its payment-day message and its receipt are about an undertaking that no longer
+   * exists, and the firm watched one go on running after they cancelled.
+   *
+   * MATCHED ON THE VERSION'S TRIGGER, the same way workflow_hold_account decides which run not to
+   * hold: "this version exists to answer exactly this event" is a fact about the workflow, where
+   * "started recently" is a guess about clocks.
+   *
+   * AND A SENT STEP STAYS SENT. The confirmation reached the debtor; rewriting it would be
+   * rewriting the file an attorney reads eighteen months later.
+   */
+  with live as (
+    select r.id from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = new.account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'promise_due'
+  ), killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = v_reason
+      from live
+     where s.run_id = live.id and s.state in ('pending', 'held')
+     returning s.id
+  )
+  update public.workflow_runs r
+     set state = 'left', left_reason = v_reason, left_at = public.raptor_now()
+    from live
+   where r.id = live.id;
+
+  /*
+   * TWO: AND THE SEQUENCE THE PROMISE WAS HOLDING.
+   *
+   * RELEASED WHENEVER THE PROMISE IS GENUINELY GONE, which is both of the firm's cases: a debtor
+   * who disputes and a debtor who will not pay are each a reason for the collection sequence to
+   * go on -- the dispute will stop it again on its own terms if it is in writing, which is the
+   * firm's rule and not this one's business.
+   *
+   * KEPT ONLY FOR A REPLACEMENT, and that exception is the whole reason the third cause exists.
+   * See the note at the top: a promise may hold a run once per run ever, so releasing here and
+   * letting the corrected arrangement re-capture would leave a section 129 running against a
+   * debtor who is paying.
+   */
+  if new.cancel_cause is distinct from 'replaced' then
+    perform public.workflow_resume_account(new.account_id, v_reason, 'promise');
+  end if;
+
+  return new;
+end $$;
+
+create or replace function public.workflow_resume_account(
+  p_account_id uuid, p_reason text default null, p_cause text default null
+) returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_resumed integer := 0;
+begin
+  /*
+   * TWO SEQUENCES WHOSE WHOLE SUBJECT CAN STOP EXISTING, ENDED HERE BEFORE ANYTHING IS LET GO.
+   *
+   * A PROMISE SEQUENCE WITH NO LIVE ARRANGEMENT. The firm: "there's no active PTP on here, but the
+   * workflow is running a PTP." Its confirmation, its reminder two days before and its message on
+   * the day are all about an undertaking that no longer exists.
+   *
+   * AN INVITATION NOBODY IS WAITING ON. The alleged sequence asks the debtor to put the dispute in
+   * writing and ends by deeming it undisputed. Once the dispute is answered, or once the writing
+   * has arrived, there is nothing left to wait for -- and that notice reaching a debtor whose
+   * dispute is on the firm's desk is the worst thing either sequence can do.
+   *
+   * ENDED, NOT LEFT HELD: a held run is one somebody is expected to release later, and these must
+   * never go again. And it runs on EVERY resume rather than only the event that caused it, so an
+   * order of events nobody has thought of heals instead of sending.
+   */
+  with dead as (
+    select r.id, 'The arrangement is no longer live'::text as why
+      from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'promise_due'
+       /* LIVE MEANS open OR defaulted, the rule ptpSchedule applies to every notice merged on this
+          account. Cancelled, kept and broken are one answer: no undertaking is left. */
+       and not exists (
+         select 1 from public.promises_to_pay p
+          where p.account_id = p_account_id and p.status in ('open', 'defaulted')
+       )
+    union all
+    select r.id, 'Nobody is waiting for this dispute in writing'::text
+      from public.workflow_runs r
+      join public.workflow_versions v on v.id = r.version_id
+     where r.account_id = p_account_id
+       and r.state in ('running', 'held')
+       and v.trigger_kind = 'dispute_alleged'
+       /* ALIVE ONLY WHILE AN OPEN DISPUTE IS STILL BEING WAITED FOR IN WRITING. Closed, or already
+          in writing, and the invitation has been answered one way or the other. */
+       and not exists (
+         select 1 from public.account_queries q
+          where q.account_id = p_account_id
+            and q.kind = 'dispute'
+            and q.status <> 'closed'
+            and not coalesce(q.in_writing, false)
+            and q.received_on is null
+       )
+  ), killed as (
+    /* A SENT STEP STAYS SENT: it is the record of a message that reached a debtor. */
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = dead.why
+      from dead
+     where s.run_id = dead.id and s.state in ('pending', 'held')
+     returning s.id
+  ), closed as (
+    update public.workflow_run_holds h
+       set ended_on = public.raptor_today(),
+           ended_reason = dead.why
+      from dead
+     where h.run_id = dead.id and h.ended_on is null
+     returning h.id
+  )
+  update public.workflow_runs r
+     set state = 'left', left_reason = dead.why, left_at = public.raptor_now()
+    from dead
+   where r.id = dead.id;
+
+  /*
+   * ONLY THE HOLDS THIS EVENT IS ABOUT.
+   *
+   * This closed every open hold on the account whatever had caused it, so a dispute being answered
+   * released a run that a PROMISE had stopped -- and the section 129 went on demanding payment
+   * from a debtor who had an arrangement the firm had accepted.
+   *
+   * NULL MEANS EVERY CAUSE, and it is not a loophole: that is a person pressing Resume, who is
+   * looking at the account and deciding it may go on. The triggers all name their cause.
+   */
+  update public.workflow_run_holds h
+     set ended_on = public.raptor_today(),
+         ended_reason = coalesce(p_reason, 'Resumed')
+    from public.workflow_runs r
+   where h.run_id = r.id
+     and r.account_id = p_account_id
+     and r.state = 'held'
+     and h.ended_on is null
+     and (p_cause is null or h.cause = p_cause);
+
+  /*
+   * AND A RUN GOES ONLY WHERE NOTHING ELSE IS STILL HOLDING IT.
+   *
+   * CLOSE THE HOLD FIRST, THEN LET THE RUN GO -- in this order because the hold's ended_on is what
+   * the app adds up to move the remaining steps: a run set running with its hold still open would
+   * be a sequence whose clock never restarted, and the next morning's sweep would send the step it
+   * was paused on.
+   */
+  update public.workflow_runs r
+     set state = 'running'
+   where r.account_id = p_account_id
+     and r.state = 'held'
+     and not exists (
+       select 1 from public.workflow_run_holds h
+        where h.run_id = r.id and h.ended_on is null
+     );
+
+  get diagnostics v_resumed = row_count;
+  return v_resumed;
+end $$;
+
+create or replace function public.workflow_start_on_allocation()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- Nothing to start: the account is being unallocated, or was never allocated.
+  if new.assigned_to is null then
+    return new;
+  end if;
+  -- Already had somebody. This is a reallocation, which the firm says must not restart it.
+  if tg_op = 'UPDATE' and old.assigned_to is not null then
+    return new;
+  end if;
+
+  /*
+   * AN IMPORTED ACCOUNT IS NOT A NEW HANDOVER, AND THE FIRM SAW THIS HAPPEN.
+   *
+   * THE FIRM, looking at BPM0109: "files imported from Swordfish shouldn't receive handover SMSs
+   * and stuff ... if it's imported from Swordfish, no handover SMSs. New handovers, SMSs and
+   * letters, handover."
+   *
+   * A handover notice tells a debtor their account has just been placed with this firm. On an
+   * account that came across from Swordfish that is simply untrue -- the firm has had the file for
+   * years, and the debtor has already been written to about it -- so the notice is both wrong and,
+   * on an SMS, charged to the debtor under item 1(c) for a fact that is not a fact.
+   *
+   * `imported_at` is the marker because it is written in exactly one place, swordfishImport.ts, and
+   * the ordinary handover path never sets it: on staging it is present on all 20 imported accounts
+   * and absent on all 28 of the others. A new handover is therefore untouched by this, which is the
+   * half of the firm's sentence that must keep working.
+   */
+  if new.imported_at is not null then
+    return new;
+  end if;
+
+  /*
+   * AND NOT ON AN ACCOUNT NOBODY MAY CHASE. BPM0109 is Frozen, so it is in the On hold book, and it
+   * was sent a handover email and a handover SMS anyway: an imported freeze never went through
+   * hold_account, so there was no workflow_run_holds row to pause anything that started afterwards.
+   *
+   * This is the firm's own rule about queues -- "a frozen or closed account must never appear in a
+   * collector's queue or a dialler campaign" -- applied to the thing that actually leaves the
+   * building. Reading `book` rather than the status keeps it the one derivation: an AFTER trigger
+   * sees the stored generated column on NEW, which was probed before this was written.
+   */
+  if new.book <> 'active' then
+    return new;
+  end if;
+
+  /*
+   * EVERY ACTIVE VERSION THAT WAITS FOR THIS EVENT, not "the" one. Two workflows may both start
+   * on allocation the day the firm writes a second, and picking one of them arbitrarily is how a
+   * workflow silently never runs. Draft versions are excluded: a draft is being argued about.
+   *
+   * ONCE PER ACCOUNT AND VERSION, EVER -- in any state, not only while one is running. The
+   * partial unique index on workflow_runs stops a second LIVE run; it would happily allow a
+   * second after the first finished, which on a reallocation is exactly the case the firm ruled
+   * out.
+   *
+   * THE FIRM'S DAY, not the server's. The database is in UTC and the firm is two hours ahead in
+   * winter; around midnight the two disagree about the date, and started_on is what every step's
+   * date is counted from.
+   */
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.id, v.id, public.raptor_today(), new.assigned_to
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'allocated'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.id and r.version_id = v.id
+     );
+
+  return new;
+end $$;
+
+create or replace function public.workflow_start_on_dispute() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_kind text;
+begin
+  if new.kind <> 'dispute' or new.account_id is null then
+    return new;
+  end if;
+
+  /*
+   * WHICH SEQUENCE ANSWERS THIS DISPUTE, decided by the one fact that separates them: have we got
+   * it in writing? `in_writing` and `received_on` are the same answer from two directions -- the
+   * box sets both -- and either one on its own is enough here, because a row carrying only one of
+   * them is a row somebody wrote by hand and it still means the dispute arrived.
+   */
+  v_kind := case when new.in_writing or new.received_on is not null
+    then 'dispute_logged' else 'dispute_alleged' end;
+
+  /*
+   * ON AN UPDATE, ONLY WHEN THE ANSWER HAS CHANGED. A dispute is edited for a dozen reasons -- an
+   * owner, a chase date, a category -- and a sequence started on every one of them would be a
+   * second acknowledgement to the debtor for a field nobody changed.
+   *
+   * THIS BRANCH IS ABOUT EDIT NOISE AND NOTHING ELSE. Ending the invitation used to live inside it
+   * and so never ran on an INSERT -- see the header: a dispute that arrives already in writing left
+   * the deemed-undisputed sequence running.
+   */
+  if tg_op = 'UPDATE' then
+    if v_kind <> 'dispute_logged' then return new; end if;
+    if coalesce(old.in_writing, false) or old.received_on is not null then return new; end if;
+  end if;
+
+  /*
+   * AND THE INVITATION IS OVER, HOWEVER THE WRITING GOT HERE. The alleged sequence exists to ask
+   * for the dispute in writing and, if nothing comes, to send the deemed-undisputed notice. It has
+   * come. A SENT STEP STAYS SENT, as everywhere: it is the record of a notice that reached a
+   * debtor. Its holds are closed with it, or the run is left carrying one nothing will ever lift.
+   */
+  if v_kind = 'dispute_logged' then
+    with live as (
+      select r.id from public.workflow_runs r
+        join public.workflow_versions v on v.id = r.version_id
+       where r.account_id = new.account_id
+         and r.state in ('running', 'held')
+         and v.trigger_kind = 'dispute_alleged'
+    ), killed as (
+      update public.workflow_run_steps s
+         set state = 'cancelled', note = 'The dispute was received in writing'
+        from live
+       where s.run_id = live.id and s.state in ('pending', 'held')
+       returning s.id
+    ), closed as (
+      update public.workflow_run_holds h
+         set ended_on = public.raptor_today(),
+             ended_reason = 'The dispute was received in writing'
+        from live
+       where h.run_id = live.id and h.ended_on is null
+       returning h.id
+    )
+    update public.workflow_runs r
+       set state = 'left', left_reason = 'The dispute was received in writing', left_at = public.raptor_now()
+      from live
+     where r.id = live.id;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, public.raptor_today(), new.raised_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = v_kind
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+
+  return new;
+end $$;
+
+create or replace function public.workflow_start_on_instalment_kept() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if not (
+    new.instalments_kept > coalesce(old.instalments_kept, 0)
+    or (new.status = 'kept' and coalesce(old.status, '') <> 'kept')
+  ) then
+    return new;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, public.raptor_today(), new.resolved_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'payment_received'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+  return new;
+end $$;
+
+create or replace function public.workflow_start_on_promise()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  /* Only a live one. A promise recorded already kept or already broken is history being written
+     down -- an import, a correction -- and history does not send anybody an email. */
+  if new.status <> 'open' then
+    return new;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, public.raptor_today(), new.created_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'promise_due'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+
+  return new;
+end $$;
+
+create or replace function public.workflow_start_on_promise_broken() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if new.status <> 'defaulted' or coalesce(old.status, '') = 'defaulted' then
+    return new;
+  end if;
+
+  insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+  select new.account_id, v.id, public.raptor_today(), new.resolved_by
+    from public.workflow_versions v
+   where v.state = 'active'
+     and v.trigger_kind = 'promise_broken'
+     and not exists (
+       select 1 from public.workflow_runs r
+        where r.account_id = new.account_id
+          and r.version_id = v.id
+          and r.state in ('running', 'held')
+     );
+  return new;
+end $$;
+
+create or replace function public.workflow_step_not_served(
+  p_step uuid, p_reason text, p_by uuid default null)
+returns table (run_id uuid, account_id uuid, step_label text, already boolean)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_run uuid; v_account uuid; v_state text; v_label text; v_already boolean;
+begin
+  select s.run_id, r.account_id, s.state, n.label, s.not_served_at is not null
+    into v_run, v_account, v_state, v_label, v_already
+  from public.workflow_run_steps s
+  join public.workflow_runs r on r.id = s.run_id
+  join public.workflow_nodes n on n.id = s.node_id
+  where s.id = p_step;
+
+  if v_run is null then
+    raise exception 'That step is not there.' using errcode = 'no_data_found';
+  end if;
+
+  /* ONLY A NOTICE THAT ACTUALLY WENT OUT. A step that is pending or held has not been served on
+     anybody, so there is nothing to say was never served -- and marking one would unlock a
+     re-issue of a sequence that has not run. */
+  if v_state <> 'sent' then
+    raise exception 'That notice has not been sent, so it cannot be marked as never delivered.'
+      using errcode = 'check_violation';
+  end if;
+
+  /* IDEMPOTENT. The morning sweep can meet the same bounce twice, and a second marking must not
+     overwrite the first person's reason or re-announce it. */
+  if v_already then
+    return query select v_run, v_account, v_label, true;
+    return;
+  end if;
+
+  update public.workflow_run_steps
+     set not_served_at = public.raptor_now(), not_served_reason = p_reason, not_served_by = p_by
+   where id = p_step;
+
+  /*
+   * AND THE RUN MAY BE ISSUED AGAIN. This is the whole purpose of the marking: the once-per-
+   * account-and-version rule exists because two runs of a statutory sequence are two clocks on
+   * one debt, and that reasoning assumes the first clock was valid. A notice that never reached
+   * the debtor never started a good clock, so a fresh sequence is one clock, not two -- the same
+   * argument the corrected-amount dispute already uses.
+   */
+  update public.workflow_runs set reissue_allowed = true where id = v_run;
+
+  return query select v_run, v_account, v_label, false;
+end $$;
+
+create or replace function public.workflow_supersede_run(p_run uuid, p_reason text)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_cancelled integer := 0;
+  v_state text;
+begin
+  select state into v_state from public.workflow_runs where id = p_run;
+  if v_state is null then
+    raise exception 'That workflow run is not there.' using errcode = 'no_data_found';
+  end if;
+  /* IDEMPOTENT. A run already closed is left exactly as it was -- re-closing it would overwrite
+     the reason it actually ended with, which on a run that exited on a promise is the record of
+     why the firm stopped. */
+  if v_state not in ('running', 'held') then return 0; end if;
+
+  /* A SENT STEP STAYS SENT -- the same rule workflow_exit_account states. It is the record of a
+     notice that reached somebody, and the file has to read "went to the wrong address on the 1st,
+     re-issued on the 8th". Only what has not happened is cancelled. */
+  with killed as (
+    update public.workflow_run_steps s
+       set state = 'cancelled', note = p_reason
+     where s.run_id = p_run and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_cancelled from killed;
+
+  update public.workflow_run_holds
+     set ended_on = public.raptor_today(),
+         ended_reason = coalesce(ended_reason, p_reason)
+   where run_id = p_run and ended_on is null;
+
+  update public.workflow_runs
+     set state = 'left', left_reason = p_reason, left_at = public.raptor_now()
+   where id = p_run;
+
+  return v_cancelled;
+end $$;
+
+-- The columns whose default is a BUSINESS date follow the clock too. Left on the real clock: calls,
+-- emails and activities (a record of something that happened in the real world), imported_at, the
+-- setting-change log, the deployment row, and payover_run_sends.sent_at (when an advice really went).
+alter table public.account_payments alter column received_at set default public.raptor_now();
+alter table public.client_charges alter column raised_on set default public.raptor_today();
+alter table public.account_fees alter column incurred_at set default public.raptor_now();
+alter table public.trust_creditor_entries alter column entry_at set default public.raptor_now();
+alter table public.trust_payments_out alter column instructed_at set default public.raptor_now();
+alter table public.payment_allocations alter column computed_at set default public.raptor_now();
+alter table public.business_expenses alter column incurred_on set default public.raptor_today();
+alter table public.workflow_run_holds alter column started_on set default public.raptor_today();
+alter table public.handovers alter column received_at set default public.raptor_now();
+alter table public.account_status_events alter column changed_at set default public.raptor_now();
+alter table public.account_desk_history alter column effective_from set default public.raptor_now();
+alter table public.account_settlements alter column proposed_at set default public.raptor_now();
+alter table public.account_queries alter column raised_at set default public.raptor_now();
+alter table public.account_judgments alter column recorded_at set default public.raptor_now();
+
+-- A STEP SKIPPED BY A STAGING CLOCK JUMP (prompt 10). It fell due on a day the clock jumped over and
+-- would have been sent; nothing was sent and nothing was charged. It counts as done for the run and
+-- for the SMS that follows its email (stepPairs), and it can only arise on staging -- the jump route
+-- refuses any database that is not.
+alter table public.workflow_run_steps drop constraint workflow_run_steps_state_check;
+alter table public.workflow_run_steps add constraint workflow_run_steps_state_check
+  check (state in ('pending', 'held', 'sent', 'cancelled', 'failed', 'skipped'));

@@ -70,7 +70,7 @@ ok('the parked branch was found', parkedBranch.length > 50)
 no('...and it writes no trust entry', /insert into public\.trust_creditor_entries/.test(parkedBranch))
 no('...and no payment out', /insert into public\.trust_payments_out/.test(parkedBranch))
 /* ALL IT DOES IS SET A DATE. */
-ok('...it only sets a date to come back on', /v_until := current_date/.test(parkedBranch))
+ok('...it only sets a date to come back on', /v_until := public\.raptor_today\(\)/.test(parkedBranch))
 
 /* AND IT READS THE SETTING, so naming the period later costs nothing. */
 ok('the period is a setting', /from public\.firm_settings/.test(parkedBranch))
@@ -81,7 +81,7 @@ ok('...which exists on the table', /add column if not exists parked_credit_month
 const take = liveBody('take_parked_credit')
 ok('take_parked_credit is in schema.sql', !!take)
 ok('it refuses an early take',
-  /if v_a\.excess_parked_until > current_date then[\s\S]{0,200}raise exception/.test(take ?? ''))
+  /if v_a\.excess_parked_until > public\.raptor_today\(\) then[\s\S]{0,200}raise exception/.test(take ?? ''))
 ok('...and refuses one that is not parked at all',
   /excess_disposal is distinct from 'parked'[\s\S]{0,160}raise exception/.test(take ?? ''))
 ok('...and refuses taking it twice',

@@ -14,6 +14,7 @@ import {
 import { recordOutcome } from '../../lib/recordOutcome'
 import type { ChargeResult } from '../../lib/accountCharges'
 import type { ClientPosition } from '../../lib/clientPosition'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * THE FIVE OUTCOMES A CALL SOMEBODY ANSWERED CAN HAVE.
@@ -146,7 +147,7 @@ export function CallButton({ accountId, numbers, actor, livePromise, standing, c
 
   useEffect(() => () => { if (watching.current) clearInterval(watching.current) }, [])
 
-  const schedule = scheduleFor(new Date())
+  const schedule = scheduleFor(clockNow())
   const consultationRate = schedule.items.find((i) => i.id === '7')?.amount ?? 0
   const callRate = schedule.items.find((i) => i.id === '2')?.amount ?? 0
 

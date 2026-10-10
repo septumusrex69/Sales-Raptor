@@ -8,6 +8,7 @@ import { fetchClientBalances, type ClientBalance } from '../../lib/business'
 import { fetchTrustPosition, type TrustPosition } from '../../lib/trust'
 import { monthBounds, monthLabel, thisMonth, trustBankCostsState, type BusinessMonth, type TrustBankCosts } from '../../lib/businessMonth'
 import { fetchBusinessMonth, fetchTrustBankCosts } from '../../lib/businessApi'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * WHAT THE FIRM IS WORTH THIS MONTH — or the part of it Raptor can honestly answer today.
@@ -33,7 +34,7 @@ export function BusinessOverview() {
 
   useEffect(() => {
     let live = true
-    const now = thisMonth(new Date())
+    const now = thisMonth(clockNow())
     const b = monthBounds(now.year, now.month)
     Promise.all([
       /* WHO OWES US, from the same figures as Trust -> Client balances (10 Oct): PTC fees and
@@ -144,7 +145,7 @@ export function BusinessOverview() {
             and a wrong one. Now there is a real one.
           */}
           <Card className="p-5 space-y-2.5">
-            <div className="text-[12.5px] text-slate-400">{monthLabel(thisMonth(new Date()).year, thisMonth(new Date()).month)}</div>
+            <div className="text-[12.5px] text-slate-400">{monthLabel(thisMonth(clockNow()).year, thisMonth(clockNow()).month)}</div>
             <Row label="Earned" value={rand(month?.earned ?? 0)} />
             <Row label="Invoiced to clients" value={rand(month?.invoiced ?? 0)} />
             <Row label="Spent" value={`(${rand(month?.expenses ?? 0)})`} />

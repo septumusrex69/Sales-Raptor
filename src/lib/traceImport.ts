@@ -21,6 +21,7 @@ import { setSubStatus } from './accountStandingData.ts'
 import { keepNewestPerThing } from './traceStore.ts'
 import { likelyRelatives } from './traceProfile.ts'
 import type { AdministrationReading, TraceProfile } from './traceProfile.ts'
+import { clockNow } from './clock.ts'
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
 
@@ -113,7 +114,7 @@ export async function importTrace(input: {
 }): Promise<TraceImportResult> {
   const { accountId, profile, target, decisions, actor } = input
   const result: TraceImportResult = { ...empty }
-  const tracedAt = new Date().toISOString()
+  const tracedAt = clockNow().toISOString()
 
   /*
    * THE DIRECTOR THE REPORT IS ABOUT, resolved before anything else is written.

@@ -244,7 +244,10 @@ check('today is read in the firm’s timezone, not the server’s',
 ok('...which differs from the server’s own day at the boundary',
   todayInJohannesburg(new Date('2026-09-23T23:30:00Z'))
   !== new Date('2026-09-23T23:30:00Z').toISOString().slice(0, 10))
-ok('the runner uses it rather than a clock', /todayInJohannesburg\(\)/.test(runner))
+/* The runner asks the DATABASE what day it is (firmClock -> raptor_clock), which is Johannesburg's
+   day, or the staging clock's on staging (prompt 10); clock.ts falls back to todayInJohannesburg. */
+ok('the runner uses it rather than a clock', /await firmClock\(admin\)/.test(runner)
+  && /todayInJohannesburg\(\)/.test(read('api/_lib/workflow/clock.ts')))
 ok('...and never reads the date off the server',
   !/new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/.test(runner))
 
@@ -459,7 +462,7 @@ ok('the runner never waits out the minutes on the column',
 /* ONE PRESS SENDS BOTH, and the companion is run AS THE CALLER -- without that it would hit its own
    waits-for-a-person refusal and hold, which is the two presses the firm is complaining about. */
 ok('a release sends the SMS behind the notice as the same person',
-  /runOneStep\(admin, s, today, caller\.id\)/.test(read('api/_lib/workflow/release.ts')))
+  /runOneStep\(admin, s, today, caller\.id, \{ now \}\)/.test(read('api/_lib/workflow/release.ts')))
 
 /* ---------------- the arrangement confirmation carries the schedule ---------------- */
 

@@ -292,7 +292,7 @@ ok('...which the tab strip actually draws', /\{t\.alert && \(/.test(read('src/co
  */
 check('every state a step can be in has a word for it',
   Object.keys(RUN_STEP_WORDS).sort(),
-  ['cancelled', 'failed', 'held', 'pending', 'sent'])
+  ['cancelled', 'failed', 'held', 'pending', 'sent', 'skipped'])
 check('held reads as what it is', RUN_STEP_WORDS.held?.label ?? null, 'Waiting on you')
 check('...and failed does not read as the same thing', RUN_STEP_WORDS.failed?.label ?? null, 'Did not send')
 /*

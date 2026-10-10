@@ -36,6 +36,7 @@ import { rejectedSheetName, rejectedSheetRows } from './rejectedSheet.ts'
 import { importNoteBody, importNoteSubject } from './importNote.ts'
 import { formatCurrency } from '../data/mockData'
 import { handoverRateBlock, type ClientCommission } from './commissionRule.ts'
+import { clockNow } from './clock.ts'
 
 /* ONE LITERAL, not a concatenation: supabase-js types the result off this string, and split
    across a `+` every field comes back as GenericStringError. Learned on ROW_COLUMNS below. */
@@ -670,7 +671,7 @@ export async function approveDraft(input: {
    */
   const { data: batch, error: batchError } = await supabase.from('handovers').insert({
     company_id: judged.draft.companyId,
-    received_at: new Date().toISOString(),
+    received_at: clockNow().toISOString(),
     capital_amount: judged.totalCapital,
     accounts_count: going.length,
     reference: judged.draft.filename,
@@ -1022,7 +1023,7 @@ export async function approveDraft(input: {
         queryRaised,
         substituted: substituted.length,
       }),
-      activity_date: new Date().toISOString(),
+      activity_date: clockNow().toISOString(),
     })
     if (error) throw new Error(error.message)
   } catch (e) {
@@ -1033,7 +1034,7 @@ export async function approveDraft(input: {
   await supabase.from('handover_drafts').update({
     state: 'approved',
     handover_id: handoverId,
-    approved_at: new Date().toISOString(),
+    approved_at: clockNow().toISOString(),
     approved_by: me.user?.id ?? null,
   }).eq('id', input.draftId)
 

@@ -78,7 +78,7 @@ ok('...the one that waits for a promise', /v\.trigger_kind = 'promise_due'/.test
  * THE FIRM'S DAY, NOT THE SERVER'S. The database is not in Johannesburg either, and started_on is
  * what every step of the sequence is counted from.
  */
-ok('...dated in the firm’s own day', /now\(\) at time zone 'Africa\/Johannesburg'/.test(fn))
+ok('...dated in the firm’s own day', /public\.raptor_today\(\)/.test(fn))
 /* Whoever took the promise owns the run, so the sequence is somebody's rather than nobody's. */
 ok('...started by whoever took the promise', /new\.created_by/.test(fn))
 

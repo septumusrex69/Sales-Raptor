@@ -44,7 +44,7 @@ const move = dispose.slice(dispose.lastIndexOf("if p_disposal = 'moved' then"))
 ok('a move takes the credit off the first account',
   /insert into public\.trust_creditor_entries \([\s\S]*?values \('debtor', v_company, v_a\.account_id, -v_a\.excess_credit,/.test(move))
 ok('...and puts it on the second as an approved payment',
-  /insert into public\.account_payments \([\s\S]*?approved_at, approved_by, allocated_on, moved_from_allocation_id[\s\S]*?\) values \(\s*p_move_to, coalesce\(v_received, now\(\)\), v_a\.excess_credit/.test(move))
+  /insert into public\.account_payments \([\s\S]*?approved_at, approved_by, allocated_on, moved_from_allocation_id[\s\S]*?\) values \(\s*p_move_to, coalesce\(v_received, public\.raptor_now\(\)\), v_a\.excess_credit/.test(move))
 ok('...marked as moved, pointing back at where it came from',
   /'moved', 'Overpayment moved from '[\s\S]*?, v_a\.id\s*\);/.test(move))
 ok('...after the decision is recorded, so the first account no longer holds the run',
@@ -72,7 +72,7 @@ const rev = liveFn('reverse_payment')
 ok('reversing a payment whose overpayment moved is refused',
   /a\.excess_disposal = 'moved'\) then\s*raise exception 'Its overpayment was moved/.test(rev))
 ok('...before anything is reversed', rev.indexOf("excess_disposal = 'moved'") >= 0
-  && rev.indexOf("excess_disposal = 'moved'") < rev.indexOf('set reversed_at = now()'))
+  && rev.indexOf("excess_disposal = 'moved'") < rev.indexOf('set reversed_at = public.raptor_now()'))
 
 const ui = readFileSync(new URL('../../src/components/finance/DisposeExcessModal.tsx', import.meta.url), 'utf8')
 ok('the box offers the debtor\'s accounts, not a key to type', /fetchMoveTargets\(accountId\)/.test(ui) && !/The account's id/.test(ui))

@@ -44,6 +44,7 @@
  * QA script for this module runs with scripts/qa/tsresolve.mjs, which teaches it to.
  */
 import { isWrittenOff } from './accountStatus.js'
+import { clockNow } from './clock.js'
 /*
  * FROM reminderTime, NOT diaryPriority, though both export this.
  *
@@ -142,7 +143,7 @@ const VAT_RATE = 0.15
  * the ledger would be guessing.
  */
 export async function chargeItemWith(db: ChargeDb, input: ChargeInput): Promise<ChargeResult> {
-  const at = input.at ?? new Date()
+  const at = input.at ?? clockNow()
   const schedule = scheduleFor(at)
 
   /*

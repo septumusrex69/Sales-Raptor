@@ -12,6 +12,7 @@ import {
 } from '../lib/collectionPace.ts'
 import type { HeroFigures } from '../components/collections/CollectionsHero'
 import type { ID, Team } from '../types'
+import { clockNow } from '../lib/clock.ts'
 
 /**
  * THE MONTH'S COLLECTIONS FIGURES, WORKED OUT IN ONE PLACE.
@@ -80,7 +81,7 @@ export interface CollectionsMonth {
 export function useCollectionsMonth(): CollectionsMonth {
   const { users, teams, targets } = useAppStore()
   const { currentUser } = useAuth()
-  const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(new Date()))
+  const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(clockNow()))
   /* Null means "the latest day this period has", which is today for the month in progress and
      the last day of it for a month that has closed. Cleared whenever the period changes. */
   const [asAtKey, setAsAtKey] = useState<string | null>(null)
@@ -101,7 +102,7 @@ export function useCollectionsMonth(): CollectionsMonth {
    * in a way somebody could spot.
    */
   const asAt = useMemo(() => {
-    const latest = new Date() > period.end ? period.end : new Date()
+    const latest = clockNow() > period.end ? period.end : clockNow()
     if (!asAtKey) return latest
     const picked = new Date(`${asAtKey}T12:00:00`)
     if (Number.isNaN(picked.getTime())) return latest
@@ -278,4 +279,4 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 /* Written out rather than through Intl: en-ZA renders September as "Sept", which is neither the
    full month nor a normal abbreviation, and this codebase has been bitten by it before. */
 const shortDay = (d: Date): string => `${d.getDate()} ${MONTHS[d.getMonth()]}`
-const isToday = (d: Date): boolean => dayKey(d) === dayKey(new Date())
+const isToday = (d: Date): boolean => dayKey(d) === dayKey(clockNow())

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import advance from '../_lib/workflow/advance.js'
+import clock from '../_lib/workflow/clock.js'
 import release from '../_lib/workflow/release.js'
 import run from '../_lib/workflow/run.js'
 import start from '../_lib/workflow/start.js'
@@ -14,7 +15,9 @@ import start from '../_lib/workflow/start.js'
  * twelfth of the deployment, and `advance` (the test clock) cost nothing for the same reason.
  */
 const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promise<void>> = {
-  run, release, start, advance,
+  /* `clock` is the staging clock's jump (prompt 10) -- staging only, Administrator only. Here for
+     the reason `advance` is: a route in this file costs nothing, a file costs a twelfth. */
+  run, release, start, advance, clock,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

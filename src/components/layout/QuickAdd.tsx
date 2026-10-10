@@ -11,6 +11,7 @@ import { leadSources, services } from '../../data/mockData'
 import type { Lead, LeadSource, ProductService } from '../../types'
 import { LeadOpportunityFields, emptyLeadOpportunityValue, leadOpportunityPatch } from '../leads/LeadOpportunityFields'
 import { isAssignableOwner } from '../../lib/permissions'
+import { clockNow } from '../../lib/clock.ts'
 
 type QuickAddType = 'lead' | 'contact' | 'company' | 'deal' | 'task' | 'meeting' | 'note'
 
@@ -310,7 +311,7 @@ export function DealForm({ onClose, store, navigate }: { onClose: () => void; st
             handoverAmount: isHandover && form.handoverAmount !== '' ? Number(form.handoverAmount) : undefined,
             accountsCount: isHandover && form.accountsCount !== '' ? Number(form.accountsCount) : undefined,
             notes: form.notes.trim() || undefined,
-            expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : new Date().toISOString(),
+            expectedCloseDate: form.expectedCloseDate ? new Date(form.expectedCloseDate).toISOString() : clockNow().toISOString(),
           })
           onClose()
           navigate(`/deals/${deal.id}`)

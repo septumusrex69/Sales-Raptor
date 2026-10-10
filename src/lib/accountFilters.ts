@@ -13,6 +13,7 @@
  */
 import type { AccountQuery } from './accountBook.ts'
 import { parseBook } from './accountBooks.ts'
+import { clockNow } from './clock.ts'
 
 /** Relative windows, because nobody asks "since 17 July". They ask "in the last two months". */
 export const QUIET_CHOICES = [
@@ -96,7 +97,7 @@ export interface QueryContext {
 
 export function queryFromParams(
   params: URLSearchParams,
-  today = new Date(),
+  today = clockNow(),
   ctx: QueryContext = {},
 ): AccountQuery {
   const q: AccountQuery = {}

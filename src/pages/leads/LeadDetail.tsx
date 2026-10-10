@@ -46,6 +46,7 @@ import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 import { summaryLine } from '../../lib/summaryLine'
 import { hasDealValue } from '../../lib/dealKind'
+import { clockNow } from '../../lib/clock.ts'
 
 type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
 
@@ -179,7 +180,7 @@ export function LeadDetail() {
               number={lead.phone}
               className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
               log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
-              onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
+              onDialled={() => updateLead(lead.id, { lastContactAt: clockNow().toISOString() })}
             />
           ) : (
             <span className="text-slate-300">—</span>
@@ -192,7 +193,7 @@ export function LeadDetail() {
               number={lead.mobile}
               className="inline-flex items-center gap-1.5 text-slate-700 font-medium hover:text-brand-600"
               log={{ label: `${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId }}
-              onDialled={() => updateLead(lead.id, { lastContactAt: new Date().toISOString() })}
+              onDialled={() => updateLead(lead.id, { lastContactAt: clockNow().toISOString() })}
             />
           ) : (
             <span className="text-slate-300">—</span>
@@ -575,7 +576,7 @@ export function LeadDetail() {
         placeholder="Where does this lead stand? Two lines is plenty."
         onSave={(text) => updateLead(lead.id, {
           mainComment: text || undefined,
-          mainCommentAt: new Date().toISOString(),
+          mainCommentAt: clockNow().toISOString(),
           mainCommentBy: currentUser?.id,
         })}
         summary={(

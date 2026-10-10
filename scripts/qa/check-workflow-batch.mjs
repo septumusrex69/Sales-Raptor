@@ -124,7 +124,7 @@ ok('...and an unset secret refuses more, not less',
  * for the rest".
  */
 ok('one pass is bounded by a clock', /const BUDGET_MS = /.test(run))
-ok('...checked BEFORE each step, not after', /if \(Date\.now\(\) - startedAt > BUDGET_MS\)/.test(run))
+ok('...checked BEFORE each step, not after', /if \(Date\.now\(\) - startedAt > budgetMs\)/.test(run))
 ok('...and what it did not reach is counted', /left \+= 1/.test(run))
 ok('...and reported', /remaining: left/.test(run))
 

@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
 import { fetchSettingChanges, logSettingChange, type SettingChange } from '../../lib/payover'
 import { fetchTrustOpening, setTrustOpening, type TrustOpening } from '../../lib/trust'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * THE FOUR THINGS THAT DECIDE WHAT EVERY DEBTOR IS CHARGED AND EVERY CLIENT IS PAID.
@@ -561,7 +562,7 @@ function OpeningModal({ current, onClose, onSave }: {
   onClose: () => void
   onSave: (amount: number, asAt: string, reason: string) => Promise<void>
 }) {
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  const today = clockToday()
   const [amount, setAmount] = useState(current?.amount !== null && current?.amount !== undefined ? current.amount.toFixed(2) : '')
   const [asAt, setAsAt] = useState(current?.asAt ?? '')
   const [reason, setReason] = useState('')

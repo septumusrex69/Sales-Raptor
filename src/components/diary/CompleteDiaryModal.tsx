@@ -14,6 +14,7 @@ import {
   CALL_OUTCOMES, EMPTY_OUTCOME, outcomeReady, type CallOutcome, type OutcomeChoice,
 } from '../../lib/callOutcome.ts'
 import { recordOutcome } from '../../lib/recordOutcome.ts'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * Mark one diary entry worked, and say what happens to the account next.
@@ -35,7 +36,7 @@ export function CompleteDiaryModal({ entry, onClose, onDone }: {
   const { currentUser } = useAuth()
   const { users } = useAppStore()
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = clockToday()
   const [outcome, setOutcome] = useState('')
   const [came, setCame] = useState<OutcomeChoice>(EMPTY_OUTCOME)
   const [plan, setPlan] = useState<NextPlan>(() => initialPlan(entry.kind, addWorkingDays(today, 5)))

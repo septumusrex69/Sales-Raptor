@@ -193,7 +193,9 @@ ok('...every one of them, not the first found', /insert into public\.workflow_ru
 
 /* THE FIRM'S DAY. The database is UTC and the firm is ahead of it; started_on is what every
    step's date is counted from, so a run started at midnight must not be dated yesterday. */
-ok('the run is dated in the firm’s own day', /Africa\/Johannesburg/.test(startFn))
+/* raptor_today() IS the firm's day (Africa/Johannesburg) -- and on staging, the staging clock's
+   (prompt 10). check-staging-clock holds what it is. */
+ok('the run is dated in the firm’s own day', /public\.raptor_today\(\)/.test(startFn))
 /* Whether a workflow starts cannot depend on who did the allocating. */
 ok('it does not depend on who allocated', /security definer/.test(startFn))
 ok('...and is still pinned to the public schema', /set search_path to 'public'/.test(startFn))
@@ -251,7 +253,7 @@ ok('the runner dates what is unplanned before it sends', /planUnplannedRuns\(adm
  * same call, which is what makes "email then SMS minutes later" possible at all.
  */
 const planAt = runner.indexOf('planUnplannedRuns')
-const sendAt = runner.indexOf('runOneStep(admin, step, today)')
+const sendAt = runner.indexOf('runOneStep(admin, step, today,')
 ok('both halves are there', planAt > 0 && sendAt > 0)
 ok('...and it plans before it sends', planAt < sendAt)
 

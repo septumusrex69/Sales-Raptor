@@ -42,7 +42,7 @@ const modal = code('src/pages/accounts/TraceWorkspaceModal.tsx')
 ok('a contact can be born verified', /verified\?: boolean/.test(workspace))
 /* A DATE, NOT A FLAG. "Nobody has confirmed it" and "confirmed on this day" are the two states and
    there is no third, which is why the column is a timestamp. */
-ok('...and it is written as a date', /verified_at: input\.verified \? new Date\(\)\.toISOString\(\) : null/.test(workspace))
+ok('...and it is written as a date', /verified_at: input\.verified \? clockNow\(\)\.toISOString\(\) : null/.test(workspace))
 ok('a finding saved off a trace lands verified', /verified: true,/.test(data))
 /*
  * BUT THE DEFAULT IS NOT TRUE. Saving a finding off a trace is a decision somebody made about a

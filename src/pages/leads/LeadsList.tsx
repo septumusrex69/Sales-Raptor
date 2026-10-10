@@ -45,6 +45,7 @@ import { isMeaningfulActivity } from '../../lib/meaningfulActivity'
 import { ALL_COLUMNS, defaultVisibleColumns, SORTABLE_COLUMN_KEYS, type ColumnKey, type SortKey } from '../../lib/leadColumns'
 import type { Lead, LeadClassification, LeadStatus, ProductService } from '../../types'
 import { LEAD_STATUSES, isActiveLead } from '../../lib/leadStatus'
+import { clockNow } from '../../lib/clock.ts'
 
 const ALL_STATUSES: LeadStatus[] = LEAD_STATUSES
 const SCORE_THRESHOLDS = ['All', '80', '60', '40', '20'] as const
@@ -250,7 +251,7 @@ export function LeadsList() {
 
   function logQuickAction(lead: Lead, type: 'Call' | 'Email' | 'WhatsApp') {
     addActivity({ type, subject: `${type} with ${lead.firstName} ${lead.lastName}`, leadId: lead.id, companyId: lead.companyId })
-    updateLead(lead.id, { lastContactAt: new Date().toISOString() })
+    updateLead(lead.id, { lastContactAt: clockNow().toISOString() })
     if (type === 'Call' && lead.phone) {
       // With BuzzBox connected the PABX rings the rep's extension and bridges the call; the
       // Activity above is already the log of it. Otherwise hand off to the device's dialler.

@@ -19,6 +19,7 @@ import { downloadCsv } from '../lib/csvExport'
 import { topLevelClients, rollupClient, collectionsCoefficient, type ClientRollup } from '../lib/companyRollup'
 import { OUTCOME_WON, OUTCOME_REJECTED, OUTCOME_VALUE } from '../lib/colors'
 import type { Company, ID, Task, Team, User } from '../types'
+import { clockNow } from '../lib/clock.ts'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -567,7 +568,7 @@ export function CommunicationsDashboard() {
         <div className="px-5 pb-5 divide-y divide-slate-50">
           {tasksDue.map((t) => (
             <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
                 <Circle size={15} />
               </button>
               <p className="min-w-0 flex-1 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>

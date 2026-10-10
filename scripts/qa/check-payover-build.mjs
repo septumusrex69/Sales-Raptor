@@ -267,7 +267,7 @@ ok('...never touching an approved, sent, paid or voided run',
 ok('...and is Administrator only', /current_user_role\(\) is distinct from 'Administrator'/.test(refresh))
 const approveRun = liveBody('approve_payover_run') ?? ''
 ok('a run cannot be approved before its cycle has closed without a reason -- on staging too',
-  /if v_end >= \(now\(\) at time zone 'Africa\/Johannesburg'\)::date and nullif\(btrim\(coalesce\(v_early, ''\)\), ''\) is null then\s+raise exception/.test(approveRun)
+  /if v_end >= public\.raptor_today\(\) and nullif\(btrim\(coalesce\(v_early, ''\)\), ''\) is null then\s+raise exception/.test(approveRun)
   && !/is_staging_database/.test(approveRun))
 const early = liveBody('approve_payover_run_early') ?? ''
 ok('approving early demands a real reason and keeps who gave it',

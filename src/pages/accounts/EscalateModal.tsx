@@ -12,8 +12,11 @@ import { chargeMessage } from '../../lib/accountCharges'
 import { raiseTicketFromEmail } from '../../lib/userMail'
 import { useAuth } from '../../store/AuthContext'
 import type { User } from '../../types'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * Raising a dispute.
@@ -914,7 +917,7 @@ export function EscalateModal({
           */}
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Follow it up on</span>
-            <input type="date" value={chaseOn} min={TODAY} onChange={(e) => setChaseOn(e.target.value)}
+            <input type="date" value={chaseOn} min={TODAY()} onChange={(e) => setChaseOn(e.target.value)}
               className="w-full mt-1 text-sm rounded-lg border border-slate-200 px-2.5 py-2" />
             <span className="block text-[11px] text-slate-500 mt-1">
               When this comes back to you if it has not been answered.

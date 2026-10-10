@@ -5,6 +5,7 @@ import { leadServiceValueList } from './LeadOpportunityFields'
 import { REJECTION_REASONS } from '../../lib/rejection'
 import type { ConvertConfirmation, ConvertDealConfirmation, ConvertDealOutcome } from '../../store/AppStore'
 import type { Deal, Lead, ProductService, RejectionReason } from '../../types'
+import { clockToday } from '../../lib/clock.ts'
 
 const OUTCOMES: { value: ConvertDealOutcome; label: string; hint: string }[] = [
   { value: 'signed', label: 'Signed', hint: 'Confirmed and won at the values below' },
@@ -79,7 +80,7 @@ export function ConvertLeadModal({
   onClose: () => void
   onConfirm: (confirmation: ConvertConfirmation) => void
 }) {
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [startDate, setStartDate] = useState(() => clockToday())
   const [rows, setRows] = useState<Row[]>(() => initialRows(lead, openDeals))
 
   function patchRow(key: string, patch: Partial<Row>) {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { paymentReference } from '../../lib/paymentsOut'
+import { clockToday } from '../../lib/clock.ts'
 
 export interface PayableRun {
   id: string
@@ -26,7 +27,7 @@ export function MarkPaidModal({ runs, onClose, onSave }: {
 }) {
   const [refs, setRefs] = useState<Record<string, string>>(
     () => Object.fromEntries(runs.map((r) => [r.id, paymentReference(r.invoiceNumber) ?? ''])))
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(() => clockToday())
   const [busy, setBusy] = useState(false)
   const one = runs.length === 1
   const ready = runs.every((r) => (refs[r.id] ?? '').trim())

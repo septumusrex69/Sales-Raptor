@@ -20,6 +20,7 @@ import { promoteTraceItem, recordTraceOutcome, traceReportUrl } from '../../lib/
 import { recordDial } from '../../lib/accountCalls'
 import { TraceButton } from './TraceButton'
 import { formatDate, formatMoney } from '../../data/mockData'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * Working inside a trace.
@@ -194,7 +195,7 @@ export function TraceWorkspaceModal({
     setBusy(row.key); setError(null)
     try {
       for (const item of row.items) await recordTraceOutcome({ itemId: item.id, outcome, actor })
-      const at = outcome === null ? null : new Date().toISOString()
+      const at = outcome === null ? null : clockNow().toISOString()
       setLocal((s) => {
         const next = { ...s }
         for (const item of row.items) next[item.id] = { ...next[item.id], outcome, outcomeAt: at }

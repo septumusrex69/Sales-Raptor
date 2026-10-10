@@ -315,7 +315,7 @@ ok('the costs pool is split oldest fee first',
  * receipt, after whatever else was charged that day.
  */
 ok('the receipt fee this payment raises is dated the day the money arrived',
-  /coalesce\(p_new_fee_day, current_date\)::timestamptz/.test(feeSplit)
+  /coalesce\(p_new_fee_day, public\.raptor_today\(\)\)::timestamptz/.test(feeSplit)
   && /select 1, '0{8}-/.test(feeSplit))
 /* AND THE RECOVERABLE RULE IS THE ENGINE'S. engine_balances gathers the pool with fee_stands() and
    `billed is not false`, and it is that pool to_costs came out of; the money position view's

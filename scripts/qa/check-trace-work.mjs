@@ -469,7 +469,7 @@ ok('...and what came of it recorded', /onOutcome\(e\.target\.value === ''/.test(
  */
 ok('...and undone when it was wrong', /\? null : e\.target\.value as TraceOutcome/.test(workspace))
 ok('...which clears it rather than recording a fifth state',
-  /outcome_at: input\.outcome === null \? null : new Date/.test(data))
+  /outcome_at: input\.outcome === null \? null : clockNow\(\)/.test(data))
 /*
  * AN OUTCOME GOES ON EVERY FINDING BEHIND THE ROW. One number printed under Cell, Home and Work
  * is one row over three findings; writing to one of them leaves the other two reading "Not

@@ -20,6 +20,7 @@ import {
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
 import { clerksReached } from '../../lib/workflowSchedule.ts'
 import { dayKey } from '../../lib/collectionPace.ts'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * Library &rarr; Workflows.
@@ -380,7 +381,7 @@ function WorkflowBuilder({ workflowKey, mayEdit, onBack }: {
    * whether the viability review lands in the December shutdown — and the picker is here rather
    * than fixed at today so the firm can try the dates that worry them.
    */
-  const [from, setFrom] = useState<string>(() => dayKey(new Date()))
+  const [from, setFrom] = useState<string>(() => dayKey(clockNow()))
   const [tab, setTab] = useState<(typeof TABS)[number]>('Builder')
   const [selected, setSelected] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

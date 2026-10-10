@@ -1,3 +1,4 @@
+import { clockNow } from './clock.ts'
 /**
  * How a date reads in a list.
  *
@@ -15,14 +16,14 @@ export function relativeDayLabel(iso?: string): string {
   if (Number.isNaN(date.getTime())) return '—'
 
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const dayDiff = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86400000)
+  const dayDiff = Math.round((startOfDay(clockNow()) - startOfDay(date)) / 86400000)
 
   if (dayDiff === 0) return 'Today'
   if (dayDiff === 1) return 'Yesterday'
   if (dayDiff > 1 && dayDiff < 7) return date.toLocaleDateString('en-ZA', { weekday: 'long' })
   if (dayDiff >= 7 && dayDiff < 14) return 'Last week'
 
-  const sameYear = date.getFullYear() === new Date().getFullYear()
+  const sameYear = date.getFullYear() === clockNow().getFullYear()
   return date.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: sameYear ? undefined : 'numeric' })
 }
 
@@ -39,7 +40,7 @@ export function dateGroupLabel(iso?: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return 'No date'
 
-  const now = new Date()
+  const now = clockNow()
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
   const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86400000)
 
@@ -75,7 +76,7 @@ export function dateGroupLabel(iso?: string): string {
  * A date in the future is a data error rather than an age, and comes back empty so the caller
  * shows the date alone.
  */
-export function timeOnDesk(iso?: string | null, now: Date = new Date()): string {
+export function timeOnDesk(iso?: string | null, now: Date = clockNow()): string {
   if (!iso) return ''
   const from = new Date(iso)
   if (Number.isNaN(from.getTime())) return ''
@@ -155,7 +156,7 @@ export function firmDay(iso: string): string {
 }
 
 /** Today, on the same calendar. */
-export function firmToday(now: Date = new Date()): string {
+export function firmToday(now: Date = clockNow()): string {
   return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
 }
 
@@ -171,7 +172,7 @@ export function firmToday(now: Date = new Date()): string {
  * windows are in -- and `hourCycle: 'h23'` because en-GB midnight is "24:00" otherwise, which sorts
  * after every window there is.
  */
-export function firmClock(now: Date = new Date()): string {
+export function firmClock(now: Date = clockNow()): string {
   return now.toLocaleTimeString('en-GB', {
     timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   })
@@ -194,7 +195,7 @@ export function firmClock(now: Date = new Date()): string {
  * NO CLOCK OF ITS OWN: the time to compare against is passed in, so this can be checked without
  * mocking one.
  */
-export function agoLabel(iso?: string | null, now: Date = new Date()): string {
+export function agoLabel(iso?: string | null, now: Date = clockNow()): string {
   if (!iso) return ''
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return ''

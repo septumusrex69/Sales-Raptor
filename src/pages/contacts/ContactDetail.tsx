@@ -20,6 +20,7 @@ import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
 } from '../../components/record/RecordComment'
 import { companyById, formatCurrency, formatDate, formatDateTime, userById } from '../../data/mockData'
+import { clockNow } from '../../lib/clock.ts'
 
 type ContactTab = 'Overview' | 'Activity' | 'Notes' | 'Tasks'
 
@@ -237,7 +238,7 @@ export function ContactDetail() {
         placeholder="Anything the next person should know before they ring? Two lines is plenty."
         onSave={(text) => updateContact(contact.id, {
           mainComment: text || undefined,
-          mainCommentAt: new Date().toISOString(),
+          mainCommentAt: clockNow().toISOString(),
           mainCommentBy: currentUser?.id,
         })}
         summary={(

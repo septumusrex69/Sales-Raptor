@@ -23,6 +23,7 @@ import {
 } from '../lib/salesMonth'
 import { resolveTarget } from '../lib/targets'
 import { formatCurrency } from '../data/mockData'
+import { clockNow } from '../lib/clock.ts'
 
 const MONTHS_SHOWN = 12
 
@@ -50,7 +51,7 @@ export function CollectorProfile() {
   const { userId = '' } = useParams()
   const { users, teams, targets } = useAppStore()
   const { currentUser } = useAuth()
-  const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(new Date()))
+  const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(clockNow()))
   const [floor, setFloor] = useState<CollectorStats[] | null>(null)
   const [daily, setDaily] = useState<DailyTake[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -84,7 +85,7 @@ export function CollectorProfile() {
   const stats = floor?.find((r) => r.userId === userId) ?? null
   const score = stats ? scoreCollector(stats) : null
 
-  const pace = useMemo(() => monthPace(period.start, period.end, new Date()), [period])
+  const pace = useMemo(() => monthPace(period.start, period.end, clockNow()), [period])
   const target = useMemo(() => monthTargetFor({
     set: resolveTarget(targets, 'user', userId, 'collected', period.key)?.targetValue ?? null,
     grade: person?.collectorGrade ?? null,
@@ -151,7 +152,7 @@ export function CollectorProfile() {
             </p>
           </div>
         </div>
-        <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={new Date()} />
+        <SalesMonthPicker value={period} onChange={setPeriod} referenceDate={clockNow()} />
       </div>
 
       {error && (

@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import type { BusinessExpense, BusinessMonth, ExpenseCategory, TrustBankCosts } from './businessMonth'
 import { toIncomeRow, type IncomeRow } from './businessIncome'
+import { clockNow } from './clock.ts'
 
 /** The firm's own books, read and written. Split from businessMonth.ts so a check can import that. */
 
@@ -73,7 +74,7 @@ export async function recordExpense(e: {
  */
 export async function cancelExpense(id: string, reason: string): Promise<void> {
   const { error } = await supabase.from('business_expenses')
-    .update({ cancelled_at: new Date().toISOString(), cancelled_reason: reason })
+    .update({ cancelled_at: clockNow().toISOString(), cancelled_reason: reason })
     .eq('id', id)
   if (error) throw new Error(error.message)
 }

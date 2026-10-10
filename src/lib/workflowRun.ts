@@ -24,7 +24,8 @@
 import { landsOn, landsOnInstalment, type DayUnit, type WorkflowNode } from './workflowBuilder.js'
 import type { Instalment } from './ptpSchedule.js'
 
-export type RunStepState = 'pending' | 'held' | 'sent' | 'cancelled' | 'failed'
+/** `skipped`: a staging clock jump passed over it -- it would have gone, and was not sent (prompt 10). */
+export type RunStepState = 'pending' | 'held' | 'sent' | 'cancelled' | 'failed' | 'skipped'
 
 export interface PlannedStep {
   nodeId: string

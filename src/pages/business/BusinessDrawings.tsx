@@ -8,6 +8,7 @@ import { monthBounds, monthLabel, thisMonth, type BusinessMonth } from '../../li
 import { drawFromTrust, fetchBusinessMonth, fetchDrawings, type Drawing } from '../../lib/businessApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * DRAWING THE FIRM'S EARNINGS OUT OF TRUST.
@@ -26,7 +27,7 @@ import { useAuth } from '../../store/AuthContext'
  */
 export function BusinessDrawings() {
   const { currentUser } = useAuth()
-  const now = thisMonth(new Date())
+  const now = thisMonth(clockNow())
   const [year, setYear] = useState(now.year)
   const [month, setMonth] = useState(now.month)
   const [rows, setRows] = useState<Drawing[]>([])

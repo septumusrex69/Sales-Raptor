@@ -11,8 +11,11 @@ import {
 import type { User } from '../../types'
 import { canViewClients } from '../../lib/permissions'
 import { escalationCard } from '../../lib/disputeCategories'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * Where a dispute sits, as a dot, in the app's own palette.
@@ -186,7 +189,7 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
   clientLiaisonId: string | undefined
 }) {
   const [closing, setClosing] = useState(false)
-  const stale = isStale(q, TODAY)
+  const stale = isStale(q, TODAY())
   const owner = users.find((u) => u.id === q.ownerId)
   const ctx = { accountId, actorId: actor.id, actorName: actor.name }
 
@@ -242,7 +245,7 @@ function QueryCard({ query: q, accountId, users, actor, busy, run, onChange, cli
           date is said out loud rather than left blank.
         */}
         {(() => {
-          const line = stageLine({ stage: q.stage, chaseOn: q.chaseOn, today: TODAY })
+          const line = stageLine({ stage: q.stage, chaseOn: q.chaseOn, today: TODAY() })
           return (
             <span className="inline-flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STAGE_DOT[q.stage] }} />

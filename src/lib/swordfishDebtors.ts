@@ -13,6 +13,7 @@
  */
 import { num, isoDate, text, type CsvRow } from './csv.ts'
 import { normaliseRegistrationNumber } from './debtorIdentity.ts'
+import { clockNow } from './clock.ts'
 
 export interface ContactRow {
   account_id: string
@@ -126,7 +127,7 @@ function promiseStatus(raw: string): PromiseRow['status'] | null {
   }
 }
 
-export function readDebtorsPerClient(rows: CsvRow[], now = new Date()): DebtorImport {
+export function readDebtorsPerClient(rows: CsvRow[], now = clockNow()): DebtorImport {
   const nowIso = now.toISOString()
   /* The firm's day, not UTC's: a promise due "today" in Johannesburg is still live at 01:00. */
   const today = now.toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })

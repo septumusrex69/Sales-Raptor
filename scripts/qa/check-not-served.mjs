@@ -119,7 +119,7 @@ const fnAt = Math.max(
 )
 ok('the function is in the schema', fnAt > 0)
 const fn = fnAt > 0 ? schema.slice(fnAt, schema.indexOf('$$;', fnAt)) : ''
-ok('...and stamps the step', /set not_served_at = now\(\)/.test(fn))
+ok('...and stamps the step', /set not_served_at = public\.raptor_now\(\)/.test(fn))
 ok('...and unlocks the re-issue', /update public\.workflow_runs set reissue_allowed = true/.test(fn))
 /*
  * ONLY A NOTICE THAT WENT OUT. A pending or held step has been served on nobody, so there is

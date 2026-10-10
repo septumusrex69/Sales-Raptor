@@ -11,8 +11,11 @@ import {
   QUERY_OUTCOME_LABEL, QUERY_STAGE_LABEL, type QueryStage, type QueueRow,
 } from '../../lib/accountQueries'
 import { escalationCard } from '../../lib/disputeCategories'
+import { clockToday } from '../../lib/clock.ts'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+/* A function, not a constant: read when the page draws, after the firm's clock has been loaded
+   (lib/clock) -- a module constant would be fixed at whatever moment the bundle was first imported. */
+const TODAY = () => clockToday()
 
 /**
  * The columns, in the order a dispute travels.
@@ -203,7 +206,7 @@ export function DisputesBoard() {
     return {
       count: all.length,
       open: open.length,
-      stale: open.filter((r) => isStale(r, TODAY)).length,
+      stale: open.filter((r) => isStale(r, TODAY())).length,
       oldest: open.reduce((m, r) => Math.max(m, ageInDays(r)), 0),
     }
   }, [rows, scope, isMine])
@@ -375,7 +378,7 @@ export function DisputesBoard() {
                     </td>
                     <td className="px-2 py-1.5 text-slate-500 max-w-[10rem] truncate">{q.ownerId ? userById(q.ownerId)?.name ?? '—' : '—'}</td>
                     <td className="px-2 py-1.5"><StageChip column={columnOf(q)} /></td>
-                    <td className={`px-2 py-1.5 tabular-nums ${isStale(q, TODAY) ? 'text-negative-700 font-medium' : 'text-slate-500'}`}>
+                    <td className={`px-2 py-1.5 tabular-nums ${isStale(q, TODAY()) ? 'text-negative-700 font-medium' : 'text-slate-500'}`}>
                       {q.chaseOn ? formatDate(q.chaseOn) : '—'}
                     </td>
                     <td className="px-3 py-1.5 text-right text-slate-500 tabular-nums">{ageInDays(q)}d</td>
@@ -463,7 +466,7 @@ function DisputeCard({ dispute: q, ownerName, busy, onDragStart, onOpen }: {
         {closed
           ? <span className="text-[var(--c-green)] shrink-0">{q.outcome ? QUERY_OUTCOME_LABEL[q.outcome] : 'Closed'}</span>
           : q.chaseOn
-            ? <span className={`shrink-0 ${isStale(q, TODAY) ? 'text-negative-700 font-medium' : 'text-slate-400'}`}>Chase {formatDate(q.chaseOn)}</span>
+            ? <span className={`shrink-0 ${isStale(q, TODAY()) ? 'text-negative-700 font-medium' : 'text-slate-400'}`}>Chase {formatDate(q.chaseOn)}</span>
             : <span className="text-slate-300 shrink-0">No chase date</span>}
       </div>
     </div>

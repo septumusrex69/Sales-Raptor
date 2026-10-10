@@ -17,6 +17,7 @@ import { diarise } from './diary.ts'
 import type { HandOutPlan } from './handOut.ts'
 import { ID_CHUNK, idChunks } from './accountAllocation.ts'
 import { handOutNotices } from './handOutNotice.ts'
+import { clockNow } from './clock.ts'
 
 /**
  * The two things you can do with a stack of accounts, and they are not independent switches.
@@ -191,7 +192,7 @@ export async function commitHandOut(input: {
     try {
       const { error: supersedeError } = await supabase
         .from('diary_entries')
-        .update({ state: 'moved', moved_at: new Date().toISOString(), moved_by: input.actor.id })
+        .update({ state: 'moved', moved_at: clockNow().toISOString(), moved_by: input.actor.id })
         .in('account_id', slice.map((p) => p.accountId))
         .eq('state', 'open')
       if (supersedeError) throw new Error(supersedeError.message)

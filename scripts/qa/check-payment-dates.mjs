@@ -143,10 +143,10 @@ ok('a run never claims money Swordfish paid over',
 
 const approve = fn('approve_payment')
 ok('approving sets the allocation date',
-  /allocated_on = \(now\(\) at time zone 'Africa\/Johannesburg'\)::date/.test(approve))
+  /allocated_on = public\.raptor_today\(\)/.test(approve))
 /* THE FIRM'S DAY. The database is UTC and Johannesburg is ahead of it, so around midnight the two
    disagree about which cycle a receipt falls in. */
-ok('...on the firm’s clock', /Africa\/Johannesburg/.test(approve))
+ok('...on the firm’s clock (raptor_today is Johannesburg’s day; check-staging-clock)', /public\.raptor_today\(\)/.test(approve))
 /* AND THE RECEIVED DATE IS NEVER TOUCHED: it is what the debtor did, and the other is what we did. */
 ok('...without moving the received date', !/set .{0,40}received_at/.test(approve))
 

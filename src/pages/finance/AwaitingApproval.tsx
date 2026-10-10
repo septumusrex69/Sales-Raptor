@@ -18,6 +18,7 @@ import {
   type QueueException, type QueueFigures,
 } from '../../lib/paymentsQueue'
 import { cycleStartOn, shortDate } from '../../lib/trustCycles'
+import { clockToday } from '../../lib/clock.ts'
 /*
  * THE FOUR FIGURES BEHIND EACH FEE LINE ARE DRAWN FROM ONE DEFINITION, shared with the
  * administrator's check of posted payments. On the queue they moved out of the table and into the
@@ -115,7 +116,7 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
         fetchAwaitingApproval(),
         /* TODAY'S ONLY. The record is permanent, but the strip under the queue is about what just
            happened -- a month of rejections there would be a second list nobody reads. */
-        fetchRejectedPayments(new Date().toISOString().slice(0, 10)),
+        fetchRejectedPayments(clockToday()),
       ])
       setRows(queue)
       setRejected(thrown)

@@ -2,6 +2,7 @@ import { CalendarClock, Users } from 'lucide-react'
 import { SalesMonthPicker } from '../ui/SalesMonthPicker'
 import { dayKey } from '../../lib/collectionPace.ts'
 import type { CollectionsMonth } from '../../hooks/useCollectionsMonth'
+import { clockNow } from '../../lib/clock.ts'
 
 /**
  * THE THREE CONTROLS THAT SAY WHAT THE FIGURES ARE OF: the period, the day they are read as at,
@@ -24,7 +25,7 @@ export function MonthControls({ month }: { month: CollectionsMonth }) {
   return (
     <>
       <SalesMonthPicker value={period} onChange={(p) => { setPeriod(p); setAsAtKey(null) }}
-        referenceDate={new Date()} variant="dark" />
+        referenceDate={clockNow()} variant="dark" />
       <span className="hidden sm:block h-4 w-px bg-white/20" />
       <span className="flex items-center gap-2 text-xs text-white/60">
         <CalendarClock size={14} className="shrink-0 text-white/50" />
@@ -32,7 +33,7 @@ export function MonthControls({ month }: { month: CollectionsMonth }) {
         <input id="collections-as-at" type="date" value={dayKey(asAt)}
           onChange={(e) => setAsAtKey(e.target.value || null)}
           min={dayKey(period.start)}
-          max={dayKey(new Date() > period.end ? period.end : new Date())}
+          max={dayKey(clockNow() > period.end ? period.end : clockNow())}
           aria-label="Read the report as at"
           className="rounded-lg border border-white/15 bg-white/10 px-2 py-1.5 text-xs text-white [color-scheme:dark]" />
       </span>

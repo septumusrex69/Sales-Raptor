@@ -12,6 +12,7 @@ import type {
   Activity, ActivityType, AppNotification, Company, Contact, Deal, DealStage, Handover, ID, Lead,
   ProductService, Proposal, RejectionReason, Target, TargetMetric, Task, TaskType, Team, TeamKind, User,
 } from '../types'
+import { clockNowMs } from '../lib/clock.ts'
 
 /**
  * Generic camelCase(app) <-> snake_case(Postgres) row mapping. The SQL
@@ -667,7 +668,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         kind: kindForService(def.service),
         value: def.value,
         probability: DEAL_STAGE_PROBABILITY['New Deal'],
-        expectedCloseDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        expectedCloseDate: new Date(clockNowMs() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         service: def.service,
         handoverAmount: def.handoverAmount,
         accountsCount: def.accountsCount,
@@ -1032,7 +1033,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       const proposal: Proposal = {
         id: crypto.randomUUID(),
         status: 'Draft',
-        validityDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
+        validityDate: new Date(clockNowMs() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         createdAt: nowIso(),
         ...input,
       }

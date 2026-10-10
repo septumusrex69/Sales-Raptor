@@ -19,6 +19,7 @@ import {
 import { formatCurrency } from '../../data/mockData'
 import { HandoverImportCard } from './HandoverImportCard'
 import { LeadsImportCard } from './LeadsImportCard'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * Which database this app is actually pointed at.
@@ -146,7 +147,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
    * settledThroughDefault offers their own worked example; this box is where they correct it.
    */
   const [settledThrough, setSettledThrough] = useState(
-    () => settledThroughDefault(new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })),
+    () => settledThroughDefault(clockToday()),
   )
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [reading, setReading] = useState(false)

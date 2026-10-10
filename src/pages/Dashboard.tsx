@@ -13,6 +13,7 @@ import { CompareSelector, type CompareMode } from '../components/ui/CompareSelec
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
+import { clockNow } from '../lib/clock.ts'
 /*
  * The only thing on this page that needs the charting library, and it sits below the fold.
  * Loading it separately lets the figures — which are what someone opens the dashboard for —
@@ -540,7 +541,7 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
           {tasksDue.map((t) => (
             /* One line a task, the checking-list look: what it is about trails the title in grey. */
             <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: new Date().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
                 <Circle size={15} />
               </button>
               <p className="min-w-0 flex-1 flex items-center gap-1.5">
