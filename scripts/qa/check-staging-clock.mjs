@@ -129,7 +129,7 @@ ok('...and the runs are refreshed, as opening the queue would', /v_refreshed := 
 const clear = lastFn('clear_staging').body
 ok('Clear staging needs the words typed', /if p_confirm is distinct from 'CLEAR STAGING' then\s+raise exception/.test(clear))
 ok('...is guarded', /perform public\.staging_clock_guard\(\)/.test(clear))
-ok('...empties the money in one statement', /'trunc' \|\| 'ate table public\.payover_run_sends, public\.payover_run_lines, public\.payover_runs, '/.test(clear))
+ok('...empties the money in one statement', /'trunc' \|\| 'ate table public\.client_business_receipts, public\.payover_run_sends, public\.payover_run_lines, public\.payover_runs, '/.test(clear))
 ok('...clears the trust opening balance it described', /set trust_opening_balance = null, trust_opening_date = null/.test(clear))
 ok('...and starts the clock on the day picked', /set business_date = p_start/.test(clear))
 no('...and never touches people, templates or mailboxes',

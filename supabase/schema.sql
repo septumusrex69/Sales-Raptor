@@ -38335,3 +38335,624 @@ end $$;
 
 revoke all on function public.match_payovers_by_reference() from public, anon;
 grant execute on function public.match_payovers_by_reference() to authenticated;
+
+
+-- -----------------------------------------------------------------------------------------------------
+-- A CLIENT PAYS WHAT IT OWES INTO THE BUSINESS ACCOUNT, MATCHED TO ITS PAYOVER (the firm, 10 Oct: "that's
+-- paid to our business account, not to the trust account. So we would have to match it."; asked to go
+-- ahead the same day).
+--
+-- A run below nil is the client owing the firm (mostly PTC commission). Until now the only way that debt
+-- left was the next payover: build_payover_run carries the shortfall in. A client who pays it instead --
+-- into the BUSINESS account, with the run's reference -- had nowhere to be recorded, and the shortfall
+-- would then have been taken twice: once by the client's payment and again off their next payover.
+--
+-- WHAT RECORDING IT DOES:
+--   * a client_business_receipts row (append-only: no update or delete policy, a trigger refuses both);
+--   * the run is marked settled by it (payover_runs.settled_direct_receipt_id), so it is NOT carried into
+--     the next payover, ptc_ageing no longer lists it, and the cycle close does not look for it;
+--   * if the shortfall had already been carried into a run that is still being checked, that run is
+--     rebuilt without it; if that run is approved or later, the debt was already taken and this refuses;
+--   * one trust ledger entry, the client's: + the amount, "Paid to the business account against ...". The
+--     client's trust balance stood at minus the shortfall with no money behind it (the PTC was paid to
+--     them, never into trust); paid off outside the trust, that minus is cleared and the bank and the
+--     ledger agree again. NO firm entry in trust: the money is in the business account, not the trust.
+--
+-- WHOLE AMOUNTS ONLY, for now: the payment must be the shortfall to the cent. A part payment would have
+-- to split a run's shortfall between "paid" and "still carried", and the firm has not said how it wants
+-- that read on the next advice -- refused with the sentence, not guessed.
+--
+-- BOTH TICKS: it touches the trust ledger (finance.view) and records business-account money
+-- (business.view), the same rule as a drawing.
+-- -----------------------------------------------------------------------------------------------------
+
+create table if not exists public.client_business_receipts (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id),
+  payover_run_id uuid not null references public.payover_runs(id),
+  amount numeric(14,2) not null check (amount > 0),
+  /* The day the money reached the business account -- a business date, so on the staging clock. */
+  received_on date not null default public.raptor_today(),
+  reference text not null,
+  note text,
+  created_by uuid references public.profiles(id),
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists client_business_receipts_one_per_run
+  on public.client_business_receipts (payover_run_id);
+
+alter table public.client_business_receipts enable row level security;
+
+create policy client_business_receipts_select on public.client_business_receipts
+  for select using (public.has_capability('finance.view') or public.has_capability('business.view'));
+
+create or replace function public.protect_client_business_receipt() returns trigger
+language plpgsql security invoker set search_path to 'public' as $$
+begin
+  raise exception 'A client''s payment, once recorded, is not changed. Record a correction instead.'
+    using errcode = '42501';
+end $$;
+
+create or replace trigger client_business_receipts_frozen
+  before update or delete on public.client_business_receipts
+  for each row execute function public.protect_client_business_receipt();
+
+alter table public.payover_runs
+  add column if not exists settled_direct_receipt_id uuid references public.client_business_receipts(id);
+
+comment on column public.payover_runs.settled_direct_receipt_id is
+  'A run below nil whose shortfall the client paid into the BUSINESS account. Settled: never carried '
+  'into a later payover, and not owed (ptc_ageing). See record_client_business_receipt.';
+
+create or replace function public.record_client_business_receipt(
+  p_run uuid, p_amount numeric, p_received_on date, p_reference text, p_note text default null)
+returns uuid
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_run public.payover_runs%rowtype;
+  v_into public.payover_runs%rowtype;
+  v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_id uuid;
+begin
+  if not (public.has_capability('finance.view') and public.has_capability('business.view')) then
+    raise exception 'Recording a client''s payment to the business account needs both the trust and the business ticks.'
+      using errcode = '42501';
+  end if;
+  select * into v_run from public.payover_runs where id = p_run for update;
+  if not found then raise exception 'No such payover run.' using errcode = 'P0002'; end if;
+  if v_run.status not in ('approved', 'sent', 'paid') then
+    raise exception 'That run is %. Approve it first: the client owes what an approved run says.', v_run.status
+      using errcode = '22023';
+  end if;
+  if coalesce(v_run.net_payover, 0) >= 0 then
+    raise exception 'That run is not below nil. The client owes nothing on it.' using errcode = '22023';
+  end if;
+  if v_run.settled_direct_receipt_id is not null then
+    raise exception 'The client''s payment for % is already recorded.', v_run.invoice_number using errcode = '22023';
+  end if;
+  if p_amount is null or round(p_amount, 2) <> round(-v_run.net_payover, 2) then
+    raise exception 'The client owes R % on %. Record the whole amount; a part payment is not recorded yet.',
+      to_char(-v_run.net_payover, 'FM999999990.00'), v_run.invoice_number using errcode = '22023';
+  end if;
+  if p_received_on is null or p_received_on > public.raptor_today() then
+    raise exception 'Say the day the money reached the business account -- not a day in the future.' using errcode = '22023';
+  end if;
+  if v_ref is null then
+    raise exception 'Put the reference on it -- the one on the business account statement.' using errcode = '23502';
+  end if;
+
+  /* ALREADY CARRIED? Into a run still being checked: take it back out. Into one approved or later:
+     the debt has already been taken off a payover, and taking the client's money as well is twice. */
+  if v_run.carried_out_run_id is not null then
+    select * into v_into from public.payover_runs where id = v_run.carried_out_run_id;
+    if v_into.status in ('approved', 'sent', 'paid') then
+      raise exception 'That shortfall was already taken off %, which is %. It is not owed any more.',
+        v_into.invoice_number, v_into.status using errcode = '22023';
+    end if;
+  end if;
+
+  insert into public.client_business_receipts (company_id, payover_run_id, amount, received_on, reference, note, created_by)
+  values (v_run.company_id, p_run, round(p_amount, 2), p_received_on, v_ref, nullif(btrim(coalesce(p_note, '')), ''), auth.uid())
+  returning id into v_id;
+
+  update public.payover_runs set settled_direct_receipt_id = v_id where id = p_run;
+
+  insert into public.trust_creditor_entries (party, company_id, amount, reason, payover_run_id, created_by)
+  values ('client', v_run.company_id, round(p_amount, 2),
+          'Paid to the business account against ' || v_run.invoice_number || ' (' || v_ref || ')', p_run, auth.uid());
+
+  if v_into.id is not null then
+    perform public.build_payover_run(v_into.company_id, v_into.period_start);
+  end if;
+  return v_id;
+end $$;
+
+revoke all on function public.record_client_business_receipt(uuid, numeric, date, text, text) from public, anon;
+grant execute on function public.record_client_business_receipt(uuid, numeric, date, text, text) to authenticated;
+
+-- The readers of "a shortfall still owed" leave out one the client paid into the business account,
+-- and the trust's cash view treats that payment like the PTC it pays off (no trust money either way).
+create or replace function public.build_payover_run(p_company uuid, p_period_start date)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_end date := public.payover_cycle_end(p_period_start);
+  v_run uuid;
+  v_status text;
+  v_prev record;
+  v_later uuid[];
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select id, status into v_run, v_status
+    from public.payover_runs where company_id = p_company and period_start = p_period_start;
+
+  -- A VOIDED RUN IS NOT AN ISSUED ONE, SO IT DOES NOT HOLD THE CYCLE.
+  -- Voiding threw the working document away: it released every allocation, dropped every line and
+  -- went out to nobody. But UNIQUE (company_id, period_start) means the row still occupies the
+  -- slot, and this used to refuse it alongside approved and sent -- so a client whose run was
+  -- voided could never be paid over for that cycle again, and protect_payover_run refuses to
+  -- remove the row as well. Pressing Void was irreversible and nobody was warned.
+  -- The number goes with it, or payover_invoice_number hands out the next one and leaves a gap
+  -- in a sequence the client reads.
+  if v_run is not null and v_status = 'void' then
+    delete from public.payover_runs where id = v_run;
+    v_run := null;
+  end if;
+
+  if v_run is not null and not public.payover_run_is_open(v_status) then
+    raise exception 'The % run for this client is already %; a correction belongs in the next run.',
+      to_char(p_period_start, 'DD Mon YYYY'), v_status;
+  end if;
+
+  if v_run is null then
+    insert into public.payover_runs (company_id, period_start, period_end, invoice_number)
+    values (p_company, p_period_start, v_end, public.payover_invoice_number(p_company, v_end))
+    returning id into v_run;
+  else
+    /* Let go of everything it was holding before it claims again, so a rebuild is not an append. */
+    update public.payment_allocations set payover_run_id = null where payover_run_id = v_run;
+    update public.payment_allocations set reversal_carried_run_id = null where reversal_carried_run_id = v_run;
+    update public.payover_runs set carried_out_run_id = null where carried_out_run_id = v_run;
+    /* AND THE CLIENT CHARGES IT WAS CARRYING, or a rebuild leaves them pointing at a run whose
+       lines have gone and they are never set off against anything. */
+    update public.client_charges set payover_run_id = null where payover_run_id = v_run;
+    delete from public.payover_run_lines where run_id = v_run;
+  end if;
+
+  /* A PTC A LATER, STILL-OPEN RUN TOOK BEFORE THIS ONE EXISTED -- built first, or rebuilt alone --
+     is let go here so this run can claim it; the later run's line goes with it and its figures are
+     redone, so the PTC is on exactly one run. */
+  with freed as (
+    update public.payment_allocations a
+       set payover_run_id = null
+      from public.account_payments p, public.payover_runs l
+     where p.id = a.payment_id
+       and l.id = a.payover_run_id
+       and l.company_id = p_company
+       and l.period_start > p_period_start
+       and public.payover_run_is_open(l.status)
+       and a.paid_to_client
+       and p.allocated_on >= p_period_start
+       and p.allocated_on <= public.payover_ptc_until(v_end)
+    returning a.id, l.id as run_id
+  ), gone as (
+    delete from public.payover_run_lines x using freed f
+     where x.allocation_id = f.id and x.run_id = f.run_id
+    returning x.run_id
+  )
+  select array_agg(distinct run_id) into v_later from gone;
+
+  /* 1. THIS CYCLE'S OWN ALLOCATIONS. Claimed and drawn in one statement so an allocation cannot be
+        claimed by a run that then fails to list it. Demo money is excluded here as well as in the
+        engine -- R23,6m nobody paid, sitting in the same table as money somebody did. */
+  with claimed as (
+    update public.payment_allocations a
+       set payover_run_id = v_run
+      from public.account_payments p, public.debtor_accounts d
+     where p.id = a.payment_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       /* MONEY SWORDFISH ALREADY PAID OVER IS NEVER CLAIMED. It has no allocation, so the
+          join already excludes it -- this is the rule said out loud beside the dates, because
+          the day somebody allocates an imported receipt by hand is the day the client is
+          paid twice for money they were remitted years ago. */
+       and not p.paid_over_in_swordfish
+       /* CLAIMED ON THE ALLOCATION DATE, NOT ON created_at.
+          THE FIRM: "it's important to capture the payment date and basically the allocation
+          date of a payment. For example, if a payment was made a PTC, let's say on the 5th of
+          September and only processed today, it will only be processed with this import
+          date... or if a payment was in suspense... it missed the first payment run in which
+          it was supposed to be. So it should be running in the payment run."
+          created_at was standing in for this and is not it: it is when the ROW was written,
+          which for an imported book is the day of the import for every receipt in it, and
+          which nothing may move because it is the audit trail. allocated_on is set at
+          approval -- the moment a payment is processed -- so a receipt released from suspense
+          in October goes out in October's run however long it sat, and the day the debtor
+          paid stays on received_at where it belongs.
+          A DATE against the cycle's own dates, so no timezone can push a receipt into the
+          neighbouring cycle at midnight. */
+       /* A PTC GOES ON THE NEXT PAYOVER, NOT ITS OWN CYCLE'S (the firm, 10 Oct: "if an invoice is
+          captured on the 15th of October ... the client will be invoiced on the 11th of
+          November"). A payment into trust waits for its cycle to close and then the payover
+          delay; a PTC has nothing to wait for -- the debtor paid the client, our share is owed
+          now -- so it rides the run paid on the next 11th: anything captured up to the day
+          before that run's payover date. With no delay this is the cycle's own window, as before. */
+       and p.allocated_on <= case when a.paid_to_client
+                                  then public.payover_ptc_until(v_end) else v_end end
+       and (p.allocated_on >= p_period_start
+            /* LATE FOR A RUN APPROVED EARLY: processed in a cycle whose run for this client
+               had already gone, so it rides the next run rather than none (8 Oct). */
+            or exists (select 1 from public.payover_runs e
+                        where e.company_id = p_company
+                          and e.status in ('approved', 'sent', 'paid')
+                          and p.allocated_on between e.period_start
+                            and case when a.paid_to_client
+                                     then public.payover_ptc_until(e.period_end) else e.period_end end))
+       /* AND NOT ONE AN EARLIER RUN STILL OPEN IS DUE TO CARRY. The October run's window reaches into
+          November's cycle for PTCs, so November's run must leave those to it. */
+       and not (a.paid_to_client and exists (
+             select 1 from public.payover_runs e
+              where e.company_id = p_company
+                and e.period_start < p_period_start
+                and public.payover_run_is_open(e.status)
+                and p.allocated_on <= public.payover_ptc_until(e.period_end)))
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat,
+    excess_credit, needs_rate
+  )
+  select v_run, c.id, c.account_id,
+         case when c.paid_to_client then 'ptc' else 'trust' end,
+         c.paid_to_client,
+         coalesce(c.payment_amount, 0), c.to_interest, coalesce(c.to_costs, 0), c.to_capital,
+         c.commission, c.commission_vat, c.excess_credit, c.status = 'needs_rate'
+    from claimed c;
+
+  /* 2. REVERSALS OF PAYMENTS ALREADY INVOICED. The firm's decision 6: never edited in the run that
+        went out -- it becomes a negative line in the next one. */
+  with carried as (
+    update public.payment_allocations a
+       set reversal_carried_run_id = v_run
+      from public.payover_runs r, public.debtor_accounts d
+     where r.id = a.payover_run_id
+       and d.id = a.account_id
+       and d.company_id = p_company
+       and a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    returning a.*
+  )
+  insert into public.payover_run_lines (
+    run_id, allocation_id, account_id, line_kind, paid_to_client,
+    payment_amount, to_interest, to_costs, to_capital, commission, commission_vat, excess_credit
+  )
+  select v_run, c.id, c.account_id, 'reversal', c.paid_to_client,
+         -coalesce(c.payment_amount, 0), -c.to_interest, -coalesce(c.to_costs, 0), -c.to_capital,
+         -c.commission, -c.commission_vat, -c.excess_credit
+    from carried c;
+
+  /* 3. LAST RUN'S SHORTFALL, from the most recent INVOICED run rather than merely last month. */
+  select r.id, r.net_payover, r.invoice_number into v_prev
+    from public.payover_runs r
+   where r.company_id = p_company
+     and r.period_start < p_period_start
+     and r.status in ('approved', 'sent', 'paid')
+     and r.net_payover < 0
+     and r.carried_out_run_id is null
+     and r.settled_direct_receipt_id is null
+   order by r.period_start desc limit 1;
+
+  if v_prev.id is not null then
+    insert into public.payover_run_lines (run_id, line_kind, carried_amount)
+    values (v_run, 'carried', v_prev.net_payover);
+    update public.payover_runs set carried_out_run_id = v_run where id = v_prev.id;
+  end if;
+
+  /* 4. WHAT THE CLIENT OWES THE FIRM, taken off this payover. The firm, on withdrawing an
+        account: "withdrawal fee subtracted from payover". A charge is claimed by the first run
+        built after it was raised -- not by the cycle it falls in -- because it is not a receipt
+        and has no cycle of its own; what matters is that it comes off the next money that goes
+        out. `settlement = 'invoice'` is the other half of the firm's example and is deliberately
+        NOT claimed: that one the client pays directly. */
+  with taken as (
+    update public.client_charges c
+       set payover_run_id = v_run
+     where c.company_id = p_company
+       and c.settlement = 'set_off'
+       and c.payover_run_id is null
+       and c.cancelled_at is null
+       and c.paid_at is null
+       and c.raised_on <= v_end
+    returning c.*
+  )
+  insert into public.payover_run_lines (
+    run_id, account_id, line_kind, client_charge_id, charge_amount)
+  select v_run, t.account_id, 'charge', t.id, t.amount + t.vat from taken t;
+
+  perform public.recompute_payover_run(v_run);
+  if v_later is not null then
+    perform public.recompute_payover_run(x) from unnest(v_later) as x;
+  end if;
+  return v_run;
+end $$;
+
+create or replace function public.close_payover_cycle(p_period_start date default null)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_start date := coalesce(p_period_start, public.payover_cycle_start(public.raptor_now() - interval '1 day'));
+  v_end date := public.payover_cycle_end(v_start);
+  v_company uuid;
+  v_count integer := 0;
+begin
+  for v_company in
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.account_payments p on p.id = a.payment_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.payover_run_id is null
+       and a.status <> 'reversed'
+       and not p.is_demo
+       /* THE SAME COLUMN THE BUILD CLAIMS ON, and check-payover-runs holds the two together
+          in one loop for exactly this reason: written on different columns, a month's money
+          moves between the close and the build and every total still reconciles, so nothing
+          anywhere reports it. See build_payover_run for why created_at was never this. */
+       and not p.paid_over_in_swordfish
+       and p.allocated_on >= v_start
+       and p.allocated_on <= v_end
+    union
+    select distinct d.company_id
+      from public.payment_allocations a
+      join public.payover_runs r on r.id = a.payover_run_id
+      join public.debtor_accounts d on d.id = a.account_id
+     where a.status = 'reversed'
+       and r.status in ('approved', 'sent', 'paid')
+       and a.reversal_carried_run_id is null
+    union
+    select r.company_id
+      from public.payover_runs r
+     where r.status in ('approved', 'sent', 'paid')
+       and r.net_payover < 0
+       and r.carried_out_run_id is null
+       and r.settled_direct_receipt_id is null
+       and r.period_start < v_start
+  loop
+    if exists (select 1 from public.payover_runs
+                where company_id = v_company and period_start = v_start
+                  and not public.payover_run_is_open(status)) then
+      continue;
+    end if;
+    perform public.build_payover_run(v_company, v_start);
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end $$;
+
+create or replace function public.ptc_ageing()
+returns table(company_id uuid, client text, owed numeric, since date, run_id uuid,
+              invoice_number text, invoiced boolean)
+language sql stable security definer set search_path to 'public'
+as $$
+  with recursive head as (
+    -- THE SHORTFALL STILL STANDING: a run below nil that has not been carried into another.
+    select r.id, r.company_id, r.net_payover, r.period_end, r.invoice_number, r.id as cur
+      from public.payover_runs r
+     where r.status <> 'void' and r.net_payover < 0 and r.carried_out_run_id is null
+       and r.settled_direct_receipt_id is null
+  ), back as (
+    -- WALKED BACK through the runs that carried it, so a debt keeps the date it was first invoiced.
+    select h.id as head_id, h.cur, (select period_end from public.payover_runs where id = h.cur) as period_end
+      from head h
+    union all
+    select b.head_id, p.id, p.period_end
+      from back b join public.payover_runs p on p.carried_out_run_id = b.cur
+  ), first as (
+    select head_id, min(period_end) as first_end from back group by head_id
+  )
+  select h.company_id, co.name, round(-h.net_payover, 2),
+         public.payover_pays_on(f.first_end), h.id, h.invoice_number,
+         public.payover_pays_on(f.first_end) <= public.raptor_today()
+    from head h
+    join first f on f.head_id = h.id
+    join public.companies co on co.id = h.company_id
+   where public.has_capability('finance.view')
+   order by public.payover_pays_on(f.first_end), co.name
+$$;
+
+create or replace function public.client_ledger(p_company uuid)
+returns table(entry_on date, sort_at timestamptz, kind text, description text, reference text,
+              case_number text, amount numeric, balance numeric, run_id uuid, charge_id uuid)
+language sql stable security definer set search_path to 'public'
+as $$
+  with lines as (
+    select (e.entry_at at time zone 'Africa/Johannesburg')::date as entry_on, e.entry_at as sort_at,
+           case when e.reason like 'Paid to the business account%' then 'paid_direct'
+                when e.reason like 'Payment reversed:%' then 'reversal'
+                when e.reason like 'Re-split:%' then 're_split'
+                when e.reason like 'Payover % paid to the client' then 'payover_paid'
+                when e.reason like 'Charges set off%' then 'set_off'
+                when e.reason like 'Overpayment released%' then 'released'
+                when e.amount < 0 then 'owed'
+                else 'held' end as kind,
+           e.reason as description, r.invoice_number as reference, d.case_number,
+           e.amount, r.id as run_id, null::uuid as charge_id
+      from public.trust_creditor_entries e
+      /* THE RUN THAT CARRIES THE LINE: the entry's own (a payover paid, a set-off), else the run
+         that claimed its payment -- a PTC rides the NEXT payover (10 Oct), so its date no longer
+         says which run it is on -- and for a reversal, the run it was carried into. */
+      left join public.payment_allocations pa on pa.id = e.allocation_id
+      left join public.payover_runs r on r.id = coalesce(e.payover_run_id,
+             case when e.reason like 'Payment reversed:%' then pa.reversal_carried_run_id
+                  else pa.payover_run_id end)
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'client' and e.company_id = p_company
+    union all
+    select c.raised_on, c.raised_on::timestamptz + interval '12 hours', 'charge_pending',
+           c.description || ' (comes off the next payover)', null, d.case_number,
+           -(c.amount + c.vat), null, c.id
+      from public.client_charges c
+      left join public.payover_runs r on r.id = c.payover_run_id
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'set_off'
+       and (c.payover_run_id is null or r.status not in ('approved', 'sent', 'paid'))
+    union all
+    select c.raised_on, c.raised_on::timestamptz + interval '12 hours', 'invoice_raised',
+           c.description, c.invoice_number, d.case_number, -(c.amount + c.vat), null, c.id
+      from public.client_charges c
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'invoice'
+    union all
+    select (c.paid_at at time zone 'Africa/Johannesburg')::date, c.paid_at, 'invoice_paid',
+           'Invoice paid by the client', coalesce(c.paid_reference, c.invoice_number), d.case_number,
+           c.amount + c.vat, null, c.id
+      from public.client_charges c
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'invoice'
+       and c.paid_at is not null
+  )
+  select l.entry_on, l.sort_at, l.kind, l.description, l.reference, l.case_number, l.amount,
+         sum(l.amount) over (order by l.sort_at, l.kind rows between unbounded preceding and current row),
+         l.run_id, l.charge_id
+    from lines l
+   where public.has_capability('finance.view') or public.has_capability('business.view')
+   order by l.sort_at, l.kind
+$$;
+
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) or x.reason like 'Paid to the business account%' as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           r.paid_at is not null as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0) as clients_open,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         public.raptor_today() <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;
+
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay';
+
+  execute 'de' || 'lete from public.workflow_run_holds';
+  execute 'de' || 'lete from public.workflow_run_steps';
+  execute 'de' || 'lete from public.workflow_runs';
+  execute 'de' || 'lete from public.sms_messages';
+  execute 'de' || 'lete from public.signing_requests';
+  execute 'de' || 'lete from public.account_fees';
+  execute 'de' || 'lete from public.account_interest_accruals';
+  execute 'de' || 'lete from public.account_settlements';
+  execute 'de' || 'lete from public.account_reminders';
+  execute 'de' || 'lete from public.account_calls';
+  execute 'de' || 'lete from public.account_emails';
+  execute 'de' || 'lete from public.account_queries';
+  execute 'de' || 'lete from public.account_judgments';
+  execute 'de' || 'lete from public.account_notes';
+  execute 'de' || 'lete from public.account_status_events';
+  execute 'de' || 'lete from public.account_desk_history';
+  execute 'de' || 'lete from public.account_director_companies';
+  execute 'de' || 'lete from public.account_directors';
+  execute 'de' || 'lete from public.account_authorised_contacts';
+  execute 'de' || 'lete from public.account_contacts';
+  execute 'de' || 'lete from public.notifications';
+  execute 'de' || 'lete from public.activities';
+  execute 'de' || 'lete from public.tasks';
+  execute 'de' || 'lete from public.proposals';
+  execute 'de' || 'lete from public.business_expenses';
+  execute 'de' || 'lete from public.handover_draft_rows';
+  execute 'de' || 'lete from public.handover_drafts';
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.client_documents';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+

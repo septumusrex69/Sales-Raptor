@@ -13,6 +13,7 @@ import {
 import { Modal } from '../../components/ui/Modal'
 import { groupRunsByCycle, periodLabel } from '../../lib/payoverGroups'
 import { supabase } from '../../lib/supabase'
+import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
 import { MarkPaidModal, type PayableRun } from './MarkPaidModal'
@@ -106,6 +107,8 @@ export function FinanceWorkQueue() {
   const [cycle, setCycle] = useState<Cycle | null>(null)
   const [tiles, setTiles] = useState<CycleTiles | null>(null)
   const [rows, setRows] = useState<WorkQueueRow[]>([])
+  /* Runs below nil the client has paid into the business account -- "Paid to us", not "owes us". */
+  const [settled, setSettled] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -141,6 +144,7 @@ export function FinanceWorkQueue() {
         supabase.from('firm_settings').select('payover_lag_months').limit(1).maybeSingle()])
       setLag(Number((f.data as { payover_lag_months?: number } | null)?.payover_lag_months ?? 1))
       setRows(q)
+      setSettled(await fetchSettledRunIds().catch(() => new Set<string>()))
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
     } catch (e) {
@@ -473,6 +477,11 @@ export function FinanceWorkQueue() {
                       <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-slate-400" data-testid="still-open"
                         title="Approve early from the run, with a reason">
                         Open until {fmtDay(r.periodEnd)}
+                      </span>
+                    ) : r.netPayover < 0 && settled.has(r.runId) ? (
+                      <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-emerald-700"
+                        data-testid="paid-to-us" title="The client paid the shortfall into the business account">
+                        Paid to us
                       </span>
                     ) : r.nextStep === 'paid' && r.netPayover < 0 ? (
                       /* A RUN BELOW NIL HAS NOTHING TO PAY: the client owes us, and it comes off their

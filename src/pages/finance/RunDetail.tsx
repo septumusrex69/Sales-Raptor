@@ -17,6 +17,10 @@ import { fetchPayoutsStatementOnly } from '../../lib/trust'
 import { MarkPaidModal } from './MarkPaidModal'
 import { useBackLink, useRecordName } from '../../lib/backLink'
 import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
+import { fetchReceiptForRun, recordClientPayment, type ClientBusinessReceipt } from '../../lib/clientBusinessReceipts'
+import { canViewBusiness, canViewFinance } from '../../lib/permissions'
+import { useAuth } from '../../store/AuthContext'
+import { clockToday } from '../../lib/clock.ts'
 
 /**
  * ONE PAYOVER RUN, AND THE PAYMENTS UNDER IT.
@@ -60,6 +64,8 @@ interface RunRow {
   early_at?: string | null
   /* Who approved it early (the firm, 10 Oct: "it should say who made the note"). */
   early?: { name: string | null } | null
+  /* Below nil and paid by the client into the business account (record_client_business_receipt). */
+  settled_direct_receipt_id?: string | null
 }
 
 const STATUS_TONE: Record<RunStatus, string> = {
@@ -91,6 +97,7 @@ export function RunDetail() {
   const [earlyModal, setEarlyModal] = useState(false)
   const [emailModal, setEmailModal] = useState(false)
   const [sends, setSends] = useState<AdviceSend[]>([])
+  const [receipt, setReceipt] = useState<ClientBusinessReceipt | null>(null)
   const [firm, setFirm] = useState<{ name: string; address: string | null; phone: string | null; email: string | null; vatNumber: string | null } | null>(null)
 
   const load = useCallback(async () => {
@@ -125,6 +132,7 @@ export function RunDetail() {
       } : null)
       setRows(await fetchRunPayments(id))
       setSends(await fetchAdviceSends({ runId: id }).catch(() => []))
+      setReceipt(await fetchReceiptForRun(id).catch(() => null))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load that run.')
     } finally {
@@ -308,6 +316,10 @@ export function RunDetail() {
             </tr>
           </tbody>
         </table>
+
+        {run.net_payover < 0 && (
+          <ClientPaidUs run={run} receipt={receipt} onRecorded={load} onError={setError} />
+        )}
 
         {run.ptc_received > 0 && (
           <p className="mt-2 max-w-lg text-xs text-slate-400">
@@ -671,4 +683,85 @@ function fmtDay(iso: string): string {
 }
 function fmtStamp(iso: string): string {
   return new Date(iso).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * A RUN BELOW NIL: THE CLIENT'S PAYMENT INTO THE BUSINESS ACCOUNT (the firm, 10 Oct: "that's paid to
+ * our business account, not to the trust account. So we would have to match it").
+ *
+ * Recorded, it settles the shortfall: not carried into the next payover, off "What clients owe us",
+ * on the client's ledger. Offered only on an approved run (the client owes what an approved run says)
+ * and only to somebody with both the trust and the business ticks -- the database asks the same.
+ * The amount is the shortfall and is not typed: a part payment is not recorded yet.
+ */
+function ClientPaidUs({ run, receipt, onRecorded, onError }: {
+  run: RunRow; receipt: ClientBusinessReceipt | null; onRecorded: () => void; onError: (e: string | null) => void
+}) {
+  const { currentUser } = useAuth()
+  const [open, setOpen] = useState(false)
+  const [on, setOn] = useState(() => clockToday())
+  const [reference, setReference] = useState(`BF ${run.invoice_number}`)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const owed = Math.abs(run.net_payover)
+
+  if (receipt) {
+    return (
+      <p className="mt-2 max-w-lg text-xs text-emerald-700" data-testid="client-paid-us">
+        Paid by the client into the business account: {rand(receipt.amount)} on {fmtDay(receipt.receivedOn)}, reference {receipt.reference}.
+        It is settled and is not taken off a later payover.
+      </p>
+    )
+  }
+  const may = canViewFinance(currentUser) && canViewBusiness(currentUser)
+  if (!may || !['approved', 'sent', 'paid'].includes(run.status)) {
+    return (
+      <p className="mt-2 max-w-lg text-xs text-slate-400">
+        It comes off the client{"'"}s next payover, unless they pay it into the business account first.
+      </p>
+    )
+  }
+  async function save() {
+    setBusy(true); onError(null)
+    try {
+      await recordClientPayment({ runId: run.id, amount: owed, receivedOn: on, reference, note })
+      setOpen(false)
+      onRecorded()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Could not record the payment.')
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="mt-3 max-w-lg rounded-lg border border-slate-200 px-3 py-2 text-[12.5px]" data-testid="client-paid-form">
+      {!open ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-slate-600">It comes off their next payover, unless they pay it into the business account.</span>
+          <button type="button" onClick={() => setOpen(true)}
+            className="rounded-md border border-slate-200 px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50">
+            Record their payment
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="font-medium text-slate-800">The client paid {rand(owed)} into the business account</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-slate-600">On
+              <input type="date" value={on} max={clockToday()} onChange={(e) => setOn(e.target.value)} className={inputClass} />
+            </label>
+            <label className="flex items-center gap-1.5 text-slate-600">Reference
+              <input value={reference} onChange={(e) => setReference(e.target.value)} className={inputClass} />
+            </label>
+          </div>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inputClass} />
+          <div className="flex gap-2">
+            <button type="button" disabled={busy || !on || !reference.trim()} onClick={() => void save()}
+              className="rounded-md bg-navy-900 px-3 py-1 font-medium text-white hover:bg-navy-800 disabled:opacity-50">
+              {busy ? 'Recording…' : 'Record it'}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="text-slate-500 underline">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

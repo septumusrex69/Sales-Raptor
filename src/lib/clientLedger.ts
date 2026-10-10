@@ -127,6 +127,8 @@ export function ledgerByPayover(entries: ClientEntry[], runs: LedgerRun[]): Ledg
         label: e.kind === 'payover_paid' ? `Payover ${e.reference ?? ''} paid to the client`.replace('  ', ' ')
           : e.kind === 'invoice_raised' ? `Invoice${e.reference ? ` ${e.reference}` : ''}: ${e.description}`
           : e.kind === 'invoice_paid' ? `Invoice${e.reference ? ` ${e.reference}` : ''} paid by the client`
+          /* A run below nil the client paid into the BUSINESS account (record_client_business_receipt). */
+          : e.kind === 'paid_direct' ? `Paid to our business account against ${e.reference ?? 'the payover'}`
           : e.description,
         state: e.kind === 'charge_pending' ? 'Comes off the next payover' : null,
         reference: e.reference, runId: e.runId,

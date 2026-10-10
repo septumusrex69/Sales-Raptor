@@ -112,6 +112,8 @@ export async function fetchClientDebts(): Promise<ClientDebt[]> {
 export type ClientEntryKind =
   | 'held' | 'owed' | 'set_off' | 'payover_paid' | 'released' | 'reversal' | 're_split'
   | 'charge_pending' | 'invoice_raised' | 'invoice_paid'
+  /** A run below nil the client paid into the business account (record_client_business_receipt). */
+  | 'paid_direct'
 
 export interface ClientEntry {
   on: string

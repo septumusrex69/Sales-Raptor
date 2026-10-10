@@ -217,5 +217,25 @@ begin
     'cycle1', c1->'pay', 'cycle2', c2->'pay', 'cycle3', c3->'pay');
 end $$;
 
+/* THE SAME BOOK, BUT SIM BRAVO PAYS ITS CYCLE-2 SHORTFALL INTO THE BUSINESS ACCOUNT (the firm, 10 Oct:
+   "we would have to match it"): recorded against PO-SMB-2608, it is not owed by age, not carried into
+   cycle 3, and the trust then reconciles to exactly R0.00 -- no PTC share left stranded. */
+create or replace function qa_sim.run_direct() returns jsonb language plpgsql as $$
+declare f text[] := '{}'; v_run uuid; v_net numeric; c3 jsonb;
+begin
+  perform qa_sim.setup(); perform qa_sim.cycle1(); perform qa_sim.cycle2();
+  select id, net_payover into v_run, v_net from public.payover_runs where invoice_number = 'PO-SMB-2608';
+  perform public.record_client_business_receipt(v_run, -v_net, date '2026-08-11', 'SIM BRAVO EFT');
+  f := qa_sim.expect(not exists (select 1 from public.ptc_ageing()), 'paid direct: no longer owed by age', f);
+  f := qa_sim.expect((qa_sim.recon()->>'ledger_vs_bank')::numeric = 0, 'paid direct: the ledger agrees with the bank', f);
+  c3 := qa_sim.cycle3();
+  f := qa_sim.expect((select carried_in from public.payover_runs where invoice_number = 'PO-SMB-2609') = 0, 'paid direct: not carried into the next payover', f);
+  f := qa_sim.expect((c3->'pay'->'recon'->>'in_trust')::numeric = 0 and (c3->'pay'->'recon'->>'not_accounted')::numeric = 0, 'paid direct: trust reconciles to zero after cycle 3', f);
+  return jsonb_build_object('failures', f, 'cycle3', c3->'pay');
+end $$;
+
 -- ---------------------------------------------------------------- run it (rolls everything back)
-do $p$ begin perform qa_sim.as_admin(); raise exception 'SIMULATION %', qa_sim.run_all(); end $p$;
+-- Both scenarios; each starts by clearing staging inside the same rolled-back transaction.
+do $p$ begin perform qa_sim.as_admin();
+  raise exception 'SIMULATION % || DIRECT %', (qa_sim.run_all())->'failures', (select qa_sim.run_direct())->'failures';
+end $p$;

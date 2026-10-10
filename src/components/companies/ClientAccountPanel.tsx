@@ -44,6 +44,7 @@ const KIND: Record<ClientEntryKind, { label: string; tone: string }> = {
   charge_pending: { label: 'Due off next payover', tone: 'bg-gold-100 text-gold-800' },
   invoice_raised: { label: 'Invoiced', tone: 'bg-brand-100 text-brand-700' },
   invoice_paid: { label: 'Invoice paid', tone: 'bg-slate-100 text-slate-600' },
+  paid_direct: { label: 'Paid to us', tone: 'bg-emerald-50 text-emerald-700' },
 }
 
 /*
