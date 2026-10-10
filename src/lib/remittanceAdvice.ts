@@ -122,6 +122,14 @@ export interface RemittanceAdvice {
     directNote: string | null
     net: number
     paidNote: string
+    /**
+     * WHICH WAY THE MONEY GOES (the firm, 10 Oct, of "Net amount we are paying you -R 14 162.50":
+     * "it could look like we are still owing the client money"). A run below nothing is the
+     * client owing the firm: said in words, with the amount as a positive figure.
+     */
+    clientOwes: boolean
+    /** The headline's own label: "Net amount we are paying you" or "Amount you owe us". */
+    netLabel: string
   }
   /** "How we got there", one line each, the last being the net. */
   workings: { label: string; amount: number; emphasis?: boolean }[]
@@ -235,7 +243,13 @@ export function buildRemittanceAdvice(input: {
       amount: l.excessCredit,
     }))
 
-  const paidNote = run.paidAt
+  /* A RUN BELOW NOTHING: the client owes the firm, and the next run brings it forward. */
+  const clientOwes = run.netPayover < 0
+  const reference = paymentReference(run.invoiceNumber)
+  const paidNote = clientOwes
+    ? `Nothing is paid to you this period. It comes off your next payover`
+      + `${reference ? `, or pay us with reference ${reference}` : ''}.`
+    : run.paidAt
     ? `Paid by EFT${run.eftReference ? ` ${run.eftReference}` : ''} on ${advDate(run.paidAt)}`
     /* WITH THE REFERENCE IT WILL CARRY, so the client can find it on their own statement (the firm,
        8 Oct: a payover goes out "with a client unique reference"). */
@@ -267,7 +281,9 @@ export function buildRemittanceAdvice(input: {
   if (releasedTotal !== 0) {
     workings.push({ label: 'Add debtor overpayments paid over to you in full (no commission)', amount: releasedTotal })
   }
-  workings.push({ label: 'Net amount we are paying you', amount: run.netPayover, emphasis: true })
+  workings.push(clientOwes
+    ? { label: 'Amount you owe us', amount: -run.netPayover, emphasis: true }
+    : { label: 'Net amount we are paying you', amount: run.netPayover, emphasis: true })
 
   return {
     firm,
@@ -282,6 +298,8 @@ export function buildRemittanceAdvice(input: {
         : null,
       net: run.netPayover,
       paidNote,
+      clientOwes,
+      netLabel: clientOwes ? 'Amount you owe us' : 'Net amount we are paying you',
     },
     workings,
     collections,
@@ -314,9 +332,13 @@ export function adviceBody(adv: RemittanceAdvice): string {
     'Good day',
     `Please find attached our remittance advice and tax invoice ${adv.run.invoiceNumber} for `
       + `collections from ${advDate(adv.run.periodStart)} to ${advDate(adv.run.periodEnd)}.`,
-    `Net amount payable to you: ${rand(adv.run.netPayover)}`
-      + `\nPayment: by EFT to your nominated account, ${when}`
-      + (adv.run.eftReference ? `\nReference: ${adv.run.eftReference}` : ''),
+    ...(adv.headline.clientOwes
+      ? [`Amount you owe us: ${rand(-adv.run.netPayover)}`
+          + '\nNothing is paid to you for this period. We will take it off your next payover'
+          + (paymentReference(adv.run.invoiceNumber) ? `, or you may pay it to us with reference ${paymentReference(adv.run.invoiceNumber)}.` : '.')]
+      : [`Net amount payable to you: ${rand(adv.run.netPayover)}`
+          + `\nPayment: by EFT to your nominated account, ${when}`
+          + (adv.run.eftReference ? `\nReference: ${adv.run.eftReference}` : '')]),
     'The attached statement lists every payment behind that figure, account by account.',
     'Kind regards\nBredell Ferreira',
   ].join('\n\n')

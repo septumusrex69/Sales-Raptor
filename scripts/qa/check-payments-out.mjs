@@ -129,7 +129,7 @@ for (const fn of ['mark_payover_run_paid', 'mark_refund_paid']) {
   ok(`...before it writes anything`, body.indexOf('payouts_statement_only') >= 0 && body.indexOf('payouts_statement_only') < body.search(/\bupdate public\./))
 }
 const runPage = strip(read('src/pages/finance/RunDetail.tsx'))
-ok('the run offers Mark paid only while the switch is off', /\(run\.status === 'approved' \|\| run\.status === 'sent'\) && !statementOnly && \(/.test(runPage))
+ok('the run offers Mark paid only while the switch is off (and the run is not below nil)', /\(run\.status === 'approved' \|\| run\.status === 'sent'\) && !statementOnly && run\.net_payover >= 0 && \(/.test(runPage))
 ok('...and says how it will be paid when it is on', /Paid when its line on the bank statement is allocated/.test(runPage))
 ok('Payments to make offers Mark paid only while the switch is off', /\{statementOnly \? \(\s*<span[^>]*>Paid from the statement<\/span>/.test(strip(read('src/pages/trust/TrustPaymentsOut.tsx'))))
 ok('Trust settings carries the switch', /saveStatementOnly\(e\.target\.checked\)/.test(strip(read('src/pages/finance/FinanceSettings.tsx'))))

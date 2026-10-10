@@ -287,6 +287,28 @@ const emailSrc2 = readFileSync(new URL('../../src/lib/remittanceEmail.ts', impor
 ok('...which the bulk send uses too, so a bulk advice is the previewed one',
   /advice: adviceFromRun\(d, client,/.test(emailSrc2) && !/buildRemittanceAdvice\(/.test(emailSrc2))
 
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+/* ---- A RUN BELOW NIL IS THE CLIENT OWING US (the firm, 10 Oct: "it could look like we are still
+   owing the client money ... if they have to pay us we need to make this clearer") ---- */
+{
+  const owes = build([line()], { netPayover: -14162.5, invoiceNumber: 'PO-LGR-2610' })
+  check('the headline says the client owes us', owes.headline.netLabel, 'Amount you owe us')
+  ok('...and that nothing is paid, and how it is settled', /Nothing is paid to you this period\. It comes off your next payover/.test(owes.headline.paidNote))
+  const last = owes.workings[owes.workings.length - 1]
+  check('the last working line is what they owe, as a positive figure', [last.label, last.amount], ['Amount you owe us', 14162.5])
+  const body = adviceBody(owes)
+  ok('the covering email says so too', /Amount you owe us: R/.test(body) && !/payable to you/.test(body))
+  const paid = build([line()])
+  check('a run above nil is unchanged', [paid.headline.netLabel, paid.workings[paid.workings.length - 1].label], ['Net amount we are paying you', 'Net amount we are paying you'])
+  const pdf = read('src/lib/remittancePdf.ts')
+  ok('the PDF draws the label and a positive figure', /figure\(adv\.headline\.netLabel, rand\(Math\.abs\(adv\.headline\.net\)\)/.test(pdf))
+  const sql = read('supabase/schema.sql')
+  const ptm = sql.slice(sql.lastIndexOf('create or replace function public.payments_to_make('))
+  ok('Payments to make leaves out a run below nil', /and r\.net_payover > 0/.test(ptm.slice(0, ptm.indexOf('$$;'))))
+  const mpp = sql.slice(sql.lastIndexOf('create or replace function public.mark_payover_run_paid('))
+  ok('...and a run below nil cannot be marked paid', /if \(select net_payover from public\.payover_runs where id = p_run\) < 0 then\s*raise exception/.test(mpp.slice(0, mpp.indexOf('end $$;'))))
+}
+
 console.log(`\ncheck-remittance-advice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

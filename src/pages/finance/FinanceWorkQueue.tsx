@@ -403,7 +403,10 @@ export function FinanceWorkQueue() {
                   <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                     {r.ptcSetOff ? `− ${rand(r.ptcSetOff)}` : '—'}
                   </td>
-                  <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{rand(r.netPayover)}</td>
+                  {/* Below nil is the client owing us (the firm, 10 Oct): said, not a minus sign. */}
+                  <td className={clsx('px-2 py-1.5 text-right font-semibold tabular-nums', r.netPayover < 0 && 'text-negative-700')}>
+                    {r.netPayover < 0 ? `owes us ${rand(-r.netPayover)}` : rand(r.netPayover)}
+                  </td>
                   <td className="px-2 py-1.5"><Pill status={r.status} /></td>
                   <td className="px-3 py-1.5">
                     {r.nextStep === 'approve' && stillOpen(r) ? (

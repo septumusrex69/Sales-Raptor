@@ -255,7 +255,12 @@ export function RunDetail() {
                 Paid when its line on the bank statement is allocated
               </span>
             )}
-            {(run.status === 'approved' || run.status === 'sent') && !statementOnly && (
+            {(run.status === 'approved' || run.status === 'sent') && !statementOnly && run.net_payover < 0 && (
+              <span className="text-[12px] text-slate-500" data-testid="client-owes-note">
+                Nothing to pay: comes off their next payover
+              </span>
+            )}
+            {(run.status === 'approved' || run.status === 'sent') && !statementOnly && run.net_payover >= 0 && (
               <button type="button" disabled={busy} onClick={() => setPayModal(true)}
                 className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                 Mark paid
@@ -293,8 +298,12 @@ export function RunDetail() {
             {Number(run.charges_set_off) !== 0 && <Line label="Charges set off against this payover" value={-run.charges_set_off} sub />}
             {Number(run.excess_released) !== 0 && <Line label="Overpayments released to the client, no commission" value={run.excess_released} sub />}
             <tr className="border-t-2 border-slate-800">
-              <td className="py-2 font-semibold text-slate-800">Amount to pay</td>
-              <td className="py-2 text-right font-semibold tabular-nums text-slate-800">{rand(run.net_payover)}</td>
+              {/* BELOW NIL IS THE CLIENT OWING US (the firm, 10 Oct): said in words, the figure positive. */}
+              <td className="py-2 font-semibold text-slate-800" data-testid="run-net-label">
+                {run.net_payover < 0 ? 'Client owes us' : 'Amount to pay'}
+              </td>
+              <td className={clsx('py-2 text-right font-semibold tabular-nums',
+                run.net_payover < 0 ? 'text-negative-700' : 'text-slate-800')}>{rand(Math.abs(run.net_payover))}</td>
             </tr>
           </tbody>
         </table>

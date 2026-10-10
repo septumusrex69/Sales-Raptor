@@ -33184,3 +33184,73 @@ begin
     end;
   end loop;
 end $$;
+
+-- PAYMENTS TO MAKE LEAVES OUT A RUN AT OR BELOW NIL (10 Oct) -- the client owes the firm; carried forward.
+create or replace function public.payments_to_make()
+returns table(kind text, id uuid, payee text, amount numeric, reference text, status text,
+              due_on date, since timestamptz, detail text, company_id uuid, account_id uuid,
+              case_number text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'payover', r.id, coalesce(c.name, 'Client'), r.net_payover,
+         public.payment_out_reference('payover', r.invoice_number), r.status,
+         /* THE DAY IT IS DUE: the 11th, payover_lag_months after the cycle closed on the 10th. */
+         (r.period_end + make_interval(months => coalesce(f.payover_lag_months, 1)))::date + 1,
+         coalesce(r.sent_at, r.approved_at), nullif(btrim(coalesce(c.banking_details, '')), ''),
+         r.company_id, null::uuid, r.invoice_number
+    from public.payover_runs r
+    left join public.companies c on c.id = r.company_id
+    left join public.firm_settings f on true
+   where public.has_capability('finance.view') and r.status in ('approved', 'sent')
+     /* NOTHING GOES OUT ON A RUN AT OR BELOW NIL (10 Oct): the client owes the firm, and the next
+        run brings it forward as its opening line. Listed, it read as a payment to make of -R x. */
+     and r.net_payover > 0
+  union all
+  select 'refund', o.id, o.payable_to, o.amount,
+         public.payment_out_reference('refund', coalesce(d.case_number, d.account_number)), 'due',
+         null::date, o.instructed_at, o.reason, d.company_id, o.account_id, d.case_number
+    from public.trust_payments_out o
+    left join public.debtor_accounts d on d.id = o.account_id
+   where public.has_capability('finance.view') and o.paid_at is null and o.cancelled_at is null
+   order by 7 nulls last, 8
+$$;
+
+-- A RUN BELOW NIL CANNOT BE MARKED PAID (10 Oct).
+create or replace function public.mark_payover_run_paid(
+  p_run uuid, p_reference text, p_paid_at timestamptz default now())
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  /* WHEN THE STATEMENT IS THE ONLY WAY (the firm, for go-live): nothing is paid until the bank says so. */
+  if coalesce((select payouts_statement_only from public.firm_settings limit 1), false) then
+    raise exception 'Payments out are confirmed from the bank statement only. Import the statement and allocate the line under Exceptions.' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(p_reference, '')), '') is null then
+    raise exception 'Say which EFT paid it -- the reference is what reconciles this invoice to the bank.';
+  end if;
+  /* NOTHING IS PAID ON A RUN BELOW NIL (10 Oct): the client owes the firm, and the next run brings
+     it forward as its opening line whether or not this one is marked. Marking it paid would write
+     a payment out of money that never left the account. */
+  if (select net_payover from public.payover_runs where id = p_run) < 0 then
+    raise exception 'This run is below nil: the client owes us, and it comes off their next payover. There is nothing to pay.'
+      using errcode = '22023';
+  end if;
+  update public.payover_runs
+     set status = 'paid', paid_at = p_paid_at, eft_reference = btrim(p_reference)
+   where id = p_run and status in ('approved', 'sent');
+  if not found then raise exception 'Only an approved or sent run can be marked paid.'; end if;
+end $$;

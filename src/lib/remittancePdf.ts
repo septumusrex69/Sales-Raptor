@@ -142,7 +142,8 @@ export async function remittancePdf(adv: RemittanceAdvice): Promise<RemittancePd
   if (adv.headline.paidDirectly > 0) {
     figure('Paid directly to you', rand(adv.headline.paidDirectly), adv.headline.directNote ?? '')
   }
-  figure('Net amount we are paying you', rand(adv.headline.net), adv.headline.paidNote, true)
+  /* A run below nothing is the client owing the firm: its own words and a positive figure. */
+  figure(adv.headline.netLabel, rand(Math.abs(adv.headline.net)), adv.headline.paidNote, true)
 
   y -= 14
   p1.drawText('HOW WE GOT THERE', { x: M, y, size: 8, font: sansBold, color: rgb(INK.r, INK.g, INK.b) })
