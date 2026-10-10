@@ -38,9 +38,9 @@ const q = (id, client, start, end, net, status) => ({ run_id: id, company_id: id
   ptc_set_off: 0, net_payover: net, exceptions: 0, status, next_step: 'mark_paid', approved_at: null,
   sent_at: null, paid_at: null, eft_reference: null })
 const QUEUE = [
-  q('A', 'Summit Fitness', '2026-08-11', '2026-09-10', 8426.07, 'sent'),
+  { ...q('A', 'Summit Fitness', '2026-08-11', '2026-09-10', 8426.07, 'sent'), next_step: 'paid' },
   q('B', 'Baobab Property', '2026-08-11', '2026-09-10', 9699.53, 'approved'),
-  q('C', 'Lowveld Motors', '2026-07-11', '2026-08-10', 120, 'sent'),
+  { ...q('C', 'Lowveld Motors', '2026-07-11', '2026-08-10', 120, 'sent'), next_step: 'paid' },
   /* Ready in the cycle being paid now, and ready in the cycle still open (not approvable yet). */
   { ...q('E', 'Silverleaf Body Corporate', '2026-08-11', '2026-09-10', 500, 'ready'), next_step: 'approve' },
   { ...q('D', 'Karoo Fleet Hire', '2026-09-11', '2026-10-10', 3031.31, 'ready'), next_step: 'approve' },
@@ -66,7 +66,7 @@ const handlers = [
   [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
   [(u) => /\/rpc\/payover_cycle_now/.test(u), () => ({ body: [{ period_start: '2026-09-11', period_end: '2026-10-10', days_left: 2, today: '2026-10-08' }] })],
   [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: QUEUE })],
-  [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run_early|approve_payover_run)/.test(u),
+  [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run_early|approve_payover_run|mark_payover_run_paid)/.test(u),
     (u, req) => { calls.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...(req.postDataJSON() ?? {}) }); return { body: 0 } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
@@ -126,6 +126,31 @@ try {
   t.check('...and approves the ready one whose cycle has closed, and nothing else',
     JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['E']))
   t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
+
+  /* ---- MARK PAID FROM THE LIST (the firm, 10 Oct: "just immediately show you that pop-up") ---- */
+  await page.getByTestId('queue-run').filter({ hasText: 'Summit Fitness' }).getByRole('button', { name: 'Mark paid' }).click()
+  const ref = page.getByLabel('EFT reference')
+  await ref.waitFor({ timeout: 5000 }).catch(() => {})
+  t.ok('Mark paid opens the box on the list, not the run', /\/trust\/payover/.test(page.url()) && await ref.isVisible().catch(() => false))
+  t.ok('...with the reference the run should go out on', /PO-A/.test(await ref.inputValue().catch(() => '')))
+  await page.getByRole('button', { name: 'Mark paid', exact: true }).last().click()
+  await page.getByTestId('bulk-note').filter({ hasText: 'marked paid' }).waitFor({ timeout: 10000 }).catch(() => {})
+  const paidOne = calls.filter((c) => c.fn === 'mark_payover_run_paid')
+  t.check('...and marks it paid through the function, on that reference',
+    JSON.stringify(paidOne.map((c) => [c.p_run, /PO-A/.test(c.p_reference ?? '')])), JSON.stringify([['A', true]]))
+
+  /* AND SEVERAL AT ONCE, each on its own reference, one date. */
+  for (const name of ['Summit Fitness', 'Lowveld Motors']) {
+    await page.getByTestId('queue-run').filter({ hasText: name }).getByRole('checkbox').check()
+  }
+  await page.getByTestId('bulk-pay').click()
+  await page.getByRole('button', { name: 'Mark 2 paid' }).waitFor({ timeout: 5000 }).catch(() => {})
+  t.ok('the bulk bar marks the picked runs paid, each with its own reference',
+    (await page.getByLabel('EFT reference for Summit Fitness').count()) > 0 && (await page.getByLabel('EFT reference for Lowveld Motors').count()) > 0)
+  await page.getByRole('button', { name: 'Mark 2 paid' }).click()
+  await page.waitForTimeout(600)
+  t.check('...and calls the function once a run',
+    JSON.stringify(calls.filter((c) => c.fn === 'mark_payover_run_paid').map((c) => c.p_run).slice(1).sort()), JSON.stringify(['A', 'C']))
 
   /* A row with a button, measured here to hold the Running tab's text-only row against it. */
   const buttonRowHeight = await page.getByTestId('queue-run').filter({ has: page.locator('button') }).first()

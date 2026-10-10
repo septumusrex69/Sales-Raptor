@@ -6,7 +6,7 @@ import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import {
   NEXT_STEP_LABEL, RUN_STATUS_LABEL,
-  approveRun, buildRun, fetchBuildable, fetchCycle, fetchTiles, fetchWorkQueue,
+  approveRun, buildRun, fetchBuildable, markRunPaid, fetchCycle, fetchTiles, fetchWorkQueue,
   isStagingDeployment, refreshRuns, resetRun,
   type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
@@ -14,6 +14,8 @@ import { Modal } from '../../components/ui/Modal'
 import { groupRunsByCycle, periodLabel } from '../../lib/payoverGroups'
 import { supabase } from '../../lib/supabase'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
+import { fetchPayoutsStatementOnly } from '../../lib/trust'
+import { MarkPaidModal, type PayableRun } from './MarkPaidModal'
 import { rand as randAmount } from '../../lib/money'
 
 /**
@@ -116,6 +118,12 @@ export function FinanceWorkQueue() {
   const [note, setNote] = useState<string | null>(null)
   /* How long after a cycle closes it is paid (Trust settings); one month unless the firm changed it. */
   const [lag, setLag] = useState(1)
+  /* MARK PAID, FROM HERE (the firm, 10 Oct: "the mark as paid button should ... just immediately
+     show you that pop-up"). One run from its row, several from the bulk bar. Not offered at all
+     where Trust settings say payments out are confirmed from the statement only. */
+  const [paying, setPaying] = useState<PayableRun[] | null>(null)
+  const [statementOnly, setStatementOnly] = useState(false)
+  useEffect(() => { fetchPayoutsStatementOnly().then(setStatementOnly).catch(() => {}) }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -150,6 +158,10 @@ export function FinanceWorkQueue() {
        emailing the advice and recording an EFT all need something the queue does not have — which
        row, which address, which reference — and a button that half-does a job is worse than one
        that takes you to where the job is done. Approve is the exception: there is nothing to ask. */
+    if (row.nextStep === 'paid' && !statementOnly && row.netPayover >= 0) {
+      setPaying([{ id: row.runId, client: row.client, invoiceNumber: row.invoiceNumber, amount: row.netPayover }])
+      return
+    }
     if (row.nextStep !== 'approve') { navigate(`/trust/runs/${row.runId}`); return }
     setBusy(row.runId)
     setError(null)
@@ -207,6 +219,24 @@ export function FinanceWorkQueue() {
   const pickedRows = rows.filter((r) => picked.has(r.runId))
   const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r)).map((r) => r.runId)
   const toEmail = pickedRows.filter((r) => r.status === 'approved').map((r) => r.runId)
+  /* Only what is ready to pay: approved or sent, and not below nil -- a run below nil is the client
+     owing us, and mark_payover_run_paid refuses it. */
+  const toPay = statementOnly ? [] : pickedRows.filter((r) => (r.status === 'approved' || r.status === 'sent') && r.netPayover >= 0)
+
+  async function payRuns(refs: Record<string, string>, date: string) {
+    setBusy('bulk'); setError(null); setNote(null)
+    const failed: string[] = []
+    const list = paying ?? []
+    for (const r of list) {
+      try { await markRunPaid(r.id, refs[r.id].trim(), new Date(`${date}T12:00:00`).toISOString()) } catch (e) {
+        failed.push(`${r.client}: ${e instanceof Error ? e.message : 'could not be marked paid'}`)
+      }
+    }
+    setNote(`${list.length - failed.length} marked paid${failed.length ? `; ${failed.length} not: ${failed.join('; ')}` : ''}.`)
+    setPaying(null); setPicked(new Set())
+    await load()
+    setBusy(null)
+  }
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   return (
@@ -317,6 +347,13 @@ export function FinanceWorkQueue() {
               className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40">
               Email advice {toEmail.length}
             </button>
+            {!statementOnly && (
+              <button type="button" data-testid="bulk-pay" disabled={busy !== null || toPay.length === 0}
+                onClick={() => setPaying(toPay.map((r) => ({ id: r.runId, client: r.client, invoiceNumber: r.invoiceNumber, amount: r.netPayover })))}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-40">
+                Mark paid {toPay.length}
+              </button>
+            )}
             <button type="button" onClick={() => setPicked(new Set())} className="text-slate-500 underline">Clear</button>
             {busy === 'bulk' && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
           </div>
@@ -437,6 +474,13 @@ export function FinanceWorkQueue() {
                         title="Approve early from the run, with a reason">
                         Open until {fmtDay(r.periodEnd)}
                       </span>
+                    ) : r.nextStep === 'paid' && r.netPayover < 0 ? (
+                      /* A RUN BELOW NIL HAS NOTHING TO PAY: the client owes us, and it comes off their
+                         next payover or they pay it into the business account. */
+                      <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-negative-700"
+                        data-testid="owes-us">
+                        Client owes us
+                      </span>
                     ) : r.nextStep && (
                       <button
                         type="button"
@@ -468,6 +512,9 @@ export function FinanceWorkQueue() {
         </p>
       </Card>
 
+      {paying && (
+        <MarkPaidModal runs={paying} onClose={() => setPaying(null)} onSave={payRuns} />
+      )}
       {building && cycle && (
         <BuildRunModal
           cycle={cycle}

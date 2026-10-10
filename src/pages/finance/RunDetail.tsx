@@ -14,6 +14,7 @@ import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from 
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
+import { MarkPaidModal } from './MarkPaidModal'
 import { useBackLink, useRecordName } from '../../lib/backLink'
 import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
 
@@ -415,10 +416,10 @@ export function RunDetail() {
       )}
       {payModal && run && (
         <MarkPaidModal
-          suggested={paymentReference(run.invoice_number) ?? ''}
+          runs={[{ id: run.id, client: client?.name ?? '', invoiceNumber: run.invoice_number, amount: run.net_payover }]}
           onClose={() => setPayModal(false)}
-          onSave={async (ref, date) => {
-            await act(() => markRunPaid(run.id, ref, new Date(`${date}T12:00:00`).toISOString()))
+          onSave={async (refs, date) => {
+            await act(() => markRunPaid(run.id, refs[run.id], new Date(`${date}T12:00:00`).toISOString()))
             setPayModal(false)
           }}
         />
@@ -521,8 +522,6 @@ function PaymentPanel({ row, audit, onClose }: {
   )
 }
 
-/** 'Mark paid' asks for the EFT reference and the date — the firm's own instruction. The
- *  reference is what reconciles this invoice to the bank statement, so it is required. */
 /**
  * APPROVING BEFORE THE CUT-OFF. The firm, 8 Oct: "you shouldn't just do it" -- so it asks why, and
  * says plainly what happens to a payment processed later in the cycle.
@@ -552,42 +551,6 @@ function EarlyApproveModal({ periodEnd, onClose, onSave }: {
             onClick={() => { setBusy(true); void onSave(reason.trim()).finally(() => setBusy(false)) }}
             className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
             Approve now
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-function MarkPaidModal({ suggested, onClose, onSave }: {
-  /** The reference it should have gone out on; still editable, because the bank's wins. */
-  suggested: string
-  onClose: () => void
-  onSave: (ref: string, date: string) => Promise<void>
-}) {
-  const [ref, setRef] = useState(suggested)
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [busy, setBusy] = useState(false)
-  return (
-    <Modal title="Mark this payover paid" onClose={onClose} width={420}>
-      <div className="space-y-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">EFT reference</label>
-          <input value={ref} onChange={(e) => setRef(e.target.value)} className={inputClass} placeholder="As it appears on the bank statement" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Payment date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
-        </div>
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
-          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button
-            type="button"
-            disabled={busy || !ref.trim()}
-            onClick={() => { setBusy(true); void onSave(ref, date).finally(() => setBusy(false)) }}
-            className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50"
-          >
-            Mark paid
           </button>
         </div>
       </div>

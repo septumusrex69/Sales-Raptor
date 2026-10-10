@@ -88,7 +88,11 @@ ok('Payments to make is in the Trust rail', /to: '\/trust\/payments-out', label:
 ok('...and routed', /path="payments-out" element=\{<TrustPaymentsOut \/>\}/.test(read('src/App.tsx')))
 const run = strip(read('src/pages/finance/RunDetail.tsx'))
 ok('the run says which reference to pay it on', /Pay with reference/.test(run) && /paymentReference\(run\.invoice_number\)/.test(run))
-ok('...and Mark paid starts from it', /suggested=\{paymentReference\(run\.invoice_number\) \?\? ''\}/.test(run) && /useState\(suggested\)/.test(run))
+/* Mark paid is its own box since 10 Oct (opened from the run AND the runs list, one run or many);
+   each run in it starts on the reference it should have gone out on. */
+const markPaid = strip(read('src/pages/finance/MarkPaidModal.tsx'))
+ok('...and Mark paid starts from it', /runs\.map\(\(r\) => \[r\.id, paymentReference\(r\.invoiceNumber\) \?\? ''\]\)/.test(markPaid)
+  && /invoiceNumber: run\.invoice_number/.test(run))
 ok('the client\'s advice says it will carry it', /reference \$\{paymentReference\(run\.invoiceNumber\)\}/.test(read('src/lib/remittanceAdvice.ts')))
 
 /* ---- 5. completed from two places, confirmed by the statement (the firm, 8 Oct) ---- */
