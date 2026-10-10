@@ -89,17 +89,18 @@ export function FinanceExceptions() {
           </div>
           <div className="divide-y divide-slate-50">
             {g.rows.slice(0, 200).map((j, i) => (
-              <div key={`${j.allocationId ?? j.accountId}-${i}`} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-slate-800">
-                    {j.client} · {j.debtor}
-                  </div>
-                  <div className="text-xs text-slate-400">{j.caseNumber ?? ''} · {j.problem}</div>
+              <div key={`${j.allocationId ?? j.accountId}-${i}`} className="flex items-center gap-3 px-4 py-1.5 text-[12.5px] whitespace-nowrap" data-testid="exception-row">
+                {/* ONE THIN LINE, like Trust -> Check (the firm, 10 Oct). */}
+                <div className="min-w-0 flex-1 truncate" title={`${j.client} · ${j.debtor} · ${j.problem}`}>
+                  <span className="text-slate-500">{j.caseNumber ?? ''}</span>
+                  <span className="ml-2 font-medium text-slate-800">{j.debtor}</span>
+                  <span className="ml-2 text-slate-500">{j.client}</span>
+                  <span className="ml-2 text-slate-400">· {j.problem}</span>
                 </div>
-                <div className="tabular-nums text-sm text-slate-700">{j.amount === null ? '—' : rand(j.amount)}</div>
+                <div className="tabular-nums text-slate-700">{j.amount === null ? '—' : rand(j.amount)}</div>
                 {j.kind === 'needs_rate' ? (
                   <button type="button" onClick={() => setRateFor(j)}
-                    className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
+                    className="rounded-md bg-navy-900 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-navy-800">
                     {j.action}
                   </button>
                 ) : j.kind === 'excess_credit' && j.allocationId ? (
@@ -116,12 +117,12 @@ export function FinanceExceptions() {
                    * The account is still one click away, under the debtor's name.
                    */
                   <button type="button" onClick={() => setDisposing(j)}
-                    className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
+                    className="rounded-md bg-navy-900 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-navy-800">
                     Decide it
                   </button>
                 ) : (
                   <Link to={`/accounts/${j.accountId}`}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100">
+                    className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-700 hover:bg-slate-100">
                     {j.action}
                   </Link>
                 )}

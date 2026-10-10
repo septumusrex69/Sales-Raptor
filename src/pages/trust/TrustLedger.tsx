@@ -144,13 +144,13 @@ function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; 
     <div className="space-y-3">
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="bg-slate-50 text-[10.5px] uppercase tracking-wide text-slate-400">
-                <th className="text-left font-medium px-4 py-2.5">Whose</th>
-                <th className="text-left font-medium px-4 py-2.5">Which</th>
-                <th className="text-right font-medium px-4 py-2.5">Entries</th>
-                <th className="text-right font-medium px-4 py-2.5">Balance</th>
+              <tr className="border-b border-slate-100 text-slate-400">
+                <th className="text-left font-medium px-3 py-1.5">Whose</th>
+                <th className="text-left font-medium px-3 py-1.5">Which</th>
+                <th className="text-right font-medium px-3 py-1.5">Entries</th>
+                <th className="text-right font-medium px-3 py-1.5">Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -160,8 +160,8 @@ function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; 
                 return (
                 <Fragment key={key}>
                 <tr className="border-t border-slate-100" data-testid="ledger-row">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 flex-wrap">
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
                       <button type="button" onClick={() => setOpenKey(isOpen ? null : key)}
                         aria-expanded={isOpen} aria-label={`What makes up ${r.whoName}'s balance`}
                         className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -184,9 +184,9 @@ function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; 
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-500">{r.whoDetail || '—'}</td>
-                  <td className="px-4 py-3 text-right text-slate-500 tabular-nums">{r.entries}</td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap">
+                  <td className="px-3 py-1.5 text-slate-500">{r.whoDetail || '—'}</td>
+                  <td className="px-3 py-1.5 text-right text-slate-500 tabular-nums">{r.entries}</td>
+                  <td className="px-3 py-1.5 text-right font-medium tabular-nums whitespace-nowrap">
                     {rand(Math.abs(r.balance))}
                   </td>
                 </tr>
@@ -199,11 +199,11 @@ function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; 
                 )
               })}
               <tr className="border-t border-slate-200 bg-slate-50">
-                <td className="px-4 py-3 text-[12.5px] font-bold uppercase tracking-wide text-slate-600"
+                <td className="px-3 py-1.5 text-[12.5px] font-bold uppercase tracking-wide text-slate-600"
                   colSpan={3}>
                   Total
                 </td>
-                <td className="px-4 py-3 text-right text-base font-semibold tabular-nums">
+                <td className="px-3 py-1.5 text-right text-base font-semibold tabular-nums">
                   {rand(Math.abs(rows.reduce((s, r) => s + r.balance, 0)))}
                 </td>
               </tr>
@@ -235,45 +235,45 @@ function Entries({ party, who }: { party: TrustParty; who: string }) {
   if (!entries) return <p className="flex items-center gap-2 text-[12.5px] text-slate-400"><Loader2 size={13} className="animate-spin" /> Reading the entries…</p>
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <table className="w-full text-[12.5px]" data-testid="ledger-entries">
+      <table className="w-full text-[12.5px] whitespace-nowrap" data-testid="ledger-entries">
         <thead>
-          <tr className="text-[10.5px] uppercase tracking-wide text-slate-400">
-            <th className="px-3 py-2 text-left font-medium">Date</th>
-            <th className="px-3 py-2 text-left font-medium">What</th>
-            <th className="px-3 py-2 text-left font-medium">Account</th>
-            <th className="px-3 py-2 text-left font-medium">Payover run</th>
-            <th className="px-3 py-2 text-right font-medium">Amount</th>
-            <th className="px-3 py-2 text-right font-medium">Balance</th>
+          <tr className="text-slate-400">
+            <th className="px-3 py-1.5 text-left font-medium">Date</th>
+            <th className="px-3 py-1.5 text-left font-medium">What</th>
+            <th className="px-3 py-1.5 text-left font-medium">Account</th>
+            <th className="px-3 py-1.5 text-left font-medium">Payover run</th>
+            <th className="px-3 py-1.5 text-right font-medium">Amount</th>
+            <th className="px-3 py-1.5 text-right font-medium">Balance</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((e) => (
             <tr key={e.id} className="border-t border-slate-100">
-              <td className="whitespace-nowrap px-3 py-2 text-slate-500">{fmtDay(e.at)}</td>
-              <td className="px-3 py-2 text-slate-700">
+              <td className="whitespace-nowrap px-3 py-1.5 text-slate-500">{fmtDay(e.at)}</td>
+              <td className="px-3 py-1.5 text-slate-700">
                 {e.reason}
                 {e.onStatement && <span className="ml-1.5 text-slate-400">· on the statement {fmtDay(e.onStatement)}</span>}
               </td>
-              <td className="whitespace-nowrap px-3 py-2">
+              <td className="whitespace-nowrap px-3 py-1.5">
                 {e.accountId
                   ? <Link to={`/accounts/${e.accountId}`} className="text-slate-700 hover:text-gold-700">{e.caseNumber ?? 'Account'}{e.debtorName ? ` · ${e.debtorName}` : ''}</Link>
                   : <span className="text-slate-300">—</span>}
               </td>
-              <td className="whitespace-nowrap px-3 py-2">
+              <td className="whitespace-nowrap px-3 py-1.5">
                 {e.runId
                   ? <Link to={`/trust/runs/${e.runId}`} className="text-brand-500 hover:underline">{e.invoiceNumber ?? 'Run'}</Link>
                   : <span className="text-slate-300">—</span>}
               </td>
-              <td className={clsx('whitespace-nowrap px-3 py-2 text-right tabular-nums', e.amount < 0 ? 'text-negative-700' : 'text-slate-700')}>
+              <td className={clsx('whitespace-nowrap px-3 py-1.5 text-right tabular-nums', e.amount < 0 ? 'text-negative-700' : 'text-slate-700')}>
                 {e.amount < 0 ? `−${rand(-e.amount)}` : rand(e.amount)}
               </td>
-              <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-800">{rand(e.balance)}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-slate-800">{rand(e.balance)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       {entries.length === 500 && (
-        <p className="border-t border-slate-100 px-3 py-2 text-[12px] text-slate-400">The latest 500 entries; the balance carries everything before them.</p>
+        <p className="border-t border-slate-100 px-3 py-1.5 text-[12px] text-slate-400">The latest 500 entries; the balance carries everything before them.</p>
       )}
     </div>
   )

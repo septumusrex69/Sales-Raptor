@@ -59,8 +59,8 @@ try {
   t.check('both overpayments are listed', await decide.count(), 2)
 
   /* ---- the box opens, with every choice ---- */
-  await page.locator('div', { hasText: /^Lowveld Motors \(Pty\) Ltd · Ilse Muller$/ }).first()
-    .locator('xpath=ancestor::div[contains(@class,"flex-wrap")][1]').getByRole('button', { name: 'Decide it' }).click()
+  await page.getByTestId('exception-row').filter({ hasText: 'Ilse Muller' }).filter({ hasText: 'Lowveld Motors' })
+    .first().getByRole('button', { name: 'Decide it' }).click()
   await page.getByText('Refund it to the debtor').waitFor({ timeout: 10000 })
   for (const choice of ['Refund it to the debtor', 'Move it to another of their accounts', 'Release it to the client']) {
     t.ok(`"${choice}" is a choice`, await page.getByText(choice).first().isVisible())

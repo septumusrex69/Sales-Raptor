@@ -158,53 +158,57 @@ export function TrustPaymentsOut() {
             </Card>
           ) : (
             <Card padded={false} className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100">
-                    <th className="text-left px-5 py-3">Pay to</th>
-                    <th className="text-left px-3 py-3">What</th>
-                    <th className="text-left px-3 py-3">Reference</th>
-                    <th className="text-left px-3 py-3">When</th>
-                    <th className="text-right px-3 py-3">Amount</th>
-                    <th className="px-5 py-3" />
+                  <tr className="text-slate-400 border-b border-slate-100">
+                    <th className="font-medium text-left px-3 py-2">Pay to</th>
+                    <th className="font-medium text-left px-2 py-2">Bank details</th>
+                    <th className="font-medium text-left px-3 py-2">What</th>
+                    <th className="font-medium text-left px-3 py-2">Reference</th>
+                    <th className="font-medium text-left px-3 py-2">When</th>
+                    <th className="font-medium text-right px-3 py-2">Amount</th>
+                    <th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((p) => (
-                    <tr key={`${p.kind}-${p.id}`} className="border-b border-slate-100 last:border-b-0 align-top" data-testid="payment-to-make">
-                      <td className="px-5 py-3">
-                        <div className="font-medium text-slate-800">{p.payee}</div>
-                        {p.detail && <div className="mt-0.5 text-[12px] text-slate-500 whitespace-pre-line">{p.kind === 'payover' ? p.detail : `Why: ${p.detail}`}</div>}
-                        {p.kind === 'payover' && !p.detail && <div className="mt-0.5 text-[12px] text-amber-700">No banking details on the client</div>}
+                    <tr key={`${p.kind}-${p.id}`} className="border-b border-slate-50 last:border-b-0 hover:bg-slate-50" data-testid="payment-to-make">
+                      <td className="px-3 py-2 font-medium text-slate-800 max-w-[14rem] truncate" title={p.payee}>{p.payee}</td>
+                      {/* One line: the banking details' own line breaks become dots. */}
+                      <td className="px-2 py-2 text-slate-500 max-w-[18rem] truncate"
+                        title={p.detail ?? undefined}>
+                        {p.detail
+                          ? (p.kind === 'payover' ? p.detail : `Why: ${p.detail}`).split(/\s*\n\s*/).join(' \u00b7 ')
+                          : p.kind === 'payover' ? <span className="text-amber-700">No banking details on the client</span> : ''}
                       </td>
-                      <td className="px-3 py-3 text-slate-600">
+                      <td className="px-3 py-2 text-slate-600">
                         {p.kind === 'payover' ? (
                           <Link to={`/trust/runs/${p.id}`} className="text-gold-700 hover:text-gold-800">Payover {p.caseNumber ?? ''}</Link>
                         ) : (
                           <Link to={`/accounts/${p.accountId}`} className="text-gold-700 hover:text-gold-800">Refund · {p.caseNumber ?? 'the debtor'}</Link>
                         )}
-                        <div className="text-[12px] text-slate-400">
-                          {p.kind === 'payover' ? (p.status === 'sent' ? 'Advice sent' : 'Approved') : 'Overpayment refunded'}
-                        </div>
+                        <span className="text-slate-400">
+                          {' \u00b7 '}{p.kind === 'payover' ? (p.status === 'sent' ? 'Advice sent' : 'Approved') : 'Overpayment refunded'}
+                        </span>
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-2">
                         {p.reference ? (
                           <button type="button" onClick={() => copy(p.reference!)} title="Copy the reference"
-                            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 px-2 py-1 font-mono text-[12.5px] text-slate-800 hover:bg-slate-50">
+                            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-200 px-1.5 py-0.5 font-mono text-[12.5px] text-slate-800 hover:bg-slate-50">
                             {p.reference}
                             {copied === p.reference ? <Check size={13} className="text-positive-700" /> : <Copy size={13} className="text-slate-400" />}
                           </button>
                         ) : <span className="text-slate-400">—</span>}
                       </td>
-                      <td className="px-3 py-3 text-slate-600 whitespace-nowrap">{p.dueOn ? `Due ${shortDate(p.dueOn)}` : 'As soon as paid'}</td>
-                      <td className="px-3 py-3 text-right font-semibold tabular-nums text-slate-800 whitespace-nowrap">{rand(p.amount)}</td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.dueOn ? `Due ${shortDate(p.dueOn)}` : 'As soon as paid'}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-800 whitespace-nowrap">{rand(p.amount)}</td>
+                      <td className="px-3 py-2 text-right">
                         {statementOnly ? (
                           <span className="text-[11.5px] text-slate-400 whitespace-nowrap">Paid from the statement</span>
                         ) : (
                         <button type="button"
                           onClick={() => setPaying({ kind: p.kind, id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}
-                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap">
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap">
                           Mark paid
                         </button>
                         )}
@@ -251,29 +255,29 @@ function PaidList({ paid }: { paid: PaidOut[] }) {
   const label = (p: PaidOut) => (p.kind === 'payover' ? `Payover ${p.caseNumber ?? ''}` : p.kind === 'refund' ? `Refund · ${p.caseNumber ?? ''}` : 'Transfer to the business account')
   return (
     <Card padded={false} className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-sm">
+      <table className="w-full text-[12.5px] whitespace-nowrap">
         <thead>
-          <tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-100">
-            <th className="text-left px-5 py-3">Paid to</th>
-            <th className="text-left px-3 py-3">What</th>
-            <th className="text-left px-3 py-3">Reference</th>
-            <th className="text-left px-3 py-3">Paid</th>
-            <th className="text-left px-3 py-3">Bank statement</th>
-            <th className="text-right px-5 py-3">Amount</th>
+          <tr className="text-slate-400 border-b border-slate-100">
+            <th className="font-medium text-left px-3 py-2">Paid to</th>
+            <th className="font-medium text-left px-3 py-2">What</th>
+            <th className="font-medium text-left px-3 py-2">Reference</th>
+            <th className="font-medium text-left px-3 py-2">Paid</th>
+            <th className="font-medium text-left px-3 py-2">Bank statement</th>
+            <th className="font-medium text-right px-3 py-2">Amount</th>
           </tr>
         </thead>
         <tbody>
           {paid.map((p) => (
             <tr key={`${p.kind}-${p.id}`} className="border-b border-slate-100 last:border-b-0" data-testid="paid-out">
-              <td className="px-5 py-3 font-medium text-slate-800">{p.payee}</td>
-              <td className="px-3 py-3 text-slate-600">
+              <td className="px-3 py-2 font-medium text-slate-800">{p.payee}</td>
+              <td className="px-3 py-2 text-slate-600">
                 {p.kind === 'payover' ? <Link to={`/trust/runs/${p.id}`} className="text-gold-700 hover:text-gold-800">{label(p)}</Link>
                   : p.kind === 'refund' && p.accountId ? <Link to={`/accounts/${p.accountId}`} className="text-gold-700 hover:text-gold-800">{label(p)}</Link>
                     : label(p)}
               </td>
-              <td className="px-3 py-3 font-mono text-[12.5px] text-slate-700 whitespace-nowrap">{p.paidReference ?? p.reference ?? '—'}</td>
-              <td className="px-3 py-3 text-slate-600 whitespace-nowrap">{p.paidAt ? shortDate(p.paidAt.slice(0, 10)) : '—'}</td>
-              <td className="px-3 py-3 whitespace-nowrap">
+              <td className="px-3 py-2 font-mono text-[12.5px] text-slate-700 whitespace-nowrap">{p.paidReference ?? p.reference ?? '—'}</td>
+              <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.paidAt ? shortDate(p.paidAt.slice(0, 10)) : '—'}</td>
+              <td className="px-3 py-2 whitespace-nowrap">
                 {p.confirmed ? (
                   <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700">
                     On the statement {p.statementDate ? shortDate(p.statementDate) : ''}
@@ -282,7 +286,7 @@ function PaidList({ paid }: { paid: PaidOut[] }) {
                   <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11.5px] font-semibold text-amber-800">Waiting for the statement</span>
                 )}
               </td>
-              <td className="px-5 py-3 text-right font-semibold tabular-nums text-slate-800 whitespace-nowrap">{rand(p.amount)}</td>
+              <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-800 whitespace-nowrap">{rand(p.amount)}</td>
             </tr>
           ))}
         </tbody>

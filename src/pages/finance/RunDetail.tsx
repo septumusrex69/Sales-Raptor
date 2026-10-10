@@ -328,44 +328,54 @@ export function RunDetail() {
           <span className="ml-auto text-xs text-slate-400">{shown.length} of {rows.length}</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px]">
+          {/*
+            ONE THIN LINE A PAYMENT, LIKE TRUST -> CHECK (the firm, 10 Oct: "I like the way the check
+            is done because it's like thin little lines ... make the lists look like the check").
+            Each fact has its own column instead of being stacked under the name, nothing wraps,
+            and the table scrolls sideways inside its card when it is wider than the screen.
+          */}
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
-                <th className="px-4 py-2.5">Debtor</th>
-                <th className="px-4 py-2.5">Paid</th>
-                <th className="px-4 py-2.5 text-right">Capital received</th>
-                <th className="px-4 py-2.5 text-right">Commission</th>
-                <th className="px-4 py-2.5 text-right">VAT</th>
-                <th className="px-4 py-2.5 text-right">Capital outstanding</th>
+              <tr className="border-b border-slate-100 text-left text-slate-400">
+                <th className="px-3 py-2 font-medium">Paid</th>
+                <th className="px-2 py-2 font-medium">Account</th>
+                <th className="px-2 py-2 font-medium">Debtor</th>
+                <th className="px-2 py-2 font-medium">Your ref</th>
+                <th className="px-2 py-2 font-medium">Note</th>
+                <th className="px-2 py-2 text-right font-medium">Capital received</th>
+                <th className="px-2 py-2 text-right font-medium">Commission</th>
+                <th className="px-2 py-2 text-right font-medium">VAT</th>
+                <th className="px-3 py-2 text-right font-normal text-slate-400">Capital outstanding</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.lineId} onClick={() => setOpen(r)}
-                  className={clsx('cursor-pointer border-b border-slate-50 text-sm hover:bg-slate-50',
-                    r.lineKind === 'reversal' && 'text-negative-700')}>
-                  <td className="px-4 py-2.5">
-                    <div className="font-medium">{r.lineKind === 'carried' ? 'Brought forward' : r.debtor}</div>
-                    <div className="text-xs text-slate-400">
-                      {r.caseNumber ?? ''}{r.clientReference ? ` · your ref ${r.clientReference}` : ''}
-                      {r.lineKind === 'ptc' && ' · paid you directly'}
-                      {r.lineKind === 'reversal' && ' · reversed after the last run'}
-                      {r.lateCapture && ' · captured after the previous cut-off'}
-                    </div>
+                  className={clsx('cursor-pointer border-b border-slate-50 hover:bg-slate-50',
+                    r.lineKind === 'reversal' ? 'text-negative-700' : 'text-slate-700')}>
+                  <td className="px-3 py-2 text-slate-500">{r.receivedAt ? fmtDay(r.receivedAt.slice(0, 10)) : '\u2014'}</td>
+                  <td className="px-2 py-2 text-slate-500">{r.caseNumber ?? ''}</td>
+                  <td className="px-2 py-2 font-medium max-w-[16rem] truncate" title={r.debtor ?? undefined}>
+                    {r.lineKind === 'carried' ? 'Brought forward' : r.debtor}
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">{r.receivedAt ? fmtDay(r.receivedAt.slice(0, 10)) : '—'}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
+                  <td className="px-2 py-2 text-slate-500">{r.clientReference ?? ''}</td>
+                  <td className="px-2 py-2 text-slate-500">
+                    {[r.lineKind === 'ptc' && 'paid you directly',
+                      r.lineKind === 'reversal' && 'reversed after the last run',
+                      r.lateCapture && 'captured after the previous cut-off'].filter(Boolean).join(' \u00b7 ')}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">
                     {r.lineKind === 'carried' ? rand(r.carriedAmount) : rand(r.toCapital)}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{r.lineKind === 'carried' ? '—' : rand(r.commission)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{r.lineKind === 'carried' ? '—' : rand(r.commissionVat)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
-                    {r.lineKind === 'carried' ? '—' : rand(r.capitalAfter)}
+                  <td className="px-2 py-2 text-right tabular-nums">{r.lineKind === 'carried' ? '\u2014' : rand(r.commission)}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{r.lineKind === 'carried' ? '\u2014' : rand(r.commissionVat)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                    {r.lineKind === 'carried' ? '\u2014' : rand(r.capitalAfter)}
                   </td>
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
               )}
             </tbody>
           </table>

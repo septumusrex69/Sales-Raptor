@@ -53,7 +53,7 @@ const STATUS_TONE: Record<RunStatus, string> = {
 
 function Pill({ status }: { status: RunStatus }) {
   return (
-    <span className={clsx('inline-block rounded-full px-2.5 py-1 text-[11.5px] font-semibold whitespace-nowrap', STATUS_TONE[status])}>
+    <span className={clsx('inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap', STATUS_TONE[status])}>
       {RUN_STATUS_LABEL[status]}
     </span>
   )
@@ -307,30 +307,32 @@ export function FinanceWorkQueue() {
             period only on the Paid tab (where the heading does not carry it), exceptions on the
             button only, and headings that fit on one line.
           */}
-          <table className="w-full min-w-[720px]">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400 whitespace-nowrap">
-                <th className="w-8 pl-4 py-2.5">
+              <tr className="border-b border-slate-100 text-left text-slate-400">
+                <th className="w-8 pl-4 py-2 font-medium">
                   <input type="checkbox" aria-label="Select every run shown"
                     checked={shown.length > 0 && shown.every((r) => picked.has(r.runId))}
                     onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((r) => r.runId)) : new Set())} />
                 </th>
-                <th className="px-4 py-2.5">Client</th>
-                <th className="px-4 py-2.5 text-right" title="Collected by Bredell Ferreira into trust">Collected</th>
-                <th className="px-4 py-2.5 text-right">PTC set-off</th>
-                <th className="px-4 py-2.5 text-right">To pay</th>
-                <th className="px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5">Next step</th>
+                <th className="px-2 py-2 font-medium">Client</th>
+                <th className="px-2 py-2 font-medium">Run</th>
+                <th className="px-2 py-2 text-right font-medium">Payments</th>
+                <th className="px-2 py-2 text-right font-medium" title="Collected by Bredell Ferreira into trust">Collected</th>
+                <th className="px-2 py-2 text-right font-medium">PTC set-off</th>
+                <th className="px-2 py-2 text-right font-medium">To pay</th>
+                <th className="px-2 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Next step</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">
                   <Loader2 className="mx-auto w-5 h-5 animate-spin" />
                 </td></tr>
               )}
               {!loading && shown.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
                   {tab === 'paid'
                     ? 'Nothing has been paid over yet.'
                     : 'Nothing processed in this cycle or the last yet. A client appears here, with its run built, as soon as a payment for it is approved.'}
@@ -344,8 +346,8 @@ export function FinanceWorkQueue() {
                   then the one sentence of what happens next and when, and the cycle's total.
                 */}
                 <tr className="border-b border-slate-100" data-testid="cycle-group" data-tone={g.tone}>
-                  <td colSpan={7} className="p-0">
-                    <div className={clsx('flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-l-4 px-4 py-3',
+                  <td colSpan={9} className="p-0">
+                    <div className={clsx('flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 border-l-4 px-4 py-2',
                       g.tone === 'late' ? 'border-l-negative-500 bg-negative-50'
                         : g.tone === 'now' ? 'border-l-gold-500 bg-gold-50'
                           : g.tone === 'early' ? 'border-l-slate-400 bg-slate-50'
@@ -374,27 +376,26 @@ export function FinanceWorkQueue() {
                 <tr
                   key={r.runId}
                   onClick={() => navigate(`/trust/runs/${r.runId}`)}
-                  className="cursor-pointer border-b border-slate-50 text-sm hover:bg-slate-50"
+                  className="cursor-pointer border-b border-slate-50 text-slate-700 hover:bg-slate-50"
                   data-testid="queue-run"
                 >
-                  <td className="w-8 pl-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                  <td className="w-8 pl-4 py-1.5" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" aria-label={`Select ${r.client}`} checked={picked.has(r.runId)}
                       onChange={() => toggle(r.runId)} />
                   </td>
-                  <td className="px-4 py-2.5">
-                    <div className="font-semibold text-slate-800 whitespace-nowrap">{r.client}</div>
-                    <div className="text-xs text-slate-400 whitespace-nowrap">
-                      {r.invoiceNumber} · {r.payments} {r.payments === 1 ? 'payment' : 'payments'}
-                      {g.tone === 'done' && <>{' · '}{fmtDay(r.periodStart)}–{fmtDay(r.periodEnd)}</>}
-                    </div>
+                  <td className="px-2 py-1.5 font-medium text-slate-800 max-w-[16rem] truncate" title={r.client}>{r.client}</td>
+                  <td className="px-2 py-1.5 text-slate-500">
+                    {r.invoiceNumber}
+                    {g.tone === 'done' && <span className="text-slate-400">{' · '}{fmtDay(r.periodStart)}–{fmtDay(r.periodEnd)}</span>}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{rand(r.trustCapital)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 whitespace-nowrap">
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{r.payments}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{rand(r.trustCapital)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
                     {r.ptcSetOff ? `− ${rand(r.ptcSetOff)}` : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums whitespace-nowrap">{rand(r.netPayover)}</td>
-                  <td className="px-4 py-2.5"><Pill status={r.status} /></td>
-                  <td className="px-4 py-2.5">
+                  <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{rand(r.netPayover)}</td>
+                  <td className="px-2 py-1.5"><Pill status={r.status} /></td>
+                  <td className="px-3 py-1.5">
                     {r.nextStep === 'approve' && stillOpen(r) ? (
                       <span className="whitespace-nowrap text-xs text-slate-400" data-testid="still-open"
                         title="Approve early from the run, with a reason">
@@ -406,7 +407,7 @@ export function FinanceWorkQueue() {
                         disabled={busy === r.runId}
                         onClick={(e) => { e.stopPropagation(); void onNextStep(r) }}
                         className={clsx(
-                          'whitespace-nowrap rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors disabled:opacity-50',
+                          'whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors disabled:opacity-50',
                           r.nextStep === 'approve'
                             ? 'bg-navy-900 text-white hover:bg-navy-800'
                             : 'border border-slate-200 text-slate-700 hover:bg-slate-100',
