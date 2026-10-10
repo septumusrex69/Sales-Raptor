@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -68,6 +68,13 @@ export function CheckPayments() {
   const { currentUser } = useAuth()
   const mayReverse = canReversePayment(currentUser)
   const [reversing, setReversing] = useState<PostedPayment | null>(null)
+  /*
+   * FILED BY CLIENT, THEN NARROWED BY MONTH (the firm, 10 Oct: "under the client. So it's
+   * organized, it's filed. And here is just a bunch of list of stuff"). A client is a closed
+   * folder until opened; the month narrows every folder at once.
+   */
+  const [month, setMonth] = useState<string>('all')
+  const [openClients, setOpenClients] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -95,8 +102,28 @@ export function CheckPayments() {
 
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
   const older = useMemo(() => checked.filter((c) => c.row.beforeTheRecord), [checked])
-  const shown = onlyBroken ? broken : checked
-  const total = useMemo(() => rows.reduce((n, r) => n + r.amount, 0), [rows])
+  const months = useMemo(() => [...new Set(rows.map((r) => r.receivedOn.slice(0, 7)))].sort().reverse(), [rows])
+  const shown = (onlyBroken ? broken : checked).filter((c) => month === 'all' || c.row.receivedOn.startsWith(month))
+  /* ONE FOLDER A CLIENT, the one paid most recently first; a client's payments newest first inside. */
+  const folders = useMemo(() => {
+    const by = new Map<string, typeof shown>()
+    for (const c of shown) {
+      const k = c.row.client ?? 'No client'
+      by.set(k, [...(by.get(k) ?? []), c])
+    }
+    return [...by.entries()].map(([client, items]) => ({
+      client, items,
+      latest: items.reduce((m, c) => (c.row.receivedOn > m ? c.row.receivedOn : m), ''),
+      trust: items.filter((c) => !c.row.paidToClient).reduce((t, c) => t + c.row.amount, 0),
+      direct: items.filter((c) => c.row.paidToClient).reduce((t, c) => t + c.row.amount, 0),
+      problems: items.filter((c) => c.problems.length > 0).length,
+    })).sort((a, b) => (a.latest < b.latest ? 1 : a.latest > b.latest ? -1 : a.client.localeCompare(b.client)))
+  }, [shown])
+  /* Open by itself when there is only one to open, or when the list is narrowed to the broken ones. */
+  /* The total is of what is shown, so the month narrows it too. */
+  const total = shown.reduce((n, c) => n + c.row.amount, 0)
+  const isOpenClient = (k: string) => onlyBroken || folders.length === 1 || openClients.has(k)
+  const toggleClient = (k: string) => setOpenClients((p) => (p.has(k) ? new Set([...p].filter((x) => x !== k)) : new Set([...p, k])))
 
   function toggleSection(k: SectionKey) { setOpened((p) => toggled(p, k)) }
 
@@ -111,11 +138,16 @@ export function CheckPayments() {
               {/* RENAMED FROM "CHECK" (the firm, 10 Oct): the check happens BEFORE approval, in the
                   approval queue; this is where every processed payment lives afterwards, and
                   where one is reversed. The formulas still run over every row. */}
-              Every payment processed into the trust, newest first, with every formula still run
-              over it. Open one to see its split, or to reverse it.
+              Every processed payment, filed by client. Open a client for their payments, and a
+              payment for its split or to reverse it. Every formula is still run over every one.
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Month"
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12.5px] text-slate-700">
+              <option value="all">Every month</option>
+              {months.map((m) => <option key={m} value={m}>{monthName(m)}</option>)}
+            </select>
             <label className="flex items-center gap-1.5 text-[12.5px] text-slate-600">
               <input type="checkbox" checked={onlyBroken}
                 onChange={(e) => setOnlyBroken(e.target.checked)} />
@@ -204,12 +236,41 @@ export function CheckPayments() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map(({ row: r, a, problems }) => (
-                  <PostedRow key={r.paymentId} r={r} a={a} problems={problems}
-                    opened={opened}
-                    isOpen={open === r.paymentId}
-                    onOpen={() => setOpen(open === r.paymentId ? null : r.paymentId)} />
-                ))}
+                {folders.map((f) => {
+                  const on = isOpenClient(f.client)
+                  return (
+                    <Fragment key={f.client}>
+                      <tr className="cursor-pointer border-b border-slate-100 bg-slate-50 hover:bg-slate-100"
+                        data-testid="history-client" onClick={() => toggleClient(f.client)}>
+                        <td colSpan={5} className="px-3 py-1.5">
+                          <span className="inline-flex items-center gap-2">
+                            {on ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+                            <span className="font-semibold text-slate-800">{f.client}</span>
+                            <span className="text-slate-400">
+                              · {f.items.length} {f.items.length === 1 ? 'payment' : 'payments'}
+                              {f.trust ? ` · ${rand(f.trust)} into trust` : ''}
+                              {f.direct ? ` · ${rand(f.direct)} paid to them directly` : ''}
+                              {` · latest ${formatDate(f.latest)}`}
+                            </span>
+                            {f.problems > 0 && <span className="text-amber-700 font-medium">· {f.problems} do not add up</span>}
+                          </span>
+                        </td>
+                        <td colSpan={feeColumns(opened) + 9} />
+                      </tr>
+                      {on && f.items.map(({ row: r, a, problems }) => (
+                        <PostedRow key={r.paymentId} r={r} a={a} problems={problems}
+                          opened={opened}
+                          isOpen={open === r.paymentId}
+                          onOpen={() => setOpen(open === r.paymentId ? null : r.paymentId)} />
+                      ))}
+                    </Fragment>
+                  )
+                })}
+                {folders.length === 0 && (
+                  <tr><td colSpan={feeColumns(opened) + 14} className="px-4 py-8 text-center text-[13px] text-slate-400">
+                    No payment in that month.
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -274,6 +335,13 @@ export function CheckPayments() {
  * was raised and then cancelled because the cheque came back, rather than the fee simply
  * vanishing. Everything else follows in the database.
  */
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December']
+/* Written out rather than through Intl: en-ZA abbreviates September to "Sept" (CLAUDE.md). */
+function monthName(ym: string): string {
+  return `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`
+}
+
 function ReverseModal({ row, onClose, onDone }: { row: PostedPayment; onClose: () => void; onDone: () => Promise<void> }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)

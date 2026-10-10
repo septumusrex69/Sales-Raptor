@@ -59,7 +59,6 @@ const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').
 const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
 const BusinessIncome = lazy(() => import('./pages/business/BusinessIncome').then((m) => ({ default: m.BusinessIncome })))
 const BusinessDrawings = lazy(() => import('./pages/business/BusinessDrawings').then((m) => ({ default: m.BusinessDrawings })))
-const CheckPayments = lazy(() => import('./pages/finance/CheckPayments').then((m) => ({ default: m.CheckPayments })))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LibraryPage = lazy(() => import('./pages/library/LibraryPage').then((m) => ({ default: m.LibraryPage })))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
@@ -183,7 +182,10 @@ function App() {
               <Route path="/trust" element={<RequireFinance><TrustLayout /></RequireFinance>}>
                 <Route index element={<TrustOverview />} handle={{ title: 'Trust overview' }} />
                 <Route path="payments" element={<FinancePayments />} handle={{ title: 'Payments in' }} />
-                <Route path="check" element={<CheckPayments />} handle={{ title: 'Payment history' }} />
+                {/* PAYMENT HISTORY LIVES IN PAYMENTS IN NOW, as its History tab, filed by client (the
+                    firm, 10 Oct: "it should live inside the payment in ... under the client. So it's
+                    organized, it's filed"). The address stays, for links already sent. */}
+                <Route path="check" element={<Navigate to="/trust/payments?tab=history" replace />} />
                 <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
                 <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
                 <Route path="payments-out" element={<TrustPaymentsOut />} handle={{ title: 'Payments to make' }} />

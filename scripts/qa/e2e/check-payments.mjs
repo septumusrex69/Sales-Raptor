@@ -113,7 +113,15 @@ try {
   {
     const { context, page } = await openCheck(browser, [GOOD, BAD, OLD])
 
-    const rows = await page.locator('tbody tr').count()
+    /* FILED, NOT LISTED (the firm, 10 Oct: "it should live inside the payment in ... under the
+       client. So it's organized, it's filed"). The old address lands on Payments in's History tab. */
+    t.ok('the old address opens Payments in, on History', /\/trust\/payments\?tab=history/.test(page.url()))
+    t.ok('...with History the chosen tab', await page.getByTestId('payments-tab-history').isVisible())
+    const folders = page.getByTestId('history-client')
+    t.ok('the receipts sit under their client\'s folder', (await folders.count()) >= 1
+      && /Rinda Roo Company/.test(await folders.first().innerText()))
+    t.ok('...and a month narrows every folder at once', (await page.getByLabel('Month').count()) > 0)
+    const rows = await page.locator('tbody tr:not([data-testid="history-client"])').count()
     t.check('all three receipts are drawn', rows, 3)
 
     const band = (await page.locator('text=/do not obey the allocation formulas/').count()) > 0
@@ -162,7 +170,7 @@ try {
     t.ok('a clean list says so rather than saying nothing',
       (await page.locator('text=/All 1 obey every allocation formula/').count()) > 0)
 
-    await page.locator('tbody tr').first().locator('button').first().click()
+    await page.locator('tbody tr:not([data-testid="history-client"])').first().locator('button').first().click()
     await page.waitForTimeout(200)
 
     for (const heading of ['Where it came from', 'What it did', 'Whether it holds', 'The account today']) {
@@ -181,7 +189,7 @@ try {
     t.ok('and writes the accounting out as a sum',
       /2\u00a0500\.00/.test(panel) && /Fees \+ capital \+ credit/.test(panel))
     t.ok('it names who approved it', /Stephan/.test(panel))
-    t.ok('it says where the client’s money got to', /Paid/.test(await page.locator('tbody tr').first().innerText()))
+    t.ok('it says where the client’s money got to', /Paid/.test(await page.locator('tbody tr:not([data-testid="history-client"])').first().innerText()))
 
     await page.screenshot({ path: `${OUT}/check-payments-opened.png`, fullPage: true })
     await context.close()
@@ -190,7 +198,7 @@ try {
   /* ------------------------------------------------------------------ the one that is wrong */
   {
     const { context, page } = await openCheck(browser, [BAD])
-    await page.locator('tbody tr').first().locator('button').first().click()
+    await page.locator('tbody tr:not([data-testid="history-client"])').first().locator('button').first().click()
     await page.waitForTimeout(200)
     /* BELOW THE TABLE, NOT INSIDE IT -- see the comment on the screen. A panel in a colSpan cell
        takes the table's width, and this table is wider than the window, so the verdict column was
@@ -216,9 +224,9 @@ try {
   {
     const { context, page } = await openCheck(browser, [OLD])
     t.ok('an older allocation is not reported as broken', (await page.locator('text=/do not obey the allocation formulas/').count()) === 0)
-    const row = await page.locator('tbody tr').first().innerText()
+    const row = await page.locator('tbody tr:not([data-testid="history-client"])').first().innerText()
     t.ok('and the row says it was not checked', /not checked/.test(row))
-    await page.locator('tbody tr').first().locator('button').first().click()
+    await page.locator('tbody tr:not([data-testid="history-client"])').first().locator('button').first().click()
     await page.waitForTimeout(200)
     /* BELOW THE TABLE, NOT INSIDE IT -- see the comment on the screen. A panel in a colSpan cell
        takes the table's width, and this table is wider than the window, so the verdict column was

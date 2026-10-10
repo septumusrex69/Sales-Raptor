@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
+import clsx from 'clsx'
 import { Plus } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { firmToday } from '../../lib/dateLabels'
@@ -9,6 +10,7 @@ import { BankImportCard, LatestStatement } from './BankImportCard'
 import { UnallocatedReceipts } from './UnallocatedReceipts'
 import { RecordPaymentModal } from './RecordPaymentModal'
 import { AwaitingApproval } from './AwaitingApproval'
+import { CheckPayments } from './CheckPayments'
 
 /**
  * PAYMENTS IN: WHERE THE DAY'S MONEY IS PROCESSED, AND NOTHING ELSE.
@@ -24,12 +26,20 @@ import { AwaitingApproval } from './AwaitingApproval'
  *   4. SUSPENSE, below the pending payments, where the firm asked for it.
  *
  * WHAT WENT: the list of every payment ever, with its "Every client" and "Trust and client-direct"
- * filters. A processed payment is found on Check (every posted receipt, checked against the
- * formulas) and the trust ledger. REVERSING ONE moved with it to Check -- it was this list's row
+ * filters. A processed payment is found on the History tab (every posted receipt, filed by client
+ * and month, checked against the formulas) and the trust ledger. REVERSING ONE moved with it to Check -- it was this list's row
  * action and the only place in the app that could reverse a payment, so removing the list without
  * moving it would have removed the firm's only way to undo a posted receipt.
  */
 export function FinancePayments() {
+  /*
+   * TWO TABS: THE DAY'S WORK, AND WHAT HAS BEEN DONE (the firm, 10 Oct, of the separate Payment
+   * history screen: "it should live inside the payment in ... if I want to look at a historical
+   * report, it should live there ... under the client. So it's organized, it's filed"). Processing
+   * stays the default; History is every processed payment, filed by client and month.
+   */
+  const [params, setParams] = useSearchParams()
+  const tab: 'process' | 'history' = params.get('tab') === 'history' ? 'history' : 'process'
   /* Bumped whenever an import, a placement or an approval changes the ledger, so the queue, the
      tiles and suspense reload together rather than disagreeing about what has been placed. */
   const [changed, setChanged] = useState(0)
@@ -51,8 +61,31 @@ export function FinancePayments() {
   const onLoaded = useCallback((count: number, total: number) => setPending({ count, total }), [])
   const onUnmatched = useCallback((count: number, total: number) => setUnmatched({ count, total }), [])
 
+  const tabs = (
+    <div className="flex gap-4 border-b border-slate-200">
+      {([['process', 'To process'], ['history', 'History']] as const).map(([k, label]) => (
+        <button key={k} type="button" data-testid={`payments-tab-${k}`}
+          onClick={() => setParams(k === 'process' ? {} : { tab: k }, { replace: true })}
+          className={clsx('-mb-px border-b-2 px-1 pb-2 text-[13.5px] font-medium transition-colors',
+            tab === k ? 'border-navy-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700')}>
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (tab === 'history') {
+    return (
+      <div className="space-y-5">
+        {tabs}
+        <CheckPayments />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5">
+      {tabs}
       {/*
         THE FIRM'S OWN MOCK-UP, 7 October: two buttons on one line, one card of four figures, the
         last statement folded into a line, then the queue and what needs an account -- "This looks
@@ -99,12 +132,6 @@ export function FinancePayments() {
       {/* SUSPENSE LIVES HERE, BELOW THE PENDING PAYMENTS, at the firm's asking -- named the way
           their mock-up names it: Needs an account. */}
       <UnallocatedReceipts refreshKey={changed} onPlaced={bump} onTotals={onUnmatched} />
-
-      <p className="text-[12px] text-slate-400">
-        Looking for a payment that has already been processed?{' '}
-        <Link to="/trust/check" className="font-medium text-[var(--c-steel)] hover:underline">Payment history</Link>
-        {' '}lists every posted receipt, and is where one is reversed.
-      </p>
 
       {recording && (
         <RecordPaymentModal onClose={() => setRecording(false)}

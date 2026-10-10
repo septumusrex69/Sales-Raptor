@@ -231,7 +231,7 @@ try {
     /* THE RAIL DREW, with its name and the line saying whose money this is. */
     const rail = page.locator('nav').filter({ hasText: 'Money held for other people' }).first()
     t.ok('the trust rail is on the page', (await rail.count()) > 0)
-    for (const item of ['Overview', 'Payments in', 'Payment history', 'Payover runs', 'Exceptions']) {
+    for (const item of ['Overview', 'Payments in', 'Payover runs', 'Exceptions']) {
       t.ok(`...listing ${item}`, (await rail.getByRole('link', { name: item }).count()) > 0)
     }
     t.ok('...and its settings', (await rail.getByRole('link', { name: 'Trust settings' }).count()) > 0)
@@ -390,7 +390,7 @@ try {
      * name alone; now the name heads a rail of icons, the way the main menu folds.
      */
     const folded = page.getByRole('navigation', { name: 'Trust menu' })
-    for (const label of ['Overview', 'Payments in', 'Payment history', 'Payover runs', 'Trust ledger', 'Exceptions', 'Trust settings']) {
+    for (const label of ['Overview', 'Payments in', 'Payover runs', 'Trust ledger', 'Exceptions', 'Trust settings']) {
       t.ok(`folded, ${label} is still an icon on screen`, await folded.getByRole('link', { name: label, exact: true }).isVisible())
     }
     const foldedBox = await folded.boundingBox()
