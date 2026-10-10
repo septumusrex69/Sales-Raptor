@@ -1,6 +1,6 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, CreditCard, FileText, Filter, Loader2, Search, Users } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
@@ -68,19 +68,27 @@ function Pill({ status }: { status: RunStatus }) {
  * every payment in the database is already keyed to an account because that is the only way one
  * can be captured. Shown rather than dropped, so the tile is there the day the import is.
  */
-function Tile({ label, value, note, tone, to }: {
-  label: string; value: string; note: string; tone?: 'warn'; to?: string
+function Tile({ icon, label, value, note, to, accent, action }: {
+  icon: ReactNode; label: string; value: string; note?: string; to?: string
+  /** The one card that is a call to work (Ready to approve): tinted, with its action under it. */
+  accent?: boolean; action?: ReactNode
 }) {
   const body = (
-    <>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">{label}</div>
-      <div className={clsx('mt-1 text-[21px] font-medium tabular-nums', tone === 'warn' ? 'text-amber-700' : 'text-slate-800')}>{value}</div>
-      <div className="mt-0.5 text-xs text-slate-400">{note}</div>
-    </>
+    <div className="flex gap-3">
+      <span className={clsx('mt-0.5 shrink-0', accent ? 'text-sky-700' : 'text-slate-500')}>{icon}</span>
+      <div className="min-w-0">
+        <div className={clsx('text-[13px] font-medium', accent ? 'text-sky-800' : 'text-slate-700')}>{label}</div>
+        <div className="mt-1 text-[22px] font-semibold tabular-nums text-slate-800">{value}</div>
+        {note && <div className="mt-0.5 text-xs text-slate-400">{note}</div>}
+        {action}
+      </div>
+    </div>
   )
+  const box = clsx('block rounded-xl border p-4 transition-colors',
+    accent ? 'border-sky-100 bg-sky-50/60' : 'border-slate-100 bg-white')
   return to
-    ? <Link to={to} className="block p-4 hover:bg-slate-50 transition-colors">{body}</Link>
-    : <div className="p-4">{body}</div>
+    ? <Link to={to} className={clsx(box, 'hover:bg-slate-50')}>{body}</Link>
+    : <div className={box}>{body}</div>
 }
 
 export function FinanceWorkQueue() {
@@ -90,6 +98,8 @@ export function FinanceWorkQueue() {
      waiting for its payover day -- an overdue one is here too, in red), PAID (the history). */
   const tabParam = params.get('tab')
   const tab: 'running' | 'closed' | 'paid' = tabParam === 'paid' ? 'paid' : tabParam === 'running' ? 'running' : 'closed'
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
 
   const [cycle, setCycle] = useState<Cycle | null>(null)
   const [tiles, setTiles] = useState<CycleTiles | null>(null)
@@ -188,7 +198,10 @@ export function FinanceWorkQueue() {
   const paid = rows.filter((r) => r.status === 'paid')
   /* Nothing to pay yet (mid-cycle, or after the 11th's payments went): open on Running instead. */
   const tabShown = tabParam === null && closed.length === 0 && running.length > 0 ? 'running' : tab
-  const shown = tabShown === 'paid' ? paid : tabShown === 'running' ? running : closed
+  const q = query.trim().toLowerCase()
+  const shown = (tabShown === 'paid' ? paid : tabShown === 'running' ? running : closed)
+    .filter((r) => (!q || r.client.toLowerCase().includes(q) || (r.invoiceNumber ?? '').toLowerCase().includes(q))
+      && (!statusFilter || r.status === statusFilter))
   /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
   const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'paid' ? 'paid' : 'open', lag)
   const pickedRows = rows.filter((r) => picked.has(r.runId))
@@ -205,86 +218,90 @@ export function FinanceWorkQueue() {
         </div>
       )}
 
+      {/*
+        FOUR CARDS, NOT A STRIP (the firm, 10 Oct, with a drawing). The cycle and cut-off line and
+        the Needs review -> Ready -> Approved -> Sent -> Paid legend went: the legend explained the
+        pills every row already wears, and the firm read it as noise ("I don't know what that ...
+        is"). What the cut-off said lives in each cycle's band ("closes at midnight on 10 Oct").
+        The last card is the one that is work, so it is tinted and says where to go.
+      */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="run-tiles">
+        <Tile icon={<CreditCard size={20} />} label="Money received" value={rand(tiles?.moneyReceived ?? 0)}
+          note="Trust account, this cycle" to="/trust/payments" />
+        <Tile icon={<Users size={20} />} label="Net due to clients" value={rand(tiles?.dueToClients ?? 0)}
+          note="After commission, VAT and set-offs" />
+        <Tile icon={<FileText size={20} />} label="Unmatched payments"
+          value={`${tiles?.unmatchedCount ?? 0} · ${rand(tiles?.unmatchedAmount ?? 0)}`}
+          note="Bank import unavailable" />
+        <Tile icon={<CheckCircle2 size={20} />} label="Ready to approve" accent
+          value={String(tiles?.readyCount ?? 0)}
+          note={(tiles?.needsReviewCount ?? 0) > 0 ? `${tiles?.needsReviewCount} more need review` : undefined}
+          action={(
+            <button type="button" data-testid="review-runs"
+              onClick={() => {
+                /* To the tab the ready runs are on, showing only them. */
+                const onClosed = closed.some((r) => r.status === 'ready')
+                setParams(onClosed ? {} : { tab: 'running' }, { replace: true })
+                setStatusFilter('ready')
+              }}
+              className="mt-1 inline-flex items-center gap-1 text-[13px] font-medium text-sky-700 hover:text-sky-900">
+              Review runs <ArrowRight size={14} />
+            </button>
+          )} />
+      </div>
+
       <Card padded={false}>
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-b border-slate-100 px-4 py-3.5">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">Cycle</div>
-            <div className="font-medium text-slate-800">
-              {cycle ? `${fmtDay(cycle.periodStart)} – ${fmtDay(cycle.periodEnd)}` : '—'}
-            </div>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 px-4 pt-3">
+          <div className="flex gap-4">
+            {(['running', 'closed', 'paid'] as const).map((t) => {
+              const count = t === 'running' ? running.length : t === 'closed' ? closed.length : paid.length
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  data-testid={`tab-${t}`}
+                  onClick={() => setParams(t === 'closed' ? {} : { tab: t }, { replace: true })}
+                  className={clsx(
+                    '-mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-[13.5px] font-medium transition-colors',
+                    tabShown === t ? 'border-navy-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700',
+                  )}
+                >
+                  {t === 'running' ? 'Running' : t === 'closed' ? 'Closed · to pay' : 'Paid'}
+                  {/* Brackets kept for the reader of innerText; drawn as a pill. */}
+                  <span className="rounded-full bg-slate-100 px-2 py-px text-[11.5px] text-slate-600">
+                    <span className="sr-only">(</span>{count}<span className="sr-only">)</span>
+                  </span>
+                </button>
+              )
+            })}
           </div>
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">Cut-off</div>
-            <div className="font-medium text-slate-800">
-              {cycle ? `${fmtDay(cycle.periodEnd)}, midnight · ${cycle.daysLeft} ${cycle.daysLeft === 1 ? 'day' : 'days'}` : '—'}
-            </div>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-3">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-              {(['needs_review', 'ready', 'approved', 'sent', 'paid'] as RunStatus[]).map((st, i) => (
-                <span key={st} className="flex items-center gap-1.5">
-                  {i > 0 && <ArrowRight className="w-3 h-3" />}
-                  <Pill status={st} />
-                </span>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 pb-2">
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+              <Search size={14} className="text-slate-400" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search clients…"
+                aria-label="Search clients" className="w-44 bg-transparent text-[13px] outline-none placeholder:text-slate-400" />
+            </label>
+            <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-600">
+              <Filter size={14} className="text-slate-400" />
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
+                aria-label="Filter by status" className="bg-transparent outline-none">
+                <option value="">All statuses</option>
+                {(['needs_review', 'ready', 'approved', 'sent', 'paid'] as RunStatus[]).map((st) => (
+                  <option key={st} value={st}>{RUN_STATUS_LABEL[st]}</option>
+                ))}
+              </select>
+            </label>
             {/*
-              THE PRESS THAT MAKES A RUN AT ALL, which nothing else in the app did.
-              It is not "close the cycle": build_payover_run takes any cycle start and has never
-              waited for a period to end, so this works on the 5th as well as the 11th. The firm
-              asked because the queue was empty and there was nothing to press -- "where is the
-              payover report?" -- and the answer was that the report has no run to hang off.
+              THE PRESS THAT MAKES A RUN AT ALL, for a cycle other than the running one. Staging
+              only: in production the runs build themselves (refresh_payover_runs on open).
             */}
             {staging && (
               <button type="button" onClick={() => setBuilding(true)}
-                className="text-[12.5px] font-medium text-slate-500 underline hover:text-slate-700">
-                Build for another cycle (staging)
+                className="text-[12px] font-medium text-slate-400 underline hover:text-slate-600">
+                Build another cycle
               </button>
             )}
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 divide-y divide-slate-100 border-b border-slate-100 sm:grid-cols-2 sm:divide-y-0 sm:divide-x lg:grid-cols-4">
-          <Tile
-            label="Money received"
-            value={rand(tiles?.moneyReceived ?? 0)}
-            note="Trust account, this cycle"
-            to="/trust/payments"
-          />
-          <Tile
-            label="Due to clients"
-            value={rand(tiles?.dueToClients ?? 0)}
-            note="After commission, VAT and set-offs"
-          />
-          <Tile
-            label="Unmatched payments"
-            value={`${tiles?.unmatchedCount ?? 0} · ${rand(tiles?.unmatchedAmount ?? 0)}`}
-            note="Bank import not built yet, so nothing can be unmatched"
-          />
-          <Tile
-            label="Waiting for action"
-            value={`${tiles?.waitingCount ?? 0} ${(tiles?.waitingCount ?? 0) === 1 ? 'payover' : 'payovers'}`}
-            note={`${tiles?.needsReviewCount ?? 0} need review, ${tiles?.readyCount ?? 0} ready to approve`}
-            tone={(tiles?.waitingCount ?? 0) > 0 ? 'warn' : undefined}
-            to="/trust/exceptions"
-          />
-        </div>
-
-        <div className="flex gap-1 px-4 pt-3">
-          {(['running', 'closed', 'paid'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              data-testid={`tab-${t}`}
-              onClick={() => setParams(t === 'closed' ? {} : { tab: t }, { replace: true })}
-              className={clsx(
-                'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
-                tabShown === t ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:bg-slate-50',
-              )}
-            >
-              {t === 'running' ? `Running (${running.length})` : t === 'closed' ? `Closed · to pay (${closed.length})` : `Paid (${paid.length})`}
-            </button>
-          ))}
         </div>
 
         {/* THE BULK BAR: only what each picked run is ready for, counted, so a button never offers
@@ -341,7 +358,8 @@ export function FinanceWorkQueue() {
               )}
               {!loading && shown.length === 0 && (
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
-                  {tabShown === 'paid'
+                  {(q || statusFilter) ? 'No run on this tab matches the search or filter.'
+                    : tabShown === 'paid'
                     ? 'Nothing has been paid over yet.'
                     : tabShown === 'running'
                       ? 'Nothing processed in this cycle yet. A client appears here, with its run built, as soon as a payment for it is approved.'
@@ -357,13 +375,15 @@ export function FinanceWorkQueue() {
                 */}
                 <tr className="border-b border-slate-100" data-testid="cycle-group" data-tone={g.tone}>
                   <td colSpan={9} className="p-0">
-                    <div className={clsx('flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 border-l-4 px-4 py-2',
+                    <div className={clsx('flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 border-l-4 px-4 py-1.5',
                       g.tone === 'late' ? 'border-l-negative-500 bg-negative-50'
                         : g.tone === 'now' ? 'border-l-gold-500 bg-gold-50'
                           : g.tone === 'early' ? 'border-l-slate-400 bg-slate-50'
                             : 'border-l-positive-600 bg-positive-50')}>
+                      {/* ONE LINE (the firm's drawing, 10 Oct): the word, the cycle, how many, and what
+                          happens next, then the total at the right. */}
                       <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className={clsx('rounded-full px-2.5 py-0.5 text-[11.5px] font-bold uppercase tracking-wide',
                             g.tone === 'late' ? 'bg-negative-100 text-negative-700'
                               : g.tone === 'now' ? 'bg-gold-100 text-gold-800'
@@ -375,8 +395,8 @@ export function FinanceWorkQueue() {
                           <span className="text-[12.5px] text-slate-500">
                             · {g.runs.length} {g.runs.length === 1 ? 'client' : 'clients'}
                           </span>
+                          <span className="text-[12.5px] text-slate-500">· {g.state}</span>
                         </div>
-                        <div className="mt-0.5 text-[12.5px] text-slate-600">{g.state}</div>
                       </div>
                       <span className="text-[14px] font-semibold tabular-nums text-slate-800">{rand(g.total)}</span>
                     </div>

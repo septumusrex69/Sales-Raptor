@@ -108,7 +108,7 @@ try {
     /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · check, approve and pay on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
   t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now"]')
   t.ok('the tabs count what is in them',
-    /Running \(1\)/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay \(4\)/.test(await page.getByTestId('tab-closed').innerText()))
+    /Running\s*\(?\s*1\s*\)?/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay\s*\(?\s*4\s*\)?/.test(await page.getByTestId('tab-closed').innerText()))
 
   /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
   t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
@@ -141,6 +141,23 @@ try {
     /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
   /* ONE HEIGHT FOR EVERY RUN (the firm, 10 Oct): "make them all as big as the email advice" lines.
      Presence first, so a missing button row cannot pass as equal. */
+  /* THE FIRM'S DRAWING (10 Oct): four cards, no status legend, a search over the clients. */
+  /* The status filter's options name every status too, so they are read out of the page first. */
+  const pageText = await page.locator('main').evaluate((m) => {
+    const c = m.cloneNode(true); c.querySelectorAll('select').forEach((x) => x.remove()); return c.innerText ?? c.textContent
+  })
+  t.ok('the status legend is gone', !/Needs review[\s\S]{0,6}Ready[\s\S]{0,6}Approved[\s\S]{0,6}Sent[\s\S]{0,6}Paid/.test(pageText))
+  t.ok('the four cards are drawn, ending on Ready to approve',
+    /Money received[\s\S]*Net due to clients[\s\S]*Unmatched payments[\s\S]*Ready to approve[\s\S]*Review runs/
+      .test(await page.getByTestId('run-tiles').innerText()))
+  await page.getByLabel('Search clients').fill('no such client')
+  await page.getByText('No run on this tab matches').waitFor({ timeout: 5000 })
+  t.check('a search with no match empties the list, and says why', await page.getByTestId('queue-run').count(), 0)
+  await page.getByLabel('Search clients').fill('karoo')
+  await page.getByTestId('queue-run').first().waitFor({ timeout: 5000 })
+  t.check('...and a client\'s name finds it, ignoring case', await page.getByTestId('queue-run').count(), 1)
+  await page.getByLabel('Search clients').fill('')
+
   const openRowHeight = await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' })
     .evaluate((el) => Math.round(el.getBoundingClientRect().height))
   t.ok('a run row with a button was measured', buttonRowHeight > 0)
