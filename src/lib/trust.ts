@@ -288,3 +288,133 @@ export async function fetchTrustCycles(): Promise<TrustCycle[]> {
     runsToDo: Number(r.runs_to_do ?? 0),
   }))
 }
+
+/*
+ * THE TRUST OVERVIEW, SPLIT (10 Oct). The firm: "Everything that's in the trust, this is what it's
+ * for ... Now you've incorporated PTCs in this ... We should report on that separately." Four reads,
+ * each one database function, nothing summed twice:
+ *  - trust_cash_by_cycle: the money IN the trust account, by the cycle it is for and whose it is.
+ *    A PTC's entry is left out (no money came in); what a paid payover kept back is the firm's.
+ *  - ptc_by_run: each payover's PTCs -- owed to the firm, set off from the client's own trust
+ *    money, and short.
+ *  - ptc_ageing: what each client still owes after set-off, dated from the payover that invoiced it.
+ *  - collections_by_payover: into trust + paid straight to clients, counted from the payments and
+ *    from the runs, so the two can be held against each other.
+ */
+export interface TrustCashCycle {
+  periodStart: string
+  periodEnd: string
+  paysOn: string
+  isOpen: boolean
+  forClients: number
+  /** Earned on receipts, plus what paid payovers kept back (of which `firmSetOff`). */
+  forFirm: number
+  firmSetOff: number
+  /** Bank interest, bank charges, drawings and transfers -- the firm's, but not earned on a receipt. */
+  firmOther: number
+  forDebtors: number
+  unplaced: number
+  total: number
+}
+
+export async function fetchTrustCashByCycle(): Promise<TrustCashCycle[]> {
+  const { data, error } = await supabase.rpc('trust_cash_by_cycle')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    periodStart: String(r.period_start),
+    periodEnd: String(r.period_end),
+    paysOn: String(r.pays_on),
+    isOpen: Boolean(r.is_open),
+    forClients: n(r.for_clients),
+    forFirm: n(r.for_firm),
+    firmSetOff: n(r.firm_set_off),
+    firmOther: n(r.firm_other),
+    forDebtors: n(r.for_debtors),
+    unplaced: n(r.unplaced),
+    total: n(r.total),
+  }))
+}
+
+export interface PtcRun {
+  runId: string
+  companyId: string
+  client: string
+  invoiceNumber: string | null
+  periodStart: string
+  paysOn: string
+  status: string
+  /** What the debtors paid straight to the client. */
+  received: number
+  /** The firm's share of it: fees, interest, commission and VAT. */
+  owed: number
+  /** Covered by the client's own trust money on this payover. */
+  setOff: number
+  /** Not covered: the client owes it. */
+  short: number
+}
+
+export async function fetchPtcByRun(): Promise<PtcRun[]> {
+  const { data, error } = await supabase.rpc('ptc_by_run')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    runId: String(r.run_id),
+    companyId: String(r.company_id),
+    client: String(r.client ?? ''),
+    invoiceNumber: (r.invoice_number as string | null) ?? null,
+    periodStart: String(r.period_start),
+    paysOn: String(r.pays_on),
+    status: String(r.status),
+    received: n(r.ptc_received),
+    owed: n(r.ptc_owed),
+    setOff: n(r.set_off),
+    short: n(r.short),
+  }))
+}
+
+export interface PtcAgeing {
+  companyId: string
+  client: string
+  owed: number
+  /** The payover date that first invoiced it; a shortfall carried forward keeps it. */
+  since: string
+  runId: string
+  invoiceNumber: string | null
+  /** False until that payover date: the remittance advice that invoices it has not gone yet. */
+  invoiced: boolean
+}
+
+export async function fetchPtcAgeing(): Promise<PtcAgeing[]> {
+  const { data, error } = await supabase.rpc('ptc_ageing')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    companyId: String(r.company_id),
+    client: String(r.client ?? ''),
+    owed: n(r.owed),
+    since: String(r.since),
+    runId: String(r.run_id),
+    invoiceNumber: (r.invoice_number as string | null) ?? null,
+    invoiced: Boolean(r.invoiced),
+  }))
+}
+
+export interface PayoverTie {
+  paysOn: string
+  intoTrust: number
+  paidDirect: number
+  payments: number
+  runsIntoTrust: number
+  runsPaidDirect: number
+}
+
+export async function fetchCollectionsByPayover(): Promise<PayoverTie[]> {
+  const { data, error } = await supabase.rpc('collections_by_payover')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paysOn: String(r.pays_on),
+    intoTrust: n(r.into_trust),
+    paidDirect: n(r.paid_direct),
+    payments: Number(r.payments ?? 0),
+    runsIntoTrust: n(r.runs_into_trust),
+    runsPaidDirect: n(r.runs_paid_direct),
+  }))
+}

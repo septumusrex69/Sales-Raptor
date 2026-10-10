@@ -287,8 +287,8 @@ ok('...and still reads the position', /fetchTrustPosition\(\)/.test(page))
  * them an "Ownership reconciliation" that reads DOWN from the bank -- in the trust account, less
  * accounted for, not accounted for. Asserted in that order, presence first.
  */
-const from = page.indexOf('Who owns the money in trust?')
-const control = from < 0 ? '' : page.slice(from, page.indexOf('Collections by period', from))
+const from = page.indexOf('What is in the trust account')
+const control = from < 0 ? '' : page.slice(from, page.indexOf('Paid straight to clients (PTCs)', from))
 ok('the ownership block was found', control.length > 500 && control.length < 14000)
 let at = -1
 for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"',
@@ -303,11 +303,11 @@ for (const line of ['Total accounted for', 'Total not accounted for', 'label="In
  * Accounted for is money with a name on it; an unplaced receipt is NOT accounted for (the firm,
  * 10 Oct), so it is no longer in the sum. A client in debit is subtracted once.
  */
-ok('accounted for is summed from the owners, less clients in debit, without the unplaced receipts',
-  /* owedToClientsGross: what is owed TO clients; a client in debit is subtracted once, below (8 Oct). */
-  /const owedToClientsGross = r2\(position\.owedToClients \+ position\.owedByClients\)/.test(page)
-  && /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*- position\.owedByClients\)/
-    .test(page))
+/* Since 10 Oct: the money in the bank with an owner -- each cycle's clients and firm, the firm's
+   interest and charges, the debtors -- read from trust_cash_by_cycle; no PTC, no unplaced receipts. */
+ok('accounted for is summed from the bank money by cycle, without the unplaced receipts',
+  /const accounted = r2\(sum\(\(c\) => c\.forClients \+ c\.forFirm\) \+ firmOther \+ forDebtors\)/.test(page)
+  && !/const accounted = [^\n]*unidentified/.test(page))
 ok('...and what is not accounted for is the BANK less that sum, through trustHeadline',
   /trustHeadline\(\{\s*trustCash: position\.trustCash, owners: accounted,/.test(page))
 /*

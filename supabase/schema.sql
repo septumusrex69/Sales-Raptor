@@ -33709,3 +33709,187 @@ as $$
    where public.has_capability('finance.view') or public.has_capability('business.view')
    order by l.sort_at, l.kind
 $$;
+
+-- ============================================================================================
+-- THE TRUST OVERVIEW, SPLIT: WHAT IS IN THE BANK, AND THE PTCs (10 Oct).
+--
+-- The firm: "Everything that's in the trust, this is what it's for ... Now you've incorporated PTCs
+-- in this ... We should report on that separately." A PTC brought no money in -- the debtor paid the
+-- client -- so it has no place in what the trust account holds. Three read-only functions, nothing
+-- written to the books (they are append-only):
+--
+-- trust_cash_by_cycle: the money in the trust account, by the cycle it is for and whose it is. A
+--   PTC's "client owes the trust" entry is left out: it is not money. And what a PAID payover kept
+--   back from the client -- a PTC set off, last run's shortfall recovered -- is the firm's: the
+--   client's entries on a paid run net to exactly that, because the payover paid out everything
+--   else. Read as the firm's here, or it sits in trust under the client's name, which is the gap
+--   the overview could not explain.
+-- ptc_by_run: each payover's PTCs -- what was paid straight to the client, what the firm is owed on
+--   it, how much the client's own trust money covers (set off) and what it does not (short).
+-- ptc_ageing: what each client still owes the firm after the set-offs, dated from the payover
+--   that first invoiced it (a shortfall carried forward keeps its first date), for 30/60/90 days.
+-- ============================================================================================
+
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           r.paid_at is not null as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0) as clients_open,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         (now() at time zone 'Africa/Johannesburg')::date <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;
+revoke all on function public.trust_cash_by_cycle() from public, anon;
+grant execute on function public.trust_cash_by_cycle() to authenticated;
+
+create or replace function public.ptc_by_run()
+returns table(run_id uuid, company_id uuid, client text, invoice_number text, period_start date,
+              pays_on date, status text, ptc_received numeric, ptc_owed numeric, set_off numeric,
+              short numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with owed as (
+    select a.payover_run_id as run_id, -sum(x.amount) as owed
+      from public.trust_creditor_entries x
+      join public.payment_allocations a on a.id = x.allocation_id
+     where x.party = 'client' and a.paid_to_client and a.payover_run_id is not null
+     group by a.payover_run_id
+  )
+  select r.id, r.company_id, co.name, r.invoice_number, r.period_start,
+         public.payover_pays_on(r.period_end), r.status,
+         round(coalesce(r.ptc_received, 0), 2), round(o.owed, 2),
+         round(o.owed - least(o.owed, greatest(0, -r.net_payover)), 2),
+         round(least(o.owed, greatest(0, -r.net_payover)), 2)
+    from public.payover_runs r
+    join owed o on o.run_id = r.id
+    join public.companies co on co.id = r.company_id
+   where r.status <> 'void' and round(o.owed, 2) <> 0
+     and public.has_capability('finance.view')
+   order by public.payover_pays_on(r.period_end), co.name
+$$;
+revoke all on function public.ptc_by_run() from public, anon;
+grant execute on function public.ptc_by_run() to authenticated;
+
+create or replace function public.ptc_ageing()
+returns table(company_id uuid, client text, owed numeric, since date, run_id uuid,
+              invoice_number text, invoiced boolean)
+language sql stable security definer set search_path to 'public'
+as $$
+  with recursive head as (
+    -- THE SHORTFALL STILL STANDING: a run below nil that has not been carried into another.
+    select r.id, r.company_id, r.net_payover, r.period_end, r.invoice_number, r.id as cur
+      from public.payover_runs r
+     where r.status <> 'void' and r.net_payover < 0 and r.carried_out_run_id is null
+  ), back as (
+    -- WALKED BACK through the runs that carried it, so a debt keeps the date it was first invoiced.
+    select h.id as head_id, h.cur, (select period_end from public.payover_runs where id = h.cur) as period_end
+      from head h
+    union all
+    select b.head_id, p.id, p.period_end
+      from back b join public.payover_runs p on p.carried_out_run_id = b.cur
+  ), first as (
+    select head_id, min(period_end) as first_end from back group by head_id
+  )
+  select h.company_id, co.name, round(-h.net_payover, 2),
+         public.payover_pays_on(f.first_end), h.id, h.invoice_number,
+         public.payover_pays_on(f.first_end) <= (now() at time zone 'Africa/Johannesburg')::date
+    from head h
+    join first f on f.head_id = h.id
+    join public.companies co on co.id = h.company_id
+   where public.has_capability('finance.view')
+   order by public.payover_pays_on(f.first_end), co.name
+$$;
+revoke all on function public.ptc_ageing() from public, anon;
+grant execute on function public.ptc_ageing() to authenticated;
+
+-- ============================================================================================
+-- EACH PAYOVER, CHECKED (10 Oct). The firm: "the total monthly collections equals what's in the
+-- trust and all the PTCs ... That's how we can double check all of the figures." For each payover
+-- date: the money that came into trust for it and the money paid straight to clients that rides it,
+-- counted twice -- once from the payments themselves, once from what the payover runs carry -- so a
+-- payment no run picked up, or a run carrying one twice, shows as a difference on the row.
+-- A payment into trust belongs to the payover of its cycle; a PTC to the next 11th after it was
+-- captured (it rides the next payover, 10 Oct).
+-- ============================================================================================
+
+create or replace function public.collections_by_payover()
+returns table(pays_on date, into_trust numeric, paid_direct numeric, payments integer,
+              runs_into_trust numeric, runs_paid_direct numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with pay as (
+    -- ON THE PAYOVER THAT CARRIES IT where a run has claimed it; by the rule where none has yet.
+    select coalesce(
+             (select public.payover_pays_on(r.period_end)
+                from public.payment_allocations a join public.payover_runs r on r.id = a.payover_run_id
+               where a.payment_id = p.id and r.status <> 'void' limit 1),
+             case when p.paid_to_client
+                  then ((date_trunc('month', p.allocated_on) + interval '10 days')
+                        + case when extract(day from p.allocated_on) >= 11 then interval '1 month' else interval '0' end)::date
+                  else public.payover_pays_on(public.payover_cycle_end(public.payover_cycle_start(p.allocated_on::timestamptz)))
+             end) as pays_on,
+           p.paid_to_client, p.amount
+      from public.account_payments p
+     where p.allocated_on is not null and p.reversed_at is null and p.rejected_at is null
+       and not p.is_demo and not p.paid_over_in_swordfish
+  ),
+  booked as (
+    select public.payover_pays_on(r.period_end) as pays_on,
+           sum(l.payment_amount) filter (where l.line_kind = 'trust') as trust,
+           sum(l.payment_amount) filter (where l.line_kind = 'ptc') as direct
+      from public.payover_run_lines l
+      join public.payover_runs r on r.id = l.run_id
+     where r.status <> 'void'
+     group by 1
+  ),
+  counted as (
+    select pays_on, coalesce(sum(amount) filter (where not paid_to_client), 0) as trust,
+           coalesce(sum(amount) filter (where paid_to_client), 0) as direct, count(*)::integer as n
+      from pay group by pays_on
+  )
+  select coalesce(c.pays_on, b.pays_on), round(coalesce(c.trust, 0), 2), round(coalesce(c.direct, 0), 2),
+         coalesce(c.n, 0), round(coalesce(b.trust, 0), 2), round(coalesce(b.direct, 0), 2)
+    from counted c full join booked b on b.pays_on = c.pays_on
+   where public.has_capability('finance.view')
+   order by 1
+$$;
+revoke all on function public.collections_by_payover() from public, anon;
+grant execute on function public.collections_by_payover() to authenticated;

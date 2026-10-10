@@ -6,13 +6,14 @@ import { Card } from '../../components/ui/Card'
 import { unexplainedDebitAction } from '../../lib/bankLineAllocation'
 import { rand } from '../../lib/money'
 import {
-  fetchFirmHeld, fetchOverpaymentsKept, fetchTrustAwaiting, fetchTrustCycles, fetchTrustOpening, fetchTrustPosition,
+  fetchCollectionsByPayover, fetchFirmHeld, fetchOverpaymentsKept, fetchPtcAgeing, fetchPtcByRun,
+  fetchTrustAwaiting, fetchTrustCashByCycle, fetchTrustCycles, fetchTrustOpening, fetchTrustPosition,
   fetchUnreconciledPayouts,
-  type TrustCycle, type TrustOpening, type TrustPosition, type UnreconciledPayout,
+  type PayoverTie, type PtcAgeing, type PtcRun, type TrustCashCycle, type TrustCycle, type TrustOpening,
+  type TrustPosition, type UnreconciledPayout,
 } from '../../lib/trust'
-import {
-  cycleCollected, cycleLabel, cycleState, cycleTodo, cycleTotals, overdueCycles,
-} from '../../lib/trustCycles'
+import { cycleLabel, overdueCycles } from '../../lib/trustCycles'
+import { PayoverCheck, PtcAgeAnalysis, PtcByPayover } from './TrustPtc'
 import { trustChecks, trustHeadline, trustVerdict } from '../../lib/trustBalance'
 import { firmHeldLines, firmHeldSum, type FirmHeld } from '../../lib/firmHeld'
 
@@ -59,6 +60,10 @@ export function TrustOverview() {
   const [kept, setKept] = useState<{ amount: number; accounts: number } | null>(null)
   const [opening, setOpening] = useState<TrustOpening | null>(null)
   const [awaiting, setAwaiting] = useState<{ amount: number; payments: number } | null>(null)
+  const [cash, setCash] = useState<TrustCashCycle[]>([])
+  const [ptc, setPtc] = useState<PtcRun[]>([])
+  const [ageing, setAgeing] = useState<PtcAgeing[]>([])
+  const [ties, setTies] = useState<PayoverTie[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -75,8 +80,19 @@ export function TrustOverview() {
       fetchTrustOpening().catch(() => null),
       /* Names part of the bank/ledger gap; unreadable, the gap is simply not split. */
       fetchTrustAwaiting().catch(() => null),
+      /* THE SPLIT (10 Oct): the bank money by cycle is what "accounted for" is now made of, so it is
+         not optional; the PTC reads are explanations and degrade to an empty section. */
+      fetchTrustCashByCycle(),
+      fetchPtcByRun().catch(() => [] as PtcRun[]),
+      fetchPtcAgeing().catch(() => [] as PtcAgeing[]),
+      fetchCollectionsByPayover().catch(() => [] as PayoverTie[]),
     ])
-      .then(([p, u, c, f, k, o, w]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k); setOpening(o); setAwaiting(w) } })
+      .then(([p, u, c, f, k, o, w, cc, pr, ag, ti]) => {
+        if (live) {
+          setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k); setOpening(o); setAwaiting(w)
+          setCash(cc); setPtc(pr); setAgeing(ag); setTies(ti)
+        }
+      })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -143,29 +159,35 @@ export function TrustOverview() {
    * neither explains as its own line rather than folding it in.
    */
   /*
-   * CLIENTS ARE OWED THE POSITIVE PART ONLY. `owedToClients` is the clients' NET balance -- a client
-   * in debit already pulls it down -- and the "owed back" line subtracts that debit again, so the
-   * total came out short by exactly what clients owe back (8 Oct, staging: R321.88 "unexplained"
-   * that was this screen counting it twice). The Clients line draws what is owed TO clients, the
-   * owed-back line what is owed by them, and the two add back to the net.
+   * ACCOUNTED FOR IS THE MONEY IN THE BANK THAT HAS AN OWNER, AND NOTHING ELSE (10 Oct). The firm:
+   * "Everything that's in the trust, this is what it's for ... Now you've incorporated PTCs in this,
+   * and I don't think that's the right thing to do." It used to be the trust LEDGER's owners, and a
+   * PTC is in the ledger as a client owing the trust -- R26 656.25 on staging that never came into
+   * the account, which turned "accounted for" negative. It is now `trust_cash_by_cycle`: each
+   * cycle's money for clients, for the firm (including what a paid payover kept back), for debtors,
+   * plus the firm's interest and bank charges. Receipts nobody has placed are not accounted for.
+   * The PTCs are their own section below.
    */
-  const owedToClientsGross = r2(position.owedToClients + position.owedByClients)
-  /*
-   * ACCOUNTED FOR IS MONEY WITH A NAME ON IT: clients, the firm, debtors, less what clients owe
-   * back. Unallocated receipts used to be summed in here too, which is why the old total always
-   * equalled the ledger -- but a receipt nobody has placed is exactly what the firm means by "not
-   * accounted for" (10 Oct), so it now sits on that side with the bank/ledger gap.
-   */
-  const accounted = r2(owedToClientsGross + position.owedToFirm + position.owedToDebtors
-    - position.owedByClients)
+  const sum = (f: (c: TrustCashCycle) => number) => r2(cash.reduce((t, c) => t + f(c), 0))
+  const firmOther = sum((c) => c.firmOther)
+  const forDebtors = sum((c) => c.forDebtors)
+  const accounted = r2(sum((c) => c.forClients + c.forFirm) + firmOther + forDebtors)
   const head = trustHeadline({
     trustCash: position.trustCash, owners: accounted,
-    unidentified: position.unidentified, difference: position.difference,
+    unidentified: position.unidentified,
+    /* The bank against everything with an owner or waiting for one -- the books, PTCs left out. */
+    difference: r2(position.trustCash - accounted - position.unidentified),
     awaiting: awaiting?.amount ?? 0,
   })
+  /* The cycles, named as the firm says them: this month's (running), last month's (closed, waiting
+     for its 11th), and anything older, which has gone past its day. */
+  const openCycle = cash.find((c) => c.isOpen)
+  const closed = cash.filter((c) => !c.isOpen)
+  const lastClosed = closed.length ? closed[closed.length - 1] : null
+  const cycleName = (c: TrustCashCycle) =>
+    c.isOpen ? 'This month\u2019s collections' : c === lastClosed && c.paysOn >= today ? 'Last month\u2019s collections' : 'Earlier collections'
   const openingSet = Boolean(opening?.asAt)
   const verdict = trustVerdict(checks)
-  const totals = cycleTotals(cycles)
   const open = checks.filter((c) => c.tone !== 'clear')
 
   return (
@@ -230,10 +252,11 @@ export function TrustOverview() {
       {/* --------------------------- who owns the money --------------------------- */}
       <section>
         <h2 className="text-xl font-semibold tracking-tight text-slate-800">
-          Who owns the money in trust?
+          What is in the trust account
         </h2>
         <p className="text-sm text-slate-500 mt-1">
-          Current outstanding balances across all periods, after transfers and payovers.
+          Money that came into the account, by the payover it is waiting for. Payments made straight
+          to clients never came in, so they are below, on their own.
         </p>
 
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -242,30 +265,33 @@ export function TrustOverview() {
               NAMED AS THE FIRM NAMES THEM -- whose it is first, what the money is waiting for
               beside it. Largest claim first, as their design orders it.
             */}
-            <Owner who="Clients" what="Awaiting client payover" amount={owedToClientsGross} lead />
-            <Owner who="Bredell Ferreira" what="Earned and still held in trust" amount={position.owedToFirm} />
+            {/*
+              BY THE PAYOVER EACH PART IS WAITING FOR (the firm, 10 Oct: "It's the money for last
+              month's collection. It's the money for this month's current running month's collection.
+              Any overpayments, any suspense payments, bank charges, interest"). Each cycle's line is
+              the clients' share and the firm's share of it; overpayments, interest and charges are
+              their own lines because they wait for nothing.
+            */}
+            {[...closed, ...(openCycle ? [openCycle] : [])].map((c) => (
+              <Owner key={c.periodStart} who={cycleName(c)}
+                what={`${cycleLabel(c.periodStart, c.periodEnd)} \u00b7 pays ${longDate(c.paysOn)} \u00b7 clients ${rand(c.forClients)}, Bredell Ferreira ${rand(c.forFirm)}${c.firmSetOff ? ` (${rand(c.firmSetOff)} kept back from payovers)` : ''}`}
+                amount={r2(c.forClients + c.forFirm)} lead={c === openCycle} />
+            ))}
             {/*
               OVERPAYMENTS KEPT ARE PART OF THE DEBTORS' MONEY, drawn apart (the firm, 8 Oct: "under
               the suspense account ... just to say overpayments kept"). Taken out of the debtors'
               line by the same amount, so the total accounted for does not move.
             */}
-            <Owner who="Debtors" what="Overpayments / refunds outstanding"
-              amount={position.owedToDebtors - (kept?.amount ?? 0)} />
+            <Owner who="Overpayments" what="To refund to debtors"
+              amount={r2(forDebtors - (kept?.amount ?? 0))} />
             {kept && kept.amount > 0 && (
               <Owner who="Overpayments kept"
                 what={`Too small to refund; the debtor's until taken (${kept.accounts} ${kept.accounts === 1 ? 'account' : 'accounts'})`}
                 amount={kept.amount} />
             )}
-            {/*
-              THE OTHER DIRECTION, ONLY WHEN THERE IS ONE. A client in debit to the trust (a debtor
-              paid them direct, so the firm's fees on it are owed back) reduces what is accounted
-              for. The firm's design has no row for it because their example has none; leaving it
-              out when it is real would make the total below disagree with the ledger by exactly
-              that amount and nothing on the screen would say why.
-            */}
-            {position.owedByClients > 0 && (
-              <Owner who="Less: owed back by clients" what="Comes off the client's next payover"
-                amount={-position.owedByClients} />
+            {firmOther !== 0 && (
+              <Owner who="Interest, charges and transfers"
+                what="The firm's, not earned on a receipt; reconciled on the Business side" amount={firmOther} />
             )}
             <Subtotal label="Total accounted for" value={head.accounted} />
             {/*
@@ -394,68 +420,41 @@ export function TrustOverview() {
         {firmHeld && <FirmHeldCard held={firmHeld} owedToFirm={position.owedToFirm} />}
       </section>
 
-      {/* --------------------------- collections by period --------------------------- */}
+      {/* ------------------------------- the PTCs ------------------------------- */}
+      {/*
+        REPORTED SEPARATELY (the firm, 10 Oct): money a debtor paid the client directly, what the firm
+        is owed on it, and whether the client's own trust money on that payover covers it.
+      */}
       <section>
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Collections by period</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Paid straight to clients (PTCs)</h2>
         <p className="text-sm text-slate-500 mt-1">
-          Period earnings are shown below. The balances above show what remains in trust today.
+          Never in the trust account. What the firm is owed on each comes off that client&rsquo;s
+          payover; what their trust money does not cover, they owe us, paid into the business account.
+          A PTC goes on the next payover after it is captured.
         </p>
-        {cycles.length === 0 ? (
-          <Card className="mt-4 p-6 text-sm text-slate-500 text-center">
-            Nothing is waiting to be paid over. Every cycle Raptor knows about has been settled.
-          </Card>
-        ) : (
-          /* Scrolls sideways inside its card on a phone, rather than pushing the page wider. */
-          <Card className="mt-4 p-0 overflow-x-auto">
-            <table className="w-full min-w-[640px] text-[12.5px] whitespace-nowrap">
-              <thead>
-                <tr className=" text-slate-400 text-slate-500">
-                  <th className="text-left font-bold px-3 pt-2 pb-2">Period / client payover</th>
-                  <th className="text-right font-bold px-4 pt-2 pb-2">Collected</th>
-                  <th className="text-right font-bold px-4 pt-2 pb-2">Client portion</th>
-                  <th className="text-right font-bold px-4 pt-2 pb-2">BF earned</th>
-                  <th className="text-right font-bold px-3 pt-2 pb-2">Other held</th>
-                </tr>
-              </thead>
-              <tbody>
-                {/*
-                  THE ONE THAT LEAVES SOONEST IS AT THE TOP -- "what is for this month's payover?
-                  And what is for next month's payover" -- and the database orders it so.
-                */}
-                {cycles.map((c, i) => (
-                  <CycleRow key={c.periodStart} cycle={c} today={today}
-                    previousSeen={cycles.slice(0, i).some((x) => !x.isOpen)} />
-                ))}
-              </tbody>
-              {/*
-                THE TIE-OUT, quietly. Not in the firm's design, which shows two periods and no
-                total -- but the periods and the ownership block are the SAME money read two ways,
-                so the client column here sums to the Clients line above and the BF column to what
-                Bredell Ferreira holds before drawings. Without the row, a reader has to add them
-                up to find out the two halves of the screen agree. Only where there is more than
-                one period, because a total of one row is the row again.
-              */}
-              {cycles.length > 1 && (
-                <tfoot>
-                  <tr className="border-t border-slate-200 bg-slate-50 text-slate-600">
-                    <td className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider">All periods</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(totals.collected)}</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(totals.toClients)}</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(totals.firmEarned)}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {rand(r2(totals.collected - totals.toClients - totals.firmEarned))}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </Card>
-        )}
+        <PtcByPayover runs={ptc} />
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">What clients owe us, by age</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          After set-off, counted from the payover date that invoiced it. A shortfall carried to the
+          next payover keeps its first date.
+        </p>
+        <PtcAgeAnalysis items={ageing} today={today} />
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Each payover, checked</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          What came into trust plus what was paid straight to clients is what was collected for the
+          payover &mdash; counted from the payments, and held against the runs.
+        </p>
+        <PayoverCheck rows={ties} />
         <p className="mt-3 text-xs text-slate-500 leading-relaxed">
           Collection cycle: 11th&ndash;10th, paid over after it closes &mdash; how long after
           is <Link to="/trust/settings" className="font-medium text-gold-700 hover:text-gold-800">
-          a trust setting</Link>. BF earned is what each period&rsquo;s receipts earned the firm;
-          what remains to be drawn is the Bredell Ferreira line above.
+          a trust setting</Link>.
         </p>
       </section>
     </div>
@@ -470,52 +469,6 @@ const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 function longDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   return `${d} ${LONG_MONTHS[m - 1]} ${y}`
-}
-
-/**
- * ONE PERIOD, ONE ROW, IN THE FIRM'S COLUMNS: COLLECTED, CLIENT PORTION, BF EARNED, OTHER HELD.
- *
- * COLLECTED LEADS, at the firm's asking: the two figures after it are both SHARES of it, and
- * without the whole a small client column cannot be told from a quiet month. OTHER HELD is what
- * is neither -- debtor overpayments and receipts not yet placed -- so the four always add up.
- *
- * NAMED AS THE FIRM NAMES THEM: Running for the open cycle, Previous for the one waiting for its
- * payover, and Overdue for one that has gone past its day, which is the only row anybody has to
- * act on and so the only one that says so in colour.
- */
-function CycleRow({ cycle, today, previousSeen }: {
-  cycle: TrustCycle; today: string; previousSeen: boolean
-}) {
-  const state = cycleState(cycle, today)
-  const todo = cycleTodo(cycle)
-  const name = cycle.isOpen ? 'Running' : state.tone === 'late' ? 'Overdue' : previousSeen ? 'Earlier' : 'Previous'
-  const other = r2(cycle.toDebtors + cycle.unplaced)
-  return (
-    <tr className="border-t border-slate-100 align-top">
-      {/* ONE THIN LINE A PERIOD (the firm, 10 Oct): name, payover day and what to do, side by side. */}
-      <td className="px-6 py-2 whitespace-nowrap">
-        <span className="font-semibold text-slate-800">
-          {name} &middot; {cycleLabel(cycle.periodStart, cycle.periodEnd)}
-        </span>
-        <span className={clsx('ml-2',
-          state.tone === 'late' ? 'text-gold-800 font-medium'
-            : cycle.isOpen ? 'text-positive-700' : 'text-slate-500')}>
-          · payover {longDate(cycle.paysOn)}{cycle.isOpen ? ' · provisional' : ''}
-          {state.tone === 'late' ? ' · past its day' : ''}
-        </span>
-        {todo && (
-          <Link to="/trust/payover"
-            className="ml-2 font-medium text-gold-700 hover:text-gold-800">
-            {todo} &rarr;
-          </Link>
-        )}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">{rand(cycleCollected(cycle))}</td>
-      <td className="px-4 py-2 text-right tabular-nums font-semibold text-positive-700 whitespace-nowrap">{rand(cycle.toClients)}</td>
-      <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">{rand(cycle.firmEarned)}</td>
-      <td className="px-6 py-2 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">{rand(other)}</td>
-    </tr>
-  )
 }
 
 function Owner({ who, what, amount, lead }: {

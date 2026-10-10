@@ -109,20 +109,22 @@ ok('...not reversed', /a\.status <> 'reversed'/.test(kept))
 ok('...and not yet taken by the firm (one given back counts again)', /a\.excess_taken_at is null/.test(kept))
 ok('...behind the trust tick, as no row rather than nought', /having public\.has_capability\('finance\.view'\)/.test(kept))
 ok('...revoked from public and anon', sql.includes('revoke all on function public.overpayments_kept() from public, anon;'))
-ok('the overview takes them out of the debtors\' line', /amount=\{position\.owedToDebtors - \(kept\?\.amount \?\? 0\)\}/.test(page))
+ok('the overview takes them out of the debtors\' line', /amount=\{r2\(forDebtors - \(kept\?\.amount \?\? 0\)\)\}/.test(page))
 ok('...and draws them as their own line, among the owners (before the total accounted for)',
   page.indexOf('who="Overpayments kept"') > 0 && page.indexOf('who="Overpayments kept"') < page.indexOf('label="Total accounted for"'))
 ok('...while the total accounted for is still the debtors\' whole balance',
-  /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors/.test(page))
+  /const accounted = r2\(sum\(\(c\) => c\.forClients \+ c\.forFirm\) \+ firmOther \+ forDebtors\)/.test(page))
 
 /* ---- a client in debit is subtracted ONCE ----
  * owedToClients is the clients' NET balance, already pulled down by a client in debit, and the
  * "owed back" line subtracts that debit too. Counted twice, staging showed R321.88 "unexplained"
  * (8 Oct) that was the screen's own arithmetic. Worked on staging's figures: */
-ok('the Clients line is what is owed TO clients', /const owedToClientsGross = r2\(position\.owedToClients \+ position\.owedByClients\)/.test(page)
-  && /who="Clients" what="Awaiting client payover" amount=\{owedToClientsGross\}/.test(page))
-ok('...and the total adds that, less what clients owe back, once',
-  /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*- position\.owedByClients\)/.test(page))
+/* SINCE 10 OCT the owners are the money IN THE BANK (trust_cash_by_cycle), so a PTC -- a client in
+   debit to the trust for money that never came in -- is not on this list at all (the firm: "We
+   should report on that separately"), and there is no "owed back" to subtract. */
+const accLine = (page.match(/const accounted = [^\n]*/) ?? [''])[0]
+ok('the accounted figure is found', accLine.length > 0)
+ok('...and does not read the ledger\'s clients in debit', !/owedByClients/.test(accLine))
 {
   /* Staging's 8 Oct figures: the owners plus the unplaced receipts (now on the NOT accounted side)
      are the ledger, to the cent -- the client in debit is not counted twice. */

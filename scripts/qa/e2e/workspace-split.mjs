@@ -148,6 +148,38 @@ const CYCLES = [
   },
 ]
 
+/*
+ * THE SAME MONEY IN THE BANK, BY CYCLE (10 Oct, trust_cash_by_cycle): what "accounted for" is made
+ * of now. Adds up to the same R7 388.60 the ledger's owners did -- the clients' 2 557.90, the
+ * firm's 4 420.07 and the debtors' 410.63 -- and carries no PTC.
+ */
+const CASH = [
+  { period_start: '2026-08-11', period_end: '2026-09-10', pays_on: '2026-10-11', is_open: false,
+    for_clients: 1920.40, for_firm: 3310.07, firm_set_off: 0, firm_other: 0, for_debtors: 410.63, unplaced: 0, total: 5641.10 },
+  { period_start: '2026-09-11', period_end: '2026-10-10', pays_on: '2026-11-11', is_open: true,
+    for_clients: 637.50, for_firm: 1110.00, firm_set_off: 0, firm_other: 0, for_debtors: 0, unplaced: 0, total: 1747.50 },
+]
+/* Mielie Meal's R320 of PTC fees: on the 11 Nov payover, with no trust money to come off. */
+const PTC = [
+  { run_id: 'run-m', company_id: 'c2', client: 'Mielie Meal Co', invoice_number: 'PO-MMC-2610',
+    period_start: '2026-09-11', pays_on: '2026-11-11', status: 'ready', ptc_received: 1600,
+    ptc_owed: 320, set_off: 0, short: 320 },
+  { run_id: 'run-k', company_id: 'c3', client: 'Karoo Fleet Hire', invoice_number: 'PO-KFH-2610',
+    period_start: '2026-09-11', pays_on: '2026-11-11', status: 'ready', ptc_received: 500,
+    ptc_owed: 100, set_off: 100, short: 0 },
+]
+const AGEING = [
+  { company_id: 'c2', client: 'Mielie Meal Co', owed: 320, since: '2099-11-11', run_id: 'run-m',
+    invoice_number: 'PO-MMC-2610', invoiced: false },
+  { company_id: 'c1', client: 'Rinda Roo Company', owed: 1955, since: '2000-01-11', run_id: 'run-r',
+    invoice_number: 'PO-RRC-2609', invoiced: true },
+]
+/* One payover that agrees with its runs, one with a payment no run has picked up. */
+const TIES = [
+  { pays_on: '2026-10-11', into_trust: 5700, paid_direct: 0, payments: 4, runs_into_trust: 5700, runs_paid_direct: 0 },
+  { pays_on: '2026-11-11', into_trust: 2000, paid_direct: 2100, payments: 5, runs_into_trust: 1500, runs_paid_direct: 2100 },
+]
+
 function handlersFor(profile) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [profile] })],
@@ -161,6 +193,10 @@ function handlersFor(profile) {
     [(u) => /\/rpc\/trust_balances/.test(u), () => ({ body: BALANCES })],
     [(u) => /\/rpc\/trust_entries/.test(u), () => ({ body: ENTRIES })],
     [(u) => /\/rpc\/trust_by_cycle/.test(u), () => ({ body: CYCLES })],
+    [(u) => /\/rpc\/trust_cash_by_cycle/.test(u), () => ({ body: CASH })],
+    [(u) => /\/rpc\/ptc_by_run/.test(u), () => ({ body: PTC })],
+    [(u) => /\/rpc\/ptc_ageing/.test(u), () => ({ body: AGEING })],
+    [(u) => /\/rpc\/collections_by_payover/.test(u), () => ({ body: TIES })],
     [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
     /* WHO OWES US (10 Oct): client_balances, PTC fees and charges together. Rinda Roo owes R1 955
        in charges and holds nothing; Mielie Meal owes R320 in PTC fees and has no charge. */
@@ -257,10 +293,10 @@ try {
       !/owes the trust[\s\S]{0,120}shortfall/.test(body) || /not a shortfall/.test(body))
 
     /* ---- who owns it, whose first and what the money is beside it ---- */
-    t.ok('the ownership question is asked', /Who owns the money in trust\?/i.test(body))
+    t.ok('the bank question is asked', /What is in the trust account/i.test(body))
     for (const owner of [
-      'Awaiting client payover', 'Earned and still held in trust',
-      'Overpayments / refunds outstanding', 'Owner not yet identified',
+      'Last month\u2019s collections', 'This month\u2019s collections',
+      'To refund to debtors', 'Owner not yet identified',
     ]) {
       t.ok(`...and ${owner.toLowerCase()} is one of the answers`, body.includes(owner))
     }
@@ -268,7 +304,7 @@ try {
     /* THE FIRM, 8 Oct: overpayments kept "under the suspense account ... just to say overpayments
        kept". A split of the debtors' money, so the total accounted for does not move. */
     t.ok('overpayments kept have their own line', /Overpayments kept[\s\S]{0,120}R[\s\u00a0]100\.00/.test(body))
-    t.ok('...taken out of the debtors\' line', /Overpayments \/ refunds outstanding[\s\S]{0,40}R[\s\u00a0]310\.63/.test(body))
+    t.ok('...taken out of the debtors\' line', /To refund to debtors[\s\S]{0,40}R[\s\u00a0]310\.63/.test(body))
     t.ok('...and the total is unchanged', /TOTAL ACCOUNTED FOR[\s\S]{0,40}R[\s\u00a0]7[\s\u00a0]388\.60/i.test(body))
 
     /* ---- the firm's share, by what it is: "BF funds held: Commission + Fees + VAT" ---- */
@@ -292,88 +328,41 @@ try {
     t.ok('...and is offered to be booked as a bank charge, not matched to a run',
       /Book as a bank charge/.test(body) && !/Find its run/.test(body))
 
-    /* ---- the two cycles in the account at once ---- */
-    /*
-     * THE QUESTION THE OLD SCREEN COULD NOT ANSWER. One running total per party is a true figure
-     * that answers neither "what goes out on the 11th" nor "what have we collected this month",
-     * and those are the two things somebody standing in front of this screen wants.
-     */
-    t.ok('the closed cycle names itself', body.includes('11 Aug – 10 Sep 2026'))
-    t.ok('...and the one still collecting does too', body.includes('11 Sep – 10 Oct 2026'))
-    /*
-     * CASE-INSENSITIVE, BECAUSE `innerText` IS THE RENDERED TEXT. The state badge carries
-     * `uppercase`, so the browser hands back COLLECTING NOW while the source says "Collecting now"
-     * -- and an assertion on the source spelling fails on correct code. Everything else here is
-     * matched as written because nothing else on this screen is transformed.
-     */
-    /* NAMED AS THE FIRM NAMES THEM: Running for the open period, Previous for the one waiting. */
-    t.ok('the open one is the running period', /Running · 11 Sep – 10 Oct 2026/.test(body))
-    t.ok('...and the closed one the previous', /Previous · 11 Aug – 10 Sep 2026/.test(body))
-    t.ok("...and the running period's payover is provisional", /provisional/.test(body))
+    /* ---- the two cycles in the account at once, as lines of what is in the bank (10 Oct) ---- */
+    t.ok('last month\'s collections name their cycle, their payover and both shares',
+      /11 Aug – 10 Sep 2026 · pays 11 October 2026 · clients R 1 920\.40, Bredell Ferreira R 3 310\.07/.test(body))
+    t.ok('...and this month\'s, still collecting', /11 Sep – 10 Oct 2026 · pays 11 November 2026 · clients R 637\.50, Bredell Ferreira R 1 110\.00/.test(body))
+    t.ok('the closed cycle comes first', body.indexOf('11 Aug – 10 Sep 2026') >= 0
+      && body.indexOf('11 Aug – 10 Sep 2026') < body.indexOf('11 Sep – 10 Oct 2026'))
+    /* THE PTC IS NOT IN THE BANK LIST (the firm: "We should report on that separately"). */
+    t.ok('no "owed back by clients" line among the bank money', !/owed back by clients/i.test(body))
 
-    /*
-     * AND THE ONE THAT LEAVES SOONEST IS DRAWN FIRST. The screen does not sort -- the order is the
-     * database's -- so this is really asserting that nothing up here reverses it.
-     */
-    t.check('the cycle going out first is the top row',
-      body.indexOf('11 Aug – 10 Sep 2026') < body.indexOf('11 Sep – 10 Oct 2026')
-        && body.indexOf('11 Aug – 10 Sep 2026') >= 0, true)
-
-    /* THE DAY EACH ONE LEAVES, which is the thing the firm asked for by name. */
-    t.ok('the closed cycle quotes its payover date', /payover 11 October 2026/i.test(body))
-    t.ok('...and the open one quotes its own', /payover 11 November 2026/i.test(body))
-
-    /* WHAT EACH ONE HOLDS, FOR THE CLIENT AND FOR THE FIRM, SEPARATELY. */
-    t.ok("last month's client money is on the page", /R 1 920\.40/.test(body))
-    t.ok('...and what it earned the firm', /R 3 310\.07/.test(body))
-    t.ok("this month's so far is on the page", /R 637\.50/.test(body))
-    t.ok('...and what that has earned the firm', /R 1 110\.00/.test(body))
-
-    /* A CLOSED CYCLE WITH CLIENT MONEY AND A RUN NOT YET PAID SAYS WHAT IS LEFT TO DO ON IT. */
-    t.ok('the closed cycle says what is outstanding on it',
-      body.includes('1 run still to be approved and paid'))
-
-    /*
-     * THE TIE-OUT, AND IT IS THE POINT OF DRAWING BOTH. The bands and the control block are the
-     * same money read twice, so the totals row under the bands has to carry the SAME two figures
-     * the control block does.
-     *
-     * READ OUT OF THE TOTALS ROW ITSELF, not counted across the page. Counting occurrences looked
-     * like a tie-out and was not: R 4 420.07 already appears twice without the bands existing at
-     * all -- once in the control block and once on "Yours to draw" -- so the firm's half of that
-     * assertion passed with the whole cycle table deleted. The client half did fail, which is
-     * exactly how an assertion that is half vacuous hides.
-     */
-    /* THE ROW, read by its own label: a <tr> holds every cell, so its text is the whole line. */
-    const totalsAt = page.locator('tfoot tr', { hasText: 'All periods' }).first()
-    /* COUNTED BEFORE IT IS READ. innerText on a locator that matches nothing waits out the whole
-       timeout and then throws -- the "read defensively" trap CLAUDE.md names. */
-    const hasTotals = (await totalsAt.count()) > 0
-    t.ok('the bands carry a totals row', hasTotals)
-    const totalsRow = hasTotals ? plain(await totalsAt.innerText()) : ''
-    t.ok('the client bands total to the control block', /R 2 557\.90/.test(totalsRow))
-    t.ok("the firm's bands total to what it may draw", /R 4 420\.07/.test(totalsRow))
+    /* ---- the PTCs, on their own ---- */
+    const ptcText = plain(await page.getByTestId('ptc-by-payover').innerText().catch(() => ''))
+    t.ok('the PTCs are their own section', /Paid straight to clients \(PTCs\)/.test(body) && ptcText.length > 0)
+    t.ok('...grouped by the payover that carries them', /Payover of 11 Nov 2026/.test(ptcText))
+    t.ok('...one with no trust money says it will not be set off', /Mielie Meal Co[\s\S]*Won\u2019t be set off/.test(ptcText))
+    t.ok('...one covered says it will be', /Karoo Fleet Hire[\s\S]*Will be set off/.test(ptcText))
+    const ageText = plain(await page.getByTestId('ptc-ageing').innerText().catch(() => ''))
+    t.ok('the age analysis has its columns', /Not yet invoiced/.test(ageText) && /90\+ days/.test(ageText))
+    t.ok('...and totals what clients owe', /R 2 275\.00/.test(plain(await page.getByTestId('age-total').innerText().catch(() => ''))))
+    const tieRows = page.getByTestId('payover-check-row')
+    t.check('each payover is checked', await tieRows.count(), 2)
+    t.ok('...one agrees with its runs', /Agrees/.test(await tieRows.nth(0).innerText().catch(() => '')))
+    t.ok('...and one says what no run has picked up', /Trust R 500\.00 not on a run/.test(plain(await tieRows.nth(1).innerText().catch(() => ''))))
 
     /* AND THE SCREEN SAYS WHERE THE DATE IT QUOTES COMES FROM, because Raptor guessed it. */
     t.ok('the guessed payover date points at its setting', body.includes('a trust setting'))
 
-    /* ---- the four parties, each named by WHOSE the money is ---- */
-    /*
-     * THE ROWS WERE RENAMED TO SAY WHAT THE MONEY IS -- "Awaiting client payover" rather than
-     * "Clients" -- at the firm's asking, and whose it is was kept on the line beneath. This loop
-     * asserts the second half: the label a reader uses to find their own money. "Not yet
-     * identified" became "Unallocated receipts", which is what the firm calls it.
-     */
-    for (const who of ['Clients', 'Debtors', 'Bredell Ferreira', 'Unallocated receipts']) {
+    for (const who of ['Bredell Ferreira', 'Overpayments', 'Unallocated receipts']) {
       t.ok(`${who} has a line`, body.includes(who))
     }
-    /* THE FIRM'S LAYOUT, IN ITS ORDER: figures, then who owns it, then the periods. */
-    t.check('the ownership block comes before the periods',
-      body.indexOf('Who owns the money in trust?') >= 0
-        && body.indexOf('Who owns the money in trust?') < body.indexOf('Collections by period'), true)
+    /* THE ORDER THE FIRM READS IT: the bank, then the PTCs. */
+    t.check('the bank comes before the PTCs',
+      body.indexOf('What is in the trust account') >= 0
+        && body.indexOf('What is in the trust account') < body.indexOf('Paid straight to clients (PTCs)'), true)
     await t.shot(page, 'trust-overview')
-    /* The app scrolls inside <main>, so a full-page shot is only the top; the periods need their own. */
-    await page.locator('table').first().evaluate((el) => el.scrollIntoView({ block: 'end' }))
+    await page.getByTestId('ptc-by-payover').evaluate((el) => el.scrollIntoView({ block: 'start' })).catch(() => {})
     await t.shot(page, 'trust-overview-periods')
     t.ok('the firm knows what it may draw', /R 4 420\.07/.test(body))
 
