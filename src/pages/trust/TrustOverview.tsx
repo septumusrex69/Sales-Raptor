@@ -430,7 +430,6 @@ export function TrustOverview() {
         <p className="text-sm text-slate-500 mt-1">
           Never in the trust account. What the firm is owed on each comes off that client&rsquo;s
           payover; what their trust money does not cover, they owe us, paid into the business account.
-          A PTC goes on the next payover after it is captured.
         </p>
         <PtcByPayover runs={ptc} />
       </section>

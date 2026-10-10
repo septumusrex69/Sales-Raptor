@@ -128,7 +128,7 @@ ok('a run claims on the allocation date', /and \(p\.allocated_on >= p_period_sta
 /* Trust money by its own cycle; a PTC by the day before the run's payover date (10 Oct: a PTC
    rides the next payover -- check-ptc-next-payover). */
 ok('...bounded by the cycle it is for',
-  /and p\.allocated_on <= case when a\.paid_to_client\s+then public\.payover_pays_on\(v_end\) - 1 else v_end end/.test(build))
+  /and p\.allocated_on <= case when a\.paid_to_client\s+then public\.payover_ptc_until\(v_end\) else v_end end/.test(build))
 /*
  * AND NOT ON created_at ANY MORE. Left in beside the new clause it would be an AND that quietly
  * excluded everything imported, which reads as "the run is empty" rather than as a bug.

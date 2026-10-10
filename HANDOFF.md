@@ -4,20 +4,26 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **10 October 2026** (opening balance + overview re-read); before that **7 October 2026, evening**, end of the third session on
-`claude/sales-raptor-review-p1pzx2` (the build items the second session left, prompts 10, 11 and
-12, the Ocean skin, and the Payments in redesign twice over — the second time to the firm's own
-mock-up). Everything is committed and pushed; the last commit is `6ea667f` and the firm's preview
-deploys from it.
+Last updated: **10 October 2026, late afternoon**, end of the fourth session on
+`claude/new-session-ecohkn`. Everything is committed and pushed, and **the same commit is pushed to
+`claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
+https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 ### Start here tomorrow
 
 1. **Work on staging.** Production is NOT live and the user has said so: "We are not going live."
-2. **The production copy is HALF DONE and PAUSED** (§5, first item, has the exact state). Do not
-   resume it unless the user asks.
-3. **Built on 7-8 Oct and on staging:** Payments in to the firm's mock-up; a PTC overpayment is the
-   client's to sort out (`with_client`); `finance_exceptions` no longer readable by anon.
-4. **Run the full suite first** (`npm run qa`). The fast suite on `40fe2ab` is green (16 866).
+2. **The firm is about to run Raptor against Swordfish** (§3a, the 11 Oct - 10 Nov cycle). Anything
+   that makes Raptor's runs differ from Swordfish's during that run is unwelcome -- which is why the
+   "PTC on the next payover" rule was built and then **switched OFF** the same day (§2, top row).
+   Do not switch it on until the user says the import is right.
+3. **Every preview branch now gets the staging database settings** (§1). A new session's branch
+   used to build a preview that loaded blank.
+4. **After pushing to this session's branch, also push to `claude/sales-raptor-review-p1pzx2`**
+   (fast-forward only, `git push origin HEAD:claude/sales-raptor-review-p1pzx2`), or the firm keeps
+   looking at the old build. The user approved this on 10 Oct.
+5. **Run the full suite first** (`npm run qa`). The fast suite is green (17 348 checks, 263 files);
+   the last full run was green apart from one test since fixed (§1).
+6. **The production copy is HALF DONE and PAUSED** (§5, first item). Do not resume it unless asked.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -35,11 +41,15 @@ the problem to the next session rather than solved it.
 | Repo | **PUBLIC.** No real client data in any commit: no exports, no screenshots of the book, no dumps |
 | Verify | `npm run qa` (≈12 min, real browser), `npm run qa -- --fast` (≈3 min), `npm run build`, `npm run lint` |
 
-At the last full run (third session, at `51afe97`): **285 of 288 files green, every browser test
-among them**; the three that failed (`check-capabilities`, `check-finance-is-administrator-only`,
-`check-themes`) had not been updated for the redesign and were fixed in that commit. Since then
-(`6ea667f`, the mock-up layout) the fast suite is **all green, 16 857 checks across 253 files**, and
-`e2e/payments-in` (33) and `e2e/reject-payment` (24) were run on their own and are green.
+Previews: the four staging settings (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `EMAIL_CREDENTIALS_KEY`) were scoped in Vercel to the p1pzx2 branch
+alone; since 10 Oct they apply to every Preview branch. Production's are separate and untouched.
+
+Last full `npm run qa` (fourth session, before the Trust overview split): 297 of 298 green, the one
+(`e2e/performance`, grade parsing) fixed and re-run green on its own. Since then the fast suite is
+**all green, 17 348 checks across 263 files**, and every browser test touched since was run on its
+own and is green: `workspace-split` (124), `payover-sends` (42), `client-statement` (26),
+`check-payments` (28), `payments-in` (40), `business-income`, `payments-out`.
 
 ---
 
@@ -51,11 +61,12 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
-| (this) | **The Trust and Business menus stay put while the page scrolls, and fold narrower** (the firm, 10 Oct: "When I scroll down ... that thing disappears. It should stay"; "take a millimeter and a half out of that"). `WorkspaceRail` is `sticky top-0` inside `<main>` (which is what scrolls), as tall as the window under the top bar, so the door and widen button stay at its foot; the layouts' wrapper is `min-h-full`, not `h-full` -- with `h-full` the parent is one screen tall and a sticky child scrolls off with it. Folded width 48 -> 42px. `e2e/workspace-split` (124) scrolls the overview to the bottom and asserts the menu is still at the top; break-tested (-1285px without the fix). |
+| (this) | **The PTC-on-the-next-payover rule is SWITCHED OFF for the Swordfish parallel run** (the firm, 10 Oct, an hour after asking for it: "move it back into the normal run because currently I want to test Raptor against Swordfish. Once we've imported correctly and everything's fine, we'll make that change"). Kept, not deleted: `ptc_on_next_payover()` answers **false**, and `payover_ptc_until(cycle end)` -- the last capture day a run takes a PTC from -- is then the cycle's own end, exactly as before `7093ab9`. `build_payover_run`, `refresh_payover_runs` and `collections_by_payover` all read the switch. **To switch it on:** replace `ptc_on_next_payover()` with `select true` (one migration, mirror it, flip the 'is OFF' assertion in `check-ptc-next-payover`). Probed rolled back: a 15-Oct PTC goes on its own Oct run again. No staging run needed rebuilding (the PTCs claimed under the rule fell on the same runs either way). The Trust overview's PTC wording no longer promises the next payover. `check-ptc-next-payover` (15) holds the switch off; break-tested. |
+| `42e51a9` | **The Trust and Business menus stay put while the page scrolls, and fold narrower** (the firm, 10 Oct: "When I scroll down ... that thing disappears. It should stay"; "take a millimeter and a half out of that"). `WorkspaceRail` is `sticky top-0` inside `<main>` (which is what scrolls), as tall as the window under the top bar, so the door and widen button stay at its foot; the layouts' wrapper is `min-h-full`, not `h-full` -- with `h-full` the parent is one screen tall and a sticky child scrolls off with it. Folded width 48 -> 42px. `e2e/workspace-split` (124) scrolls the overview to the bottom and asserts the menu is still at the top; break-tested (-1285px without the fix). |
 | `251525f` | **Mark paid from the payover runs list, one or many** (the firm, 10 Oct: "the mark as paid button should ... just immediately show you that pop-up ... Even ... in bulk by selecting all"). `MarkPaidModal.tsx` is shared by the run page and the list: one run asks for its reference and date; several share the date and each keeps its own reference (starting on BF PO-...). The bulk bar gains **Mark paid N** (approved or sent, not below nil). A run below nil reads **Client owes us** instead of offering Mark paid (the function refuses it anyway). Not offered where Trust settings confirm payments out from the statement only. `e2e/payover-sends` (42) covers single and bulk, break-tested. **Next, the firm's own words:** "ultimately, from the bank statement ... allocate a specific payment made to a client ... linking it from the reference number to the payover" -- `reconcile_bank_debit` and the overview's "Match to PO-..." already do this for an unmatched debit; the firm means to show how they want it. |
 | `134508b` | **Payment history lives in Payments in, filed by client** (the firm, 10 Oct: "it should live inside the payment in ... under the client. So it's organized, it's filed. And here is just a bunch of list of stuff"). Payments in has two tabs, **To process** (unchanged, the default) and **History** (`?tab=history`): every processed payment in one folder a client (count, into trust, paid to them directly, latest date; the client paid most recently first), a month filter that narrows every folder, the formulas still run over every row and the reversal still on the opened receipt. The rail item is gone (9 targets); `/trust/check` and `/finance/check` redirect to the History tab. `e2e/check-payments` (28) asserts the redirect, the folders and the month filter; `check-workspace-split`, `e2e/workspace-split` updated. |
 | `bc00b70` | **The Trust overview splits the bank from the PTCs** (the firm, 10 Oct: "Now you've incorporated PTCs in this, and I don't think that's the right thing to do. We should report on that separately"). Four read-only functions, nothing written to the books: `trust_cash_by_cycle` (the money IN the account by cycle and whose -- a PTC's entry left out; what a PAID payover kept back read as the firm's, because a PTC writes "client owes the trust" and no firm entry, so after set-off the firm's share sat in trust under nobody's name), `ptc_by_run` (owed / set off / short per payover), `ptc_ageing` (what each client still owes after set-off, dated from the payover that first invoiced it, walked back through carried shortfalls), `collections_by_payover` (into trust + paid direct per payover, counted from the payments and from the runs). Overview: "What is in the trust account" (last month's / this month's collections, overpayments, interest and charges -> total accounted for, which no longer goes negative), then **Paid straight to clients (PTCs)**, **What clients owe us, by age** (Not yet invoiced / 0-30 / 31-60 / 61-90 / 90+), **Each payover, checked**. Staging: bank money R16 567.38 = ledger -R10 088.87 + PTCs R26 656.25, to the cent; both payovers agree with their runs. New `check-trust-split` (32); `check-firm-held`, `check-trust-cycles`, `e2e/workspace-split` rewritten to the new rule. **Not built yet:** recording a client's payment of what they owe into the BUSINESS account against the negative run (the firm: "we would have to match it"). |
-| `7093ab9` | **A PTC goes on the next payover** (the firm, 10 Oct: captured 15 Oct -> invoiced 11 Nov, not 11 Dec). `build_payover_run` claims a PTC up to the day before the run's payover date; a later open run leaves it to an earlier one; an earlier run takes back one a later run took. Trust money unchanged. `client_ledger` names the claiming run. Probed rolled back; `check-ptc-next-payover` (11). |
+| `7093ab9` | **A PTC goes on the next payover** -- SWITCHED OFF since, see the row above (the firm, 10 Oct: captured 15 Oct -> invoiced 11 Nov, not 11 Dec). `build_payover_run` claims a PTC up to the day before the run's payover date; a later open run leaves it to an earlier one; an earlier run takes back one a later run took. Trust money unchanged. `client_ledger` names the claiming run. Probed rolled back; `check-ptc-next-payover` (11). |
 | `4067795` | **Payover runs: four cards, underlined tabs, search and filter** (the firm's drawing, 10 Oct). The Needs review -> Paid legend and the cycle/cut-off strip went ("I don't know what that ... is"); Ready to approve is a tinted card whose Review runs filters to the ready runs. `payover-sends` asserts the legend gone, the cards, and the search. |
 | `878500a` | **The client's ledger is one line a payover** (the firm, 10 Oct: "there's one payover ... a credit or a debit balance", then the invoice as its own line). `clientLedger.ts` `ledgerByPayover` folds payments into the run whose period covers them; payover paid, charges and invoices stand alone; money after the last run is one "not on a payover yet" line. Debit / Credit columns, balance in Dr / Cr, click a payover for the payments and accounts behind it. Account tab moved right of Payovers. Run rows are one height ("Open until" wears the button's box). New `check-client-ledger`. |
 | `143978a` | **The remittance advice is drawn in the firm's own design** (the firm, 10 Oct, sending two mock-up PDFs and the coastline photograph: "make the remittance advices look like this"). A4 landscape: a cover with the photograph and the BF lockup (`public/brand/remittance-cover.jpg`, `bf-lockup.jpg`, fetched at draw time; a navy band and a text logo stand in if either fails to load, so an advice never refuses for a picture); "Your collection summary" with three boxes (the net box navy, its label `netLabel` so a run below nil still reads "Amount you owe us" with the figure unsigned), the payover calculation and the payment & invoice panel; then "Collections by us" as a navy-headed zebra table with a TOTAL row, paginated, and pages for payments made to the client directly and for overpayments (no commission). Decisions left to the firm: the OUTSTANDING column was kept from the old advice, the per-line VAT sentence of the mock-up was left out, reversal rows keep their own signs. `check-remittance-advice` 75/75 unchanged. |
@@ -155,9 +166,22 @@ Nothing.
 
 ## 3. Open requests the firm has made and nobody has started
 
-None outstanding as a build. The third session built everything the second left (§2). What is left
-is waiting on an ANSWER, not on work — §4 — and the production go-live, which the user has said
-will be done later (§5, first item).
+1. **A client paying what they owe into the BUSINESS account, matched to their payover.** A run
+   below nil (Jacaranda, Lowveld on staging) is the client owing the firm; the advice tells them so
+   and the runs list says "Client owes us", but there is no way yet to RECORD their payment and
+   take it off the age analysis. The firm: "that's paid to our business account, not to the trust
+   account. So we would have to match it." Needs: a business-side receipt against a run (or the
+   client), the run's shortfall marked settled, `ptc_ageing` leaving it out, the client ledger
+   showing it. Probably a `client_payments_received` table on the business side; ask before
+   designing the matching.
+2. **Matching payovers from the bank statement by reference.** The firm: "ultimately, from the bank
+   statement ... allocate a specific payment made to a client ... linking it from the reference
+   number to the payover." `reconcile_bank_debit` and the overview's "Match to PO-..." already match
+   an unmatched trust debit to a run by amount and date; the firm means to SHOW how they want it.
+   Wait for that, then match on the `BF PO-...` reference first.
+3. **Switch the PTC rule on after the Swordfish parallel run** -- only when the user says so (§2).
+4. **Optional decisions on the remittance advice** (§2, `143978a`): keep the OUTSTANDING column?
+   add the per-line VAT sentence? Unanswered.
 
 **Explained to the firm, no change asked for** (so a new session does not "fix" them):
 - **The interest lines on an imported account** were confusing because of how Swordfish
@@ -196,7 +220,7 @@ will be done later (§5, first item).
      user is getting the file (or its headings); NEVER commit it -- staging only;
   4. finish the production copy (§5).
 - **Also raised, not yet specified:** reversals of payments (reversal of an un-invoiced payment
-  works since `533b46b`; Reverse is on Trust -> Check), and something about opening a client from
+  works since `533b46b`; Reverse is on Payments in -> History, on the opened receipt), and something about opening a client from
   a payover run ("we'll get to that").
 
 ## 4. Decisions waiting on the firm

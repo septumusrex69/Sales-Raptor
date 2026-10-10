@@ -16,8 +16,9 @@ import { AGE_LABEL, AGE_ORDER, ageAnalysis } from '../../lib/ptcAgeing'
  * client, into the BUSINESS account. So the questions here are the firm's own: which will be set off,
  * which will not, and how long what is left has been owing.
  *
- * A PTC rides the NEXT payover (10 Oct): captured on 15 October, it is on the 11 November advice,
- * and that is the day it is invoiced and the day its age counts from.
+ * A PTC is invoiced on the remittance advice of the payover that carries it, and its age counts
+ * from that day. Which payover that is follows ptc_on_next_payover(): off during the Swordfish
+ * parallel run (its own cycle's run, as Swordfish does), on afterwards (the next payover).
  */
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
