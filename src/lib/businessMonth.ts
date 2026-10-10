@@ -85,6 +85,21 @@ export function expenseTotal(e: Pick<BusinessExpense, 'amount' | 'vat'>): number
 }
 
 /**
+ * AN EXPENSE AS IT IS TYPED: THE AMOUNT ON THE SLIP, VAT INCLUDED (the firm, 10 Oct: "the VAT
+ * should automatically charge fifteen percent ... if you want to remove it, you should be able to
+ * remove it ... for ninety-five [percent] of people, we use this VAT included"). What left the
+ * account is the figure somebody has in front of them; the VAT is worked out of it at the firm's
+ * rate, rounded to the cent, and the part before VAT is the rest -- so the two always add back to
+ * what was typed. A supplier not registered for VAT charges none: the whole amount is the expense.
+ */
+export function splitExpense(total: number, vatRate: number, includesVat: boolean): { amount: number; vat: number } {
+  const t = Math.round((total + Number.EPSILON) * 100) / 100
+  if (!includesVat || !(vatRate > 0)) return { amount: t, vat: 0 }
+  const vat = Math.round((t * vatRate / (1 + vatRate) + Number.EPSILON) * 100) / 100
+  return { amount: Math.round((t - vat) * 100) / 100, vat }
+}
+
+/**
  * THE TRUST ACCOUNT'S OWN INTEREST AND CHARGES (trust_bank_costs), and what they leave to do.
  *
  * The firm, 10 Oct: "the trust is not a place of expenses. There's interest, yes, but the interest

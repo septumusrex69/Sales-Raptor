@@ -27,7 +27,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  EXPENSE_CATEGORIES, expenseTotal, monthBounds, monthLabel, thisMonth,
+  EXPENSE_CATEGORIES, expenseTotal, monthBounds, monthLabel, splitExpense, thisMonth,
 } from '../../src/lib/businessMonth.ts'
 
 let pass = 0
@@ -164,6 +164,21 @@ for (const c of EXPENSE_CATEGORIES) {
 check('the total that left the account', expenseTotal({ amount: 18000, vat: 2700 }), 20700)
 check('...and nil VAT is fine', expenseTotal({ amount: 450.5, vat: 0 }), 450.5)
 check('...rounded to the cent', expenseTotal({ amount: 0.1, vat: 0.2 }), 0.3)
+
+/* THE AMOUNT ON THE SLIP, VAT INCLUDED (the firm, 10 Oct). The VAT is worked out of it, the rest is
+   the expense, and the two add back to the slip to the cent whatever the amount. */
+check('R5 000 on the slip at 15% is R4 347.83 + R652.17', splitExpense(5000, 0.15, true), { amount: 4347.83, vat: 652.17 })
+check('R115 is R100 + R15', splitExpense(115, 0.15, true), { amount: 100, vat: 15 })
+check('a supplier not registered for VAT: the whole amount, no VAT', splitExpense(5000, 0.15, false), { amount: 5000, vat: 0 })
+{
+  let adds = true
+  for (let c = 1; c <= 100000; c += 7) {
+    const t = c / 100
+    const x = splitExpense(t, 0.15, true)
+    if (expenseTotal(x) !== Math.round(t * 100) / 100) { adds = false; break }
+  }
+  ok('...and the two parts always add back to the slip', adds)
+}
 
 console.log(`check-business-books: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

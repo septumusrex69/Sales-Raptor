@@ -32,6 +32,7 @@ let BANK = { interest: 12.34, charges: 115, repaid: 0, interest_to_date: 12.34, 
   repaid_to_date: 0, firm_held: 358.55 }
 
 let sent = []
+let expenses = []
 function handlers(me) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [me] })],
@@ -42,6 +43,10 @@ function handlers(me) {
       body: [{ id: 'd1', entry_at: '2026-10-07T08:00:00Z', amount: 20, reference: 'EFT 0042', drawn_by: 'Stephan' }],
     })],
     [(u) => /\/rpc\/draw_from_trust/.test(u), (u, req) => { sent.push(req.postDataJSON()); return { body: 'x' } }],
+    [(u) => /\/rest\/v1\/business_expenses/.test(u), (u, req) => {
+      if (req.method() === 'POST') expenses.push(req.postDataJSON())
+      return { body: [] }
+    }],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
@@ -134,6 +139,26 @@ try {
     t.ok('a firm share below nothing is money owed to the trust', /Bredell Ferreira owes the trust\s*R 102\.66/.test(text))
     t.ok('...and it says how to pay it back', /Pay this back from the business account/.test(text))
     await t.shot(page, 'business-trust-bank-costs')
+    await context.close()
+  }
+
+  /* ---------------- an expense: the amount on the slip, VAT worked out of it (the firm, 10 Oct) ---------------- */
+  {
+    const { context, page } = await open(browser, ADMIN, '/business/expenses')
+    await page.getByRole('button', { name: /Record an expense/ }).first().click()
+    await page.getByPlaceholder('October rent').fill('Printer paper')
+    await page.getByTestId('expense-total').fill('5000')
+    const split = page.getByTestId('expense-split')
+    await split.waitFor({ timeout: 10000 })
+    const said = (await split.innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    t.ok('VAT is included by default and worked out of the slip', /R 4 347\.83 \+ R 652\.17 VAT = R 5 000\.00/.test(said))
+    await page.getByTestId('expense-includes-vat').uncheck()
+    t.ok('...and unticked, the whole amount carries no VAT',
+      /R 5 000\.00 left the business account, no VAT/.test((await split.innerText()).split(String.fromCharCode(0xa0)).join(' ')))
+    await page.getByTestId('expense-includes-vat').check()
+    await page.getByRole('button', { name: 'Record it' }).click()
+    await page.waitForTimeout(500)
+    t.check('it records the part before VAT and the VAT', JSON.stringify(expenses.map((x) => [x.amount, x.vat])), '[[4347.83,652.17]]')
     await context.close()
   }
 } catch (e) {

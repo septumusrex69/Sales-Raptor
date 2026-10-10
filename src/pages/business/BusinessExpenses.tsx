@@ -5,10 +5,11 @@ import { Card } from '../../components/ui/Card'
 import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import {
-  EXPENSE_CATEGORIES, expenseTotal, monthBounds, monthLabel, thisMonth,
+  EXPENSE_CATEGORIES, expenseTotal, monthBounds, monthLabel, splitExpense, thisMonth,
   type BusinessExpense, type ExpenseCategory,
 } from '../../lib/businessMonth'
 import { cancelExpense, fetchExpenses, recordExpense } from '../../lib/businessApi'
+import { fetchFirmSettings } from '../../lib/firmSettings'
 
 /**
  * WHAT THE FIRM SPENT.
@@ -208,14 +209,19 @@ function RecordExpenseModal({ onClose, onDone }: { onClose: () => void; onDone: 
   const [category, setCategory] = useState<ExpenseCategory>('Other')
   const [supplier, setSupplier] = useState('')
   const [description, setDescription] = useState('')
-  const [amount, setAmount] = useState('')
-  const [vat, setVat] = useState('')
+  /* THE AMOUNT ON THE SLIP, VAT INCLUDED unless the supplier is not registered (see splitExpense). */
+  const [total, setTotal] = useState('')
+  const [includesVat, setIncludesVat] = useState(true)
+  const [vatRate, setVatRate] = useState(0.15)
+  useEffect(() => {
+    void fetchFirmSettings().then((f) => { if (f.vatRate > 0) setVatRate(f.vatRate) })
+  }, [])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const amountNum = Number(amount)
-  const vatNum = vat.trim() === '' ? 0 : Number(vat)
-  const valid = description.trim() !== '' && Number.isFinite(amountNum) && amountNum > 0
+  const totalNum = Number(total.replace(/[\s,]/g, ''))
+  const split = splitExpense(Number.isFinite(totalNum) ? totalNum : 0, vatRate, includesVat)
+  const valid = description.trim() !== '' && Number.isFinite(totalNum) && totalNum > 0
 
   async function submit() {
     if (busy || !valid) return
@@ -223,7 +229,7 @@ function RecordExpenseModal({ onClose, onDone }: { onClose: () => void; onDone: 
     try {
       await recordExpense({
         incurredOn, category, supplier: supplier.trim() || undefined,
-        description: description.trim(), amount: amountNum, vat: Number.isFinite(vatNum) ? vatNum : 0,
+        description: description.trim(), amount: split.amount, vat: split.vat,
       })
       onDone()
     } catch (e) {
@@ -274,26 +280,27 @@ function RecordExpenseModal({ onClose, onDone }: { onClose: () => void; onDone: 
           </div>
         </div>
         <FormField label="Supplier">
-          <input className={inputClass} value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+          <input className={inputClass} value={supplier} onChange={(e) => setSupplier(e.target.value)}
+            placeholder="Optional" />
         </FormField>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <FormField label="Amount excluding VAT" required>
-              <input className={inputClass} inputMode="decimal" value={amount}
-                onChange={(e) => setAmount(e.target.value)} />
-            </FormField>
-          </div>
-          <div className="flex-1">
-            <FormField label="VAT">
-              <input className={inputClass} inputMode="decimal" value={vat}
-                onChange={(e) => setVat(e.target.value)} placeholder="0.00" />
-            </FormField>
-          </div>
-        </div>
+        <p className="-mt-2 text-[12px] text-slate-400">
+          Worth filling in for anything you claim the VAT back on: SARS wants the supplier&rsquo;s tax invoice.
+        </p>
+        <FormField label="Amount paid" required>
+          <input className={inputClass} inputMode="decimal" value={total} data-testid="expense-total"
+            onChange={(e) => setTotal(e.target.value)} placeholder="What left the account, as on the slip" />
+        </FormField>
+        <label className="flex items-center gap-2 text-[13px] text-slate-700">
+          <input type="checkbox" checked={includesVat} onChange={(e) => setIncludesVat(e.target.checked)}
+            data-testid="expense-includes-vat" />
+          Includes {Math.round(vatRate * 1000) / 10}% VAT
+          <span className="text-slate-400">· untick for a supplier not registered for VAT</span>
+        </label>
         {valid && (
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-600">
-            {rand(expenseTotal({ amount: amountNum, vat: Number.isFinite(vatNum) ? vatNum : 0 }))} left
-            the business account.
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-600" data-testid="expense-split">
+            {includesVat
+              ? <>{rand(split.amount)} + {rand(split.vat)} VAT = {rand(expenseTotal(split))} left the business account.</>
+              : <>{rand(expenseTotal(split))} left the business account, no VAT.</>}
           </div>
         )}
       </div>
