@@ -133,6 +133,10 @@ export async function saveFirmSettings(next: Omit<FirmSettings, 'updatedAt'>): P
     parked_credit_months: next.parkedCreditMonths,
     payover_lag_months: next.payoverLagMonths,
     payouts_statement_only: next.payoutsStatementOnly,
+    /* Echoed as loaded, like the switch above. The figure is SET only by set_trust_opening_balance,
+       which logs it with a reason; this keeps the five lists whole (check-firm-settings). */
+    trust_opening_balance: next.trustOpeningBalance,
+    trust_opening_date: next.trustOpeningDate,
     /*
      * WRITTEN BACK LIKE EVERY OTHER FIELD, AND THE DATABASE IS WHAT KEEPS IT SAFE.
      *

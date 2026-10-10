@@ -34,7 +34,7 @@ export const COLUMNS = 'firm_name, registration_number, vat_number, council_numb
   + 'business_bank, business_branch_code, business_account_name, business_account_number, '
   + 'signatory_name, signatory_title, '
   + 'email_font, email_size_pt, vat_rate, time_zone, finance_cutover_at, parked_credit_months, '
-  + 'payover_lag_months, payouts_statement_only, '
+  + 'payover_lag_months, payouts_statement_only, trust_opening_balance, trust_opening_date, '
   + 'updated_at'
 
 export interface Row {
@@ -69,6 +69,8 @@ export interface Row {
   parked_credit_months: number | null
   payover_lag_months: number | null
   payouts_statement_only: boolean | null
+  trust_opening_balance: number | string | null
+  trust_opening_date: string | null
   finance_cutover_at: string | null
   updated_at: string
 }
@@ -160,6 +162,14 @@ export interface FirmSettings {
    */
   payoutsStatementOnly: boolean
   /**
+   * WHAT THE TRUST ACCOUNT HELD AT THE END OF `trustOpeningDate`, off the bank's own statement.
+   * The trust overview's bank figure is this plus every statement line after that day; both null
+   * means none was captured and the figure is the imported lines alone. Set only through
+   * `set_trust_opening_balance` (Trust settings), which logs it with a reason.
+   */
+  trustOpeningBalance: number | null
+  trustOpeningDate: string | null
+  /**
    * WHEN THE ALLOCATION ENGINE STARTS SPLITTING PAYMENTS, AND NULL UNTIL THE FIRM SAYS SO.
    *
    * Payments CAPTURED on or after this are split by Raptor; everything earlier keeps the outcome
@@ -216,6 +226,8 @@ export const FIRM_UNSET: FirmSettings = {
   payoverLagMonths: 1,
   /* Off: staging marks payments paid by hand as well. Turned on at go-live. */
   payoutsStatementOnly: false,
+  trustOpeningBalance: null,
+  trustOpeningDate: null,
   /* Off. An engine that switched itself on across the whole book would not be undoable. */
   financeCutoverAt: null,
   updatedAt: '',
@@ -262,6 +274,8 @@ export function toSettings(r: Row): FirmSettings {
     parkedCreditMonths: r.parked_credit_months ?? 6,
     payoverLagMonths: r.payover_lag_months ?? 1,
     payoutsStatementOnly: r.payouts_statement_only ?? false,
+    trustOpeningBalance: r.trust_opening_balance === null ? null : Number(r.trust_opening_balance),
+    trustOpeningDate: r.trust_opening_date ?? null,
     financeCutoverAt: r.finance_cutover_at ?? null,
     updatedAt: r.updated_at,
   }

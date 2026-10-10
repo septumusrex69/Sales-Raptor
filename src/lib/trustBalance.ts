@@ -188,3 +188,49 @@ export function trustVerdict(checks: TrustCheck[]): { tone: TrustCheckTone; line
       : `The trust account balances. ${todo.length} things still need doing.`,
   }
 }
+
+/**
+ * THE THREE FIGURES ACROSS THE TOP: WHAT IS IN THE TRUST, HOW MUCH OF IT IS ACCOUNTED FOR, AND
+ * HOW MUCH IS NOT.
+ *
+ * The firm, 10 Oct, of the band that read "Bank balance / Trust ledger balance / Bank / ledger
+ * difference": "the trust balance should be the main thing ... this is how much is in the trust.
+ * This has been accounted for. This has not been accounted for. And then ... the breakdown." The
+ * old band put two balances side by side and asked the reader to subtract; this one starts from
+ * the money and says how much of it has a name on it.
+ *
+ * ACCOUNTED FOR IS THE OWNERS THE SCREEN DREW, summed by the caller from the same rows it shows --
+ * clients, the firm, debtors, less what clients owe back. Not a figure read from the database: a
+ * total the page did not add up itself is a total that can disagree with the rows above it.
+ *
+ * NOT ACCOUNTED FOR IS WHAT IS LEFT, and it is split into what it is made of, because "R950 not
+ * accounted for" is two different jobs depending on why:
+ *   - UNPLACED: receipts on the statement nobody has put against a debtor (Exceptions);
+ *   - GAP: the bank against the ledger -- money in the account the books do not know about, or (the
+ *     serious direction) books owing money the account does not hold;
+ *   - RESIDUAL: anything neither explains. Nil whenever the parts and trust_position agree, and
+ *     drawn only when they do not, so the page can still say "this does not add up".
+ */
+export interface TrustHeadline {
+  inTrust: number
+  accounted: number
+  notAccounted: number
+  unplaced: number
+  gap: number
+  residual: number
+}
+
+export function trustHeadline(input: {
+  trustCash: number
+  /** The owners the screen drew, already summed: clients + firm + debtors - owed back. */
+  owners: number
+  unidentified: number
+  difference: number
+}): TrustHeadline {
+  const inTrust = r2(input.trustCash)
+  const accounted = r2(input.owners)
+  const notAccounted = r2(inTrust - accounted)
+  const unplaced = r2(input.unidentified)
+  const gap = r2(input.difference)
+  return { inTrust, accounted, notAccounted, unplaced, gap, residual: r2(notAccounted - unplaced - gap) }
+}

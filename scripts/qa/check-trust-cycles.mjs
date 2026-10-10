@@ -282,33 +282,34 @@ ok('...and still reads the position', /fetchTrustPosition\(\)/.test(page))
  * place and a consequence, and only one of those is a record anybody keeps.
  */
 /*
- * NOW THE FIRM'S REVISED DESIGN: the owners on the left ending on "Total accounted for", and an
- * "Ownership reconciliation" beside them that reads DOWN to a difference -- trust ledger balance,
- * less amounts accounted for, unexplained difference. Asserted in that order, presence first.
+ * NOW THE FIRM'S REVISED DESIGN, AS RE-READ ON 10 OCT: the owners on the left ending on "Total
+ * accounted for", what is NOT accounted for under it, and the account's own balance last; beside
+ * them an "Ownership reconciliation" that reads DOWN from the bank -- in the trust account, less
+ * accounted for, not accounted for. Asserted in that order, presence first.
  */
 const from = page.indexOf('Who owns the money in trust?')
 const control = from < 0 ? '' : page.slice(from, page.indexOf('Collections by period', from))
-ok('the ownership block was found', control.length > 500 && control.length < 12000)
+ok('the ownership block was found', control.length > 500 && control.length < 14000)
 let at = -1
-for (const line of ['Total accounted for', 'Ownership reconciliation', 'Trust ledger balance',
-  'Less: amounts accounted for', 'Unexplained difference']) {
+for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"',
+  'Ownership reconciliation', 'Less: accounted for', 'text-slate-800">Not accounted for<']) {
   const found = control.indexOf(line)
   ok(`the ownership block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)
   at = found
 }
 /*
- * THE DIFFERENCE IS ADDED UP ON THE SCREEN, from the parts -- not handed back as one more figure.
- * And the client in debit is subtracted, or the total would disagree with the ledger by exactly
- * that amount on the day a client owes the trust.
+ * THE TOTALS ARE ADDED UP ON THE SCREEN, from the parts -- not handed back as one more figure.
+ * Accounted for is money with a name on it; an unplaced receipt is NOT accounted for (the firm,
+ * 10 Oct), so it is no longer in the sum. A client in debit is subtracted once.
  */
-ok('accounted for is summed from the four owners, less clients in debit',
+ok('accounted for is summed from the owners, less clients in debit, without the unplaced receipts',
   /* owedToClientsGross: what is owed TO clients; a client in debit is subtracted once, below (8 Oct). */
   /const owedToClientsGross = r2\(position\.owedToClients \+ position\.owedByClients\)/.test(page)
-  && /owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*\+ position\.unidentified - position\.owedByClients/
+  && /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*- position\.owedByClients\)/
     .test(page))
-ok('...and the unexplained difference is the ledger less that sum',
-  /const unexplained = r2\(position\.netOwed - accounted\)/.test(page))
+ok('...and what is not accounted for is the BANK less that sum, through trustHeadline',
+  /trustHeadline\(\{\s*trustCash: position\.trustCash, owners: accounted,/.test(page))
 /*
  * AND IT ONLY SAYS "MATCH" WHEN NOTHING IS OPEN. A reconciliation that read R 0.00 and "totals
  * match" over a bank shortfall is the failure this whole screen exists to prevent.

@@ -32727,3 +32727,149 @@ begin
 
   return v_count;
 end $$;
+
+-- ============================================================================================
+-- THE TRUST ACCOUNT HAS AN OPENING BALANCE (10 Oct)
+--
+-- trust_position's cash was the SUM OF IMPORTED STATEMENT LINES, so anything the account held
+-- before the first statement Raptor has was missing from it. On staging that was the whole of the
+-- R15 021.04 "bank / ledger difference": ten Swordfish receipts (R15 943.54) in the ledger as money
+-- held, which arrived before the first statement, less the PTC R922.50 a client owes the trust.
+--
+-- Now: cash = the bank's balance at the END of trust_opening_date + every trust statement line
+-- dated AFTER it. Lines on or before the day are already inside the figure and are not added again.
+-- Both null (the default) is the old behaviour exactly -- every line, no opening -- and the
+-- overview says so. Both or neither, by constraint: an amount with no day cannot be placed.
+--
+-- SET THROUGH ONE FUNCTION, WITH A REASON, AND NOTHING ELSE CAN MOVE IT. Moving the opening moves
+-- the reconciliation, so it is logged like a rate (finance_setting_changes). saveFirmSettings writes
+-- the whole row back, so a Firm details tab opened before somebody captured the figure would put
+-- the old one back on save; protect_trust_opening reverts any change not made inside
+-- set_trust_opening_balance (reverts rather than raises, like protect_finance_cutover: somebody
+-- saving the firm's phone number was not asking about the trust account).
+-- ============================================================================================
+
+alter table public.firm_settings add column if not exists trust_opening_balance numeric(14,2);
+alter table public.firm_settings add column if not exists trust_opening_date date;
+
+do $x$ begin
+  if not exists (select 1 from pg_constraint where conname = 'firm_settings_trust_opening_whole') then
+    alter table public.firm_settings add constraint firm_settings_trust_opening_whole
+      check ((trust_opening_balance is null) = (trust_opening_date is null));
+  end if;
+end $x$;
+
+create or replace function public.protect_trust_opening()
+returns trigger language plpgsql set search_path to 'public'
+as $$
+begin
+  if (new.trust_opening_balance, new.trust_opening_date) is distinct from (old.trust_opening_balance, old.trust_opening_date)
+     and coalesce(current_setting('raptor.trust_opening', true), '') <> 'on' then
+    new.trust_opening_balance := old.trust_opening_balance;
+    new.trust_opening_date := old.trust_opening_date;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.protect_trust_opening() from public, anon;
+
+create or replace trigger protect_trust_opening
+  before update on public.firm_settings
+  for each row execute function public.protect_trust_opening();
+
+-- Security INVOKER: firm_settings' own write policy (Administrator) still applies underneath the
+-- explicit check, and the audit insert goes through finance_setting_changes' insert policy.
+create or replace function public.set_trust_opening_balance(p_amount numeric, p_as_at date, p_reason text)
+returns void language plpgsql security invoker set search_path to 'public'
+as $$
+declare
+  v_old_amount numeric;
+  v_old_date date;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if not public.has_capability('finance.view') or public.current_user_role() <> 'Administrator' then
+    raise exception 'Only an Administrator with the trust account may set its opening balance.' using errcode = '42501';
+  end if;
+  if p_amount is null or p_as_at is null then
+    raise exception 'An opening balance is an amount AND the day it was the balance.' using errcode = '22023';
+  end if;
+  if p_as_at > (now() at time zone 'Africa/Johannesburg')::date then
+    raise exception 'The opening balance cannot be dated in the future.' using errcode = '22023';
+  end if;
+  if v_reason is null or length(v_reason) < 10 then
+    raise exception 'Say where the figure comes from (for example, which bank statement).' using errcode = '22023';
+  end if;
+
+  select trust_opening_balance, trust_opening_date into v_old_amount, v_old_date
+    from public.firm_settings where id = true;
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = round(p_amount, 2), trust_opening_date = p_as_at,
+         updated_at = now(), updated_by = auth.uid()
+   where id = true;
+  if not found then
+    raise exception 'The firm''s settings row is missing.';
+  end if;
+  perform set_config('raptor.trust_opening', '', true);
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('trust_opening_balance',
+          case when v_old_date is null then 'Not set'
+               else to_char(v_old_amount, 'FM999999999990.00') || ' at the end of ' || v_old_date end,
+          to_char(round(p_amount, 2), 'FM999999999990.00') || ' at the end of ' || p_as_at,
+          v_reason, auth.uid());
+end;
+$$;
+revoke all on function public.set_trust_opening_balance(numeric, date, text) from public, anon;
+grant execute on function public.set_trust_opening_balance(numeric, date, text) to authenticated;
+
+-- The only change from the last definition is the `cash` block: opening + lines after its day.
+-- Same return shape, so `create or replace` keeps the grants.
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(max(f.trust_opening_balance), 0) + coalesce(sum(l.amount), 0) as bal
+      from public.firm_settings f
+      left join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+  ),
+  by_party as (
+    select party,
+           case when party = 'client' then company_id::text else coalesce(account_id::text, party) end as who,
+           sum(amount) as bal
+      from public.trust_creditor_entries
+     group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal,
+         h.owed_in,
+         (h.owed_out + u.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u
+   where public.has_capability('finance.view')
+$$;

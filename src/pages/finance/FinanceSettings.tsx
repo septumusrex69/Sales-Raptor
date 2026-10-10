@@ -8,6 +8,7 @@ import { bandWords, ruleKind, tierWords } from '../../lib/commissionRule'
 import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
 import { fetchSettingChanges, logSettingChange, type SettingChange } from '../../lib/payover'
+import { fetchTrustOpening, setTrustOpening, type TrustOpening } from '../../lib/trust'
 
 /**
  * THE FOUR THINGS THAT DECIDE WHAT EVERY DEBTOR IS CHARGED AND EVERY CLIENT IS PAID.
@@ -54,6 +55,8 @@ export function FinanceSettings() {
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<RateRow | null>(null)
   const [vatModal, setVatModal] = useState(false)
+  const [opening, setOpening] = useState<TrustOpening | null>(null)
+  const [openingModal, setOpeningModal] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -95,6 +98,7 @@ export function FinanceSettings() {
         }))
         .filter((x) => x.accounts > 0 || ruleKind({ commissionRate: x.rate, commissionBands: x.bands, commissionTiers: x.tiers }) !== 'none')
         .sort((a2, b2) => b2.accounts - a2.accounts))
+      setOpening(await fetchTrustOpening())
       setChanges(await fetchSettingChanges())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the finance settings.')
@@ -245,6 +249,33 @@ export function FinanceSettings() {
                 </span>
               </label>
             </Card>
+            {/*
+              WHERE THE TRUST OVERVIEW'S BANK FIGURE STARTS. Raptor only knows the statements that
+              were imported, so without this the "in the trust account" figure leaves out whatever
+              the account held before the first one (the firm, 10 Oct: the R15 021.04 "difference"
+              was exactly that). Asked once, at go-live, off the bank's own statement, with a reason
+              -- moving it moves the reconciliation, so it is logged like a rate.
+            */}
+            <Card>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
+                Trust account opening balance
+              </div>
+              <div className="mt-1 flex items-baseline gap-3">
+                <span className={clsx('text-[22px] font-medium tabular-nums',
+                  opening?.asAt ? 'text-slate-800' : 'text-amber-700')} data-testid="opening-balance">
+                  {opening?.asAt && opening.amount !== null ? rand(opening.amount) : 'Not captured'}
+                </span>
+                <button type="button" onClick={() => setOpeningModal(true)}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100">
+                  {opening?.asAt ? 'Change' : 'Capture'}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                {opening?.asAt
+                  ? `The bank's balance at the end of ${openingDay(opening.asAt)}. The trust overview adds every statement line after that day.`
+                  : 'The bank\u2019s balance on the day before the first statement you import. Until it is captured, the trust overview counts imported statement lines only.'}
+              </p>
+            </Card>
           </div>
 
           <Card padded={false}>
@@ -384,6 +415,15 @@ export function FinanceSettings() {
         />
       )}
 
+      {openingModal && (
+        <OpeningModal current={opening} onClose={() => setOpeningModal(false)}
+          onSave={async (amount, asAt, reason) => {
+            await setTrustOpening(amount, asAt, reason)
+            setOpeningModal(false)
+            await load()
+          }} />
+      )}
+
       {editing && (
         <CommissionModal
           client={editing}
@@ -501,4 +541,78 @@ function payoverLagLabel(months: number): string {
 function payoverLagExample(months: number): string {
   const month = ['Sep', 'Oct', 'Nov', 'Dec'][Math.min(Math.max(months, 0), 3)]
   return `11 ${month}`
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December']
+/* Written out rather than through Intl: en-ZA abbreviates September to "Sept" (CLAUDE.md). */
+function openingDay(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return `${d} ${MONTHS[m - 1]} ${y}`
+}
+
+/**
+ * AN AMOUNT, THE DAY IT WAS THE BALANCE, AND WHERE IT CAME FROM. The database refuses a day that
+ * has not ended and a reason shorter than a sentence; the screen asks for the same so the refusal
+ * is never the first thing somebody sees.
+ */
+function OpeningModal({ current, onClose, onSave }: {
+  current: TrustOpening | null
+  onClose: () => void
+  onSave: (amount: number, asAt: string, reason: string) => Promise<void>
+}) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' })
+  const [amount, setAmount] = useState(current?.amount !== null && current?.amount !== undefined ? current.amount.toFixed(2) : '')
+  const [asAt, setAsAt] = useState(current?.asAt ?? '')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  /* A space or a comma is how a South African types a thousand; neither is part of the number. */
+  const value = Number(amount.replace(/[\s,]/g, ''))
+  const valid = amount.trim() !== '' && Number.isFinite(value) && /^\d{4}-\d{2}-\d{2}$/.test(asAt)
+    && asAt <= today && reason.trim().length >= 10
+
+  return (
+    <Modal title="Trust account opening balance" onClose={onClose} width={460}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Balance (R)</label>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal"
+              className={inputClass} placeholder="0.00" data-testid="opening-amount" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">At the end of</label>
+            <input type="date" value={asAt} max={today} onChange={(e) => setAsAt(e.target.value)}
+              className={inputClass} data-testid="opening-date" />
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600">Where it comes from</label>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}
+            placeholder="e.g. FNB trust statement, closing balance 30 September" data-testid="opening-reason" />
+          <p className="mt-1 text-xs text-slate-400">Required, at least ten characters. It is kept with the change.</p>
+        </div>
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Use the closing balance on the bank&rsquo;s own statement for that day. Statement lines
+          dated on or before it are already inside this figure and are not added again; lines after
+          it are.
+        </p>
+        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" disabled={!valid || busy}
+            onClick={() => {
+              setBusy(true); setError(null)
+              void onSave(value, asAt, reason.trim())
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : 'That did not save.'))
+                .finally(() => setBusy(false))
+            }}
+            className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
 }

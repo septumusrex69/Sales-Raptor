@@ -6,13 +6,14 @@ import { Card } from '../../components/ui/Card'
 import { unexplainedDebitAction } from '../../lib/bankLineAllocation'
 import { rand } from '../../lib/money'
 import {
-  fetchFirmHeld, fetchOverpaymentsKept, fetchTrustCycles, fetchTrustPosition, fetchUnreconciledPayouts,
-  type TrustCycle, type TrustPosition, type UnreconciledPayout,
+  fetchFirmHeld, fetchOverpaymentsKept, fetchTrustCycles, fetchTrustOpening, fetchTrustPosition,
+  fetchUnreconciledPayouts,
+  type TrustCycle, type TrustOpening, type TrustPosition, type UnreconciledPayout,
 } from '../../lib/trust'
 import {
   cycleCollected, cycleLabel, cycleState, cycleTodo, cycleTotals, overdueCycles,
 } from '../../lib/trustCycles'
-import { trustChecks, trustVerdict } from '../../lib/trustBalance'
+import { trustChecks, trustHeadline, trustVerdict } from '../../lib/trustBalance'
 import { firmHeldLines, firmHeldSum, type FirmHeld } from '../../lib/firmHeld'
 
 /**
@@ -56,6 +57,7 @@ export function TrustOverview() {
   const [payouts, setPayouts] = useState<UnreconciledPayout[]>([])
   const [firmHeld, setFirmHeld] = useState<FirmHeld | null>(null)
   const [kept, setKept] = useState<{ amount: number; accounts: number } | null>(null)
+  const [opening, setOpening] = useState<TrustOpening | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -68,8 +70,10 @@ export function TrustOverview() {
       fetchFirmHeld().catch(() => null),
       /* Same: a split of the debtors' line, never needed for the arithmetic. */
       fetchOverpaymentsKept().catch(() => null),
+      /* Only says where the bank figure starts; the figure itself is trust_position's. */
+      fetchTrustOpening().catch(() => null),
     ])
-      .then(([p, u, c, f, k]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k) } })
+      .then(([p, u, c, f, k, o]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k); setOpening(o) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -128,17 +132,12 @@ export function TrustOverview() {
 
   /*
    * THE RECONCILIATION, ADDED UP HERE FROM THE PARTS -- not read back as one more figure from the
-   * database. `netOwed` is what the ledger says is owed out of the trust; the parts are who it is
-   * owed to. Summed on the screen, the line "unexplained difference" is arithmetic this page
-   * actually did, rather than a nil it was handed.
-   *
-   * IT IS NIL TODAY BY CONSTRUCTION, and that is said here rather than hidden: `trust_position`
-   * builds the ledger balance out of the same parts, so the two can only part company if that
-   * function and this screen stop meaning the same thing by them. The firm drew the panel and it is
-   * drawn as they drew it. What CAN go wrong -- the bank against the ledger, money with no owner, a
-   * client in debit, a payover past its day -- is said underneath it, in the notes the firm's own
-   * design puts there ("Unallocated receipts still need allocation"), because a reconciliation
-   * that only ever reads R 0.00 is worth nothing on the day it should not.
+   * database. It used to run ledger LESS owners, which was nil by construction (the ledger is built
+   * out of the same owners). Since 10 Oct it runs from the BANK: in the trust account, less what
+   * has an owner, is what has not -- and that CAN be non-nil, because the bank figure (opening
+   * balance plus statement lines) is measured independently of the ledger. It splits into the
+   * receipts nobody has placed and the bank/ledger gap; `trustHeadline` keeps any remainder
+   * neither explains as its own line rather than folding it in.
    */
   /*
    * CLIENTS ARE OWED THE POSITIVE PART ONLY. `owedToClients` is the clients' NET balance -- a client
@@ -148,9 +147,19 @@ export function TrustOverview() {
    * owed-back line what is owed by them, and the two add back to the net.
    */
   const owedToClientsGross = r2(position.owedToClients + position.owedByClients)
+  /*
+   * ACCOUNTED FOR IS MONEY WITH A NAME ON IT: clients, the firm, debtors, less what clients owe
+   * back. Unallocated receipts used to be summed in here too, which is why the old total always
+   * equalled the ledger -- but a receipt nobody has placed is exactly what the firm means by "not
+   * accounted for" (10 Oct), so it now sits on that side with the bank/ledger gap.
+   */
   const accounted = r2(owedToClientsGross + position.owedToFirm + position.owedToDebtors
-    + position.unidentified - position.owedByClients)
-  const unexplained = r2(position.netOwed - accounted)
+    - position.owedByClients)
+  const head = trustHeadline({
+    trustCash: position.trustCash, owners: accounted,
+    unidentified: position.unidentified, difference: position.difference,
+  })
+  const openingSet = Boolean(opening?.asAt)
   const verdict = trustVerdict(checks)
   const totals = cycleTotals(cycles)
   const open = checks.filter((c) => c.tone !== 'clear')
@@ -179,21 +188,37 @@ export function TrustOverview() {
       </div>
 
       {/* ------------------------------ the three figures ------------------------------ */}
+      {/*
+        THE MONEY FIRST, THEN HOW MUCH OF IT HAS A NAME ON IT. The firm, 10 Oct: "the trust balance
+        should be the main thing ... this is how much is in the trust. This has been accounted for.
+        This has not been accounted for." The band used to read Bank balance / Trust ledger balance
+        / difference, which the firm took for the BUSINESS account's balance beside the trust's --
+        two balances side by side read as two accounts. It is one account, said so under the figure.
+      */}
       <div className="rounded-2xl bg-navy-950 text-white px-6 sm:px-8 py-6
-        grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <Figure label="Bank balance" value={rand(position.trustCash)} />
-        <Figure label="Trust ledger balance" value={rand(position.netOwed)} />
+        grid grid-cols-1 sm:grid-cols-3 gap-6" data-testid="trust-headline">
         <div>
-          <Figure
-            label="Bank / ledger difference"
-            value={rand(position.difference)}
-            tone={position.difference === 0 ? undefined : 'text-negative-300'}
-          />
+          <Figure label="In the trust account" value={rand(head.inTrust)} />
+          <div className={clsx('mt-2 text-xs', openingSet ? 'text-slate-300' : 'text-amber-300 font-semibold')}>
+            {openingSet && opening?.amount !== null && opening?.asAt
+              ? `Opening ${rand(opening.amount)} at ${longDate(opening.asAt)}, plus statements since`
+              : 'Statement lines only \u2014 no opening balance captured'}
+          </div>
+        </div>
+        <div>
+          <Figure label="Accounted for" value={rand(head.accounted)} />
+          <div className="mt-2 text-xs text-slate-300">Due to clients, Bredell Ferreira and debtors</div>
+        </div>
+        <div>
+          <Figure label="Not accounted for" value={rand(head.notAccounted)}
+            tone={head.notAccounted === 0 ? undefined : head.gap < 0 ? 'text-negative-300' : 'text-amber-300'} />
           {/* THE VERDICT IS ON THE PANEL, not inferred from a zero: nobody should have to know
               that R 0.00 is the good answer. */}
-          <div className={clsx('mt-2 text-xs font-semibold sm:text-right',
-            position.difference === 0 ? 'text-positive-100' : 'text-negative-300')}>
-            {position.difference === 0 ? 'Matched' : 'Not matched'}
+          <div className={clsx('mt-2 text-xs font-semibold',
+            head.notAccounted === 0 && head.gap === 0 ? 'text-positive-100' : head.gap < 0 ? 'text-negative-300' : 'text-amber-300')}>
+            {head.notAccounted === 0 && head.gap === 0
+              ? 'Every rand has an owner'
+              : head.gap < 0 ? 'Bank holds less than the books owe' : 'Needs placing or explaining'}
           </div>
         </div>
       </div>
@@ -222,7 +247,6 @@ export function TrustOverview() {
             */}
             <Owner who="Debtors" what="Overpayments / refunds outstanding"
               amount={position.owedToDebtors - (kept?.amount ?? 0)} />
-            <Owner who="Unallocated receipts" what="Owner not yet identified" amount={position.unidentified} />
             {kept && kept.amount > 0 && (
               <Owner who="Overpayments kept"
                 what={`Too small to refund; the debtor's until taken (${kept.accounts} ${kept.accounts === 1 ? 'account' : 'accounts'})`}
@@ -239,29 +263,69 @@ export function TrustOverview() {
               <Owner who="Less: owed back by clients" what="Comes off the client's next payover"
                 amount={-position.owedByClients} />
             )}
-            <div className="flex items-baseline gap-4 py-5 border-t border-slate-200">
-              <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">
-                Total accounted for
-              </div>
-              <div className="text-2xl font-semibold tabular-nums text-slate-800">{rand(accounted)}</div>
-            </div>
+            <Subtotal label="Total accounted for" value={head.accounted} />
+            {/*
+              NOT ACCOUNTED FOR, BY WHAT IT IS MADE OF -- two different jobs. An unplaced receipt is
+              placed on Exceptions; a bank/ledger gap is a statement not yet imported, an opening
+              balance not captured, or (short) money that has left with nothing behind it. A line
+              is drawn only when it is not nil, except the receipts, which always say where they are.
+            */}
+            <div className="pt-4 text-xs font-bold uppercase tracking-wider text-slate-400">Not accounted for</div>
+            <Owner who="Unallocated receipts" what="Owner not yet identified" amount={head.unplaced} />
+            {head.gap !== 0 && (
+              <Owner who="Bank / ledger difference"
+                what={head.gap < 0
+                  ? (openingSet ? 'The bank holds less than the books owe' : 'The books owe more than the imported statements hold \u2014 capture the opening balance')
+                  : 'In the bank, not yet in the books'}
+                amount={head.gap} />
+            )}
+            {head.residual !== 0 && (
+              <Owner who="Unexplained" what="The parts above do not add up to the bank" amount={head.residual} />
+            )}
+            <Subtotal label="Total not accounted for" value={head.notAccounted} />
+            <Subtotal label="In the trust account" value={head.inTrust} strong />
           </Card>
 
-          <div className={clsx('lg:col-span-5 rounded-xl px-6 py-6 flex flex-col',
-            verdict.tone === 'bad' ? 'bg-negative-50' : 'bg-positive-50')}>
-            <div className={clsx('text-lg font-semibold',
-              verdict.tone === 'bad' ? 'text-negative-700' : 'text-positive-700')}>
-              Ownership reconciliation
+          {/*
+            A PLAIN CARD WITH A COLOURED RULE, NOT A TINTED PANEL. The whole panel used to be washed
+            pink when the account did not balance (green when it did); the firm, 10 Oct: "a weird
+            pink thing ... I agree that there should be different colours, but change it." The
+            state is now the rule along the top and the pill beside the heading -- red short, amber
+            work outstanding, green nothing to do -- and the figures sit on the same white as the
+            owners beside them.
+          */}
+          <Card className={clsx('lg:col-span-5 px-6 py-6 flex flex-col border-t-4',
+            verdict.tone === 'bad' ? 'border-t-negative-500' : verdict.tone === 'warn' ? 'border-t-amber-400' : 'border-t-positive-600')}
+            data-testid="ownership-recon">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-slate-800">Ownership reconciliation</div>
+              <span className={clsx('rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap',
+                verdict.tone === 'bad' ? 'bg-negative-50 text-negative-700'
+                  : verdict.tone === 'warn' ? 'bg-amber-100 text-amber-800' : 'bg-positive-50 text-positive-700')}>
+                {verdict.tone === 'bad' ? 'Does not balance' : verdict.tone === 'warn' ? 'Balances, work outstanding' : 'Balances'}
+              </span>
             </div>
-            <Recon label="Trust ledger balance" value={rand(position.netOwed)} />
-            <Recon label="Less: amounts accounted for" value={rand(accounted)} />
+            <Recon label="In the trust account" value={rand(head.inTrust)} />
+            <Recon label="Less: accounted for" value={rand(head.accounted)} />
             <div className="mt-4 pt-4 border-t border-slate-200/70 flex items-baseline gap-4">
-              <div className="flex-1 text-[15px] font-semibold text-slate-800">Unexplained difference</div>
+              <div className="flex-1 text-[15px] font-semibold text-slate-800">Not accounted for</div>
               <div className={clsx('text-2xl font-semibold tabular-nums',
-                unexplained === 0 ? 'text-positive-700' : 'text-negative-700')}>
-                {rand(unexplained)}
+                head.notAccounted === 0 ? 'text-positive-700' : head.gap < 0 ? 'text-negative-700' : 'text-amber-700')}>
+                {rand(head.notAccounted)}
               </div>
             </div>
+            {/*
+              THE LIKELIEST REASON FOR A GAP, SAID WHERE THE GAP IS. Until the bank's balance on the
+              cut-over day is captured, the bank figure is the imported statements alone and the gap
+              is mostly what the account held before them.
+            */}
+            {!openingSet && head.gap !== 0 && (
+              <p className="mt-3 text-[13px] text-slate-600" data-testid="no-opening">
+                No opening balance is captured, so the bank figure is only the statements imported
+                so far. <Link to="/trust/settings" className="font-medium text-gold-700 hover:text-gold-800">
+                Capture it in Trust settings</Link>.
+              </p>
+            )}
 
             <div className="mt-5 space-y-2 text-[13px]">
               {open.length === 0 ? (
@@ -283,7 +347,7 @@ export function TrustOverview() {
               {position.difference !== 0 && payouts.length > 0 && (
                 <ul className="pt-1 space-y-1.5">
                   {payouts.map((p) => (
-                    <li key={p.id} className="text-[12.5px] rounded-lg bg-white/70 px-3 py-2">
+                    <li key={p.id} className="text-[12.5px] rounded-lg bg-slate-50 px-3 py-2">
                       <div className="flex items-baseline justify-between gap-3">
                         <span className="font-semibold tabular-nums text-negative-700">{rand(Math.abs(p.amount))}</span>
                         {(() => {
@@ -303,7 +367,7 @@ export function TrustOverview() {
                 </ul>
               )}
             </div>
-          </div>
+          </Card>
         </div>
         {/*
           THE FIRM'S DESIGN HAS ONE MORE LINE HERE -- "BF funds held: Commission + Fees + VAT" --
@@ -490,6 +554,18 @@ function FirmHeldCard({ held, owedToFirm }: { held: FirmHeld; owedToFirm: number
         </p>
       )}
     </Card></div>
+  )
+}
+
+function Subtotal({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
+  return (
+    <div className={clsx('flex items-baseline gap-4 py-4 border-t',
+      strong ? 'border-slate-300' : 'border-slate-200')}>
+      <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div>
+      <div className={clsx('font-semibold tabular-nums text-slate-800', strong ? 'text-2xl' : 'text-lg')}>
+        {rand(value)}
+      </div>
+    </div>
   )
 }
 

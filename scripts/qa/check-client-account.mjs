@@ -358,8 +358,10 @@ const cashCte = (() => {
   return end < 0 ? '' : position.slice(at, end)
 })()
 ok('the cash side of the reconciliation really is its own block', cashCte.length > 60)
-ok('trust cash is read off the bank statement',
-  /from public\.bank_statement_lines l/.test(cashCte))
+/* Since 10 Oct the cash starts from the captured opening balance and adds the statement lines
+   after it, so the lines are JOINED from the settings row rather than selected from directly. */
+ok('trust cash is read off the bank statement, from the opening balance on',
+  /(from|left join) public\.bank_statement_lines l/.test(cashCte) && /trust_opening_balance/.test(cashCte))
 ok('...on the trust account, not any account',
   /l\.bank_account = f\.trust_account_number/.test(cashCte))
 ok('...and the difference is named rather than hidden',

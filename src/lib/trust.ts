@@ -76,6 +76,40 @@ export async function fetchPayoutsStatementOnly(): Promise<boolean> {
   return Boolean((data as { payouts_statement_only?: boolean } | null)?.payouts_statement_only)
 }
 
+/**
+ * WHERE THE BANK FIGURE STARTS (firm_settings.trust_opening_balance / trust_opening_date).
+ *
+ * trust_position's cash is the opening balance plus every trust statement line AFTER its date. With
+ * no opening balance it is the statement lines alone -- which is short by whatever was in the
+ * account before the first statement Raptor has (on staging, the R15 021.04 of Swordfish receipts
+ * that arrived before 8 October). The overview says which of the two it is showing.
+ */
+export interface TrustOpening {
+  accountNumber: string | null
+  amount: number | null
+  asAt: string | null
+}
+
+export async function fetchTrustOpening(): Promise<TrustOpening> {
+  const { data } = await supabase.from('firm_settings')
+    .select('trust_account_number, trust_opening_balance, trust_opening_date').limit(1).maybeSingle()
+  const r = data as { trust_account_number: string | null; trust_opening_balance: number | string | null; trust_opening_date: string | null } | null
+  return {
+    accountNumber: r?.trust_account_number ?? null,
+    amount: r?.trust_opening_balance === null || r?.trust_opening_balance === undefined ? null : Number(r.trust_opening_balance),
+    asAt: r?.trust_opening_date ?? null,
+  }
+}
+
+/**
+ * SET THE OPENING BALANCE. One RPC, so the figure and its audit line (with the reason) are written
+ * together or not at all; Administrator with the trust tick only, refused in the database.
+ */
+export async function setTrustOpening(amount: number, asAt: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('set_trust_opening_balance', { p_amount: amount, p_as_at: asAt, p_reason: reason })
+  if (error) throw new Error(error.message)
+}
+
 export async function fetchTrustPosition(): Promise<TrustPosition | null> {
   const { data, error } = await supabase.rpc('trust_position')
   if (error) throw new Error(error.message)

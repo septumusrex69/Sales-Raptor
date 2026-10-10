@@ -110,8 +110,8 @@ ok('...and not yet taken by the firm (one given back counts again)', /a\.excess_
 ok('...behind the trust tick, as no row rather than nought', /having public\.has_capability\('finance\.view'\)/.test(kept))
 ok('...revoked from public and anon', sql.includes('revoke all on function public.overpayments_kept() from public, anon;'))
 ok('the overview takes them out of the debtors\' line', /amount=\{position\.owedToDebtors - \(kept\?\.amount \?\? 0\)\}/.test(page))
-ok('...and draws them as their own line, under unallocated receipts',
-  page.indexOf('who="Unallocated receipts"') > 0 && page.indexOf('who="Overpayments kept"') > page.indexOf('who="Unallocated receipts"'))
+ok('...and draws them as their own line, among the owners (before the total accounted for)',
+  page.indexOf('who="Overpayments kept"') > 0 && page.indexOf('who="Overpayments kept"') < page.indexOf('label="Total accounted for"'))
 ok('...while the total accounted for is still the debtors\' whole balance',
   /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors/.test(page))
 
@@ -122,12 +122,14 @@ ok('...while the total accounted for is still the debtors\' whole balance',
 ok('the Clients line is what is owed TO clients', /const owedToClientsGross = r2\(position\.owedToClients \+ position\.owedByClients\)/.test(page)
   && /who="Clients" what="Awaiting client payover" amount=\{owedToClientsGross\}/.test(page))
 ok('...and the total adds that, less what clients owe back, once',
-  /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*\+ position\.unidentified - position\.owedByClients\)/.test(page))
+  /const accounted = r2\(owedToClientsGross \+ position\.owedToFirm \+ position\.owedToDebtors\s*- position\.owedByClients\)/.test(page))
 {
+  /* Staging's 8 Oct figures: the owners plus the unplaced receipts (now on the NOT accounted side)
+     are the ledger, to the cent -- the client in debit is not counted twice. */
   const P = { owedToClients: -321.88, owedByClients: 321.88, owedToFirm: 24055.36, owedToDebtors: 980.84, unidentified: 0, netOwed: 24714.32 }
   const gross = P.owedToClients + P.owedByClients
-  const accounted = Math.round((gross + P.owedToFirm + P.owedToDebtors + P.unidentified - P.owedByClients) * 100) / 100
-  check('staging\'s 8 Oct figures now reconcile to the ledger, nothing unexplained', Math.round((P.netOwed - accounted) * 100) / 100, 0)
+  const accounted = Math.round((gross + P.owedToFirm + P.owedToDebtors - P.owedByClients) * 100) / 100
+  check('staging\'s 8 Oct figures reconcile to the ledger, nothing unexplained', Math.round((P.netOwed - accounted - P.unidentified) * 100) / 100, 0)
 }
 
 /* ---- a released overpayment leaves the debtor's own account (8 Oct) ---- */

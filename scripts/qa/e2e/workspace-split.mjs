@@ -208,40 +208,36 @@ try {
      * silently never matched would pass the day the figure disappeared.
      */
     const body = plain(await page.locator('main').innerText())
-    t.ok('the bank balance is on the page', /R 6 910\.10/.test(body))
-    t.ok('what is owed out of it is too', /R 7 873\.60/.test(body))
+    /*
+     * THE BAND READS FROM THE MONEY (the firm, 10 Oct): in the trust account, how much of it is
+     * accounted for, how much is not. 6 910.10 in the bank; 7 388.60 has an owner (the ledger's
+     * 7 873.60 less the 485.00 nobody has placed); so -478.50 is not accounted for -- the 485.00
+     * receipt plus a 963.50 shortfall. Labels are drawn `uppercase`, hence /i.
+     */
+    t.ok('the bank figure leads, named as the trust account', /In the trust account\s*R 6 910\.10/i.test(body))
+    t.ok('...then what is accounted for', /Accounted for\s*R 7 388\.60/i.test(body))
+    t.ok('...then what is not', /Not accounted for\s*-R 478\.50/i.test(body))
+    t.ok('...with the verdict in words', /Bank holds less than the books owe/.test(body))
+    t.ok('with no opening balance captured, the band says the figure is statements only',
+      /no opening balance captured/i.test(body))
+    t.ok('...and the reconciliation says where to capture it', /Capture it in Trust settings/.test(body))
     /*
      * THE DIFFERENCE IS STATED IN WORDS, not only drawn as a red number. A figure with no sentence
      * under it tells somebody they have a problem and nothing about where to start.
      */
     t.ok('and the shortfall is said out loud',
       /bank holds R 963\.50 less than is owed/.test(body))
-    /*
-     * THE THREE FIGURES ARE NAMED AS THE TWO RECORDS BEING RECONCILED. The firm's own sketch calls
-     * them BANK BALANCE and TRUST LEDGER BALANCE, and that is better here rather than merely more
-     * formal: "owed out of it" describes a consequence, where "trust ledger balance" names the
-     * thing being compared, and a reconciliation only reads when both sides are named.
-     */
-    /* CASE-INSENSITIVE for the same reason as the heading above: the dark panel's labels are drawn
-       `uppercase`, so innerText returns TRUST LEDGER BALANCE. */
-    t.ok('the two records are named as records',
-      /Bank balance/i.test(body) && /Trust ledger balance/i.test(body))
-    /* AND THE VERDICT IS ON THE PANEL, so nobody has to know that R 0.00 is the good answer. */
-    t.ok('...with the match stated rather than implied', /NOT MATCHED/i.test(body))
 
-    /* ---- the reconciliation the firm drew, and it does not say "match" over a hole ---- */
-    /*
-     * THE FIRM'S REVISED DESIGN puts an "Ownership reconciliation" beside the owners: trust ledger
-     * balance, less amounts accounted for, unexplained difference. That line is nil by
-     * construction (trust_position builds the balance from the same parts), so what the panel has
-     * to get right is everything UNDER it -- and this fixture has a real R 963,50 shortfall. The
-     * assertion that matters is that the panel does not print "totals match" over it.
-     */
-    t.ok('the reconciliation is drawn as the firm drew it',
-      /Ownership reconciliation/.test(body) && /Less: amounts accounted for/.test(body)
-        && /Unexplained difference/.test(body))
+    /* ---- the reconciliation, read down from the bank ---- */
+    t.ok('the reconciliation reads down from the bank',
+      /Ownership reconciliation/.test(body) && /Less: accounted for/.test(body))
     t.ok('...and it does not claim a match over a shortfall',
       !/Bank, ledger and ownership totals match/.test(body))
+    t.ok('not accounted for is split into what it is made of',
+      /Unallocated receipts[\s\S]{0,80}R 485\.00/.test(body)
+        && /Bank \/ ledger difference[\s\S]{0,120}-R 963\.50/.test(body)
+        && /TOTAL NOT ACCOUNTED FOR\s*-R 478\.50/i.test(body)
+        && /IN THE TRUST ACCOUNT\s*R 6 910\.10/i.test(body))
     t.ok('...it says what is outstanding: the unplaced receipt', /R 485\.00 is in the account with nobody/.test(body))
     /*
      * A TRUST DEBTOR IS NOT A SHORTFALL, and the words have to keep them apart: the cash is all
@@ -263,7 +259,7 @@ try {
        kept". A split of the debtors' money, so the total accounted for does not move. */
     t.ok('overpayments kept have their own line', /Overpayments kept[\s\S]{0,120}R[\s\u00a0]100\.00/.test(body))
     t.ok('...taken out of the debtors\' line', /Overpayments \/ refunds outstanding[\s\S]{0,40}R[\s\u00a0]310\.63/.test(body))
-    t.ok('...and the total is unchanged', /TOTAL ACCOUNTED FOR[\s\S]{0,40}R[\s\u00a0]7[\s\u00a0]873\.60/i.test(body))
+    t.ok('...and the total is unchanged', /TOTAL ACCOUNTED FOR[\s\S]{0,40}R[\s\u00a0]7[\s\u00a0]388\.60/i.test(body))
 
     /* ---- the firm's share, by what it is: "BF funds held: Commission + Fees + VAT" ---- */
     const held = page.getByTestId('firm-held')
