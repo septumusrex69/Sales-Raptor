@@ -154,6 +154,14 @@ try {
   t.check('...and approves through the early function, with the reason',
     JSON.stringify(sentEarly ? { p_run: sentEarly.p_run, p_reason: sentEarly.p_reason } : null),
     JSON.stringify({ p_run: 'run-open', p_reason: 'Large PTC: the client owes us our share and needs the advice' }))
+  /* ---- AN EARLY APPROVAL SAYS WHO (the firm, 10 Oct: "it should say who made the note") ---- */
+  runShown = { ...RUN, early_reason: 'Large PTC: the client needs the advice', early_at: '2026-10-09T08:00:00Z',
+    early: { name: 'Stephan' } }
+  sends = []
+  await page.goto(`http://127.0.0.1:${PORT}/trust/runs/run-1`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('early-reason').waitFor({ timeout: 15000 })
+  t.ok('an early approval names who approved it, when and why',
+    /Approved before the cycle closed by Stephan on .*: Large PTC: the client needs the advice/.test(await page.getByTestId('early-reason').innerText()))
   runShown = RUN
   sends = SENDS
 

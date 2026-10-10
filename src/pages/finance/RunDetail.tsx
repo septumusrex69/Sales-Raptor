@@ -56,6 +56,8 @@ interface RunRow {
   company_id: string
   early_reason?: string | null
   early_at?: string | null
+  /* Who approved it early (the firm, 10 Oct: "it should say who made the note"). */
+  early?: { name: string | null } | null
 }
 
 const STATUS_TONE: Record<RunStatus, string> = {
@@ -95,7 +97,7 @@ export function RunDetail() {
     try {
       const { data, error: e } = await supabase
         .from('payover_runs')
-        .select('*, companies(name, code, commission_rate, vat_number, email)')
+        .select('*, companies(name, code, commission_rate, vat_number, email), early:profiles!payover_runs_early_by_fkey(name)')
         .eq('id', id)
         .maybeSingle()
       if (e) throw new Error(e.message)
@@ -301,7 +303,7 @@ export function RunDetail() {
         )}
         {run.early_reason && (
           <p className="mt-2 text-xs text-amber-800" data-testid="early-reason">
-            Approved before the cycle closed{run.early_at ? ` on ${fmtDay(run.early_at.slice(0, 10))}` : ''}: {run.early_reason}
+            Approved before the cycle closed{run.early?.name ? ` by ${run.early.name}` : ''}{run.early_at ? ` on ${fmtDay(run.early_at.slice(0, 10))}` : ''}: {run.early_reason}
           </p>
         )}
         {run.eft_reference && (
