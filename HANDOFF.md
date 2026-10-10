@@ -4,26 +4,35 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **10 October 2026, late afternoon**, end of the fourth session on
-`claude/new-session-ecohkn`. Everything is committed and pushed, and **the same commit is pushed to
+Last updated: **10 October 2026, evening**, end of the fifth session on `claude/staging-clock`.
+Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 ### Start here tomorrow
 
 1. **Work on staging.** Production is NOT live and the user has said so: "We are not going live."
-2. **The firm is about to run Raptor against Swordfish** (§3a, the 11 Oct - 10 Nov cycle). Anything
+2. **Staging now runs on a clock (prompt 10, §2).** `raptor_now()` / `raptor_today()` are every
+   business date. It is on the REAL date and nothing has been cleared -- the firm moves it from the
+   banner (Administrator: +1 day / to the 11th / to the 10th / pick a date / Clear staging). Never
+   write `now()` or `current_date` for a business date again, and never `new Date()` in `src/` for
+   a date decision: `check-staging-clock` fails on both.
+3. **The firm is about to run Raptor against Swordfish** (§3a, the 11 Oct - 10 Nov cycle). Anything
    that makes Raptor's runs differ from Swordfish's during that run is unwelcome -- which is why the
-   "PTC on the next payover" rule was built and then **switched OFF** the same day (§2, top row).
-   Do not switch it on until the user says the import is right.
-3. **Every preview branch now gets the staging database settings** (§1). A new session's branch
-   used to build a preview that loaded blank.
-4. **After pushing to this session's branch, also push to `claude/sales-raptor-review-p1pzx2`**
-   (fast-forward only, `git push origin HEAD:claude/sales-raptor-review-p1pzx2`), or the firm keeps
-   looking at the old build. The user approved this on 10 Oct.
-5. **Run the full suite first** (`npm run qa`). The fast suite is green (17 348 checks, 263 files);
-   the last full run was green apart from one test since fixed (§1).
-6. **The production copy is HALF DONE and PAUSED** (§5, first item). Do not resume it unless asked.
+   "PTC on the next payover" rule stays **switched OFF** (§2, fourth session, top row; the user
+   confirmed again on 10 Oct: "The third one we'll keep"). Do not switch it on until they say so.
+4. **One ledger decision is waiting** (§4, item 12): the firm's PTC share recovered by set-off
+   stays in trust under no ledger owner, so `draw_from_trust` refuses it. Found by the simulation.
+   Ask before changing the ledger.
+5. **After pushing to this session's branch, also push to `claude/sales-raptor-review-p1pzx2`**
+   (fast-forward only, `git push origin HEAD:claude/sales-raptor-review-p1pzx2`).
+6. **Run the full suite first** (`npm run qa`). At the end of the fifth session: 304 of 305 green.
+   The one red, `e2e/performance` ("Collected today" shows the period's figure), fails identically
+   on `1848079`, the commit this session started from -- it is DATE-dependent and reproduces on the
+   10th (the last day of the sales month), not caused by the clock. Look at `useCollectionsMonth`'s
+   day range on a period's last day; it may be a real "Collected today" bug on every 10th.
+7. **The production copy is HALF DONE and PAUSED** (§5, first item). Do not resume it unless asked.
+   It now also needs everything in §5's "fifth session" list.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
 the problem to the next session rather than solved it.
@@ -34,7 +43,7 @@ the problem to the next session rather than solved it.
 
 | | |
 |---|---|
-| Branch | `claude/new-session-ecohkn` from the fourth session (before it, `claude/sales-raptor-review-p1pzx2`; one branch per session — two sessions on one branch means one force-pushes the other) |
+| Branch | `claude/staging-clock` from the fifth session (before it `claude/new-session-ecohkn`, `claude/sales-raptor-review-p1pzx2`; one branch per session — two sessions on one branch means one force-pushes the other) |
 | Staging | `kvkajxpremantdkhmjvb` — work here, data is disposable and the firm has said so |
 | Production | `qcvesjzoiznrvunjrqpv` — **do not write to it casually**. It is NOT "a little behind": see §5, first item |
 | Live app | Vercel project `sales-raptor`, production deploys **`Main` at `acae2c8` (12 Sep)** against the production database. The firm works on this branch's preview, against staging |
@@ -44,6 +53,10 @@ the problem to the next session rather than solved it.
 Previews: the four staging settings (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, `EMAIL_CREDENTIALS_KEY`) were scoped in Vercel to the p1pzx2 branch
 alone; since 10 Oct they apply to every Preview branch. Production's are separate and untouched.
+
+Fifth session, full `npm run qa`: **304 of 305 green** -- the one is `e2e/performance`, pre-existing
+and date-dependent (see "Start here", item 6). Fast suite all green; `npm run build` and `npm run lint`
+clean.
 
 Last full `npm run qa` (fourth session, before the Trust overview split): 297 of 298 green, the one
 (`e2e/performance`, grade parsing) fixed and re-run green on its own. Since then the fast suite is
@@ -56,6 +69,16 @@ own and is green: `workspace-split` (124), `payover-sends` (42), `client-stateme
 ## 2. What shipped this session
 
 Newest first. Each commit message carries the full reasoning; this is the index.
+
+**Fifth session (10 October, evening), on `claude/staging-clock`** (started from `1848079`):
+
+| Commit | What it is |
+|---|---|
+| `bae366e` | **Remittance advice: OUTSTANDING stays, and a VAT sentence on every line** (the firm, 10 Oct: "keep the outstanding column and the VAT also needs to be there"). Under each collection on the PDF: "Commission 20% R 270.00 + VAT 15% R 40.50 = R 310.50 deducted" (a reversal: "... given back with this reversal", red); its own column in the .xlsx. `vatLine` in remittanceAdvice.ts reads VAT's rate off the row's own figures. **The mock-up's exact wording is not in the repo** -- this is a default offered to the firm; if they paste the sentence, change `vatLine` only. `check-remittance-advice` 75 -> 82. |
+| `b95cb62` | **A client pays what it owes into the BUSINESS account, matched to its payover** (§3 item 1, the user: "you can proceed"). `record_client_business_receipt(run, amount, day, reference, note)` -- trust AND business ticks; an approved run below nil; the whole shortfall to the cent (part payments refused for now, §4 item 13); once; not in the future (the clock's). Writes `client_business_receipts` (append-only, trigger refuses update/delete), `payover_runs.settled_direct_receipt_id`, and ONE client trust entry "Paid to the business account against PO-..." that clears the minus a PTC left with no money behind it. Settled = not carried (`build_payover_run`, `close_payover_cycle`), not owed by age (`ptc_ageing`); carried into a run still being checked -> that run is rebuilt without it; into an approved one -> refused. `trust_cash_by_cycle` treats the entry like the PTC it pays off; `client_ledger` names it `paid_direct`. Run page "Record their payment"; runs list "Paid to us"; client ledger line. Simulation `run_direct`: trust R0.00 at the end of cycle 3. `check-client-business-receipt` (24). |
+| `9b8552d` | **Payovers matched from the statement by the BF PO reference first** (§3 item 2). `match_payovers_by_reference()`: every unallocated debit whose reference or description names a run (`payover_number_in`, any case, `-2` suffix) is settled through `allocate_bank_line(...,'payover')` -- only at the run's exact amount, only an approved/sent/paid run not yet on the statement; anything else is reported, not matched. The statement import runs it straight after the lines land and says so; Exceptions has "Match N payovers by reference". `check-payover-reference-match` (16). |
+| `c553117` | **The three-cycle simulation, and two faults it found.** `scripts/qa/live/staging-clock-sim.sql` (functions in a `qa_sim` schema on staging, revoked from every role): clears staging, walks three cycles on the clock, asserts prompt 10's Done-when list, and RAISES so it all rolls back. Green. FIXED: (1) a statement receipt matched by its reference could not go back to Needs an account -- `import_bank_lines` never wrote `account_payments.bank_line_id`, so `reverse_payment_to_unplaced` called it "recorded by hand"; the import writes it now and `reverse_payment` / `reverse_payment_to_unplaced` find the line either way (staging's existing rows are covered by the fallback; nothing was swept). (2) Money on a CLOSED account was flagged nowhere: the approval queue badges it "Account closed" (how and when) and `splitForBatch` holds it out of Approve all. NOT changed: §4 item 12. `e2e/staging-clock` (18). |
+| `a7d3b11` | **The staging clock (prompt 10).** `raptor_now()` / `raptor_today()`: on production now() and Johannesburg's day, ALWAYS -- the clock row (`staging_clock`, one row) is read only where `deployment.kind = 'staging'`, and a trigger refuses the row anywhere else; proved on staging by flipping the deployment row inside a rolled-back transaction (`raptor_now() = now()`, the write refused). On staging: the clock's day at the real time of day. **62 functions** route business dates through it (generated from each function's live text, md5-verified against schema.sql; the rule: every non-comment line not stamping `updated_at`); left real ON PURPOSE: updated_at, `workflow_publish`, the `signing_*` expiries, the clock's own functions -- `check-staging-clock` holds that list. `payover_cycle_tiles` and `payover_buildable` now cut on `allocated_on` (they still used `created_at`, which the clock cannot move). Business-date column defaults follow the clock (14 columns; calls, emails, activities, imported_at, the settings log and advice sends stay real). `begin_staging_clock_jump` (forward only, logged in `finance_setting_changes`), `step_staging_clock` (exactly one day; on the 11th `close_payover_cycle` for the cycle just ended + `refresh_payover_runs`), `clear_staging(start, 'CLEAR STAGING')` (empties book and money, keeps people/templates/workflows/settings/mailboxes, clears the trust opening balance, restarts the clock). Server: `firmClock()` (api/_lib/workflow/clock.ts) is what run/start/release/advance ask; `POST /api/workflow/clock {to}` walks a jump a day at a time -- the clock, then that morning's sweep with `skipSends` (a due step is recorded `skipped`, a new step state: nothing sent, no fee; its SMS pair is not held); resumes if its four minutes run out. Browser: `lib/clock.ts` (`clockNow` / `clockToday` / `clockNowMs`), read ONCE per page load by AppLayout before any page draws; ~70 files moved off `new Date()` (the real-world ones stay: timers, ids, mail read/sync stamps, reminders, updated_at -- `check-staging-clock` holds the list and their count). Banner on every staging screen; Administrator controls; a jump reloads the page. A statement with a line dated after today is refused (database and browser). `check-business-books`' last-day fixture was red on any SAST machine -- fixed. `check-staging-clock` (75). |
 
 **Fourth session (8 October), on `claude/new-session-ecohkn`** (started from `6c19fed`; the firm's preview of THIS branch is a new Vercel URL):
 
@@ -166,22 +189,14 @@ Nothing.
 
 ## 3. Open requests the firm has made and nobody has started
 
-1. **A client paying what they owe into the BUSINESS account, matched to their payover.** A run
-   below nil (Jacaranda, Lowveld on staging) is the client owing the firm; the advice tells them so
-   and the runs list says "Client owes us", but there is no way yet to RECORD their payment and
-   take it off the age analysis. The firm: "that's paid to our business account, not to the trust
-   account. So we would have to match it." Needs: a business-side receipt against a run (or the
-   client), the run's shortfall marked settled, `ptc_ageing` leaving it out, the client ledger
-   showing it. Probably a `client_payments_received` table on the business side; ask before
-   designing the matching.
-2. **Matching payovers from the bank statement by reference.** The firm: "ultimately, from the bank
-   statement ... allocate a specific payment made to a client ... linking it from the reference
-   number to the payover." `reconcile_bank_debit` and the overview's "Match to PO-..." already match
-   an unmatched trust debit to a run by amount and date; the firm means to SHOW how they want it.
-   Wait for that, then match on the `BF PO-...` reference first.
-3. **Switch the PTC rule on after the Swordfish parallel run** -- only when the user says so (§2).
-4. **Optional decisions on the remittance advice** (§2, `143978a`): keep the OUTSTANDING column?
-   add the per-line VAT sentence? Unanswered.
+The four that stood here at the start of the fifth session were answered by the user on 10 Oct:
+1 (client pays into the business account) and 2 (match payovers by reference) are BUILT (§2); 4
+(remittance advice) is BUILT with a default VAT wording (§2, `bae366e`); 3 stays as it is:
+
+1. **Switch the PTC rule on after the Swordfish parallel run** -- only when the user says so ("The
+   third one we'll keep").
+2. **The VAT sentence's exact wording** -- confirm with the firm or paste the mock-up's sentence
+   (`vatLine`).
 
 **Explained to the firm, no change asked for** (so a new session does not "fix" them):
 - **The interest lines on an imported account** were confusing because of how Swordfish
@@ -288,6 +303,24 @@ Do not guess these. Each one changes money.
     clipped by it and nothing claims one is "within limit". If the firm wants that badge, the engine
     has to return the figure — a change to `preview_allocation`, not to the screen.
 
+12. **THE FIRM'S PTC SHARE RECOVERED BY SET-OFF HAS NO LEDGER OWNER, SO IT CANNOT BE DRAWN**
+    (found by the staging simulation, 10 Oct). A PTC writes "client owes the trust" and no firm
+    entry; when a later payover sets that debt off against the client's trust money (a negative run
+    carried in, or a PTC set off in the same run), the client's ledger is right and the money stays
+    in trust -- the Trust overview counts it as the firm's (`firm_set_off`, "accounted for"), but
+    `trust_position.owed_to_firm` does not, so `draw_from_trust` refuses it. In the simulation:
+    R2 176.18 left in trust after cycle 3. The fix that fits the ledger is ONE firm entry at the
+    moment a run that recovers PTC debt is approved/paid, for exactly what it recovered (PTC dues +
+    PTC debt carried in - shortfall still owed) -- but it changes what the firm may draw, so ASK.
+    (If the client pays the shortfall into the business account instead, §2 `b95cb62`, nothing is
+    stranded.)
+13. **Part payments of a shortfall into the business account** are refused for now: how a run's
+    shortfall should read on the next advice when half was paid directly is the firm's call.
+14. **No allocation kind for a debtor's payment that BOUNCES on the statement.** The simulation used
+    "wrong reference" instead (reverse to Needs an account, place elsewhere), which works; a returned
+    debit order has a debit line on the statement and nothing to allocate it to except "other",
+    which would count it twice against the reversal's own entries. Ask how the bank shows one.
+
 **Decided on 7 October (third session), so nobody asks again:** a settlement's approval is recorded
 by the client liaison role (+ Administrator); a paid settlement is closed by a PERSON, never by
 itself; the Income screen is behind a tick no role has; a drawing needs both the trust and the
@@ -308,6 +341,23 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **FIFTH SESSION, STAGING ONLY** (all at the end of `schema.sql`, in order): the staging clock
+  (`staging_clock`, its trigger, `raptor_today`, `raptor_now`, `raptor_clock`, `staging_clock_guard`,
+  `begin_staging_clock_jump`, `step_staging_clock`, `clear_staging`), the 62 clocked functions and 14
+  column defaults, the `skipped` step state, the bank_line_id fix (`reverse_payment_to_unplaced`,
+  `reverse_payment`, `import_bank_lines`), `payover_number_in` + `match_payovers_by_reference`,
+  `client_business_receipts` + `record_client_business_receipt` + `settled_direct_receipt_id` and the
+  five readers (`build_payover_run`, `close_payover_cycle`, `ptc_ageing`, `client_ledger`,
+  `trust_cash_by_cycle`). **On production the clock is inert by construction** -- but production
+  needs a `deployment` row (§5 below says it has none yet); none = not staging = now(), which is the
+  safe way round. Also staging only: the `qa_sim` schema (the simulation's fixture functions).
+- **The staging clock and the browser.** Dates the browser DECIDES follow the clock; dates the browser
+  merely DISPLAYS from rows are whatever the row says. Mail, calls, activities and reminders stay on the
+  real clock on purpose (they happened in the real world). `collector_performance` and the dashboards
+  count by `created_at`, a real stamp, so a simulated July shows up in the real month on the
+  performance screens -- not in the money, which is all on `allocated_on` / clocked dates.
+- **The morning cron on staging** asks the database for today, so with the clock standing at 11 July
+  it sends nothing dated later. A JUMP never sends; staging's live SMS is safe from it.
 - **PRODUCTION COPY: PAUSED HALF-WAY ON 8 OCT, AT THE USER'S WORD ("we are not going live").**
   Production (`qcvesjzoiznrvunjrqpv`) still serves the old `Main` (`acae2c8`) and is safe for it.
   Method: rebuild from staging's CURRENT catalog (not by replaying 302 migrations), idempotently,
@@ -553,6 +603,24 @@ once a sed silently failed to apply and the green result was meaningless. Verify
 actually landed before trusting the red.
 
 ---
+
+**A function changed in the same `execute_sql` call as a probe that RAISES is rolled back with it.**
+Apply the change in one call and probe in the next, or the "fix" you just tested is gone. (Fifth
+session: `trust_cash_by_cycle` "worked" in the probe and was still the old one afterwards.)
+
+**Line-number edit lists go stale the moment you insert a line.** A script that converted every
+`new Date()` except a KEEP list by file:line, re-run after imports were added, converted exactly the
+lines it was told to keep. Key exclusions on the line's TEXT, never its number.
+
+**`git checkout <file>` in a break test throws away your own uncommitted work in that file.** Copy the
+file aside and copy it back, as every other break test here does.
+
+**A bare `import ... from './x'` breaks the QA checks** (they resolve `.ts`/`.js` only); vite does not
+care, so the build is green and 20 checks fail with ERR_MODULE_NOT_FOUND. Lib files imported by checks
+use `./x.ts`; files the API also imports use `./x.js`.
+
+**The MCP tool may ask the user before running anything that LOOKS destructive** -- an `update
+public.deployment` inside a probe was cancelled once. Keep probes to what they need.
 
 ## 7. How to pick up
 
