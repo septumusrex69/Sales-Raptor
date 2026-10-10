@@ -47,6 +47,7 @@ import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
 import { EscalateModal } from './EscalateModal'
 import { FreezeModal } from './FreezeModal'
 import { EndAccountModal } from '../../components/accounts/EndAccountModal'
+import { useBackLink, useRecordName } from '../../lib/backLink'
 import { HoldAccountModal, ReleaseAccountModal } from '../../components/accounts/HoldAccountModal'
 import { bookLabel, holdLabel } from '../../lib/accountBooks'
 import { compareWithSwordfish } from '../../lib/importGap'
@@ -866,6 +867,10 @@ export function AccountDetail() {
   const heroName = account
     ? ([account.debtorFirstName, account.debtorSurname].filter(Boolean).join(' ') || 'Unnamed debtor')
     : null
+  /* BACK GOES WHERE YOU CAME FROM (the firm, 10 Oct): "Back to Highveld Tyre Services CC" when the
+     account was opened from its client, "All accounts" when opened from the list or directly. */
+  useRecordName(heroName)
+  const back = useBackLink({ to: '/accounts', label: 'All accounts' })
   useTitleSlot(
     heroName ? (
       <span className="min-w-0 flex items-baseline gap-2">
@@ -1513,8 +1518,8 @@ export function AccountDetail() {
 
   return (
     <div className="space-y-4">
-      <Link to="/accounts" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={14} /> All accounts
+      <Link to={back.to} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700" data-testid="back-link">
+        <ArrowLeft size={14} /> {back.label}
       </Link>
 
       {/*

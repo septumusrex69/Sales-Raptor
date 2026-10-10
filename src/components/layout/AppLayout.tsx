@@ -1,4 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
+import { notePage } from '../../lib/backLink'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { TitleSlotProvider } from './TitleSlot'
@@ -72,6 +74,8 @@ export function AppLayout() {
   // naming a different page, which is how /accounts spent its first day calling itself Dashboard.
   // An empty heading is visibly unfinished; a wrong one is not.
   const title = TITLES.find((t) => t.test.test(location.pathname))?.title ?? ''
+  /* Remembered for the next page's back link (lib/backLink): this page's address and name. */
+  useEffect(() => { notePage(location.pathname, location.search, title) }, [location.pathname, location.search, title])
 
   return (
     <TitleSlotProvider>

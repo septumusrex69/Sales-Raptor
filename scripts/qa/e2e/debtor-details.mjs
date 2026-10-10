@@ -211,6 +211,22 @@ try {
   const trace = await whereIs('Trace information')
   t.ok('...and in three columns it sits under the timeline',
     trace.y > timeline.y && Math.abs(trace.x - timeline.x) < 40)
+
+  /* ---------- back goes where you came from (the firm, 10 Oct) ---------- */
+  /* "If you take that route from the [debtor] to the client, you should be able to go back to the
+     [debtor] ... not necessarily back to the clients." Opened directly, the account offers its list. */
+  t.check('an account opened directly goes back to the list', (await page.getByTestId('back-link').innerText()).trim(), 'All accounts')
+  await page.getByRole('link', { name: 'Northbank Properties' }).first().click()
+  await page.waitForURL((u) => u.pathname.startsWith('/companies/'), { timeout: 15000 })
+  /* The account's own link stays in the page until the client page replaces it: wait for that. */
+  const clientBack = page.getByTestId('back-link').filter({ hasNotText: 'All accounts' })
+  await clientBack.waitFor({ timeout: 15000 })
+  const clientBackText = (await clientBack.innerText()).trim()
+  t.ok(`the client opened from the account goes back to the debtor ("${clientBackText}")`,
+    /^Back to /.test(clientBackText) && clientBackText !== 'Back to Clients')
+  await clientBack.click()
+  await page.waitForURL((u) => u.pathname === `/accounts/${ACCOUNT.id}`, { timeout: 15000 })
+  t.ok('...and pressing it lands on that account', true)
 } finally {
   if (browser) await browser.close()
   stopServer(server)

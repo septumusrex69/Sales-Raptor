@@ -14,6 +14,7 @@ import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from 
 import { remittancePdf } from '../../lib/remittancePdf'
 import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
+import { useBackLink, useRecordName } from '../../lib/backLink'
 import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
 
 /**
@@ -181,13 +182,17 @@ export function RunDetail() {
     finally { setBusy(false) }
   }
 
+  /* BACK GOES WHERE YOU CAME FROM (the firm, 10 Oct): the client's Payovers tab, Payments to make,
+     or the queue when opened from it or directly. */
+  useRecordName(run?.invoice_number)
+  const back = useBackLink({ to: '/trust/payover', label: 'Payover runs' })
   if (loading) return <div className="py-16 text-center text-slate-400"><Loader2 className="mx-auto w-5 h-5 animate-spin" /></div>
   if (!run) return <div className="py-16 text-center text-sm text-slate-400">{error ?? 'Not found.'}</div>
 
   return (
     <div className="space-y-4">
-      <Link to="/trust/payover" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="w-4 h-4" /> Payover queue
+      <Link to={back.to} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" data-testid="back-link">
+        <ArrowLeft className="w-4 h-4" /> {back.label}
       </Link>
 
       {error && (

@@ -5,6 +5,7 @@ import {
   CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
+import { useBackLink, useRecordName } from '../../lib/backLink'
 import { useAuth } from '../../store/AuthContext'
 import { DashboardHero } from '../../components/dashboard/DashboardHero'
 import { Card, CardHeader } from '../../components/ui/Card'
@@ -99,6 +100,10 @@ export function CompanyDetail() {
     addTask,
   } = useAppStore()
   const company = companies.find((c) => c.id === id)
+  /* BACK GOES WHERE YOU CAME FROM (the firm, 10 Oct: from Kagiso Mokoena's account, "go back to
+     Kagiso", not to all clients). The clients list when opened from it or directly. */
+  useRecordName(company?.name)
+  const back = useBackLink({ to: '/companies', label: 'Back to Clients' })
   const isAdmin = currentUser?.role === 'Administrator'
   /*
    * THE SAME RULE AS THE ADD FORM, which it was not.
@@ -568,8 +573,8 @@ export function CompanyDetail() {
 
   return (
     <div className="space-y-5">
-      <Link to="/companies" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
-        <ArrowLeft size={15} /> Back to Clients
+      <Link to={back.to} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700" data-testid="back-link">
+        <ArrowLeft size={15} /> {back.label}
       </Link>
 
       <DashboardHero
