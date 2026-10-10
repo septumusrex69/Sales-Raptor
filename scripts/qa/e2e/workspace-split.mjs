@@ -162,6 +162,16 @@ function handlersFor(profile) {
     [(u) => /\/rpc\/trust_entries/.test(u), () => ({ body: ENTRIES })],
     [(u) => /\/rpc\/trust_by_cycle/.test(u), () => ({ body: CYCLES })],
     [(u) => /\/rest\/v1\/client_charges/.test(u), () => ({ body: CHARGES })],
+    /* WHO OWES US (10 Oct): client_balances, PTC fees and charges together. Rinda Roo owes R1 955
+       in charges and holds nothing; Mielie Meal owes R320 in PTC fees and has no charge. */
+    [(u) => /\/rpc\/client_balances/.test(u), () => ({ body: [
+      { company_id: 'c1', client: 'Rinda Roo Company', code: 'RRC', in_trust: 0, charges_due: 1955,
+        net: -1955, last_paid_on: null, last_paid: null },
+      { company_id: 'c2', client: 'Mielie Meal Co', code: 'MMC', in_trust: -320, charges_due: 0,
+        net: -320, last_paid_on: null, last_paid: null },
+      { company_id: 'c3', client: 'Karoo Fleet Hire', code: 'KFH', in_trust: 2557.9, charges_due: 0,
+        net: 2557.9, last_paid_on: null, last_paid: null },
+    ] })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: [MONTH] })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
@@ -522,14 +532,29 @@ try {
       /whether or not it has left the trust account/.test(body))
 
     /*
-     * THE TWO WAYS A CHARGE IS SETTLED, SHOWN APART. Added together they would read as one overdue
-     * figure and somebody would chase a client for money already coming off their next run. This
-     * is also what holds business.ts to the database's spelling: with the literal wrong, BOTH
-     * charges land in "invoiced" and the set-off line disappears.
+     * WHO OWES US, FROM THE CLIENT BALANCES (10 Oct): a client owing charges AND a client owing PTC
+     * fees, which the old charges-only list could not see at all; a client we owe is not listed.
      */
-    t.ok('a charge coming off the payover says so', /R 575\.00 off their payover/.test(body))
-    t.ok('...and an invoiced one says that instead', /R 1 380\.00 invoiced/.test(body))
-    t.ok('...with the client owing the two together', /R 1 955\.00/.test(body))
+    const owe = plain(await page.getByTestId('clients-owe-us').innerText())
+    t.ok('a client owing charges is listed', /Rinda Roo Company[\s\S]*R 1 955\.00/.test(owe))
+    t.ok('...and so is a client owing PTC fees', /Mielie Meal Co[\s\S]*-R 320\.00[\s\S]*R 320\.00/.test(owe))
+    t.check('...but not a client we owe', /Karoo Fleet Hire/.test(owe), false)
+    t.ok('...with the two owed together in the band', /R 2 275\.00/.test(body))
+    await context.close()
+  }
+
+  /* ------------------------------------------- every client's balance (the firm, 10 Oct) ------- */
+  {
+    const { context, page } = await open(browser, ADMIN, '/trust/clients')
+    const rows = page.getByTestId('client-balance')
+    await rows.first().waitFor({ timeout: 15000 })
+    t.check('every client with a balance is listed', await rows.count(), 3)
+    const text = plain(await page.locator('main').innerText())
+    t.ok('a client we owe says so in words', /Karoo Fleet Hire[\s\S]*We owe them R 2 557\.90/.test(text))
+    t.ok('...and a client who owes us', /Mielie Meal Co[\s\S]*They owe us R 320\.00/.test(text))
+    t.ok('the totals add each side', /We owe clients[\s\S]*R 2 557\.90/i.test(text) && /Clients owe us[\s\S]*R 2 275\.00/i.test(text))
+    t.ok('a client opens their ledger', (await page.locator('a[href="/companies/c2?tab=Account"]').count()) > 0)
+    await t.shot(page, 'trust-client-balances')
     await context.close()
   }
 

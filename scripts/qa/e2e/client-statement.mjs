@@ -45,24 +45,26 @@ const REP = { ...PROFILE, name: 'Dineo', role: 'Sales Representative' }
 
 const CO = { id: 'c1', name: 'Rinda Roo Company', owner_id: ADMIN.id }
 
-/* The firm's eight lines. The account opens at nil, goes both ways, and closes owing the firm. */
+/* THE CLIENT LEDGER (10 Oct): held for them, a PTC fee they owe, a charge waiting for the payover,
+   the charge set off, the payover paid, an invoice raised and paid. Opens at nil, goes both ways,
+   and closes with the client owing us. */
 const STATEMENT = [
-  { entry_on: '2026-08-12', kind: 'payover_due', description: 'Payover due to client',
-    reference: 'PO-RRC-2608', amount: 2557.90, balance: 2557.90, run_id: 'r1', charge_id: null },
-  { entry_on: '2026-08-15', kind: 'payover_paid', description: 'Payover paid to client',
-    reference: 'PO-RRC-2608', amount: -2557.90, balance: 0, run_id: 'r1', charge_id: null },
+  { entry_on: '2026-08-12', kind: 'held', description: 'Capital recovered, less commission, held for the client',
+    reference: null, case_number: 'RAP-1001', amount: 2557.90, balance: 2557.90, run_id: null, charge_id: null },
+  { entry_on: '2026-08-15', kind: 'payover_paid', description: 'Payover PO-RRC-2608 paid to the client',
+    reference: 'PO-RRC-2608', case_number: null, amount: -2557.90, balance: 0, run_id: 'r1', charge_id: null },
   { entry_on: '2026-09-02', kind: 'invoice_raised', description: 'Withdrawal of RRC00003',
-    reference: 'INV-0012', amount: -575.00, balance: -575.00, run_id: null, charge_id: 'ch1' },
-  { entry_on: '2026-09-12', kind: 'payover_due', description: 'Payover due to client',
-    reference: 'PO-RRC-2609', amount: 1800.00, balance: 1225.00, run_id: 'r2', charge_id: null },
-  { entry_on: '2026-09-12', kind: 'charge_set_off', description: 'Withdrawal of RRC00003',
-    reference: 'PO-RRC-2609', amount: -575.00, balance: 650.00, run_id: 'r2', charge_id: 'ch1' },
-  { entry_on: '2026-09-15', kind: 'payover_paid', description: 'Payover paid to client',
-    reference: 'PO-RRC-2609', amount: -1225.00, balance: -575.00, run_id: 'r2', charge_id: null },
+    reference: 'INV-0012', case_number: 'RAP-1003', amount: -575.00, balance: -575.00, run_id: null, charge_id: 'ch1' },
+  { entry_on: '2026-09-12', kind: 'held', description: 'Capital recovered, less commission, held for the client',
+    reference: null, case_number: 'RAP-1001', amount: 1800.00, balance: 1225.00, run_id: null, charge_id: null },
+  { entry_on: '2026-09-12', kind: 'owed', description: 'Paid straight to the client, so they owe the trust the fees and commission',
+    reference: null, case_number: 'RAP-1004', amount: -575.00, balance: 650.00, run_id: null, charge_id: null },
+  { entry_on: '2026-09-15', kind: 'payover_paid', description: 'Payover PO-RRC-2609 paid to the client',
+    reference: 'PO-RRC-2609', case_number: null, amount: -1225.00, balance: -575.00, run_id: 'r2', charge_id: null },
   { entry_on: '2026-10-01', kind: 'invoice_raised', description: 'Executive listing',
-    reference: 'INV-0019', amount: -1380.00, balance: -1955.00, run_id: null, charge_id: 'ch2' },
-  { entry_on: '2026-10-04', kind: 'invoice_paid', description: 'Invoice paid by client',
-    reference: 'EFT 8812', amount: 1380.00, balance: -575.00, run_id: null, charge_id: 'ch2' },
+    reference: 'INV-0019', case_number: null, amount: -1380.00, balance: -1955.00, run_id: null, charge_id: 'ch2' },
+  { entry_on: '2026-10-04', kind: 'invoice_paid', description: 'Invoice paid by the client',
+    reference: 'EFT 8812', case_number: null, amount: 1380.00, balance: -575.00, run_id: null, charge_id: 'ch2' },
 ]
 
 function handlersFor(profile, statement = STATEMENT) {
@@ -71,7 +73,7 @@ function handlersFor(profile, statement = STATEMENT) {
     [(u) => /\/rest\/v1\/firm_settings/.test(u),
       () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [CO] })],
-    [(u) => /\/rpc\/client_account/.test(u), () => ({ body: statement })],
+    [(u) => /\/rpc\/client_ledger/.test(u), () => ({ body: statement })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
@@ -93,7 +95,7 @@ try {
     const tab = page.getByRole('button', { name: 'Account', exact: true })
     t.ok('an administrator gets the Account tab', (await tab.count()) > 0)
     await tab.click()
-    await page.waitForSelector('text=The client’s account', { timeout: 10000 })
+    await page.waitForSelector('text=The client’s ledger', { timeout: 10000 })
 
     /* COUNTED BY ROWS IN THE STATEMENT'S OWN TABLE. The page carries other tables, and a bare
        `tr` count would be right for the wrong reason. */
@@ -105,15 +107,15 @@ try {
     /* EACH OF THE FIRM'S EIGHT, NAMED. Not a loop over "whatever is there" -- that passes on an
        empty table. */
     for (const label of [
-      'Payover due to client', 'Payover paid to client', 'Withdrawal of RRC00003',
-      'Executive listing', 'Invoice paid by client',
+      'held for the client', 'Payover PO-RRC-2608 paid to the client', 'Withdrawal of RRC00003',
+      'Paid straight to the client', 'Executive listing', 'Invoice paid by the client',
     ]) {
       t.ok(`"${label}" is on the statement`, body.includes(label))
     }
 
     /* AND EACH IS LABELLED AS THE KIND OF THING IT IS, because "Withdrawal of RRC00003" appears
        twice -- once invoiced and once taken off a payover -- and they are different events. */
-    for (const chip of ['Payover due', 'Paid out', 'Invoiced', 'Off the payover', 'Invoice paid']) {
+    for (const chip of ['Held for them', 'Owed to us', 'Paid out', 'Invoiced', 'Invoice paid']) {
       t.ok(`the "${chip}" label is used`, body.includes(chip))
     }
 
@@ -121,8 +123,8 @@ try {
      * THE GROSS PAYOVER AND THE CHARGE ARE TWO LINES, NOT ONE NET FIGURE. R1 800.00 due and
      * R575.00 off it, rather than R1 225.00 with no explanation.
      */
-    t.ok('the payover is shown in full', /\+R 1 800\.00/.test(body))
-    t.ok('...and what came off it is its own line', /−R 575\.00/.test(body))
+    t.ok('money held for them is its own line', /\+R 1 800\.00/.test(body))
+    t.ok('...and so is a fee they owe us on a payment made to them', /−R 575\.00/.test(body))
 
     /*
      * THE BALANCE IS THE DATABASE'S. Every one of the eight is asserted, in order: a component
@@ -140,7 +142,7 @@ try {
 
     /* THE CLOSING FIGURE SAYS WHICH WAY IT POINTS. A bare "-R 575.00" leaves somebody working out
        the sign; this account closes with the client owing the firm. */
-    t.ok('and it says who owes whom', /Owed to the firm/.test(body))
+    t.ok('and it says who owes whom', /The client owes us/.test(body))
     t.ok('...with the amount', /R 575\.00/.test(body))
 
     /* A payover line opens the run it came from; an invoice has no page to open yet. */

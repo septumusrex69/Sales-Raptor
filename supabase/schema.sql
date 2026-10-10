@@ -33254,3 +33254,115 @@ begin
    where id = p_run and status in ('approved', 'sent');
   if not found then raise exception 'Only an approved or sent run can be marked paid.'; end if;
 end $$;
+
+-- ============================================================================================
+-- THE CLIENT LEDGER, AND EVERY CLIENT'S BALANCE (10 Oct)
+--
+-- The firm: "we should have like a ledger for clients. Who owes us and who we paid ... I think
+-- it's important we need to understand where that lives." Before this a PTC put the client in
+-- debit on the trust ledger while Business -> Clients who owe the firm read only charges, so a
+-- client could owe R26 000 in PTC fees and the business side said nobody owed anything; and the
+-- client's own statement was built from payover runs and saw a PTC fee only once a run netted it.
+--
+-- ONE SOURCE, NOTHING COUNTED TWICE:
+--   * the client's TRUST entries are everything that touched the trust for them -- money held for
+--     them, PTC fees they owe, charges set off when a run is approved, overpayments released,
+--     reversals, payovers paid;
+--   * plus the two things that never reach the trust: a charge still waiting to come off a payover
+--     (set off, on no approved run yet -- once its run is approved the trust entry carries it),
+--     and an invoice (raised, and paid).
+-- A positive balance is money we owe the client; a negative one is money they owe us.
+-- ============================================================================================
+
+create or replace function public.client_ledger(p_company uuid)
+returns table(entry_on date, sort_at timestamptz, kind text, description text, reference text,
+              case_number text, amount numeric, balance numeric, run_id uuid, charge_id uuid)
+language sql stable security definer set search_path to 'public'
+as $$
+  with lines as (
+    select (e.entry_at at time zone 'Africa/Johannesburg')::date as entry_on, e.entry_at as sort_at,
+           case when e.reason like 'Payment reversed:%' then 'reversal'
+                when e.reason like 'Re-split:%' then 're_split'
+                when e.reason like 'Payover % paid to the client' then 'payover_paid'
+                when e.reason like 'Charges set off%' then 'set_off'
+                when e.reason like 'Overpayment released%' then 'released'
+                when e.amount < 0 then 'owed'
+                else 'held' end as kind,
+           e.reason as description, r.invoice_number as reference, d.case_number,
+           e.amount, e.payover_run_id as run_id, null::uuid as charge_id
+      from public.trust_creditor_entries e
+      left join public.payover_runs r on r.id = e.payover_run_id
+      left join public.debtor_accounts d on d.id = e.account_id
+     where e.party = 'client' and e.company_id = p_company
+    union all
+    select c.raised_on, c.raised_on::timestamptz + interval '12 hours', 'charge_pending',
+           c.description || ' (comes off the next payover)', null, d.case_number,
+           -(c.amount + c.vat), null, c.id
+      from public.client_charges c
+      left join public.payover_runs r on r.id = c.payover_run_id
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'set_off'
+       and (c.payover_run_id is null or r.status not in ('approved', 'sent', 'paid'))
+    union all
+    select c.raised_on, c.raised_on::timestamptz + interval '12 hours', 'invoice_raised',
+           c.description, c.invoice_number, d.case_number, -(c.amount + c.vat), null, c.id
+      from public.client_charges c
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'invoice'
+    union all
+    select (c.paid_at at time zone 'Africa/Johannesburg')::date, c.paid_at, 'invoice_paid',
+           'Invoice paid by the client', coalesce(c.paid_reference, c.invoice_number), d.case_number,
+           c.amount + c.vat, null, c.id
+      from public.client_charges c
+      left join public.debtor_accounts d on d.id = c.account_id
+     where c.company_id = p_company and c.cancelled_at is null and c.settlement = 'invoice'
+       and c.paid_at is not null
+  )
+  select l.entry_on, l.sort_at, l.kind, l.description, l.reference, l.case_number, l.amount,
+         sum(l.amount) over (order by l.sort_at, l.kind rows between unbounded preceding and current row),
+         l.run_id, l.charge_id
+    from lines l
+   where public.has_capability('finance.view') or public.has_capability('business.view')
+   order by l.sort_at, l.kind
+$$;
+revoke all on function public.client_ledger(uuid) from public, anon;
+grant execute on function public.client_ledger(uuid) to authenticated;
+
+create or replace function public.client_balances()
+returns table(company_id uuid, client text, code text, in_trust numeric, charges_due numeric,
+              net numeric, last_paid_on date, last_paid numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with t as (
+    select company_id, sum(amount) as bal from public.trust_creditor_entries
+     where party = 'client' and company_id is not null group by company_id
+  ),
+  ch as (
+    select c.company_id, sum(c.amount + c.vat) as due
+      from public.client_charges c
+      left join public.payover_runs r on r.id = c.payover_run_id
+     where c.cancelled_at is null
+       and ((c.settlement = 'set_off' and (c.payover_run_id is null or r.status not in ('approved', 'sent', 'paid')))
+         or (c.settlement = 'invoice' and c.paid_at is null))
+     group by c.company_id
+  ),
+  lp as (
+    select distinct on (company_id) company_id,
+           (paid_at at time zone 'Africa/Johannesburg')::date as on_day, net_payover
+      from public.payover_runs where paid_at is not null
+     order by company_id, paid_at desc
+  ),
+  who as (select company_id from t union select company_id from ch)
+  select w.company_id, co.name, co.code,
+         coalesce(t.bal, 0), coalesce(ch.due, 0), coalesce(t.bal, 0) - coalesce(ch.due, 0),
+         lp.on_day, lp.net_payover
+    from who w
+    join public.companies co on co.id = w.company_id
+    left join t on t.company_id = w.company_id
+    left join ch on ch.company_id = w.company_id
+    left join lp on lp.company_id = w.company_id
+   where public.has_capability('finance.view') or public.has_capability('business.view')
+   order by coalesce(t.bal, 0) - coalesce(ch.due, 0), co.name
+$$;
+revoke all on function public.client_balances() from public, anon;
+grant execute on function public.client_balances() to authenticated;

@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, History, Scale, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, History, Users, Scale, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -37,6 +37,9 @@ const ITEMS: RailItem[] = [
      approved run is what lands here. */
   { to: '/trust/payments-out', label: 'Payments to make', icon: Send },
   { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
+  /* Every client: what we hold for them, what they owe us (the firm, 10 Oct: "a ledger for clients.
+     Who owes us and who we paid"). */
+  { to: '/trust/clients', label: 'Client balances', icon: Users },
   { to: '/trust/exceptions', label: 'Exceptions', icon: TriangleAlert },
 ]
 

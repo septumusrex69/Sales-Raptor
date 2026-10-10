@@ -169,8 +169,8 @@ const trustTargets = railTargets(trustLayout)
 const businessTargets = railTargets(businessLayout)
 /* Read the count first: a loop over an empty list passes vacuously, which is this file's
    sibling-check trap written down. */
-/* SEVEN since 8 Oct: Payments to make joined, after the runs it is fed by. */
-check('the trust rail has its seven, settings and the door', trustTargets.length, 9)
+/* EIGHT since 10 Oct: Client balances joined, after the Trust ledger it reads from. */
+check('the trust rail has its eight, settings and the door', trustTargets.length, 10)
 /* FIVE AND THE DOOR: overview, income (drawn only for whoever holds business.income), expenses,
    drawings, back office -- and the door to the trust. */
 check('the business rail has its five and the door', businessTargets.length, 6)

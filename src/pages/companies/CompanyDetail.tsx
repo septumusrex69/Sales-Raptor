@@ -178,7 +178,9 @@ export function CompanyDetail() {
    * Which tab, and how the Overview is arranged. The layout key is per page type rather than per
    * client: it is a preference about eyes, not about a company.
    */
-  const [tab, setTab] = useState<ClientTab>('Overview')
+  /* ?tab=Account opens the client's ledger directly -- Trust -> Client balances links there. */
+  const [tab, setTab] = useState<ClientTab>(() =>
+    new URLSearchParams(window.location.search).get('tab') === 'Account' ? 'Account' : 'Overview')
   const [layout, chooseLayout] = useRecordLayout('raptor.client.layout')
   const [smsOpen, setSmsOpen] = useState(false)
 

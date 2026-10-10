@@ -109,30 +109,74 @@ export async function fetchClientDebts(): Promise<ClientDebt[]> {
  * disagrees with the payover it came from is worse than no statement.
  */
 export type ClientEntryKind =
-  | 'payover_due' | 'charge_set_off' | 'payover_paid' | 'invoice_raised' | 'invoice_paid'
+  | 'held' | 'owed' | 'set_off' | 'payover_paid' | 'released' | 'reversal' | 're_split'
+  | 'charge_pending' | 'invoice_raised' | 'invoice_paid'
 
 export interface ClientEntry {
   on: string
   kind: ClientEntryKind
   description: string
   reference: string | null
+  /** The account the line came from, where it came from one (a receipt, a PTC, a reversal). */
+  caseNumber: string | null
   amount: number
   balance: number
   runId: string | null
   chargeId: string | null
 }
 
+/*
+ * THE CLIENT LEDGER (client_ledger, 10 Oct). The firm: "we should have like a ledger for clients.
+ * Who owes us and who we paid." Read from the client's TRUST entries -- money held for them, PTC
+ * fees they owe, set-offs, releases, reversals, payovers paid -- plus the two things the trust never
+ * sees: a charge still waiting for a payover, and an invoice. It replaced `client_account`, which
+ * was built from payover runs and saw a PTC fee only once a run had netted it off.
+ * Positive is owed TO the client; negative is the client owing us.
+ */
 export async function fetchClientAccount(companyId: string): Promise<ClientEntry[]> {
-  const { data, error } = await supabase.rpc('client_account', { p_company: companyId })
+  const { data, error } = await supabase.rpc('client_ledger', { p_company: companyId })
   if (error) throw new Error(error.message)
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     on: String(r.entry_on ?? ''),
     kind: String(r.kind) as ClientEntryKind,
     description: String(r.description ?? ''),
     reference: (r.reference as string | null) ?? null,
+    caseNumber: (r.case_number as string | null) ?? null,
     amount: n(r.amount),
     balance: n(r.balance),
     runId: (r.run_id as string | null) ?? null,
     chargeId: (r.charge_id as string | null) ?? null,
+  }))
+}
+
+/**
+ * EVERY CLIENT'S BALANCE (client_balances): what the trust holds for them (negative where a PTC
+ * leaves them owing), the charges still due from them, and the net -- one list, read by Trust ->
+ * Client balances and by Business -> Clients who owe the firm, so the two cannot disagree.
+ */
+export interface ClientBalance {
+  companyId: string
+  client: string
+  code: string | null
+  inTrust: number
+  chargesDue: number
+  /** Positive: we owe them. Negative: they owe us. */
+  net: number
+  lastPaidOn: string | null
+  lastPaid: number | null
+}
+
+export async function fetchClientBalances(): Promise<ClientBalance[]> {
+  const { data, error } = await supabase.rpc('client_balances')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    companyId: String(r.company_id),
+    client: String(r.client ?? ''),
+    code: (r.code as string | null) ?? null,
+    inTrust: n(r.in_trust),
+    chargesDue: n(r.charges_due),
+    net: n(r.net),
+    lastPaidOn: (r.last_paid_on as string | null) ?? null,
+    lastPaid: r.last_paid === null || r.last_paid === undefined ? null : n(r.last_paid),
   }))
 }

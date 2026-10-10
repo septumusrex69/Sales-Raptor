@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { Link } from 'react-router-dom'
-import { fetchClientDebts, type ClientDebt } from '../../lib/business'
+import { fetchClientBalances, type ClientBalance } from '../../lib/business'
 import { fetchTrustPosition, type TrustPosition } from '../../lib/trust'
 import { monthBounds, monthLabel, thisMonth, trustBankCostsState, type BusinessMonth, type TrustBankCosts } from '../../lib/businessMonth'
 import { fetchBusinessMonth, fetchTrustBankCosts } from '../../lib/businessApi'
@@ -24,7 +24,7 @@ import { fetchBusinessMonth, fetchTrustBankCosts } from '../../lib/businessApi'
  * much the firm may take, which is the exact failure the payover arithmetic was centralised to avoid.
  */
 export function BusinessOverview() {
-  const [debts, setDebts] = useState<ClientDebt[]>([])
+  const [debts, setDebts] = useState<ClientBalance[]>([])
   const [trust, setTrust] = useState<TrustPosition | null>(null)
   const [month, setMonth] = useState<BusinessMonth | null>(null)
   const [bank, setBank] = useState<TrustBankCosts | null>(null)
@@ -35,7 +35,10 @@ export function BusinessOverview() {
     let live = true
     const now = thisMonth(new Date())
     const b = monthBounds(now.year, now.month)
-    Promise.all([fetchClientDebts(), fetchTrustPosition(), fetchBusinessMonth(b.from, b.to),
+    Promise.all([
+      /* WHO OWES US, from the same figures as Trust -> Client balances (10 Oct): PTC fees and
+         charges together. It read charges only, so a client owing R26 000 in PTC fees was absent. */
+      fetchClientBalances().then((b) => b.filter((x) => x.net < 0)), fetchTrustPosition(), fetchBusinessMonth(b.from, b.to),
       /* A reconciliation beside the month, not part of its arithmetic: unreadable, it is not drawn. */
       fetchTrustBankCosts(b.from, b.to).catch(() => null)])
       .then(([d, t, m, k]) => { if (live) { setDebts(d); setTrust(t); setMonth(m); setBank(k) } })
@@ -60,7 +63,7 @@ export function BusinessOverview() {
     )
   }
 
-  const owedByClients = debts.reduce((s, d) => s + d.total, 0)
+  const owedByClients = debts.reduce((s, d) => s - d.net, 0)
 
   return (
     <div className="space-y-5">
@@ -93,47 +96,35 @@ export function BusinessOverview() {
           </div>
           {debts.length === 0 ? (
             <Card className="p-6 text-sm text-slate-500 text-center">
-              No client owes the firm anything. Charges raised on a withdrawal or an executive
-              listing would appear here.
+              No client owes the firm anything. Fees on a payment made to a client directly, or a
+              charge raised on a withdrawal, would appear here.
             </Card>
           ) : (
             <Card className="overflow-hidden p-0">
-              {debts.map((d) => (
-                <div key={d.companyId}
-                  className="flex items-center gap-4 px-5 py-4 border-b border-slate-100 last:border-b-0">
-                  <div className="flex-1 min-w-0">
-                    <Link to={`/companies/${d.companyId}`}
-                      className="text-sm font-semibold text-slate-800 hover:text-gold-700">
-                      {d.client}
-                    </Link>
-                    <div className="text-[12.5px] text-slate-500 mt-0.5">
-                      {d.count === 1 ? '1 charge' : `${d.count} charges`}
-                      {d.oldest && `, oldest ${d.oldest}`}
-                    </div>
-                  </div>
-                  {/*
-                    THE TWO WAYS IT GETS SETTLED, SHOWN APART. Off-payover and invoiced are not the
-                    same debt: one the firm takes, the other the client has to pay. Added together
-                    they would read as one overdue figure and somebody would chase a client for
-                    money that is already coming off their next run.
-                  */}
-                  <div className="text-right shrink-0">
-                    {d.offPayover > 0 && (
-                      <div className="text-[12.5px] text-gold-700 tabular-nums">
-                        {rand(d.offPayover)} off their payover
-                      </div>
-                    )}
-                    {d.invoiced > 0 && (
-                      <div className="text-[12.5px] text-brand-500 tabular-nums">
-                        {rand(d.invoiced)} invoiced
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-[17px] font-medium tabular-nums w-28 text-right">
-                    {rand(d.total)}
-                  </div>
-                </div>
-              ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12.5px] whitespace-nowrap" data-testid="clients-owe-us">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left text-slate-400">
+                      <th className="px-3 py-2 font-medium">Client</th>
+                      <th className="px-2 py-2 text-right font-medium" title="Fees on payments made to them directly, net of what we hold for them">Trust</th>
+                      <th className="px-2 py-2 text-right font-medium">Charges</th>
+                      <th className="px-3 py-2 text-right font-medium">They owe us</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {debts.map((d) => (
+                      <tr key={d.companyId} className="border-b border-slate-50 text-slate-700 hover:bg-slate-50">
+                        <td className="px-3 py-1.5 max-w-[16rem] truncate" title={d.client}>
+                          <Link to={`/companies/${d.companyId}?tab=Account`} className="font-medium text-slate-800 hover:text-gold-700">{d.client}</Link>
+                        </td>
+                        <td className={clsx('px-2 py-1.5 text-right tabular-nums', d.inTrust < 0 && 'text-negative-700')}>{rand(d.inTrust)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{d.chargesDue ? rand(d.chargesDue) : '—'}</td>
+                        <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-negative-700">{rand(-d.net)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           )}
           <p className="mt-3 text-[12.5px] text-slate-500 leading-relaxed">

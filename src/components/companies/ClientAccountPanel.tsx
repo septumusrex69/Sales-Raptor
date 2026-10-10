@@ -36,9 +36,14 @@ import { fetchClientAccount, type ClientEntry, type ClientEntryKind } from '../.
  * working backwards from a number nobody quoted.
  */
 const KIND: Record<ClientEntryKind, { label: string; tone: string }> = {
-  payover_due: { label: 'Payover due', tone: 'bg-positive-100 text-positive-700' },
+  held: { label: 'Held for them', tone: 'bg-positive-100 text-positive-700' },
+  owed: { label: 'Owed to us', tone: 'bg-negative-100 text-negative-700' },
+  set_off: { label: 'Off the payover', tone: 'bg-gold-100 text-gold-800' },
   payover_paid: { label: 'Paid out', tone: 'bg-slate-100 text-slate-600' },
-  charge_set_off: { label: 'Off the payover', tone: 'bg-gold-100 text-gold-800' },
+  released: { label: 'Released to them', tone: 'bg-positive-100 text-positive-700' },
+  reversal: { label: 'Reversed', tone: 'bg-negative-100 text-negative-700' },
+  re_split: { label: 'Re-split', tone: 'bg-slate-100 text-slate-600' },
+  charge_pending: { label: 'Due off next payover', tone: 'bg-gold-100 text-gold-800' },
   invoice_raised: { label: 'Invoiced', tone: 'bg-brand-100 text-brand-700' },
   invoice_paid: { label: 'Invoice paid', tone: 'bg-slate-100 text-slate-600' },
 }
@@ -77,8 +82,8 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
   if (entries.length === 0) {
     return (
       <Card className="p-6 text-sm text-slate-500 text-center">
-        Nothing has passed between the firm and this client yet. A payover run or a charge raised
-        on a withdrawal would open the account.
+        Nothing has passed between the firm and this client yet. A payment collected for them, a
+        payment made to them directly, or a charge raised on a withdrawal would open the ledger.
       </Card>
     )
   }
@@ -94,11 +99,11 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
     <div className="space-y-3">
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-          The client&rsquo;s account
+          The client&rsquo;s ledger
         </div>
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline gap-2" data-testid="ledger-closing">
           <span className="text-[12.5px] text-slate-500">
-            {closing > 0 ? 'Owed to the client' : closing < 0 ? 'Owed to the firm' : 'Settled'}
+            {closing > 0 ? 'We owe the client' : closing < 0 ? 'The client owes us' : 'Settled'}
           </span>
           <span className={clsx('text-lg font-semibold tabular-nums',
             closing > 0 ? 'text-positive-700' : closing < 0 ? 'text-negative-700' : 'text-slate-600')}>
@@ -114,9 +119,10 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
               <tr className="bg-slate-50 text-slate-400 text-slate-400">
                 <th className="text-left font-medium px-4 py-2.5">Date</th>
                 <th className="text-left font-medium px-4 py-2.5">What happened</th>
+                <th className="text-left font-medium px-4 py-2.5">Account</th>
                 <th className="text-left font-medium px-4 py-2.5">Reference</th>
                 <th className="text-right font-medium px-4 py-2.5">Amount</th>
-                <th className="text-right font-medium px-4 py-2.5">Balance</th>
+                <th className="text-right font-medium px-4 py-2.5" title="Positive: we owe the client. Negative: the client owes us.">Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -127,8 +133,8 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
                     className="border-t border-slate-100">
                     <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap tabular-nums">{e.on}</td>
                     <td className="px-4 py-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-slate-800">{e.description}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-800 max-w-[28rem] truncate" title={e.description}>{e.description}</span>
                         <span className={clsx(
                           'rounded-full px-2 py-px text-[11px] font-medium',
                           meta?.tone ?? 'bg-slate-100 text-slate-600',
@@ -137,6 +143,7 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
                         </span>
                       </div>
                     </td>
+                    <td className="px-4 py-1.5 text-slate-500">{e.caseNumber ?? ''}</td>
                     <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap">
                       {/* The run is a real page; an invoice number on a charge is not, yet. */}
                       {e.runId
@@ -161,9 +168,10 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
       </Card>
 
       <p className="text-[12.5px] text-slate-500 leading-relaxed">
-        The payover is shown in full and anything taken off it as its own line, because that is how
-        the firm says it to a client — not one net figure to work backwards from. A charge set off
-        comes out of <em>this client&rsquo;s own</em> trust money and never anybody else&rsquo;s.
+        Every rand held for this client, every fee they owe us on payments made to them directly,
+        every charge, set-off and payover, in order. A positive balance is money we owe them; a
+        negative one is money they owe us, and comes off their next payover. A charge set off comes
+        out of <em>this client&rsquo;s own</em> trust money and never anybody else&rsquo;s.
       </p>
     </div>
   )
