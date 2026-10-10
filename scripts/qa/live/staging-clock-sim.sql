@@ -23,11 +23,9 @@
 --            arrives on a closed account (the approval queue flags it "Account closed"). Jump to
 --            11 Sep, pay. Nothing in trust is unaccounted for.
 --
--- KNOWN GAP IT RECORDS RATHER THAN HIDES (10 Oct): the R2 176.18 the firm recovered from Sim Bravo
--- by setting its PTC debt off against cycle 3's trust money stays in the trust account. The Trust
--- overview counts it as the firm's ("accounted for"), but the trust ledger has no firm entry for a
--- PTC's share, so draw_from_trust refuses to transfer it. The last assertion holds that what is left
--- is EXACTLY that amount; see HANDOFF.md, "decisions waiting on the firm".
+-- THE FIRM'S PTC SHARE (10 Oct): the R2 176.18 the firm recovers from Sim Bravo by setting its PTC
+-- debt off against cycle 3's trust money is credited to the firm when PO-SMB-2609 is approved
+-- (trust_creditors_on_run), so the BF transfer takes it and the trust ends cycle 3 at exactly R0.00.
 -- ============================================================================================
 
 create schema if not exists qa_sim;
@@ -211,9 +209,10 @@ begin
   f := qa_sim.expect((select count(*) from public.debtor_accounts where ended_as in ('settled', 'written_off')) = 2, 'cycle 3: a settlement and a write-off close accounts', f);
   f := qa_sim.expect(exists (select 1 from public.account_payments p join public.debtor_accounts d on d.id = p.account_id where d.ended_as is not null and (p.received_at at time zone 'Africa/Johannesburg')::date > d.ended_on), 'cycle 3: a payment arrives on a closed account', f);
   f := qa_sim.expect((c3->'pay'->'recon'->>'not_accounted')::numeric = 0, 'cycle 3: nothing in trust is unaccounted for', f);
-  select coalesce(sum(firm_set_off), 0) into v from public.trust_cash_by_cycle();
-  f := qa_sim.expect((c3->'pay'->'recon'->>'in_trust')::numeric = v, 'cycle 3: what is left in trust is exactly the firm''s PTC share recovered by set-off', f);
-  return jsonb_build_object('failures', f, 'left_in_trust', c3->'pay'->'recon'->'in_trust', 'ptc_set_off_undrawable', v,
+  select coalesce(sum(amount), 0) into v from public.trust_creditor_entries where party = 'firm' and reason like 'PTC share recovered%';
+  f := qa_sim.expect(v > 0, 'cycle 3: the firm''s PTC share recovered by set-off is the firm''s in the ledger', f);
+  f := qa_sim.expect((c3->'pay'->'recon'->>'in_trust')::numeric = 0, 'cycle 3: ...and was transferred: trust ends at R0.00', f);
+  return jsonb_build_object('failures', f, 'left_in_trust', c3->'pay'->'recon'->'in_trust', 'ptc_share_recovered', v,
     'cycle1', c1->'pay', 'cycle2', c2->'pay', 'cycle3', c3->'pay');
 end $$;
 

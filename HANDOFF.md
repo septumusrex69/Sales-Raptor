@@ -21,9 +21,9 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    that makes Raptor's runs differ from Swordfish's during that run is unwelcome -- which is why the
    "PTC on the next payover" rule stays **switched OFF** (§2, fourth session, top row; the user
    confirmed again on 10 Oct: "The third one we'll keep"). Do not switch it on until they say so.
-4. **One ledger decision is waiting** (§4, item 12): the firm's PTC share recovered by set-off
-   stays in trust under no ledger owner, so `draw_from_trust` refuses it. Found by the simulation.
-   Ask before changing the ledger.
+4. **The firm's PTC share recovered by set-off is now credited to the firm** when the run that
+   recovers it is approved, so it can be transferred (§2, top row). Runs approved BEFORE this keep
+   their entries; a client's earlier recovered share is caught up at that client's next approval.
 5. **After pushing to this session's branch, also push to `claude/sales-raptor-review-p1pzx2`**
    (fast-forward only, `git push origin HEAD:claude/sales-raptor-review-p1pzx2`).
 6. **Run the full suite first** (`npm run qa`). At the end of the fifth session: 304 of 305 green.
@@ -74,6 +74,7 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
+| (this) | **The firm's PTC share recovered by set-off is the firm's, and can be transferred** (the firm, 10 Oct: "the firm's share should stay in the trust. And it should be able to be transferred to the business account"). `trust_creditors_on_run`, on approval: ONE firm entry "PTC share recovered from payover PO-..." = the client's PTC debt on approved runs (reversed PTCs net out), less what this run still leaves short (read as PTC debt first), less what was already credited or paid into the business account (`client_business_receipts`). Negative only when a reversed PTC takes back a share already credited. It is then in `owed_to_firm`, so Payments to make / `draw_from_trust` can take it. `trust_cash_by_cycle` already read that money as the firm's (`firm_set_off`), so it leaves the new entry out of `firm_other` rather than counting it twice. Income shows it as kind 'other' (`firm_entry_kind` unchanged). Simulation: R2 176.18 credited on PO-SMB-2609, transferred with the BF fees, trust R0.00 after cycle 3; paid-direct scenario still R0.00. Going forward only, nothing swept: a client's share recovered on runs approved before this is caught up at its next approval. `check-ptc-share-recovered` (8), break-tested. |
 | `bae366e` | **Remittance advice: OUTSTANDING stays, and a VAT sentence on every line** (the firm, 10 Oct: "keep the outstanding column and the VAT also needs to be there"). Under each collection on the PDF: "Commission 20% R 270.00 + VAT 15% R 40.50 = R 310.50 deducted" (a reversal: "... given back with this reversal", red); its own column in the .xlsx. `vatLine` in remittanceAdvice.ts reads VAT's rate off the row's own figures. **The mock-up's exact wording is not in the repo** -- this is a default offered to the firm; if they paste the sentence, change `vatLine` only. `check-remittance-advice` 75 -> 82. |
 | `b95cb62` | **A client pays what it owes into the BUSINESS account, matched to its payover** (§3 item 1, the user: "you can proceed"). `record_client_business_receipt(run, amount, day, reference, note)` -- trust AND business ticks; an approved run below nil; the whole shortfall to the cent (part payments refused for now, §4 item 13); once; not in the future (the clock's). Writes `client_business_receipts` (append-only, trigger refuses update/delete), `payover_runs.settled_direct_receipt_id`, and ONE client trust entry "Paid to the business account against PO-..." that clears the minus a PTC left with no money behind it. Settled = not carried (`build_payover_run`, `close_payover_cycle`), not owed by age (`ptc_ageing`); carried into a run still being checked -> that run is rebuilt without it; into an approved one -> refused. `trust_cash_by_cycle` treats the entry like the PTC it pays off; `client_ledger` names it `paid_direct`. Run page "Record their payment"; runs list "Paid to us"; client ledger line. Simulation `run_direct`: trust R0.00 at the end of cycle 3. `check-client-business-receipt` (24). |
 | `9b8552d` | **Payovers matched from the statement by the BF PO reference first** (§3 item 2). `match_payovers_by_reference()`: every unallocated debit whose reference or description names a run (`payover_number_in`, any case, `-2` suffix) is settled through `allocate_bank_line(...,'payover')` -- only at the run's exact amount, only an approved/sent/paid run not yet on the statement; anything else is reported, not matched. The statement import runs it straight after the lines land and says so; Exceptions has "Match N payovers by reference". `check-payover-reference-match` (16). |
@@ -303,17 +304,9 @@ Do not guess these. Each one changes money.
     clipped by it and nothing claims one is "within limit". If the firm wants that badge, the engine
     has to return the figure — a change to `preview_allocation`, not to the screen.
 
-12. **THE FIRM'S PTC SHARE RECOVERED BY SET-OFF HAS NO LEDGER OWNER, SO IT CANNOT BE DRAWN**
-    (found by the staging simulation, 10 Oct). A PTC writes "client owes the trust" and no firm
-    entry; when a later payover sets that debt off against the client's trust money (a negative run
-    carried in, or a PTC set off in the same run), the client's ledger is right and the money stays
-    in trust -- the Trust overview counts it as the firm's (`firm_set_off`, "accounted for"), but
-    `trust_position.owed_to_firm` does not, so `draw_from_trust` refuses it. In the simulation:
-    R2 176.18 left in trust after cycle 3. The fix that fits the ledger is ONE firm entry at the
-    moment a run that recovers PTC debt is approved/paid, for exactly what it recovered (PTC dues +
-    PTC debt carried in - shortfall still owed) -- but it changes what the firm may draw, so ASK.
-    (If the client pays the shortfall into the business account instead, §2 `b95cb62`, nothing is
-    stranded.)
+12. ~~The firm's PTC share recovered by set-off had no ledger owner~~ -- **decided 10 Oct, built**
+    (§2, top row). The firm: "when a PTC debt is taken off a later payment, the firm's share should
+    stay in the trust. And it should be able to be transferred to the business account."
 13. **Part payments of a shortfall into the business account** are refused for now: how a run's
     shortfall should read on the next advice when half was paid directly is the firm's call.
 14. **No allocation kind for a debtor's payment that BOUNCES on the statement.** The simulation used
