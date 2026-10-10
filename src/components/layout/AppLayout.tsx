@@ -31,7 +31,7 @@ const TITLES: { test: RegExp; title: string }[] = [
   /* payments-out BEFORE payments: /^\/trust\/payments/ matches it too, and headed it "Payments in". */
   { test: /^\/trust\/payments-out/, title: 'Payments to make' },
   { test: /^\/trust\/payments/, title: 'Payments in' },
-  { test: /^\/trust\/check/, title: 'Check what has gone through' },
+  { test: /^\/trust\/check/, title: 'Payment history' },
   { test: /^\/trust\/payover/, title: 'Payover runs' },
   { test: /^\/trust\/runs/, title: 'Payover run' },
   { test: /^\/trust\/exceptions/, title: 'Exceptions' },

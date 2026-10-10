@@ -46,7 +46,7 @@ check('...and the group uses it', groupRunsByCycle([run('2026-08-11', '2026-09-1
 check('nothing to group is no groups', groupRunsByCycle([], OPEN, 'open'), [])
 
 const page = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
-check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tab, lag\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
+check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tabShown === 'paid' \? 'paid' : 'open', lag\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payover-groups: ${pass} passed, ${failures.length} failed`)

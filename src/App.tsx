@@ -182,7 +182,7 @@ function App() {
               <Route path="/trust" element={<RequireFinance><TrustLayout /></RequireFinance>}>
                 <Route index element={<TrustOverview />} handle={{ title: 'Trust overview' }} />
                 <Route path="payments" element={<FinancePayments />} handle={{ title: 'Payments in' }} />
-                <Route path="check" element={<CheckPayments />} handle={{ title: 'Check what has gone through' }} />
+                <Route path="check" element={<CheckPayments />} handle={{ title: 'Payment history' }} />
                 <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
                 <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
                 <Route path="payments-out" element={<TrustPaymentsOut />} handle={{ title: 'Payments to make' }} />

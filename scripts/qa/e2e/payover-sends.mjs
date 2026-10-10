@@ -100,33 +100,41 @@ try {
   const groups = page.getByTestId('cycle-group')
   await groups.first().waitFor({ timeout: 15000 })
   const heads = (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
-  t.check('one heading per cycle', heads.length, 3)
-  /* The firm, 10 Oct: "closed and pending payment ... this month is running" -- a clear split, in
-     words, the one that leaves soonest first. The pill is drawn uppercase, hence /i. */
+  /* The firm, 10 Oct: three tabs -- Running, Closed (to pay), Paid. Closed opens first when it has
+     anything: the overdue cycle on top in red, then the one waiting for its payover day. */
+  t.check('the Closed tab holds the closed cycles', heads.length, 2)
   t.ok('the overdue cycle first, saying it was due', /^Overdue[\s\S]*1 client[\s\S]*was due 11 Sep and is not yet paid/i.test(heads[0] ?? ''))
   t.ok('...then the closed one, with its payover day and total',
     /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · check, approve and pay on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
-  t.ok('...then the running one, still collecting', /^Running[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(heads[2] ?? ''))
-  t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now","early"]')
+  t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now"]')
+  t.ok('the tabs count what is in them',
+    /Running \(1\)/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay \(4\)/.test(await page.getByTestId('tab-closed').innerText()))
 
   /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
   t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
   t.check('...so there is no Build a run button', await page.getByRole('button', { name: /Build a run/ }).count(), 0)
-  t.ok('a run whose cycle is still open says so instead of offering Approve',
-    /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
-  for (const name of ['Karoo Fleet Hire', 'Silverleaf Body Corporate', 'Baobab Property']) {
+  for (const name of ['Silverleaf Body Corporate', 'Baobab Property']) {
     await page.getByRole('checkbox', { name: `Select ${name}` }).check()
   }
   const bar = page.getByTestId('bulk-bar')
   const barText = await bar.innerText()
   t.ok('the bulk bar offers only what the picked runs are ready for',
-    /3 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 1/.test(barText))
+    /2 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 1/.test(barText))
   await t.shot(page, 'payover-queue-cycles')
   await bar.getByRole('button', { name: 'Approve 1' }).click()
   await page.getByTestId('bulk-note').waitFor({ timeout: 10000 }).catch(() => {})
   t.check('...and approves the ready one whose cycle has closed, and nothing else',
     JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['E']))
   t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
+
+  /* ---- THE RUNNING TAB: still collecting ---- */
+  await page.getByTestId('tab-running').click()
+  /* Wait for the Running band itself: the locator would otherwise read the Closed tab's first band. */
+  await page.locator('[data-testid="cycle-group"][data-tone="early"]').waitFor({ timeout: 10000 })
+  const runningHead = (await groups.first().innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.ok('Running holds the open cycle, still collecting', /^Running[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(runningHead))
+  t.ok('...and its run says so instead of offering Approve',
+    /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
 
   /* ---- APPROVING BEFORE THE CYCLE CLOSES, WITH A REASON (the firm, 8 Oct) ---- */
   runShown = OPEN_RUN

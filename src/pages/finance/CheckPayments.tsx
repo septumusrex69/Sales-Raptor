@@ -105,11 +105,13 @@ export function CheckPayments() {
       <Card padded={false}>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
           <div>
-            <h3 className="text-[15px] font-semibold text-slate-800">Check what has gone through</h3>
+            <h3 className="text-[15px] font-semibold text-slate-800">Payment history</h3>
             <p className="text-[12px] text-slate-500">
-              Every approved receipt, with the arithmetic the engine wrote and every formula run
-              over it. Nothing here changes a figure; a wrong one is reversed from the opened
-              receipt.
+              {/* RENAMED FROM "CHECK" (the firm, 10 Oct): the check happens BEFORE approval, in the
+                  approval queue; this is where every processed payment lives afterwards, and
+                  where one is reversed. The formulas still run over every row. */}
+              Every payment processed into the trust, newest first, with every formula still run
+              over it. Open one to see its split, or to reverse it.
             </p>
           </div>
           <div className="flex items-center gap-3">

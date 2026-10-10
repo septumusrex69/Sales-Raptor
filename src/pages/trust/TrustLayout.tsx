@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CheckCheck, CircleGauge, Scale, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, History, Scale, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -31,7 +31,7 @@ import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceR
 const ITEMS: RailItem[] = [
   { to: '/trust', label: 'Overview', icon: CircleGauge, end: true },
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
-  { to: '/trust/check', label: 'Check', icon: CheckCheck },
+  { to: '/trust/check', label: 'Payment history', icon: History },
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
   /* What still has to go out, and on which reference (the firm, 8 Oct). After the runs, because an
      approved run is what lands here. */

@@ -86,7 +86,10 @@ function Tile({ label, value, note, tone, to }: {
 export function FinanceWorkQueue() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const tab = params.get('tab') === 'paid' ? 'paid' : 'open'
+  /* THREE TABS, AS THE FIRM DREW THEM (10 Oct): RUNNING (still collecting), CLOSED (cut-off passed,
+     waiting for its payover day -- an overdue one is here too, in red), PAID (the history). */
+  const tabParam = params.get('tab')
+  const tab: 'running' | 'closed' | 'paid' = tabParam === 'paid' ? 'paid' : tabParam === 'running' ? 'running' : 'closed'
 
   const [cycle, setCycle] = useState<Cycle | null>(null)
   const [tiles, setTiles] = useState<CycleTiles | null>(null)
@@ -179,11 +182,15 @@ export function FinanceWorkQueue() {
     setBusy(null)
   }
 
-  const open = rows.filter((r) => r.status !== 'paid')
+  const isRunning = (r: WorkQueueRow) => !!cycle && r.periodStart >= cycle.periodStart
+  const running = rows.filter((r) => r.status !== 'paid' && isRunning(r))
+  const closed = rows.filter((r) => r.status !== 'paid' && !isRunning(r))
   const paid = rows.filter((r) => r.status === 'paid')
-  const shown = tab === 'paid' ? paid : open
+  /* Nothing to pay yet (mid-cycle, or after the 11th's payments went): open on Running instead. */
+  const tabShown = tabParam === null && closed.length === 0 && running.length > 0 ? 'running' : tab
+  const shown = tabShown === 'paid' ? paid : tabShown === 'running' ? running : closed
   /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
-  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tab, lag)
+  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'paid' ? 'paid' : 'open', lag)
   const pickedRows = rows.filter((r) => picked.has(r.runId))
   const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r)).map((r) => r.runId)
   const toEmail = pickedRows.filter((r) => r.status === 'approved').map((r) => r.runId)
@@ -264,17 +271,18 @@ export function FinanceWorkQueue() {
         </div>
 
         <div className="flex gap-1 px-4 pt-3">
-          {(['open', 'paid'] as const).map((t) => (
+          {(['running', 'closed', 'paid'] as const).map((t) => (
             <button
               key={t}
               type="button"
-              onClick={() => setParams(t === 'open' ? {} : { tab: 'paid' }, { replace: true })}
+              data-testid={`tab-${t}`}
+              onClick={() => setParams(t === 'closed' ? {} : { tab: t }, { replace: true })}
               className={clsx(
                 'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
-                tab === t ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:bg-slate-50',
+                tabShown === t ? 'bg-slate-100 text-slate-800' : 'text-slate-500 hover:bg-slate-50',
               )}
             >
-              {t === 'open' ? `Working (${open.length})` : `Paid (${paid.length})`}
+              {t === 'running' ? `Running (${running.length})` : t === 'closed' ? `Closed · to pay (${closed.length})` : `Paid (${paid.length})`}
             </button>
           ))}
         </div>
@@ -333,9 +341,11 @@ export function FinanceWorkQueue() {
               )}
               {!loading && shown.length === 0 && (
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
-                  {tab === 'paid'
+                  {tabShown === 'paid'
                     ? 'Nothing has been paid over yet.'
-                    : 'Nothing processed in this cycle or the last yet. A client appears here, with its run built, as soon as a payment for it is approved.'}
+                    : tabShown === 'running'
+                      ? 'Nothing processed in this cycle yet. A client appears here, with its run built, as soon as a payment for it is approved.'
+                      : 'Nothing is waiting to be paid. A cycle moves here at midnight on the 10th, when it closes.'}
                 </td></tr>
               )}
               {!loading && groups.map((g) => (

@@ -102,7 +102,7 @@ export function FinancePayments() {
 
       <p className="text-[12px] text-slate-400">
         Looking for a payment that has already been processed?{' '}
-        <Link to="/trust/check" className="font-medium text-[var(--c-steel)] hover:underline">Check</Link>
+        <Link to="/trust/check" className="font-medium text-[var(--c-steel)] hover:underline">Payment history</Link>
         {' '}lists every posted receipt, and is where one is reversed.
       </p>
 
