@@ -7,7 +7,7 @@ import { Modal, FormField, inputClass, controlClass } from '../../components/ui/
 import { rand } from '../../lib/money'
 import { fetchPaymentsOutPaid, fetchPaymentsToMake, markRefundPaid } from '../../lib/bankAllocationApi'
 import { markRunPaid } from '../../lib/payover'
-import { fetchPayoutsStatementOnly, fetchTrustPosition } from '../../lib/trust'
+import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
 import { drawFromTrust } from '../../lib/businessApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
@@ -37,7 +37,7 @@ export function TrustPaymentsOut() {
   const [tab, setTab] = useState<Tab>('pay')
   const [rows, setRows] = useState<PaymentToMake[] | null>(null)
   const [paid, setPaid] = useState<PaidOut[] | null>(null)
-  const [firmHeld, setFirmHeld] = useState<number | null>(null)
+  const [firm, setFirm] = useState<FirmTrustSplit | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [paying, setPaying] = useState<Paying | null>(null)
@@ -52,11 +52,12 @@ export function TrustPaymentsOut() {
     try {
       const [due, gone, pos, only] = await Promise.all([
         fetchPaymentsToMake(), fetchPaymentsOutPaid(since),
-        /* The firm's share is shown to say what MAY be drawn; the list stands without it. */
-        fetchTrustPosition().catch(() => null),
+        /* The firm's share is shown to say what MAY be drawn -- only what its clients have been paid
+           for (the firm, 10 Oct) -- and the list stands without it. */
+        fetchFirmTrustSplit().catch(() => null),
         fetchPayoutsStatementOnly().catch(() => false),
       ])
-      setRows(due); setPaid(gone); setFirmHeld(pos ? pos.owedToFirm : null); setStatementOnly(only)
+      setRows(due); setPaid(gone); setFirm(pos); setStatementOnly(only)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -130,20 +131,27 @@ export function TrustPaymentsOut() {
             </p>
           </Card>
 
-          {/* THE FIRM'S OWN SHARE: not owed out like the rest, but drawn when the firm chooses. */}
-          {firmHeld !== null && firmHeld > 0.004 && (
+          {/* THE FIRM'S OWN SHARE: not owed out like the rest, but drawn when the firm chooses -- and
+              only once the clients it came from have been paid (the firm, 10 Oct). The figure is what
+              may go now; what is still waiting is said beside it, not hidden. */}
+          {firm !== null && firm.held > 0.004 && (
             <Card className="px-6 py-4" >
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2" data-testid="firm-to-draw">
                 <div className="flex-1 min-w-[16rem]">
                   <div className="font-medium text-slate-800">Bredell Ferreira (business account)</div>
                   <div className="text-[12.5px] text-slate-500">
-                    Earned and still held in trust — the most that may be transferred. Reference {transferReference(today)}.
+                    Earned, and its clients paid — the most that may be transferred now. Reference {transferReference(today)}.
                   </div>
+                  {firm.waiting > 0.004 && (
+                    <div className="text-[12.5px] text-slate-500" data-testid="firm-waiting">
+                      A further {rand(firm.waiting)} is the firm’s but waits until the clients it came from have been paid.
+                    </div>
+                  )}
                 </div>
-                <div className="text-lg font-semibold tabular-nums text-slate-800">{rand(firmHeld)}</div>
+                <div className="text-lg font-semibold tabular-nums text-slate-800">{rand(Math.max(firm.drawable, 0))}</div>
                 {mayDraw ? (
-                  <button type="button" onClick={() => setDrawing(true)}
-                    className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
+                  <button type="button" onClick={() => setDrawing(true)} disabled={firm.drawable <= 0.004}
+                    className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800 disabled:opacity-40">
                     Record a transfer
                   </button>
                 ) : (
@@ -238,9 +246,9 @@ export function TrustPaymentsOut() {
           }}
         />
       )}
-      {drawing && firmHeld !== null && (
+      {drawing && firm !== null && (
         <TransferBox
-          available={firmHeld} reference={transferReference(today)}
+          available={Math.max(firm.drawable, 0)} reference={transferReference(today)}
           onClose={() => setDrawing(false)}
           onSave={async (amount, ref) => { await drawFromTrust(amount, ref); setDrawing(false); await load() }}
         />
@@ -361,7 +369,7 @@ function TransferBox({ available, reference, onClose, onSave }: {
         <FormField label="Amount" required>
           <input className={inputClass} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </FormField>
-        {tooMuch && <p className="text-[12.5px] text-negative-700">The firm holds {rand(available)}. More than that is somebody else’s money.</p>}
+        {tooMuch && <p className="text-[12.5px] text-negative-700">The firm may transfer {rand(available)} now. More than that is either somebody else’s money or the firm’s share of money its clients have not yet been paid.</p>}
         <FormField label="Reference" required>
           <input className={inputClass} value={ref} onChange={(e) => setRef(e.target.value)} />
         </FormField>

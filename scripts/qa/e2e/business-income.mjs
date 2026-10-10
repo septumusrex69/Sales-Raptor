@@ -42,6 +42,8 @@ function handlers(me) {
     [(u) => /\/rpc\/business_drawings/.test(u), () => ({
       body: [{ id: 'd1', entry_at: '2026-10-07T08:00:00Z', amount: 20, reference: 'EFT 0042', drawn_by: 'Stephan' }],
     })],
+    /* R100 of the firm's R458.55 waits on a client's payover (the firm, 10 Oct). */
+    [(u) => /\/rpc\/firm_trust_split/.test(u), () => ({ body: [{ held: 458.55, drawable: 358.55, waiting: 100 }] })],
     [(u) => /\/rpc\/draw_from_trust/.test(u), (u, req) => { sent.push(req.postDataJSON()); return { body: 'x' } }],
     [(u) => /\/rest\/v1\/business_expenses/.test(u), (u, req) => {
       if (req.method() === 'POST') expenses.push(req.postDataJSON())
@@ -71,10 +73,12 @@ try {
 
     await page.getByRole('link', { name: 'Drawings' }).first().click()
     await page.getByTestId('held-for-firm').waitFor({ timeout: 20000 })
-    /* The figure draws R 0.00 first and the held amount once trust_position answers: wait for it,
+    /* The figure draws R 0.00 first and the drawable amount once firm_trust_split answers: wait for it,
        or the assertion below races the request (Playwright's locators race React). */
     await page.getByTestId('held-for-firm').filter({ hasText: /358/ }).waitFor({ timeout: 10000 }).catch(() => {})
     t.ok('Drawings says what the firm may draw', /358[\s,.]55|358.55/.test(await page.getByTestId('held-for-firm').innerText()))
+    t.ok('...of what is earned, and what waits until its clients are paid',
+      /458[\s,.]55/.test(await page.getByTestId('firm-held-total').innerText()) && /100[.,]00 waits until the clients/.test(await page.getByTestId('firm-held-total').innerText()))
     t.ok('...and lists the month\'s drawings', await page.getByText('EFT 0042').first().isVisible())
 
     await page.getByRole('button', { name: 'Draw to the business account' }).click()
@@ -82,7 +86,7 @@ try {
     await page.getByLabel('Amount').fill('400')
     await page.getByLabel(/Which transfer this is/).fill('BF-OCT-01')
     /* MORE THAN IS EARNED IS SOMEBODY ELSE'S MONEY, and the box says so before the database has to. */
-    t.ok('more than the firm holds is refused in the box', await go.isDisabled())
+    t.ok('more than the firm may draw now is refused in the box', await go.isDisabled())
     t.ok('...and says why', await page.getByText(/somebody else’s money/).first().isVisible())
     await page.getByLabel('Amount').fill('300')
     await go.click()

@@ -24,14 +24,18 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 4. **The firm's PTC share recovered by set-off is now credited to the firm** when the run that
    recovers it is approved, so it can be transferred (§2, top row). Runs approved BEFORE this keep
    their entries; a client's earlier recovered share is caught up at that client's next approval.
-5. **After pushing to this session's branch, also push to `claude/sales-raptor-review-p1pzx2`**
+5. **The firm draws its share only once the client has been paid** (§2, top row; the firm, 10 Oct).
+   `firm_trust_split()` is held / drawable / waiting; `draw_from_trust` limits on drawable; Payments
+   to make, Drawings and the Business overview offer drawable and say what waits. Two readings in it
+   are ours and are in §4 item 15 -- tell the firm if either is wrong.
+6. **After pushing to this session's branch, also push to `claude/sales-raptor-review-p1pzx2`**
    (fast-forward only, `git push origin HEAD:claude/sales-raptor-review-p1pzx2`).
-6. **Run the full suite first** (`npm run qa`). At the end of the fifth session: 304 of 305 green.
+7. **Run the full suite first** (`npm run qa`). At the end of the fifth session: 307 of 308 green.
    The one red, `e2e/performance` ("Collected today" shows the period's figure), fails identically
    on `1848079`, the commit this session started from -- it is DATE-dependent and reproduces on the
    10th (the last day of the sales month), not caused by the clock. Look at `useCollectionsMonth`'s
    day range on a period's last day; it may be a real "Collected today" bug on every 10th.
-7. **The production copy is HALF DONE and PAUSED** (§5, first item). Do not resume it unless asked.
+8. **The production copy is HALF DONE and PAUSED** (§5, first item). Do not resume it unless asked.
    It now also needs everything in §5's "fifth session" list.
 
 **Keep it current.** A session that changes something here and does not update this file has moved
@@ -74,6 +78,7 @@ Newest first. Each commit message carries the full reasoning; this is the index.
 
 | Commit | What it is |
 |---|---|
+| `DRAWABLE` | **The firm draws its share of trust money only once the client has been paid** (the firm, 10 Oct: "Bredell Ferreira can only claim its part of the trust fund money once the client has been paid. So, work it out like that"). `firm_run_settled(run)`: paid, or approved/sent with net payover at or below nil. `firm_trust_split(company)` -> held (= owed_to_firm, unchanged), drawable, waiting: a firm entry on a receipt waits on its ALLOCATION's run, a charge set off or PTC share recovered on its OWN run; bank interest, a transfer in and a parked credit never wait; the waiting entries are netted and only a net below nil reaches drawable (a receipt reversed after its share was drawn -- simulation cycle 2: drawable -R349.35). Every rule only LOWERS the figure, so it cannot cause a shortfall. `draw_from_trust` limits on drawable ("The firm may draw nothing now. The rest of its R x in trust waits until the clients it came from have been paid."). A transfer found on the statement and NOT recorded first (`allocate_bank_line` business_transfer, no target) is still written, not refused -- the money has gone, as before. Screens: Payments to make (firm card shows drawable, "A further R x ... waits"), Drawings ("May be drawn now", of R x earned), Business overview (a line under Earned, still in trust). Simulation: before each cycle's runs are paid all of the firm's share waits and drawing it is refused; after, it is drawn through `draw_from_trust` and matched on the statement to that drawing; both scenarios still end at R0.00. `check-firm-drawable` (23), break-tested four ways; check-business-income and check-client-account now read the ceiling through the split. Nothing rewritten: entries already drawn stay drawn. |
 | `d697f11` | **The firm's PTC share recovered by set-off is the firm's, and can be transferred** (the firm, 10 Oct: "the firm's share should stay in the trust. And it should be able to be transferred to the business account"). `trust_creditors_on_run`, on approval: ONE firm entry "PTC share recovered from payover PO-..." = the client's PTC debt on approved runs (reversed PTCs net out), less what this run still leaves short (read as PTC debt first), less what was already credited or paid into the business account (`client_business_receipts`). Negative only when a reversed PTC takes back a share already credited. It is then in `owed_to_firm`, so Payments to make / `draw_from_trust` can take it. `trust_cash_by_cycle` already read that money as the firm's (`firm_set_off`), so it leaves the new entry out of `firm_other` rather than counting it twice. Income shows it as kind 'other' (`firm_entry_kind` unchanged). Simulation: R2 176.18 credited on PO-SMB-2609, transferred with the BF fees, trust R0.00 after cycle 3; paid-direct scenario still R0.00. Going forward only, nothing swept: a client's share recovered on runs approved before this is caught up at its next approval. `check-ptc-share-recovered` (8), break-tested. |
 | `bae366e` | **Remittance advice: OUTSTANDING stays, and a VAT sentence on every line** (the firm, 10 Oct: "keep the outstanding column and the VAT also needs to be there"). Under each collection on the PDF: "Commission 20% R 270.00 + VAT 15% R 40.50 = R 310.50 deducted" (a reversal: "... given back with this reversal", red); its own column in the .xlsx. `vatLine` in remittanceAdvice.ts reads VAT's rate off the row's own figures. **The mock-up's exact wording is not in the repo** -- this is a default offered to the firm; if they paste the sentence, change `vatLine` only. `check-remittance-advice` 75 -> 82. |
 | `b95cb62` | **A client pays what it owes into the BUSINESS account, matched to its payover** (§3 item 1, the user: "you can proceed"). `record_client_business_receipt(run, amount, day, reference, note)` -- trust AND business ticks; an approved run below nil; the whole shortfall to the cent (part payments refused for now, §4 item 13); once; not in the future (the clock's). Writes `client_business_receipts` (append-only, trigger refuses update/delete), `payover_runs.settled_direct_receipt_id`, and ONE client trust entry "Paid to the business account against PO-..." that clears the minus a PTC left with no money behind it. Settled = not carried (`build_payover_run`, `close_payover_cycle`), not owed by age (`ptc_ageing`); carried into a run still being checked -> that run is rebuilt without it; into an approved one -> refused. `trust_cash_by_cycle` treats the entry like the PTC it pays off; `client_ledger` names it `paid_direct`. Run page "Record their payment"; runs list "Paid to us"; client ledger line. Simulation `run_direct`: trust R0.00 at the end of cycle 3. `check-client-business-receipt` (24). |
@@ -313,6 +318,12 @@ Do not guess these. Each one changes money.
     "wrong reference" instead (reverse to Needs an account, place elsewhere), which works; a returned
     debit order has a debit line on the statement and nothing to allocate it to except "other",
     which would count it twice against the reversal's own entries. Ask how the bank shows one.
+15. **Two readings in "only once the client has been paid" are ours** (10 Oct; built that way, say
+    if wrong). (a) A run approved AT OR BELOW NIL counts as paid: there is nothing to pay the client,
+    and the shortfall is their debt (carried, or paid into the business account) -- so the firm's
+    share on it may be drawn. (b) "Paid" is the run MARKED paid (`paid_at`), not paid AND seen on the
+    trust statement. If the firm wants (b) to wait for the statement, `firm_run_settled` is the one
+    place to change.
 
 **Decided on 7 October (third session), so nobody asks again:** a settlement's approval is recorded
 by the client liaison role (+ Administrator); a paid settlement is closed by a PERSON, never by

@@ -39108,3 +39108,117 @@ as $$
           or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
    order by a.cyc
 $$;
+
+-- -----------------------------------------------------------------------------------------------------
+-- THE FIRM DRAWS ITS SHARE ONLY ONCE THE CLIENT HAS BEEN PAID (the firm, 10 Oct: "Bredell Ferreira can
+-- only claim its part of the trust fund money once the client has been paid. So, work it out like that").
+--
+-- Until now the firm's whole balance in trust was drawable the moment a receipt was allocated: the
+-- commission on a payment banked on the 3rd could leave for the business account on the 4th while the
+-- client's own share of that same payment sat in trust until the 11th. The firm's share now waits for
+-- the client's.
+--
+-- WHAT WAITS. A firm entry that came out of a client's money waits until that client's payover is
+-- SETTLED:
+--   * earned on a receipt (allocation_id): the allocation's payover run;
+--   * charges set off and a PTC share recovered (payover_run_id): that run.
+-- Not yet claimed by any run, or claimed by one still being checked, or approved but not yet paid --
+-- waiting. SETTLED is: paid; or approved/sent with nothing to pay the client (net payover at or below
+-- nil -- there is no payment to wait for, and the shortfall is the client's debt, carried or paid
+-- into the business account); a void run releases its allocations, so they wait again.
+--
+-- WHAT DOES NOT WAIT: what never belonged to a client -- bank interest, a transfer in from the business
+-- account, a parked overpayment taken to the firm. And every NEGATIVE entry counts at once (drawings,
+-- bank charges, a receipt reversed): the waiting entries are netted, and if they net below nil that
+-- comes off what may be drawn. A rule that only ever lowers the drawable figure cannot cause a
+-- shortfall.
+--
+-- draw_from_trust limits on drawable rather than on the whole balance. Nothing is rewritten: entries
+-- already drawn stay drawn; this only governs the next drawing.
+-- -----------------------------------------------------------------------------------------------------
+create or replace function public.firm_run_settled(p_run uuid)
+returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select coalesce((
+    select r.paid_at is not null
+        or (r.status in ('approved', 'sent', 'paid') and coalesce(r.net_payover, 0) <= 0)
+      from public.payover_runs r where r.id = p_run), false)
+$$;
+revoke all on function public.firm_run_settled(uuid) from public, anon;
+
+create or replace function public.firm_trust_split(p_company uuid default null)
+returns table(held numeric, drawable numeric, waiting numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.amount,
+           case when public.firm_entry_kind(x.reason) in ('credit', 'bank_interest', 'transfer_in') then false
+                when x.allocation_id is not null then not public.firm_run_settled(a.payover_run_id)
+                when x.payover_run_id is not null then not public.firm_run_settled(x.payover_run_id)
+                else false end as waits
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+     where x.party = 'firm' and (p_company is null or x.company_id = p_company)
+  ), t as (
+    select coalesce(sum(amount), 0) as held,
+           coalesce(sum(amount) filter (where not waits), 0) as free,
+           coalesce(sum(amount) filter (where waits), 0) as pend
+      from e
+  )
+  select round(held, 2), round(free + least(pend, 0), 2), round(greatest(pend, 0), 2)
+    from t
+   where public.has_capability('finance.view') or public.has_capability('business.view')
+$$;
+revoke all on function public.firm_trust_split(uuid) from public, anon;
+grant execute on function public.firm_trust_split(uuid) to authenticated;
+
+create or replace function public.draw_from_trust(p_amount numeric, p_reference text, p_company uuid default null)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_id uuid;
+  v_held numeric;
+  v_drawable numeric;
+  v_ref text := nullif(btrim(coalesce(p_reference, '')), '');
+begin
+  -- BOTH TICKS. A drawing is made from the business side and moves trust money, so it needs the
+  -- business workspace AND the trust account -- the firm's ruling of 7 Oct 2026.
+  if not (public.has_capability('finance.view') and public.has_capability('business.view')) then
+    raise exception 'Drawing from the trust account needs both the trust and the business ticks.'
+      using errcode = '42501';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'A drawing is an amount, so it has to be more than nothing.' using errcode = '22023';
+  end if;
+  if v_ref is null then
+    raise exception 'Say which transfer this is.' using errcode = '22023';
+  end if;
+
+  -- THE FIRM DRAWS ONLY WHAT IS ITS OWN AND WHOSE CLIENT HAS BEEN PAID (10 Oct) -- see
+  -- firm_trust_split. Drawing more is a trust shortfall, refused here rather than found at a
+  -- reconciliation three weeks later.
+  select s.held, s.drawable into v_held, v_drawable from public.firm_trust_split(p_company) s;
+  if p_amount > coalesce(v_drawable, 0) then
+    if p_amount <= coalesce(v_held, 0) then
+      /* Below nil when a receipt whose share was already drawn is reversed: the firm owes that back
+         first, so it may draw nothing -- said as nothing, not as a minus. */
+      raise exception 'The firm may draw % now. The rest of its % in trust waits until the clients it came from have been paid.',
+        case when coalesce(v_drawable, 0) > 0 then 'R ' || to_char(v_drawable, 'FM999999990.00') else 'nothing' end,
+        'R ' || to_char(v_held, 'FM999999990.00')
+        using errcode = '22023';
+    end if;
+    raise exception 'The firm has % in trust and this would draw %. Drawing more than is earned is a trust shortfall.',
+      to_char(coalesce(v_held, 0), 'FM999999990.00'), to_char(p_amount, 'FM999999990.00')
+      using errcode = '22023';
+  end if;
+
+  insert into public.trust_creditor_entries (party, company_id, amount, reason, created_by)
+  values ('firm', p_company, -round(p_amount, 2),
+          'Drawn to the business account - ' || v_ref, auth.uid())
+  returning id into v_id;
+  return v_id;
+end $$;

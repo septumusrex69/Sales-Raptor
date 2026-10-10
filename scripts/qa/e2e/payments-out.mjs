@@ -43,6 +43,8 @@ const handlers = [
   [(u) => /\/rpc\/payments_to_make/.test(u), () => ({ body: answer })],
   [(u) => /\/rpc\/payments_out_paid/.test(u), () => ({ body: PAID })],
   [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
+  /* THE FIRM DRAWS ONCE ITS CLIENTS ARE PAID (10 Oct): R3 000 of its share waits on a payover. */
+  [(u) => /\/rpc\/firm_trust_split/.test(u), () => ({ body: [{ held: 27055.36, drawable: 24055.36, waiting: 3000 }] })],
   [(u) => /\/rpc\/(mark_payover_run_paid|mark_refund_paid|draw_from_trust)/.test(u),
     (u, req) => { sent.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...req.postDataJSON() }); return { body: null } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
@@ -93,11 +95,13 @@ try {
   /* ---- THE FIRM'S OWN TRANSFER ---- */
   const firm = page.getByTestId('firm-to-draw')
   t.ok('what the firm may draw is shown with its reference', /24[\s,.]?055[.,]36/.test(await firm.innerText()) && /BF FEES-\d{4}/.test(await firm.innerText()))
+  t.ok('...and what still waits on its clients is said beside it, not offered', /3[\s,.]?000[.,]00/.test(await page.getByTestId('firm-waiting').innerText())
+    && !/27[\s,.]?055/.test(await firm.innerText()))
   await firm.getByRole('button', { name: 'Record a transfer' }).click()
   await page.getByRole('button', { name: 'Record transfer' }).waitFor({ timeout: 10000 })
   await page.getByRole('button', { name: 'Record transfer' }).click()
   await page.waitForTimeout(500)
-  t.check('a transfer records the whole share by default, with the reference', JSON.stringify({ fn: sent[2]?.fn, amount: sent[2]?.p_amount, ok: /^BF FEES-\d{4}$/.test(sent[2]?.p_reference ?? '') }),
+  t.check('a transfer records the whole drawable share by default, with the reference', JSON.stringify({ fn: sent[2]?.fn, amount: sent[2]?.p_amount, ok: /^BF FEES-\d{4}$/.test(sent[2]?.p_reference ?? '') }),
     JSON.stringify({ fn: 'draw_from_trust', amount: 24055.36, ok: true }))
 
   /* ---- WHAT HAS GONE OUT ---- */

@@ -23,6 +23,10 @@
 --            arrives on a closed account (the approval queue flags it "Account closed"). Jump to
 --            11 Sep, pay. Nothing in trust is unaccounted for.
 --
+-- THE FIRM DRAWS ONLY ONCE THE CLIENT IS PAID (10 Oct): before each cycle's runs are paid the firm's
+-- share waits (firm_trust_split) and a drawing of it is refused; once every client is paid it is
+-- drawn through draw_from_trust and matched on the statement to that drawing.
+--
 -- THE FIRM'S PTC SHARE (10 Oct): the R2 176.18 the firm recovers from Sim Bravo by setting its PTC
 -- debt off against cycle 3's trust money is credited to the firm when PO-SMB-2609 is approved
 -- (trust_creditors_on_run), so the BF transfer takes it and the trust ends cycle 3 at exactly R0.00.
@@ -92,8 +96,18 @@ $$;
 /* Approve every run of a cycle, send its advice, pay it (matched on the statement by its BF PO-
    reference), then transfer the firm's share to the business account. */
 create or replace function qa_sim.pay_cycle(p_start date) returns jsonb language plpgsql as $$
-declare r record; v_line uuid; v_fee numeric; out jsonb := '[]'; v_today date := public.raptor_today();
+declare r record; v_line uuid; v_fee numeric; v_entry uuid; v_before jsonb; v_refused text; out jsonb := '[]'; v_today date := public.raptor_today();
 begin
+  /* BEFORE ANY CLIENT IS PAID, the firm's share of this cycle waits (the firm, 10 Oct: "can only claim
+     its part of the trust money once the client has been paid"). */
+  select to_jsonb(s) into v_before from public.firm_trust_split() s;
+  if (v_before->>'held')::numeric > 0 then
+    begin
+      perform public.draw_from_trust((v_before->>'held')::numeric, 'SIM TOO EARLY');
+      v_refused := 'NOT REFUSED';
+    exception when others then v_refused := sqlerrm;
+    end;
+  end if;
   for r in select * from public.payover_runs where period_start = p_start and public.payover_run_is_open(status) loop
     perform public.approve_payover_run(r.id);
   end loop;
@@ -108,14 +122,18 @@ begin
     end if;
     out := out || jsonb_build_object('run', r.invoice_number, 'net', r.net_payover);
   end loop;
-  select round(owed_to_firm, 2) into v_fee from public.trust_position();
+  /* Every client paid: the firm draws what is now drawable, through draw_from_trust (which refuses
+     anything still waiting), and the transfer is matched on the statement to that drawing. */
+  select round(drawable, 2) into v_fee from public.firm_trust_split();
   if v_fee > 0 then
+    v_entry := public.draw_from_trust(v_fee, 'BF FEES-' || to_char(v_today, 'YYMM'));
     perform qa_sim.statement(jsonb_build_array(jsonb_build_object('date', v_today, 'ref', 'BF FEES-' || to_char(v_today, 'YYMM'),
       'amount', to_char(-v_fee, 'FM999999990.00'), 'desc', 'TRANSFER TO BUSINESS')));
     select id into v_line from public.bank_statement_lines where reference = 'BF FEES-' || to_char(v_today, 'YYMM') and direction = 'debit';
-    perform public.allocate_bank_line(v_line, 'business_transfer');
+    perform public.allocate_bank_line(v_line, 'business_transfer', null, v_entry);
   end if;
-  return jsonb_build_object('runs', out, 'fees', v_fee, 'recon', qa_sim.recon());
+  return jsonb_build_object('runs', out, 'fees', v_fee, 'before', v_before, 'early_draw', v_refused,
+    'after', (select to_jsonb(s) from public.firm_trust_split() s), 'recon', qa_sim.recon());
 end $$;
 
 create or replace function qa_sim.approve_all() returns jsonb language sql as $$
@@ -198,6 +216,10 @@ begin
   f := qa_sim.expect(not exists (select 1 from jsonb_array_elements(c1->'runs') r where r->>'s' <> 'ready'), 'cycle 1: every run Ready on 11 Jul', f);
   f := qa_sim.expect(not exists (select 1 from public.payover_runs where period_start = date '2026-06-11' and early_reason is not null), 'cycle 1: none approved early', f);
   f := qa_sim.expect((select bool_and((approved_at at time zone 'Africa/Johannesburg')::date = date '2026-07-11') from public.payover_runs where period_start = date '2026-06-11'), 'cycle 1: approved on the business day 11 Jul', f);
+  f := qa_sim.expect((c1->'pay'->'before'->>'drawable')::numeric = 0 and (c1->'pay'->'before'->>'waiting')::numeric > 0,
+    'cycle 1: before the clients are paid, the firm''s share waits and nothing is drawable', f);
+  f := qa_sim.expect(c1->'pay'->>'early_draw' like 'The firm may draw nothing now.%', 'cycle 1: drawing it before the clients are paid is refused', f);
+  f := qa_sim.expect((c1->'pay'->'after'->>'held')::numeric = 0, 'cycle 1: once they are paid, the firm drew all of it', f);
   f := qa_sim.expect((c1->'pay'->'recon'->>'not_accounted')::numeric = 0 and (c1->'pay'->'recon'->>'in_trust')::numeric = 0, 'cycle 1: trust reconciles to zero', f);
   c2 := qa_sim.cycle2();
   f := qa_sim.expect((select bool_and(raised_on between date '2026-07-11' and date '2026-08-10') from public.client_charges where kind = 'withdrawal'), 'cycle 2: the withdrawal charge is dated in cycle 2', f);

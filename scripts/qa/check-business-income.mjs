@@ -14,7 +14,8 @@
  *   4. A DRAWING NEEDS BOTH TICKS, trust and business, at the firm's ruling -- in SQL and in the
  *      predicate that draws the button, so it is never offered and refused.
  *   5. THREE READERS OF THE FIRM'S BALANCE, ONE SUM: trust_position, business_month and the
- *      ceiling in draw_from_trust.
+ *      firm_trust_split that draw_from_trust's ceiling reads (its `held`; what of it may be DRAWN is
+ *      check-firm-drawable's).
  *   6. THE PARTS ADD TO THE TOTAL on the screen.
  *
  * What the database DOES with real rows was proved on staging in a rolled-back transaction: a R1 000
@@ -112,7 +113,7 @@ ok('...until given it', canViewIncome({ role: 'Administrator', grants: ['busines
 const draw = liveFn('draw_from_trust')
 ok('draw_from_trust asks both ticks',
   /has_capability\('finance\.view'\) and public\.has_capability\('business\.view'\)/.test(draw))
-ok('...and still refuses more than the firm holds', /if p_amount > v_held then/.test(draw))
+ok('...and still refuses more than the firm may draw', /if p_amount > coalesce\(v_drawable, 0\) then/.test(draw))
 ok('the button asks both too', canDrawFromTrust({ role: 'Administrator' }))
 check('...and is withheld with the trust tick taken away',
   canDrawFromTrust({ role: 'Administrator', revokes: ['finance.view'] }), false)
@@ -123,7 +124,9 @@ ok('business_drawings asks business.view', /has_capability\('business\.view'\)/.
 
 ok('trust_position reads the firm as its ledger sum', /filter \(where party = 'firm'\)/.test(liveFn('trust_position')))
 ok('business_month reads the same', /select coalesce\(sum\(amount\), 0\) as bal from public\.trust_creditor_entries where party = 'firm'/.test(month))
-ok('draw_from_trust\'s ceiling reads the same', /from public\.trust_creditor_entries\s+where party = 'firm'/.test(draw))
+ok('draw_from_trust\'s ceiling reads firm_trust_split', /from public\.firm_trust_split\(p_company\) s;/.test(draw))
+ok('...which reads the same', /from public\.trust_creditor_entries x[\s\S]*?where x\.party = 'firm'/.test(liveFn('firm_trust_split'))
+  && /select coalesce\(sum\(amount\), 0\) as held,/.test(liveFn('firm_trust_split')))
 
 /* ---------------- not reachable by anon ---------------- */
 

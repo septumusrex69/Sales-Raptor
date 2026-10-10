@@ -8,6 +8,7 @@ import { monthBounds, monthLabel, thisMonth, type BusinessMonth } from '../../li
 import { drawFromTrust, fetchBusinessMonth, fetchDrawings, type Drawing } from '../../lib/businessApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
+import { fetchFirmTrustSplit, type FirmTrustSplit } from '../../lib/trust'
 import { clockNow } from '../../lib/clock.ts'
 
 /**
@@ -24,6 +25,11 @@ import { clockNow } from '../../lib/clock.ts'
  * THE CEILING IS THE FIRM'S OWN BALANCE ON THE LEDGER, and the database is what holds it: a drawing
  * against anybody else's money is a trust shortfall, the most serious thing that can happen in that
  * account. The box says how much there is; draw_from_trust is what refuses more.
+ *
+ * AND ONLY ONCE THE CLIENT HAS BEEN PAID (the firm, 10 Oct: "Bredell Ferreira can only claim its part
+ * of the trust money once the client has been paid"). The figure offered is firm_trust_split's
+ * `drawable` -- the same function draw_from_trust limits on -- and what is still waiting on a client's
+ * payover is said under it rather than left out, so "earned" and "may draw" are not read as one.
  */
 export function BusinessDrawings() {
   const { currentUser } = useAuth()
@@ -35,14 +41,16 @@ export function BusinessDrawings() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [drawing, setDrawing] = useState(false)
+  const [split, setSplit] = useState<FirmTrustSplit | null>(null)
   const bounds = useMemo(() => monthBounds(year, month), [year, month])
   const mayDraw = canDrawFromTrust(currentUser)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [d, m] = await Promise.all([fetchDrawings(bounds.from, bounds.to), fetchBusinessMonth(bounds.from, bounds.to)])
-      setRows(d); setFigures(m)
+      const [d, m, f] = await Promise.all([fetchDrawings(bounds.from, bounds.to), fetchBusinessMonth(bounds.from, bounds.to),
+        fetchFirmTrustSplit().catch(() => null)])
+      setRows(d); setFigures(m); setSplit(f)
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not read the drawings.') }
     finally { setLoading(false) }
   }, [bounds.from, bounds.to])
@@ -52,7 +60,11 @@ export function BusinessDrawings() {
     const d = new Date(Date.UTC(year, month - 1 + by, 1))
     setYear(d.getUTCFullYear()); setMonth(d.getUTCMonth() + 1)
   }
-  const held = figures?.stillInTrust ?? 0
+  const held = split?.held ?? figures?.stillInTrust ?? 0
+  /* Without the split (it failed to read) nothing is offered: a ceiling that cannot be read is not
+     the whole balance. */
+  const drawable = Math.max(split?.drawable ?? 0, 0)
+  const waiting = split?.waiting ?? 0
 
   return (
     <div className="space-y-5">
@@ -62,7 +74,7 @@ export function BusinessDrawings() {
           <span className="text-xs text-slate-400">The firm’s earnings moved out of trust to the business account</span>
         </div>
         {mayDraw && (
-          <button type="button" onClick={() => setDrawing(true)} disabled={held <= 0}
+          <button type="button" onClick={() => setDrawing(true)} disabled={drawable <= 0.004}
             className="flex items-center gap-1.5 rounded-lg bg-navy-950 px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-50">
             <ArrowRightLeft size={15} /> Draw to the business account
           </button>
@@ -71,9 +83,12 @@ export function BusinessDrawings() {
 
       <div className="flex flex-wrap gap-4">
         <Card className="flex-1 min-w-[14rem]">
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">Earned, still in trust</p>
-          <p className="text-2xl font-semibold tabular-nums text-slate-900 mt-1" data-testid="held-for-firm">{rand(held)}</p>
-          <p className="text-[11px] text-slate-400 mt-1">The most the firm may draw today.</p>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">May be drawn now</p>
+          <p className="text-2xl font-semibold tabular-nums text-slate-900 mt-1" data-testid="held-for-firm">{rand(drawable)}</p>
+          <p className="text-[11px] text-slate-400 mt-1" data-testid="firm-held-total">
+            Of {rand(held)} earned and still in trust.
+            {waiting > 0.004 && <> {rand(waiting)} waits until the clients it came from have been paid.</>}
+          </p>
         </Card>
         <Card className="flex-1 min-w-[14rem]">
           <p className="text-[11px] uppercase tracking-wide text-slate-400">Drawn in {monthLabel(year, month)}</p>
@@ -126,7 +141,7 @@ export function BusinessDrawings() {
       )}
 
       {drawing && (
-        <DrawModal held={held} onClose={() => setDrawing(false)} onDone={() => { setDrawing(false); void load() }} />
+        <DrawModal held={drawable} onClose={() => setDrawing(false)} onDone={() => { setDrawing(false); void load() }} />
       )}
     </div>
   )
@@ -149,14 +164,14 @@ function DrawModal({ held, onClose, onDone }: { held: number; onClose: () => voi
   }
 
   return (
-    <Modal title="Draw to the business account" subtitle={`The firm has ${rand(held)} earned and still in trust.`} onClose={onClose}>
+    <Modal title="Draw to the business account" subtitle={`The firm may draw ${rand(held)} now: earned, and its clients paid.`} onClose={onClose}>
       <div className="space-y-3">
         <FormField label="Amount" required>
           <input className={inputClass} inputMode="decimal" value={amount} autoFocus onChange={(e) => setAmount(e.target.value)} />
         </FormField>
         {over && (
           <p className="text-xs text-[var(--c-rust-deep)]">
-            That is more than the firm has earned. Drawing it would be drawing somebody else’s money.
+            That is more than the firm may draw now. The rest is either somebody else’s money or the firm’s share of money its clients have not yet been paid.
           </p>
         )}
         <FormField label="Which transfer this is" required>

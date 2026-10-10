@@ -332,10 +332,12 @@ ok('drawing asks for the trust capability', /has_capability\('finance\.view'\)/.
 ok('...rather than naming the role', !/current_user_role\(\)/.test(draw ?? ''))
 /* THE COMPARISON, NOT THE MESSAGE. Asserted on the wording first, which passed happily with the
    test replaced by `if false` -- the sentence sat there unreachable inside a dead branch. */
-ok('...and refuses to overdraw', /if p_amount > v_held then/.test(draw ?? ''))
+ok('...and refuses to overdraw', /if p_amount > coalesce\(v_drawable, 0\) then/.test(draw ?? ''))
 ok('...saying so in the firm\u2019s terms', /Drawing more than is earned is a trust shortfall/.test(draw ?? ''))
-ok('...measured against what the firm actually holds',
-  /select coalesce\(sum\(amount\), 0\) into v_held[\s\S]{0,160}where party = 'firm'/.test(draw ?? ''))
+/* MEASURED AGAINST WHAT THE FIRM HOLDS AND ITS CLIENTS HAVE BEEN PAID FOR (the firm, 10 Oct) --
+   firm_trust_split, which check-firm-drawable holds. */
+ok('...measured against what the firm actually holds, and may draw',
+  /select s\.held, s\.drawable into v_held, v_drawable from public\.firm_trust_split\(p_company\) s;/.test(draw ?? ''))
 ok('...and says which transfer it was', /Say which transfer this is/.test(draw ?? ''))
 
 /*

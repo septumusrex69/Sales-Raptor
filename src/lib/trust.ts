@@ -148,6 +148,27 @@ export async function fetchTrustPosition(): Promise<TrustPosition | null> {
 }
 
 /**
+ * WHAT THE FIRM MAY DRAW, AND WHAT WAITS (the firm, 10 Oct: "Bredell Ferreira can only claim its part
+ * of the trust money once the client has been paid").
+ *
+ * `held` is the firm's whole balance on the trust ledger -- owed_to_firm, unchanged. `drawable` is the
+ * part whose clients have been paid (or were owed nothing on their run), and the ceiling
+ * draw_from_trust holds a drawing to; `waiting` is the rest. Drawable can be below nil: a receipt
+ * reversed after its share was drawn is owed back before anything else is drawn.
+ *
+ * NULL WHERE THE FUNCTION REFUSED, for the reason fetchTrustPosition gives.
+ */
+export interface FirmTrustSplit { held: number; drawable: number; waiting: number }
+
+export async function fetchFirmTrustSplit(): Promise<FirmTrustSplit | null> {
+  const { data, error } = await supabase.rpc('firm_trust_split')
+  if (error) throw new Error(error.message)
+  const row = (data as Record<string, unknown>[] | null)?.[0]
+  if (!row) return null
+  return { held: n(row.held), drawable: n(row.drawable), waiting: n(row.waiting) }
+}
+
+/**
  * A DEBIT OFF THE TRUST STATEMENT WITH NO PAYOVER RUN BEHIND IT.
  *
  * This is the half of the difference that can be explained by pointing at a row. The firm's own

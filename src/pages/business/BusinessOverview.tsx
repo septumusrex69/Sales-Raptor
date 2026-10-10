@@ -5,7 +5,7 @@ import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { Link } from 'react-router-dom'
 import { fetchClientBalances, type ClientBalance } from '../../lib/business'
-import { fetchTrustPosition, type TrustPosition } from '../../lib/trust'
+import { fetchFirmTrustSplit, fetchTrustPosition, type FirmTrustSplit, type TrustPosition } from '../../lib/trust'
 import { monthBounds, monthLabel, thisMonth, trustBankCostsState, type BusinessMonth, type TrustBankCosts } from '../../lib/businessMonth'
 import { fetchBusinessMonth, fetchTrustBankCosts } from '../../lib/businessApi'
 import { clockNow } from '../../lib/clock.ts'
@@ -29,6 +29,7 @@ export function BusinessOverview() {
   const [trust, setTrust] = useState<TrustPosition | null>(null)
   const [month, setMonth] = useState<BusinessMonth | null>(null)
   const [bank, setBank] = useState<TrustBankCosts | null>(null)
+  const [split, setSplit] = useState<FirmTrustSplit | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,8 +42,10 @@ export function BusinessOverview() {
          charges together. It read charges only, so a client owing R26 000 in PTC fees was absent. */
       fetchClientBalances().then((b) => b.filter((x) => x.net < 0)), fetchTrustPosition(), fetchBusinessMonth(b.from, b.to),
       /* A reconciliation beside the month, not part of its arithmetic: unreadable, it is not drawn. */
-      fetchTrustBankCosts(b.from, b.to).catch(() => null)])
-      .then(([d, t, m, k]) => { if (live) { setDebts(d); setTrust(t); setMonth(m); setBank(k) } })
+      fetchTrustBankCosts(b.from, b.to).catch(() => null),
+      /* What of it may be drawn now -- only what its clients have been paid for (the firm, 10 Oct). */
+      fetchFirmTrustSplit().catch(() => null)])
+      .then(([d, t, m, k, f]) => { if (live) { setDebts(d); setTrust(t); setMonth(m); setBank(k); setSplit(f) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -81,6 +84,11 @@ export function BusinessOverview() {
           <div className="text-3xl font-medium tabular-nums leading-none">
             {rand(trust?.owedToFirm ?? 0)}
           </div>
+          {split && split.waiting > 0.004 && (
+            <div className="text-[12px] text-positive-100 mt-2" data-testid="firm-drawable-now">
+              {rand(Math.max(split.drawable, 0))} may be drawn now; {rand(split.waiting)} waits until its clients are paid
+            </div>
+          )}
         </div>
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-positive-100 mb-1.5">
