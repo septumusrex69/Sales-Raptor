@@ -772,6 +772,10 @@ export interface ImportOutcome {
   notes: number
   /** A reference naming more than one account. Left for a person rather than guessed between. */
   ambiguous: number
+  /** Payments out matched to their payover run by the BF PO- reference, straight after the import. */
+  payoversMatched?: number
+  /** Debits that named a run and were NOT matched -- a different amount, or a run not open to it. */
+  payoverNotes?: string[]
 }
 
 /** A receipt in the trust account that nobody has placed against a debtor yet. */

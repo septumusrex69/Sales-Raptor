@@ -55,3 +55,17 @@ export async function markRefundPaid(refundId: string, reference: string, paidAt
   const { error } = await supabase.rpc('mark_refund_paid', { p_refund: refundId, p_reference: reference, p_paid_at: paidAt })
   if (error) throw new Error(error.message)
 }
+
+/** What matching payovers by their BF PO- reference did (match_payovers_by_reference). */
+export interface ReferenceMatch { matched: number; differs: number; notes: string[] }
+
+/**
+ * MATCH EVERY UNALLOCATED DEBIT THAT NAMES A PAYOVER RUN, BY ITS REFERENCE FIRST (the firm, 10 Oct).
+ * Only where the amount is the run's to the cent; anything else is reported and left for a person.
+ */
+export async function matchPayoversByReference(): Promise<ReferenceMatch> {
+  const { data, error } = await supabase.rpc('match_payovers_by_reference')
+  if (error) throw new Error(error.message)
+  const r = ((Array.isArray(data) ? data[0] : data) ?? {}) as { matched?: number; differs?: number; notes?: string[] }
+  return { matched: Number(r.matched ?? 0), differs: Number(r.differs ?? 0), notes: r.notes ?? [] }
+}

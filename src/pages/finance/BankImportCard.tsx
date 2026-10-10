@@ -3,6 +3,7 @@ import { AlertTriangle, Banknote, Check, ChevronRight, FileUp, Loader2, Upload }
 import { Card, CardHeader } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { parseBankStatement, summarise, type BankStatement } from '../../lib/bankStatement'
+import { matchPayoversByReference } from '../../lib/bankAllocationApi'
 import {
   importBankLines, fetchBankImportHistory,
   type ImportOutcome, type BankImportHistory,
@@ -75,6 +76,19 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
         bankAccountLabel: statement.accountLabel,
         lines: statement.lines,
       })
+      /*
+       * PAYOVERS BY THEIR REFERENCE, STRAIGHT AWAY (the firm, 10 Oct). A payment out carrying
+       * "BF PO-..." at the run's exact amount is that run's; matching it here is what makes the run
+       * "on the statement" without anybody opening Exceptions. A failure here loses only the
+       * convenience -- the lines are in, and Exceptions can match them.
+       */
+      if (result.debits > 0) {
+        try {
+          const m = await matchPayoversByReference()
+          result.payoversMatched = m.matched
+          result.payoverNotes = m.notes
+        } catch { /* left for Exceptions */ }
+      }
       setOutcome(result)
       setStatement(null)
       if (fileRef.current) fileRef.current.value = ''
@@ -185,7 +199,17 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
             {outcome.duplicates > 0 && (
               <li>{outcome.duplicates.toLocaleString('en-ZA')} lines were already imported and were left alone.</li>
             )}
-            {outcome.debits > 0 && <li>{outcome.debits.toLocaleString('en-ZA')} payments out are waiting under Exceptions to be allocated.</li>}
+            {(outcome.payoversMatched ?? 0) > 0 && (
+              <li data-testid="payovers-matched">
+                {outcome.payoversMatched} payover{outcome.payoversMatched === 1 ? '' : 's'} matched to {outcome.payoversMatched === 1 ? 'its run' : 'their runs'} by the BF PO reference.
+              </li>
+            )}
+            {(outcome.payoverNotes ?? []).map((n) => (
+              <li key={n} className="text-amber-800">Not matched: {n}</li>
+            ))}
+            {outcome.debits - (outcome.payoversMatched ?? 0) > 0 && (
+              <li>{(outcome.debits - (outcome.payoversMatched ?? 0)).toLocaleString('en-ZA')} payments out are waiting under Exceptions to be allocated.</li>
+            )}
             {/* AMBIGUOUS IS ITS OWN LINE: it needs a decision rather than a search -- the reference
                 matched more than one account, and both look right. */}
             {outcome.ambiguous > 0 && (

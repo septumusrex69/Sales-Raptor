@@ -10,7 +10,9 @@ import {
   KIND_LABEL, KIND_NOTE, candidatesFor, kindsFor, needsReason, needsTarget, suggestAllocation,
   type AllocationKind, type Candidate, type StatementLine,
 } from '../../lib/bankLineAllocation'
-import { allocateBankLine, fetchAllocationCandidates, fetchLinesToAllocate } from '../../lib/bankAllocationApi'
+import {
+  allocateBankLine, fetchAllocationCandidates, fetchLinesToAllocate, matchPayoversByReference,
+} from '../../lib/bankAllocationApi'
 
 /**
  * EVERY LINE ON THE TRUST STATEMENT THAT IS NOT YET ACCOUNTED FOR (prompt 12).
@@ -35,6 +37,8 @@ export function BankLinesToAllocate() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [business, setBusiness] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [matching, setMatching] = useState(false)
+  const [matchNote, setMatchNote] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -59,6 +63,27 @@ export function BankLinesToAllocate() {
   }
   const out = lines.filter((l) => l.direction === 'debit')
   const inn = lines.filter((l) => l.direction === 'credit')
+  /* Debits that name a run (BF PO-...) -- the ones "Match by reference" can settle. */
+  const naming = out.filter((l) => /PO-[A-Z0-9]+-\d{4}/i.test(`${l.reference ?? ''} ${l.description}`)).length
+
+  /*
+   * MATCH PAYOVERS BY THEIR REFERENCE FIRST (the firm, 10 Oct). The import already does this; the
+   * button is for a run approved AFTER its statement was imported, and for anybody who wants to see
+   * it happen. Only the exact amount is matched; the rest is said, and stays here for a person.
+   */
+  async function matchByReference() {
+    setMatching(true); setMatchNote(null); setError(null)
+    try {
+      const m = await matchPayoversByReference()
+      setMatchNote([
+        `${m.matched} payover${m.matched === 1 ? '' : 's'} matched by the BF PO reference.`,
+        ...m.notes.map((n) => `Not matched: ${n}`),
+      ].join(' '))
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not match by reference.')
+    } finally { setMatching(false) }
+  }
 
   return (
     <Card className="p-0 overflow-hidden" >
@@ -73,6 +98,17 @@ export function BankLinesToAllocate() {
               + `${rand(inn.reduce((s, l) => s + l.amount, 0))} in. The trust ledger does not balance against the bank until each one is allocated.`}
         </p>
       </div>
+      {naming > 0 && (
+        <div className="px-4 py-2 border-b border-slate-100 flex flex-wrap items-center gap-2 text-[12.5px]">
+          <button type="button" disabled={matching} onClick={() => void matchByReference()}
+            data-testid="match-by-reference"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            {matching && <Loader2 size={12} className="animate-spin" />} Match {naming} payover{naming === 1 ? '' : 's'} by reference
+          </button>
+          <span className="text-slate-500">A payment out carrying BF PO-… at the run’s exact amount settles that run.</span>
+        </div>
+      )}
+      {matchNote && <p className="px-4 py-2 text-[12.5px] text-slate-600" data-testid="match-note">{matchNote}</p>}
       {error && <p className="px-4 py-3 text-sm text-negative-700">{error}</p>}
       <div className="divide-y divide-slate-100">
         {lines.map((l) => (

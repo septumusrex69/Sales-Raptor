@@ -38272,3 +38272,66 @@ begin
 
   return next;
 end $$;
+
+-- -----------------------------------------------------------------------------------------------------
+-- A PAYOVER IS MATCHED FROM THE STATEMENT BY ITS REFERENCE FIRST (the firm, 10 Oct: "from the bank
+-- statement ... allocate a specific payment made to a client ... linking it from the reference number to
+-- the payover"; asked to go ahead the same day). Every payover goes out as "BF PO-<code>-<yymm>"
+-- (payment_out_reference), so a debit whose reference or description carries a run number is that run's
+-- -- PROVIDED the amount is the run's to the cent. A debit naming a run with a different amount, a run not
+-- yet approved, or one already on the statement is NOT matched: it is reported, and stays on Trust ->
+-- Exceptions for a person, because a wrong match marks a client paid who was not. The import runs this
+-- straight after the lines land; Exceptions can run it again.
+-- -----------------------------------------------------------------------------------------------------
+create or replace function public.payover_number_in(p_text text) returns text
+language sql immutable set search_path to 'public' as $$
+  select substring(upper(coalesce(p_text, '')) from 'PO-[A-Z0-9]+-[0-9]{4}(?:-[0-9]+)?')
+$$;
+
+create or replace function public.match_payovers_by_reference()
+returns table (matched integer, differs integer, notes text[])
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  l record;
+  v_run public.payover_runs%rowtype;
+  v_no text;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to reconcile.' using errcode = '42501';
+  end if;
+  matched := 0; differs := 0; notes := '{}';
+  for l in
+    select * from public.bank_statement_lines
+     where direction = 'debit' and allocation_kind is null and payover_run_id is null
+       and status = 'unallocated'
+     order by txn_date, id
+  loop
+    v_no := public.payover_number_in(coalesce(l.reference, '') || ' ' || coalesce(l.description, ''));
+    continue when v_no is null;
+    select * into v_run from public.payover_runs where invoice_number = v_no;
+    if not found then
+      differs := differs + 1;
+      notes := notes || (to_char(l.txn_date, 'DD Mon') || ': names ' || v_no || ', which is not a payover run.');
+      continue;
+    end if;
+    if v_run.status not in ('approved', 'sent', 'paid')
+       or exists (select 1 from public.bank_statement_lines x where x.payover_run_id = v_run.id) then
+      differs := differs + 1;
+      notes := notes || (to_char(l.txn_date, 'DD Mon') || ': names ' || v_no || ', which is '
+        || case when v_run.status in ('approved', 'sent', 'paid') then 'already on the statement' else v_run.status end || '.');
+      continue;
+    end if;
+    if round(abs(l.amount), 2) <> round(v_run.net_payover, 2) then
+      differs := differs + 1;
+      notes := notes || (to_char(l.txn_date, 'DD Mon') || ': names ' || v_no || ' but paid R '
+        || to_char(abs(l.amount), 'FM999999990.00') || ' against R ' || to_char(v_run.net_payover, 'FM999999990.00') || '.');
+      continue;
+    end if;
+    perform public.allocate_bank_line(l.id, 'payover', null, v_run.id);
+    matched := matched + 1;
+  end loop;
+  return next;
+end $$;
+
+revoke all on function public.match_payovers_by_reference() from public, anon;
+grant execute on function public.match_payovers_by_reference() to authenticated;
