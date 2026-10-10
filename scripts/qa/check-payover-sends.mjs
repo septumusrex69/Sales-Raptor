@@ -96,6 +96,9 @@ const company = strip(read('src/pages/companies/CompanyDetail.tsx'))
 ok('the client record has a Payovers tab, for who may see trust only',
   /canViewTrust\(currentUser\) \? \[\{ id: 'Payovers' as const, label: 'Payovers' \}\] : \[\]/.test(company)
   && /<ClientPayoversPanel companyId=\{company\.id\} \/>/.test(company))
+/* The firm, 10 Oct: the Payovers tab is the last one. */
+ok('...and it is the last tab', company.indexOf("id: 'Payovers' as const") > company.indexOf("{ id: 'Tasks', label: 'Tasks'")
+  && company.indexOf("{ id: 'Tasks', label: 'Tasks'") > 0)
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payover-sends: ${pass} passed, ${failures.length} failed`)
