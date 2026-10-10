@@ -1392,6 +1392,17 @@ export async function reversePayment(paymentId: string, reason: string): Promise
 }
 
 /**
+ * REVERSE TO "NEEDS AN ACCOUNT" (the firm, 10 Oct: a payment on the wrong reference). The receipt
+ * is reversed and its statement line goes back on the unplaced list, to be put on the right
+ * debtor; no copy waits in the queue. Only for a receipt that came off a statement --
+ * `reverse_payment_to_unplaced` refuses one recorded by hand, saying what to do instead.
+ */
+export async function reversePaymentToUnplaced(paymentId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('reverse_payment_to_unplaced', { p_payment: paymentId, p_reason: reason })
+  if (error) throw new Error(error.message)
+}
+
+/**
  * PUTTING AN UNAPPROVED RECEIPT ON THE RIGHT DEBTOR.
  *
  * The firm, asked what the approval queue may change: the account only. Which debtor it goes on is

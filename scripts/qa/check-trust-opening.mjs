@@ -85,16 +85,20 @@ ok('...and the trigger is on firm_settings, before update',
 /* The e2e fixture: 6 910.10 in the bank, ledger 7 873.60 of which 485.00 unplaced, 963.50 short. */
 check('the fixture: in, accounted, not, and what "not" is made of',
   trustHeadline({ trustCash: 6910.10, owners: 7388.60, unidentified: 485, difference: -963.50 }),
-  { inTrust: 6910.1, accounted: 7388.6, notAccounted: -478.5, unplaced: 485, gap: -963.5, residual: 0 })
+  { inTrust: 6910.1, accounted: 7388.6, notAccounted: -478.5, unplaced: 485, awaiting: 0, gap: -963.5, otherGap: -963.5, residual: 0 })
 /* Staging on 10 Oct, before and after the opening balance: owners 33 018.38, 950 unplaced. */
 check('staging without an opening: the gap is the money before the first statement',
   trustHeadline({ trustCash: 18947.34, owners: 33018.38, unidentified: 950, difference: -15021.04 }),
-  { inTrust: 18947.34, accounted: 33018.38, notAccounted: -14071.04, unplaced: 950, gap: -15021.04, residual: 0 })
+  { inTrust: 18947.34, accounted: 33018.38, notAccounted: -14071.04, unplaced: 950, awaiting: 0, gap: -15021.04, otherGap: -15021.04, residual: 0 })
 check('...with R15 021.04 at 7 Oct captured: only the unplaced receipts are left',
   trustHeadline({ trustCash: 33968.38, owners: 33018.38, unidentified: 950, difference: 0 }),
-  { inTrust: 33968.38, accounted: 33018.38, notAccounted: 950, unplaced: 950, gap: 0, residual: 0 })
+  { inTrust: 33968.38, accounted: 33018.38, notAccounted: 950, unplaced: 950, awaiting: 0, gap: 0, otherGap: 0, residual: 0 })
 /* THE SCREEN CAN STILL SAY "THIS DOES NOT ADD UP": owners that disagree with trust_position show
    as a residual, not folded into either named part. */
+/* A receipt waiting for approval is in the bank and on no ledger line: named, out of the gap. */
+check('waiting for approval comes out of the bank/ledger gap, by name',
+  trustHeadline({ trustCash: 1800, owners: 1000, unidentified: 0, difference: 800, awaiting: 800 }),
+  { inTrust: 1800, accounted: 1000, notAccounted: 800, unplaced: 0, awaiting: 800, gap: 800, otherGap: 0, residual: 0 })
 check('owners that disagree with the position leave a residual',
   trustHeadline({ trustCash: 1000, owners: 900, unidentified: 50, difference: 0 }).residual, 50)
 check('cents are rounded, not floated', trustHeadline({ trustCash: 0.3, owners: 0.1, unidentified: 0.2, difference: 0 }).residual, 0)

@@ -32960,3 +32960,227 @@ as $$
     from firm f, held h, charges c, owing o, spent s
    where public.has_capability('business.view')
 $$;
+
+-- ============================================================================================
+-- A REVERSAL TAKES BACK AN INVOICED SPLIT ON THE TRUST LEDGER TOO (10 Oct). See the comment in
+-- the function. Probed on staging, rolled back: PO-KFH-2610 paid, R5 550 reversed -> client -2 416.29,
+-- firm -3 133.71; the copy approved again -> both back; the next run nets reversal + new split to R0.00.
+-- ============================================================================================
+create or replace function public.reverse_payment_allocation() returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.reversed_at is null or old.reversed_at is not null then return new; end if;
+
+  update public.account_fees
+     set cancelled_at = now(),
+         cancel_reason = coalesce(new.reversal_reason, 'The payment was reversed')
+   where payment_id = new.id and annexure_item = '9' and source = 'raptor' and cancelled_at is null;
+
+  /* The invoiced part, which the replay below will not touch. */
+  update public.debtor_accounts d
+     set capital_outstanding = coalesce(d.capital_outstanding, 0) + x.cap
+    from (select a.account_id, sum(a.to_capital) as cap
+            from public.payment_allocations a
+           where a.payment_id = new.id
+             and a.status <> 'reversed'
+             and public.allocation_is_invoiced(a.payover_run_id)
+           group by a.account_id) x
+   where d.id = x.account_id;
+
+  /* THE TRUST LEDGER TAKES BACK AN INVOICED SPLIT TOO (10 Oct). Every entry the allocation wrote
+     -- the client's share, the firm's fees, a debtor's credit, a released overpayment -- answered
+     by its opposite, exactly as reallocate_account does for the un-invoiced ones it removes. The
+     client then owes back what it was paid from this receipt (set off by the reversal line on
+     its next run), and the firm gives back fees it earned on money that was not this debtor's.
+     Without this the ledger kept the client square while the next run took the money back, and a
+     copy approved again on the same account credited -- and paid -- the client a second time. */
+  insert into public.trust_creditor_entries (party, company_id, account_id, amount, reason, payment_id, allocation_id)
+  select e.party, e.company_id, e.account_id, -e.amount, 'Payment reversed: ' || e.reason,
+         e.payment_id, e.allocation_id
+    from public.trust_creditor_entries e
+    join public.payment_allocations a on a.id = e.allocation_id
+   where a.payment_id = new.id
+     and a.status <> 'reversed'
+     and public.allocation_is_invoiced(a.payover_run_id);
+
+  /* MARKED, NOT DELETED, WHERE IT IS ALREADY IN AN APPROVED RUN: the invoice stands and the
+     correction is a negative line in the next one. reallocate_account leaves those rows be. */
+  update public.payment_allocations
+     set status = 'reversed'
+   where payment_id = new.id;
+
+  perform public.reallocate_account(new.account_id);
+  return new;
+end $$;
+
+-- ============================================================================================
+-- REVERSE TO "NEEDS AN ACCOUNT" (10 Oct). The firm, of a payment on the wrong reference: "it
+-- needs to be allocated to somewhere, but in the in-between state it should say something else."
+-- reverse_payment hands an approved receipt back to the approval queue ON THE SAME ACCOUNT; this
+-- sends it back to the statement's unplaced receipts instead, in one step: reverse, then reject
+-- the copy with its line released (reject_payment's own path, p_not_a_receipt = false). Only a
+-- receipt that came off a statement has a line to release; one recorded by hand is reversed to
+-- the queue and rejected there.
+-- ============================================================================================
+create or replace function public.reverse_payment_to_unplaced(p_payment uuid, p_reason text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_line uuid;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') or not public.may_approve_payment() then
+    raise exception 'You are not allowed to reverse a payment and put it back unplaced.' using errcode = '42501';
+  end if;
+  select bank_line_id into v_line from public.account_payments where id = p_payment;
+  if v_line is null then
+    raise exception 'This payment was recorded by hand, so there is no statement line to put back. Reverse it to the approval queue and reject it there.'
+      using errcode = '22023';
+  end if;
+  v_copy := public.reverse_payment(p_payment, p_reason);
+  if v_copy is not null then
+    perform public.reject_payment(v_copy, 'Reversed to Needs an account: ' || btrim(p_reason), false);
+  end if;
+end $$;
+revoke all on function public.reverse_payment_to_unplaced(uuid, text) from public, anon;
+grant execute on function public.reverse_payment_to_unplaced(uuid, text) to authenticated;
+
+-- A REVERSED RECEIPT'S LINE CAN GO BACK UNPLACED (10 Oct) -- see reverse_payment_to_unplaced.
+create or replace function public.protect_bank_statement_line()
+returns trigger
+language plpgsql
+set search_path to 'public'
+as $$
+begin
+  new.bank_account := old.bank_account;
+  new.line_key := old.line_key;
+  new.txn_date := old.txn_date;
+  new.amount := old.amount;
+  new.balance := old.balance;
+  new.description := old.description;
+  new.direction := old.direction;
+  new.imported_at := old.imported_at;
+  new.imported_by := old.imported_by;
+  -- A PAYMENT ONCE MADE IS NOT UNMADE FROM HERE. Reversing a receipt is what FinancePayments
+  -- does, through the ledger, with a reason written on it.
+  --
+  -- EXCEPT WHERE THE PAYMENT WAS REJECTED, which is the one case where nothing was ever made.
+  -- The firm: "there are no way to reject payments that are imported... I do not want to approve
+  -- them." A rejected receipt never reached allocate_payment, never moved a balance and never
+  -- reached a payover run -- so there is no ledger to reverse it through, and leaving the line
+  -- pointing at it would keep the money claimed by a payment nobody is going to make. The line
+  -- has to go back on the unallocated list to be placed properly, and it cannot while it is held.
+  --
+  -- NARROW ON PURPOSE, AND IT ASKS THE PAYMENT RATHER THAN TRUSTING THE CALLER: only a clearing
+  -- (new.payment_id is null), and only where that payment really carries a rejection. Anything
+  -- else -- a different payment, a half-written one, an approved one -- is refused exactly as
+  -- before.
+  --
+  -- AND WHERE IT WAS REVERSED AND NOTHING LIVE HOLDS THE LINE (10 Oct): reverse_payment_to_unplaced
+  -- reverses the approved receipt (its ledger answered by counter-entries) and rejects the copy,
+  -- and the line still names the ORIGINAL. Cleared only when no payment on the line is neither
+  -- reversed nor rejected -- otherwise the money is still claimed.
+  if old.payment_id is not null
+     and not (new.payment_id is null
+              and (exists (select 1 from public.account_payments p
+                            where p.id = old.payment_id and p.rejected_at is not null)
+                   or (exists (select 1 from public.account_payments p
+                                where p.id = old.payment_id and p.reversed_at is not null)
+                       and not exists (select 1 from public.account_payments s
+                                        where s.bank_line_id = old.id
+                                          and s.reversed_at is null and s.rejected_at is null))))
+  then
+    new.payment_id := old.payment_id;
+    new.account_id := old.account_id;
+  end if;
+  -- PROMPT 12: WHAT A LINE WAS SAID TO BE, ONCE SAID, STAYS SAID. It wrote a ledger entry, and the
+  -- ledger is append-only; a wrong allocation is answered with a counter-entry, not a rewrite.
+  if old.allocation_kind is not null then
+    new.allocation_kind := old.allocation_kind;
+    new.allocation_reason := old.allocation_reason;
+    new.trust_entry_id := old.trust_entry_id;
+    new.allocated_at := old.allocated_at;
+    new.allocated_by := old.allocated_by;
+  end if;
+  return new;
+end
+$$;
+
+-- ============================================================================================
+-- MONEY IN THE BANK, WAITING FOR APPROVAL (10 Oct). The firm, of a reversed R800 back in the
+-- queue: "in the in-between state it should say something else." A receipt that came off the
+-- trust statement and has not been approved is in the bank and on no ledger line, so the Trust
+-- overview could only show it as bank/ledger difference. This names it: placed statement lines
+-- whose payment is neither approved, reversed nor rejected. Only lines on the trust account, and
+-- only lines after the opening balance's day (the ones before are inside the opening figure).
+-- ============================================================================================
+create or replace function public.trust_awaiting_approval()
+returns table(amount numeric, payments integer)
+language sql stable security definer set search_path to 'public'
+as $$
+  select coalesce(sum(p.amount), 0), count(*)::integer
+    from public.account_payments p
+    join public.bank_statement_lines l on l.id = p.bank_line_id
+    join public.firm_settings f on true
+   where l.bank_account = f.trust_account_number
+     and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+     and p.approved_at is null and p.reversed_at is null and p.rejected_at is null
+     and not p.paid_to_client and not p.is_demo
+  having public.has_capability('finance.view')
+$$;
+revoke all on function public.trust_awaiting_approval() from public, anon;
+grant execute on function public.trust_awaiting_approval() to authenticated;
+
+-- THE REVOKE LIST, RESTATED WITH reverse_payment_to_unplaced (10 Oct).
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

@@ -179,7 +179,8 @@ ok('the library reads the three back', /cameBackFrom: s\(r\.came_back_from\)/.te
 ok('the screen marks a returned receipt', /Came back/.test(screen))
 ok('...and tints the row so it is not approved unread', /problems\.length > 0 \|\| r\.cameBackFrom \? 'bg-amber-50'/.test(screen))
 /* SAID BEFORE IT IS PRESSED, on the box that does it. */
-ok('the reverse box says where the money goes', /comes back to <strong[\s\S]{0,60}?Payments in/.test(modal))
+/* Since 10 Oct it ASKS where: back to the queue on Payments in, or back to Needs an account. */
+ok('the reverse box says where the money goes', /waits\s+on Payments in as/.test(modal) && /Where does the money go\?/.test(modal))
 
 /* ---------------- correcting the debtor, and only the debtor ---------------- */
 
@@ -243,6 +244,48 @@ ok('...and only for what the replay redoes (never an invoiced allocation)',
 const fkGone = sql.lastIndexOf('drop constraint if exists trust_creditor_entries_allocation_id_fkey')
 const fkAdded = sql.lastIndexOf('trust_creditor_entries_allocation_id_fkey foreign key')
 ok('the ledger no longer refuses the removal through a foreign key', fkGone > 0 && fkGone > fkAdded)
+
+/* ==================== 10 Oct: where a reversed receipt goes, and the in-between state ==================== */
+{
+  const stripC = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '')
+  const fnBody = (name) => {
+    const at = sql.lastIndexOf(`create or replace function public.${name}(`)
+    if (at < 0) return ''
+    const m = /\bas \$(\w*)\$([\s\S]*?)\$\1\$/.exec(sql.slice(at))
+    return stripC(m?.[2] ?? '')
+  }
+  /* 1. A PAID-OVER RECEIPT'S SPLIT IS TAKEN BACK ON THE LEDGER. */
+  const trig = fnBody('reverse_payment_allocation')
+  const neg = trig.indexOf('-e.amount')
+  ok('reversing an invoiced split writes its opposite on the trust ledger', neg > 0
+    && /'Payment reversed: ' \|\| e\.reason/.test(trig)
+    && /public\.allocation_is_invoiced\(a\.payover_run_id\)/.test(trig.slice(neg)))
+  ok('...before the allocation is marked reversed (or nothing would match)',
+    neg > 0 && neg < trig.indexOf("set status = 'reversed'"))
+  /* 2. BACK TO NEEDS AN ACCOUNT. */
+  const un = fnBody('reverse_payment_to_unplaced')
+  ok('reversing to Needs an account reverses, then rejects the copy with its line released',
+    /public\.reverse_payment\(p_payment, p_reason\)/.test(un) && /public\.reject_payment\(v_copy, [^;]*, false\)/.test(un))
+  ok('...only for a receipt off a statement', /if v_line is null then\s*raise exception 'This payment was recorded by hand/.test(un))
+  ok('...asking both the reverse and the approve rights',
+    /has_capability\('payment\.reverse'\)/.test(un) && /may_approve_payment\(\)/.test(un))
+  ok('...revoked from public and anon', sql.includes('revoke all on function public.reverse_payment_to_unplaced(uuid, text) from public, anon;'))
+  const protect = fnBody('protect_bank_statement_line')
+  ok('a reversed receipt\'s line may be cleared only when nothing live holds it',
+    /p\.reversed_at is not null/.test(protect)
+    && /s\.bank_line_id = old\.id\s+and s\.reversed_at is null and s\.rejected_at is null/.test(protect))
+  /* 3. THE IN-BETWEEN STATE IS NAMED. */
+  const aw = fnBody('trust_awaiting_approval')
+  ok('waiting for approval is a placed trust line whose payment is not approved, reversed or rejected',
+    /l\.bank_account = f\.trust_account_number/.test(aw)
+    && /p\.approved_at is null and p\.reversed_at is null and p\.rejected_at is null/.test(aw)
+    && /having public\.has_capability\('finance\.view'\)/.test(aw))
+  const page = stripC(read('src/pages/trust/TrustOverview.tsx'))
+  ok('the overview names it under Not accounted for', /who="Waiting for approval"/.test(page) && /awaiting: awaiting\?\.amount \?\? 0/.test(page))
+  const box = read('src/pages/finance/CheckPayments.tsx')
+  ok('Reverse asks where the money goes', /Back to the approval queue/.test(box) && /Back to Needs an account/.test(box)
+    && /reversePaymentToUnplaced\(row\.paymentId, reason\.trim\(\)\)/.test(box))
+}
 
 console.log(`\ncheck-reversal-returns: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

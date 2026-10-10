@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import clsx from 'clsx'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
@@ -10,7 +11,7 @@ import { accountRate } from '../../lib/commissionRule'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import {
-  fetchPostedPayments, postedAllocation, reversePayment, type PostedPayment,
+  fetchPostedPayments, postedAllocation, reversePayment, reversePaymentToUnplaced, type PostedPayment,
 } from '../../lib/payover'
 import { checkAllocation, feesSideTaking, type Violation } from '../../lib/allocationRules'
 import {
@@ -277,6 +278,13 @@ function ReverseModal({ row, onClose, onDone }: { row: PostedPayment; onClose: (
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * WHERE IT GOES (the firm, 10 Oct): back to the approval queue on this debtor (the figures were
+   * wrong -- or move it to the right debtor there), or back to Needs an account (the wrong
+   * reference -- it is somebody else's money). Only a receipt off a statement has a line to put back.
+   */
+  const fromStatement = row.bankDescription !== null
+  const [to, setTo] = useState<'queue' | 'unplaced'>('queue')
   /* ALREADY ON A RUN: the invoice that carried it is not touched -- see below. */
   const invoiced = Boolean(row.runInvoice)
   return (
@@ -293,15 +301,42 @@ function ReverseModal({ row, onClose, onDone }: { row: PostedPayment; onClose: (
           difference between a reversal that loses the receipt and one that hands it back to be
           redone, and nobody should have to find that out by looking afterwards.
         */}
+        <div className="space-y-2" data-testid="reverse-to">
+          <div className="text-xs font-medium text-slate-600">Where does the money go?</div>
+          <label className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[13px] text-slate-700">
+            <input type="radio" className="mt-1" checked={to === 'queue'} onChange={() => setTo('queue')} />
+            <span>
+              <span className="font-medium">Back to the approval queue</span>
+              <span className="block text-xs text-slate-500">
+                The figures were wrong, or it belongs on another of this debtor&rsquo;s files. It waits
+                on Payments in as {rand(row.amount)} to be moved or approved again.
+              </span>
+            </span>
+          </label>
+          <label className={clsx('flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[13px]',
+            fromStatement ? 'text-slate-700' : 'text-slate-400')}>
+            <input type="radio" className="mt-1" disabled={!fromStatement} checked={to === 'unplaced'}
+              onChange={() => setTo('unplaced')} data-testid="reverse-to-unplaced" />
+            <span>
+              <span className="font-medium">Back to Needs an account</span>
+              <span className="block text-xs text-slate-500">
+                {fromStatement
+                  ? 'The wrong reference: it is somebody else\u2019s money. The statement line goes back to be placed on the right debtor.'
+                  : 'Only for a receipt off a bank statement. This one was recorded by hand: send it to the queue and reject it there.'}
+              </span>
+            </span>
+          </label>
+        </div>
         <p className="rounded-lg bg-brand-50 px-3 py-2 text-[13px] text-slate-700">
-          This receipt then comes back to <strong className="font-medium">Payments in</strong>{' '}
-          as {rand(row.amount)} still to be processed, so it can go on the right debtor and be
-          approved again. This reversal stays on the ledger with your reason on it.
+          Until it is approved or placed again, the Trust overview shows it under
+          {to === 'queue' ? ' Waiting for approval' : ' Unallocated receipts'}. This reversal stays on
+          the ledger with your reason on it.
         </p>
         {invoiced && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
-            This payment has already been paid over. The invoice that carried it is not touched —
-            the correction becomes a negative line in the client&rsquo;s next run.
+            This payment has already been paid over to the client. The client now owes back
+            what it was paid from it: that comes off their next payover as a negative line, and
+            Bredell Ferreira&rsquo;s fees on it are taken back.
           </p>
         )}
         <div>
@@ -321,7 +356,9 @@ function ReverseModal({ row, onClose, onDone }: { row: PostedPayment; onClose: (
           <button type="button" disabled={busy || !reason.trim()}
             onClick={() => {
               setBusy(true); setError(null)
-              void reversePayment(row.paymentId, reason.trim())
+              void (to === 'unplaced'
+                ? reversePaymentToUnplaced(row.paymentId, reason.trim())
+                : reversePayment(row.paymentId, reason.trim()))
                 .then(async () => { await onDone(); setBusy(false) })
                 .catch((e: unknown) => {
                   setError(e instanceof Error ? e.message : 'That payment could not be reversed.')

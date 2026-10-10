@@ -110,6 +110,18 @@ export async function setTrustOpening(amount: number, asAt: string, reason: stri
   if (error) throw new Error(error.message)
 }
 
+/**
+ * MONEY IN THE BANK WAITING FOR APPROVAL (trust_awaiting_approval): placed statement lines whose
+ * payment is not yet approved -- a new receipt, or one reversed back to the queue. In the bank
+ * and on no ledger line, so the overview names it rather than calling it a difference.
+ */
+export async function fetchTrustAwaiting(): Promise<{ amount: number; payments: number } | null> {
+  const { data, error } = await supabase.rpc('trust_awaiting_approval')
+  if (error) throw new Error(error.message)
+  const row = (data as Record<string, unknown>[] | null)?.[0]
+  return row ? { amount: n(row.amount), payments: n(row.payments) } : null
+}
+
 export async function fetchTrustPosition(): Promise<TrustPosition | null> {
   const { data, error } = await supabase.rpc('trust_position')
   if (error) throw new Error(error.message)

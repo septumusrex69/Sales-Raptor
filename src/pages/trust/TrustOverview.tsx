@@ -6,7 +6,7 @@ import { Card } from '../../components/ui/Card'
 import { unexplainedDebitAction } from '../../lib/bankLineAllocation'
 import { rand } from '../../lib/money'
 import {
-  fetchFirmHeld, fetchOverpaymentsKept, fetchTrustCycles, fetchTrustOpening, fetchTrustPosition,
+  fetchFirmHeld, fetchOverpaymentsKept, fetchTrustAwaiting, fetchTrustCycles, fetchTrustOpening, fetchTrustPosition,
   fetchUnreconciledPayouts,
   type TrustCycle, type TrustOpening, type TrustPosition, type UnreconciledPayout,
 } from '../../lib/trust'
@@ -58,6 +58,7 @@ export function TrustOverview() {
   const [firmHeld, setFirmHeld] = useState<FirmHeld | null>(null)
   const [kept, setKept] = useState<{ amount: number; accounts: number } | null>(null)
   const [opening, setOpening] = useState<TrustOpening | null>(null)
+  const [awaiting, setAwaiting] = useState<{ amount: number; payments: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -72,8 +73,10 @@ export function TrustOverview() {
       fetchOverpaymentsKept().catch(() => null),
       /* Only says where the bank figure starts; the figure itself is trust_position's. */
       fetchTrustOpening().catch(() => null),
+      /* Names part of the bank/ledger gap; unreadable, the gap is simply not split. */
+      fetchTrustAwaiting().catch(() => null),
     ])
-      .then(([p, u, c, f, k, o]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k); setOpening(o) } })
+      .then(([p, u, c, f, k, o, w]) => { if (live) { setPosition(p); setPayouts(u); setCycles(c); setFirmHeld(f); setKept(k); setOpening(o); setAwaiting(w) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -158,6 +161,7 @@ export function TrustOverview() {
   const head = trustHeadline({
     trustCash: position.trustCash, owners: accounted,
     unidentified: position.unidentified, difference: position.difference,
+    awaiting: awaiting?.amount ?? 0,
   })
   const openingSet = Boolean(opening?.asAt)
   const verdict = trustVerdict(checks)
@@ -211,14 +215,14 @@ export function TrustOverview() {
         </div>
         <div>
           <Figure label="Not accounted for" value={rand(head.notAccounted)}
-            tone={head.notAccounted === 0 ? undefined : head.gap < 0 ? 'text-negative-300' : 'text-amber-300'} />
+            tone={head.notAccounted === 0 ? undefined : head.otherGap < 0 ? 'text-negative-300' : 'text-amber-300'} />
           {/* THE VERDICT IS ON THE PANEL, not inferred from a zero: nobody should have to know
               that R 0.00 is the good answer. */}
           <div className={clsx('mt-2 text-xs font-semibold',
-            head.notAccounted === 0 && head.gap === 0 ? 'text-positive-100' : head.gap < 0 ? 'text-negative-300' : 'text-amber-300')}>
-            {head.notAccounted === 0 && head.gap === 0
+            head.notAccounted === 0 && head.otherGap === 0 ? 'text-positive-100' : head.otherGap < 0 ? 'text-negative-300' : 'text-amber-300')}>
+            {head.notAccounted === 0 && head.otherGap === 0
               ? 'Every rand has an owner'
-              : head.gap < 0 ? 'Bank holds less than the books owe' : 'Needs placing or explaining'}
+              : head.otherGap < 0 ? 'Bank holds less than the books owe' : 'Needs placing or explaining'}
           </div>
         </div>
       </div>
@@ -272,12 +276,22 @@ export function TrustOverview() {
             */}
             <div className="pt-4 text-xs font-bold uppercase tracking-wider text-slate-400">Not accounted for</div>
             <Owner who="Unallocated receipts" what="Owner not yet identified" amount={head.unplaced} />
-            {head.gap !== 0 && (
+            {/*
+              WAITING FOR APPROVAL (the firm, 10 Oct: a reversed R800 back in the queue -- "in the
+              in-between state it should say something else"). In the bank, placed on a debtor,
+              not yet split: named here rather than left inside the difference below.
+            */}
+            {head.awaiting !== 0 && (
+              <Owner who="Waiting for approval"
+                what={`${awaiting?.payments ?? 0} ${awaiting?.payments === 1 ? 'payment' : 'payments'} on Payments in, not yet split`}
+                amount={head.awaiting} />
+            )}
+            {head.otherGap !== 0 && (
               <Owner who="Bank / ledger difference"
-                what={head.gap < 0
+                what={head.otherGap < 0
                   ? (openingSet ? 'The bank holds less than the books owe' : 'The books owe more than the imported statements hold \u2014 capture the opening balance')
                   : 'In the bank, not yet in the books'}
-                amount={head.gap} />
+                amount={head.otherGap} />
             )}
             {head.residual !== 0 && (
               <Owner who="Unexplained" what="The parts above do not add up to the bank" amount={head.residual} />
@@ -309,7 +323,7 @@ export function TrustOverview() {
             <div className="mt-4 pt-4 border-t border-slate-200/70 flex items-baseline gap-4">
               <div className="flex-1 text-[15px] font-semibold text-slate-800">Not accounted for</div>
               <div className={clsx('text-2xl font-semibold tabular-nums',
-                head.notAccounted === 0 ? 'text-positive-700' : head.gap < 0 ? 'text-negative-700' : 'text-amber-700')}>
+                head.notAccounted === 0 ? 'text-positive-700' : head.otherGap < 0 ? 'text-negative-700' : 'text-amber-700')}>
                 {rand(head.notAccounted)}
               </div>
             </div>
@@ -318,7 +332,7 @@ export function TrustOverview() {
               cut-over day is captured, the bank figure is the imported statements alone and the gap
               is mostly what the account held before them.
             */}
-            {!openingSet && head.gap !== 0 && (
+            {!openingSet && head.otherGap !== 0 && (
               <p className="mt-3 text-[13px] text-slate-600" data-testid="no-opening">
                 No opening balance is captured, so the bank figure is only the statements imported
                 so far. <Link to="/trust/settings" className="font-medium text-gold-700 hover:text-gold-800">

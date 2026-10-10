@@ -275,8 +275,10 @@ ok('...including the description the debtor typed', /new\.description := old\.de
  * unlink, a swap to a different payment and a clearing of an approved one are all refused exactly
  * as before; only a null payment_id whose outgoing payment really carries a rejection gets through.
  */
+/* Since 10 Oct a reversed one may too, when nothing live holds the line (reverse_payment_to_unplaced;
+   held in check-reversal-returns) -- so the rejection is one arm of an `or`. */
 ok('a rejected payment may release its line',
-  /not \(new\.payment_id is null\s*and exists \(select 1 from public\.account_payments p\s*where p\.id = old\.payment_id and p\.rejected_at is not null\)\)/.test(guard))
+  /not \(new\.payment_id is null\s*and \(exists \(select 1 from public\.account_payments p\s*where p\.id = old\.payment_id and p\.rejected_at is not null\)/.test(guard))
 ok('...and anything else still cannot', /new\.payment_id := old\.payment_id;/.test(guard))
 
 /* ---------------- the four are not reachable by a stranger ---------------- */

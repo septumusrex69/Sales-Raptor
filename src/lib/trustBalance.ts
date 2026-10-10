@@ -216,7 +216,12 @@ export interface TrustHeadline {
   accounted: number
   notAccounted: number
   unplaced: number
+  /** Receipts in the bank waiting for approval (10 Oct) -- part of the bank/ledger gap, named. */
+  awaiting: number
+  /** The bank/ledger gap. */
   gap: number
+  /** The gap less what is waiting for approval: what nothing on the page explains yet. */
+  otherGap: number
   residual: number
 }
 
@@ -226,11 +231,16 @@ export function trustHeadline(input: {
   owners: number
   unidentified: number
   difference: number
+  awaiting?: number
 }): TrustHeadline {
   const inTrust = r2(input.trustCash)
   const accounted = r2(input.owners)
   const notAccounted = r2(inTrust - accounted)
   const unplaced = r2(input.unidentified)
   const gap = r2(input.difference)
-  return { inTrust, accounted, notAccounted, unplaced, gap, residual: r2(notAccounted - unplaced - gap) }
+  const awaiting = r2(input.awaiting ?? 0)
+  return {
+    inTrust, accounted, notAccounted, unplaced, awaiting, gap, otherGap: r2(gap - awaiting),
+    residual: r2(notAccounted - unplaced - gap),
+  }
 }
