@@ -446,7 +446,7 @@ export function CommunicationsDashboard() {
           <CardHeader title="Communications Team" subtitle="Click a column to sort" />
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="text-left border-y border-slate-100 text-slate-400">
                 <th className="font-medium px-3 py-2">Team Member</th>
@@ -505,7 +505,7 @@ export function CommunicationsDashboard() {
             <CardHeader title="Recent Deals Closed" action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>} />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px] whitespace-nowrap">
+            <table className="w-full list-table whitespace-nowrap">
               <thead>
                 <tr className="text-left border-y border-slate-100 text-slate-400">
                   <th className="font-medium px-3 py-2">Deal</th>

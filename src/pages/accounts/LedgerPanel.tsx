@@ -53,7 +53,7 @@ export function LedgerPanel({ accountId }: { accountId: string }) {
         </span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px] whitespace-nowrap">
+        <table className="w-full list-table whitespace-nowrap">
           <thead>
             <tr className="border-b border-slate-100 text-left text-slate-400">
               <th className="px-3 py-1.5 font-medium">Payment</th>

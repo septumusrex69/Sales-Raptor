@@ -363,7 +363,7 @@ export function RunDetail() {
             Each fact has its own column instead of being stacked under the name, nothing wraps,
             and the table scrolls sideways inside its card when it is wider than the screen.
           */}
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-left text-slate-400">
                 <th className="px-3 py-2 font-medium">Paid</th>

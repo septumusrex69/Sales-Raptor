@@ -48,7 +48,7 @@ export function PtcByPayover({ runs }: { runs: PtcRun[] }) {
   for (const r of runs) groups.set(r.paysOn, [...(groups.get(r.paysOn) ?? []), r])
   return (
     <div data-testid="ptc-by-payover"><Card className="mt-4 p-0 overflow-x-auto">
-      <table className="w-full min-w-[720px] text-[12.5px] whitespace-nowrap">
+      <table className="w-full min-w-[720px] list-table whitespace-nowrap">
         <thead>
           <tr className="text-slate-400">
             <th className="text-left font-medium px-4 py-2">Client</th>
@@ -119,7 +119,7 @@ export function PtcAgeAnalysis({ items, today }: { items: PtcAgeing[]; today: st
   }
   return (
     <div data-testid="ptc-ageing"><Card className="mt-4 p-0 overflow-x-auto">
-      <table className="w-full min-w-[720px] text-[12.5px] whitespace-nowrap">
+      <table className="w-full min-w-[720px] list-table whitespace-nowrap">
         <thead>
           <tr className="text-slate-400">
             <th className="text-left font-medium px-4 py-2">Client</th>
@@ -165,7 +165,7 @@ export function PayoverCheck({ rows }: { rows: PayoverTie[] }) {
   if (rows.length === 0) return null
   return (
     <div data-testid="payover-check"><Card className="mt-4 p-0 overflow-x-auto">
-      <table className="w-full min-w-[640px] text-[12.5px] whitespace-nowrap">
+      <table className="w-full min-w-[640px] list-table whitespace-nowrap">
         <thead>
           <tr className="text-slate-400">
             <th className="text-left font-medium px-4 py-2">Payover</th>

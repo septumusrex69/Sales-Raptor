@@ -125,7 +125,7 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
 
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="bg-slate-50 text-slate-400">
                 <th className="text-left font-medium px-4 py-2">Date</th>

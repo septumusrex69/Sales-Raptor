@@ -738,7 +738,7 @@ export function AccountsList() {
               narrower than the card), so a column is as wide as somebody made it and the list
               scrolls sideways instead. See columnWidths.ts.
             */}
-            <table className="min-w-full text-[12.5px] whitespace-nowrap"
+            <table className="min-w-full list-table whitespace-nowrap"
               style={{ tableLayout: 'fixed', width: visibleColumns.reduce((t, k) => t + widths[k], canAllocate ? 40 : 0) }}>
               <colgroup>
                 {canAllocate && <col style={{ width: 40 }} />}

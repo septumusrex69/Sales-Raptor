@@ -44,7 +44,7 @@ export function MarkPaidModal({ runs, onClose, onSave }: {
           </div>
         ) : (
           <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-slate-100">
-            <table className="w-full text-[12.5px]">
+            <table className="w-full list-table">
               <thead>
                 <tr className="text-left text-slate-400">
                   <th className="px-3 py-1.5 font-medium">Client</th>

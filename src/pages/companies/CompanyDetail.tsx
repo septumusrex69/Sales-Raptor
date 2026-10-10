@@ -294,7 +294,7 @@ export function CompanyDetail() {
         // The checking list's shape, which the firm asked for on every list in the app: one
         // line a person, job title after the name, each number in a column of its own.
         <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <tbody>
               {companyContacts.map((c) => (
                 <tr key={c.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
@@ -350,7 +350,7 @@ export function CompanyDetail() {
         <CardHeader title="Sub-accounts" subtitle={`${subAccounts.length} under this client`} />
       </div>
       <div className="overflow-x-auto px-5 pb-5">
-        <table className="w-full text-[12.5px] whitespace-nowrap">
+        <table className="w-full list-table whitespace-nowrap">
           <thead>
             <tr className="text-left text-slate-400 border-b border-slate-100">
               <th className="font-medium px-3 py-1.5">Sub-account</th>

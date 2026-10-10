@@ -120,7 +120,7 @@ export function ActivitiesPage() {
                   third; the notes now ride after the subject (whole in the tooltip) and the rest
                   are columns, so a day of thirty calls is thirty lines. */}
               <div className="overflow-x-auto">
-                <table className="w-full text-[12.5px] whitespace-nowrap">
+                <table className="w-full list-table whitespace-nowrap">
                   <tbody>
                     {items.map((a) => {
                       const Icon = ICONS[a.type]

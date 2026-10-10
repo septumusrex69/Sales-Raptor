@@ -54,7 +54,7 @@ export function ContactsList() {
 
       <Card padded={false}>
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="text-left text-slate-400 border-b border-slate-100">
                 <th className="font-medium px-3 py-1.5">Name</th>

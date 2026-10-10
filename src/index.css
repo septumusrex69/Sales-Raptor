@@ -832,3 +832,24 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   margin-inline-start: auto;
   cursor: pointer;
 }
+
+/*
+ * EVERY LONG LIST IN THE APP, ONE SIZE (the firm, 10 Oct, of the accounts and clients lists on the
+ * iPad: "make these views a little bit bigger, the lines between them a little bit bigger").
+ *
+ * They were made thin earlier the same day ("it should look like the checking list") as literal
+ * 12.5px text and py-1.5 cells in 64 tables across 39 files, so "a little bigger" would have been 64
+ * edits that drift. Now every one of those tables carries `list-table` and the size lives here, once.
+ *
+ * UNLAYERED ON PURPOSE: Tailwind v4 puts its utilities in a cascade layer, and unlayered rules beat
+ * layered ones -- so a cell's own `py-1.5` cannot undo the row height set here. The rows still never
+ * wrap (whitespace-nowrap stays on each table), which is what made them "lines" in the first place.
+ */
+.list-table {
+  font-size: 13.5px;
+}
+.list-table th,
+.list-table td {
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+}

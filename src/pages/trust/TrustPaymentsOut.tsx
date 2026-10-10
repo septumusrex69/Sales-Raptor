@@ -159,7 +159,7 @@ export function TrustPaymentsOut() {
             </Card>
           ) : (
             <Card padded={false} className="overflow-x-auto">
-              <table className="w-full text-[12.5px] whitespace-nowrap">
+              <table className="w-full list-table whitespace-nowrap">
                 <thead>
                   <tr className="text-slate-400 border-b border-slate-100">
                     <th className="font-medium text-left px-3 py-2">Pay to</th>
@@ -256,7 +256,7 @@ function PaidList({ paid }: { paid: PaidOut[] }) {
   const label = (p: PaidOut) => (p.kind === 'payover' ? `Payover ${p.caseNumber ?? ''}` : p.kind === 'refund' ? `Refund · ${p.caseNumber ?? ''}` : 'Transfer to the business account')
   return (
     <Card padded={false} className="overflow-x-auto">
-      <table className="w-full text-[12.5px] whitespace-nowrap">
+      <table className="w-full list-table whitespace-nowrap">
         <thead>
           <tr className="text-slate-400 border-b border-slate-100">
             <th className="font-medium text-left px-3 py-2">Paid to</th>

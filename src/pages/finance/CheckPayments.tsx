@@ -201,7 +201,7 @@ export function CheckPayments() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px] whitespace-nowrap">
+            <table className="w-full list-table whitespace-nowrap">
               <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
                 <tr className="border-b border-slate-100 text-slate-400">
                   <th colSpan={5} />

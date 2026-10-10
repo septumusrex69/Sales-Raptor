@@ -842,7 +842,7 @@ function ClerkTable({ rows, today, users, teams, pace, targetFor, me }: {
       </p>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px] whitespace-nowrap">
+        <table className="w-full list-table whitespace-nowrap">
           <thead>
             <tr className="text-left text-slate-400 border-b border-slate-100">
               {/*
@@ -1137,7 +1137,7 @@ function FairTable({ rows, users }: { rows: CollectorStats[]; users: { id: strin
         </span>
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px] whitespace-nowrap">
+        <table className="w-full list-table whitespace-nowrap">
           <thead>
             <tr className="text-left text-slate-400 border-b border-slate-100">
               <th className="px-4 py-2 font-medium">Collector</th>
@@ -1247,7 +1247,7 @@ function TeamTable({ rows, users, teams, targets, periodKey, pace, targetFor }: 
         </span>
       </p>
       <div className="overflow-x-auto">
-        <table className="w-full text-[12.5px] whitespace-nowrap">
+        <table className="w-full list-table whitespace-nowrap">
           <thead>
             <tr className="text-left text-slate-400 border-b border-slate-100">
               <th className="px-4 py-2 font-medium">Team</th>

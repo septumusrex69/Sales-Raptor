@@ -109,7 +109,7 @@ export function HandoverBook({ company, onUpload }: { company: Company; onUpload
         // date, the capital, the count and the reference each in a column of their own, so a
         // reference no longer pushes the date of the batch below it out of line.
         <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400">
                 <th className="px-2 py-1.5 text-left font-medium">Received</th>

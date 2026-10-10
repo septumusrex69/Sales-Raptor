@@ -651,7 +651,7 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
             />
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px] whitespace-nowrap">
+            <table className="w-full list-table whitespace-nowrap">
               <thead>
                 <tr className="text-left border-y border-slate-100 text-slate-400">
                   <th className="font-medium px-3 py-2">Deal</th>

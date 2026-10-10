@@ -103,7 +103,7 @@ export function BusinessOverview() {
           ) : (
             <Card className="overflow-hidden p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-[12.5px] whitespace-nowrap" data-testid="clients-owe-us">
+                <table className="w-full list-table whitespace-nowrap" data-testid="clients-owe-us">
                   <thead>
                     <tr className="border-b border-slate-100 text-left text-slate-400">
                       <th className="px-3 py-2 font-medium">Client</th>

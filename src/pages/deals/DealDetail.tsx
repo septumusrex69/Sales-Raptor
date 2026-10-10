@@ -389,7 +389,7 @@ export function DealDetail() {
         {dealProposals.length === 0 && <p className="text-sm text-slate-400">No proposals yet.</p>}
         {dealProposals.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px] whitespace-nowrap">
+            <table className="w-full list-table whitespace-nowrap">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-400">
                   <th className="px-2 py-1.5 text-left font-medium">Service</th>

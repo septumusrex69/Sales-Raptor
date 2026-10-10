@@ -149,7 +149,7 @@ export function ClientQueries({ companyId, section }: {
         // who raised it as a fourth under it; each is now a column, and the description is one
         // line with the whole of it in its tooltip and on the query's own page a click away.
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400">
                 <th className="px-3 py-1.5 text-left font-medium">Query</th>

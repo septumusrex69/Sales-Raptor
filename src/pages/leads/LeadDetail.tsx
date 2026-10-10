@@ -229,7 +229,7 @@ export function LeadDetail() {
         // line a person, job title after the name, each number in a column of its own so a
         // second contact's phone sits under the first's rather than wherever it wrapped to.
         <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <tbody>
               {leadContacts.map((c) => (
                 <tr key={c.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
@@ -343,7 +343,7 @@ export function LeadDetail() {
       <Card>
         <CardHeader title="Deals" subtitle={`${resultingDeals.length} on this lead`} />
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400">
                 <th className="px-3 py-1.5 text-left font-medium">Deal</th>
@@ -450,7 +450,7 @@ export function LeadDetail() {
         <p className="text-sm text-slate-400">No tasks yet.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <tbody>
               {leadTasks.map((t) => (
                 <tr key={t.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">

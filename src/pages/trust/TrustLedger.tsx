@@ -144,7 +144,7 @@ function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; 
     <div className="space-y-3">
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400">
                 <th className="text-left font-medium px-3 py-1.5">Whose</th>
@@ -235,7 +235,7 @@ function Entries({ party, who }: { party: TrustParty; who: string }) {
   if (!entries) return <p className="flex items-center gap-2 text-[12.5px] text-slate-400"><Loader2 size={13} className="animate-spin" /> Reading the entries…</p>
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <table className="w-full text-[12.5px] whitespace-nowrap" data-testid="ledger-entries">
+      <table className="w-full list-table whitespace-nowrap" data-testid="ledger-entries">
         <thead>
           <tr className="text-slate-400">
             <th className="px-3 py-1.5 text-left font-medium">Date</th>

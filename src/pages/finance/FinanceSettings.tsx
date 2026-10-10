@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase'
 import { rand, ratePercent } from '../../lib/money'
 import { fetchSettingChanges, logSettingChange, type SettingChange } from '../../lib/payover'
 import { fetchTrustOpening, setTrustOpening, type TrustOpening } from '../../lib/trust'
-import { clockToday } from '../../lib/clock.ts'
+import { clockToday, firmClockState } from '../../lib/clock.ts'
 
 /**
  * THE FOUR THINGS THAT DECIDE WHAT EVERY DEBTOR IS CHARGED AND EVERY CLIENT IS PAID.
@@ -289,7 +289,7 @@ export function FinanceSettings() {
               </span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-[12.5px] whitespace-nowrap">
+              <table className="w-full min-w-[640px] list-table whitespace-nowrap">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-slate-400 text-slate-400">
                     <th className="px-4 py-2.5">Item</th>
@@ -331,7 +331,7 @@ export function FinanceSettings() {
               Commission, per client
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[620px] text-[12.5px] whitespace-nowrap">
+              <table className="w-full min-w-[620px] list-table whitespace-nowrap">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-slate-400 text-slate-400">
                     <th className="px-4 py-2.5">Client</th>
@@ -588,6 +588,17 @@ function OpeningModal({ current, onClose, onSave }: {
               className={inputClass} data-testid="opening-date" />
           </div>
         </div>
+        {/*
+          SAID, NOT JUST GREYED OUT. The iPad's date wheel ignores `max`, so a day after today can be
+          picked -- and on staging "today" is the staging clock's, which can be months behind the real
+          date. The firm picked 10 Oct with the clock on 10 Jun and Save simply stayed grey (10 Oct).
+        */}
+        {/^\d{4}-\d{2}-\d{2}$/.test(asAt) && asAt > today && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="opening-future">
+            That day is after today ({today}{firmClockState()?.staging ? ', the staging date' : ''}). The
+            opening balance has to be a day that has already ended -- pick {today} or earlier.
+          </p>
+        )}
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600">Where it comes from</label>
           <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}

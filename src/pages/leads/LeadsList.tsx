@@ -388,7 +388,7 @@ export function LeadsList() {
               Squeezed to the container width, short values broke onto two lines — "No Contact
               / Yet", "Debt / Collection" — which quietly doubled the row height and undid the
               space the compact header just bought. */}
-          <table className="min-w-full text-[12.5px] whitespace-nowrap">
+          <table className="min-w-full list-table whitespace-nowrap">
             <thead className="sticky top-0 z-20 bg-white">
               <tr className="text-left text-slate-400 border-b border-slate-100">
                 {col.leadNumber && (

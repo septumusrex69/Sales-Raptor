@@ -373,7 +373,7 @@ export function FinanceWorkQueue() {
             period only on the Paid tab (where the heading does not carry it), exceptions on the
             button only, and headings that fit on one line.
           */}
-          <table className="w-full text-[12.5px] whitespace-nowrap">
+          <table className="w-full list-table whitespace-nowrap">
             <thead>
               <tr className="border-b border-slate-100 text-left text-slate-400">
                 <th className="w-8 pl-4 py-2 font-medium">
