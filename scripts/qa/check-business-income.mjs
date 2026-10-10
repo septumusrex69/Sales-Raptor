@@ -161,6 +161,12 @@ ok('Drawings is routed', /path="drawings" element=\{<BusinessDrawings \/>\}/.tes
 ok('...and the button is drawn off both ticks', /const mayDraw = canDrawFromTrust\(currentUser\)/.test(drawings)
   && /\{mayDraw && \(/.test(drawings))
 
+/* The firm, 10 Oct: the back office's client-by-client table "overcomplicates things". The firm's
+   figures as a whole; one client is the picker. */
+const backOffice = strip(read('src/pages/finance/BackOffice.tsx'))
+ok('the back office has no client-by-client table', !/>\s*By client\s*</.test(backOffice) && !/Potential commission<\/th>/.test(backOffice))
+ok('...and still lets you pick one client', /<option value="all">Every client<\/option>/.test(backOffice))
+
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-business-income: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length > 0 ? 1 : 0)

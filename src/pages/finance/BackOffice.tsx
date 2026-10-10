@@ -87,27 +87,12 @@ export function BackOffice() {
     },
   ]
 
+  /* The clients in the book, for the picker: the business side no longer draws them one by one. */
   const byClient = useMemo(() => {
-    const m = new Map<string, MoneyPosition[]>()
-    for (const r of rows) {
-      const list = m.get(r.companyId) ?? []
-      list.push(r)
-      m.set(r.companyId, list)
-    }
-    return [...m.entries()]
-      .map(([id, list]) => ({
-        id,
-        name: companies.find((c) => c.id === id)?.name ?? 'Unknown client',
-        capital: list.reduce((t, r) => t + r.capitalOutstanding, 0),
-        interestLeft: list.reduce((t, r) => t + r.interestLeft, 0),
-        costsLeft: list.reduce((t, r) => t + r.costsLeft, 0),
-        feesLeft: list.reduce((t, r) => t + r.receiptFeesLeft, 0),
-        bfLeft: list.reduce((t, r) => t + r.bfLeftToTake, 0),
-        potential: list.reduce((t, r) => t + r.commissionPotential, 0),
-        headroom: list.reduce((t, r) => t + r.costCapHeadroom, 0),
-        capped: list.filter((r) => r.costCapHeadroom === 0 && r.costCap > 0).length,
-      }))
-      .sort((a, b) => b.bfLeft - a.bfLeft)
+    const ids = [...new Set(rows.map((r) => r.companyId))]
+    return ids
+      .map((id) => ({ id, name: companies.find((c) => c.id === id)?.name ?? 'Unknown client' }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }, [rows, companies])
 
   const cappedCount = scoped.filter((r) => r.costCapHeadroom === 0 && r.costCap > 0).length
@@ -211,47 +196,12 @@ export function BackOffice() {
             </div>
           </Card>
 
-          <Card padded={false}>
-            <div className="border-b border-slate-100 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
-              By client
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px]">
-                <thead>
-                  <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
-                    <th className="px-4 py-2.5">Client</th>
-                    <th className="px-4 py-2.5 text-right">Capital outstanding</th>
-                    <th className="px-4 py-2.5 text-right">Interest left</th>
-                    <th className="px-4 py-2.5 text-right">Costs left</th>
-                    <th className="px-4 py-2.5 text-right">Receipt fees left</th>
-                    <th className="px-4 py-2.5 text-right">BF left to take</th>
-                    <th className="px-4 py-2.5 text-right">Potential commission</th>
-                    <th className="px-4 py-2.5 text-right">Cap headroom</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {byClient.map((c) => (
-                    <tr key={c.id} className="border-b border-slate-50 text-sm">
-                      <td className="px-4 py-3">
-                        <Link to={`/accounts?client=${c.id}`} className="font-medium text-slate-800 hover:underline">{c.name}</Link>
-                        {c.capped > 0 && (
-                          <div className="text-xs text-negative-600">{c.capped} at the items 1–7 ceiling</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{rand(c.capital)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{rand(c.interestLeft)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{rand(c.costsLeft)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{rand(c.feesLeft)}</td>
-                      <td className="px-4 py-3 text-right font-semibold tabular-nums">{rand(c.bfLeft)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-500">{rand(c.potential)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-500">{rand(c.headroom)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
+          {/*
+            NO CLIENT-BY-CLIENT TABLE HERE (the firm, 10 Oct: "I think it overcomplicates things ...
+            that should be really addressed in the trust section"). The business side reads the
+            firm's figures as a whole; one client's figures are the picker at the top, and what is
+            held for each client is the Trust ledger and the payover runs.
+          */}
           {/*
             * EXPECTED FROM PROMISES BEFORE THE CUT-OFF.
             *
