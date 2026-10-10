@@ -127,7 +127,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
             Nothing needs an account. Every receipt imported has been placed.
           </p>
         ) : (
-          <table className="w-full text-[13px]">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead className="text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-100">
                 <th className="px-4 py-2 text-left font-medium">Received</th>
@@ -189,7 +189,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
         <Card padded={false}>
           <CardHeader title="Parked off the approval queue"
             subtitle="Somebody had these in front of them and would not approve them where they sat. They are still recorded against that account until they are placed." />
-          <table className="w-full text-[13px]">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead className="text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-100">
                 <th className="px-4 py-2 text-left font-medium">Received</th>
@@ -255,7 +255,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
         <Card padded={false}>
           <CardHeader title="Payments out, not yet tied to a run"
             subtitle="Confirming one against the run it settles marks that run paid — witnessed by the bank rather than asserted." />
-          <table className="w-full text-[13px]">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <tbody>
               {payouts.map((p) => (
                 <tr key={p.id} className="border-t border-slate-50">

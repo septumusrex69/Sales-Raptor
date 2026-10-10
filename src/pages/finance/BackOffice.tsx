@@ -136,9 +136,9 @@ export function BackOffice() {
               By bucket
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px]">
+              <table className="w-full min-w-[720px] text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+                  <tr className="border-b border-slate-100 text-left text-slate-400 text-slate-400">
                     <th className="px-4 py-2.5">Bucket</th>
                     <th className="px-4 py-2.5">Taken · left · cannot take</th>
                     <th className="px-4 py-2.5 text-right">Charged</th>
@@ -151,40 +151,35 @@ export function BackOffice() {
                   {buckets.map((b) => {
                     const total = Math.max(b.taken + b.left + b.cant, 0.01)
                     return (
-                      <tr key={b.label} className="border-b border-slate-50 text-sm">
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-slate-800">{b.label}</div>
-                          {b.note && <div className="text-xs text-slate-400">{b.note}</div>}
-                        </td>
-                        <td className="px-4 py-3">
+                      <tr key={b.label} className="border-b border-slate-50">
+                        {/* ONE THIN LINE (the firm, 10 Oct): what "cannot take" means is the label's tooltip. */}
+                        <td className="px-4 py-1.5 font-medium text-slate-800" title={b.note}>{b.label}</td>
+                        <td className="px-4 py-1.5">
                           <div className="flex h-3.5 w-full min-w-[120px] overflow-hidden rounded bg-slate-100">
                             <span className="block bg-emerald-500" style={{ width: `${(b.taken / total) * 100}%` }} />
                             <span className="block bg-gold-500" style={{ width: `${(b.left / total) * 100}%` }} />
                             <span className="block bg-negative-500" style={{ width: `${(b.cant / total) * 100}%` }} />
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{rand(b.charged)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{rand(b.taken)}</td>
-                        <td className="px-4 py-3 text-right font-semibold tabular-nums">{rand(b.left)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-negative-600">{rand(b.cant)}</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums">{rand(b.charged)}</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums text-emerald-700">{rand(b.taken)}</td>
+                        <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{rand(b.left)}</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums text-negative-600">{rand(b.cant)}</td>
                       </tr>
                     )
                   })}
-                  <tr className="border-b border-slate-50 text-sm">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-slate-800">Commission</div>
-                      <div className="text-xs text-slate-400">
-                        Earned when capital comes in, so it has no &ldquo;left&rdquo; — only what the
-                        capital still outstanding would earn
-                      </div>
+                  <tr className="border-b border-slate-50">
+                    <td className="px-4 py-1.5 font-medium text-slate-800"
+                      title="Earned when capital comes in, so it has no &ldquo;left&rdquo; — only what the capital still outstanding would earn">
+                      Commission
                     </td>
-                    <td className="px-4 py-3" />
-                    <td className="px-4 py-3 text-right tabular-nums">—</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{rand(sum((r) => r.commissionEarned))}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-400">
+                    <td className="px-4 py-1.5" />
+                    <td className="px-4 py-1.5 text-right tabular-nums">—</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums text-emerald-700">{rand(sum((r) => r.commissionEarned))}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums text-slate-400">
                       {rand(sum((r) => r.commissionPotential))} potential
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">—</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">—</td>
                   </tr>
                 </tbody>
               </table>
@@ -230,9 +225,9 @@ export function BackOffice() {
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px]">
+                <table className="w-full min-w-[760px] text-[12.5px] whitespace-nowrap">
                   <thead>
-                    <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+                    <tr className="border-b border-slate-100 text-left text-slate-400 text-slate-400">
                       <th className="px-4 py-2.5">Debtor</th>
                       <th className="px-4 py-2.5">Due</th>
                       <th className="px-4 py-2.5 text-right">Promised</th>
@@ -243,7 +238,7 @@ export function BackOffice() {
                   </thead>
                   <tbody>
                     {scopedPromises.slice(0, 100).map((p) => (
-                      <tr key={p.accountId} className="border-b border-slate-50 text-sm">
+                      <tr key={p.accountId} className="border-b border-slate-50">
                         <td className="px-4 py-2.5">
                           <Link to={`/accounts/${p.accountId}`} className="font-medium text-slate-800 hover:underline">{p.debtor}</Link>
                           <div className="text-xs text-slate-400">

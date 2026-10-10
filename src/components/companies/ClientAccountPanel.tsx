@@ -109,9 +109,9 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
 
       <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[12.5px] whitespace-nowrap">
             <thead>
-              <tr className="bg-slate-50 text-[10.5px] uppercase tracking-wide text-slate-400">
+              <tr className="bg-slate-50 text-slate-400 text-slate-400">
                 <th className="text-left font-medium px-4 py-2.5">Date</th>
                 <th className="text-left font-medium px-4 py-2.5">What happened</th>
                 <th className="text-left font-medium px-4 py-2.5">Reference</th>
@@ -125,8 +125,8 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
                 return (
                   <tr key={`${e.kind}-${e.runId ?? e.chargeId ?? i}`}
                     className="border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap tabular-nums">{e.on}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap tabular-nums">{e.on}</td>
+                    <td className="px-4 py-1.5">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-slate-800">{e.description}</span>
                         <span className={clsx(
@@ -137,7 +137,7 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                    <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap">
                       {/* The run is a real page; an invoice number on a charge is not, yet. */}
                       {e.runId
                         ? <Link to={`/trust/runs/${e.runId}`} className="text-brand-500 hover:underline">
@@ -145,11 +145,11 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
                           </Link>
                         : (e.reference || '—')}
                     </td>
-                    <td className={clsx('px-4 py-3 text-right tabular-nums whitespace-nowrap',
+                    <td className={clsx('px-4 py-1.5 text-right tabular-nums whitespace-nowrap',
                       e.amount < 0 ? 'text-negative-700' : 'text-positive-700')}>
                       {e.amount < 0 ? '−' : '+'}{rand(Math.abs(e.amount))}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-medium whitespace-nowrap">
+                    <td className="px-4 py-1.5 text-right tabular-nums font-medium whitespace-nowrap">
                       {rand(e.balance)}
                     </td>
                   </tr>

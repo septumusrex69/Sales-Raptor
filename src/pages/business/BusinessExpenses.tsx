@@ -104,9 +104,9 @@ export function BusinessExpenses() {
             ) : (
               <Card className="overflow-hidden p-0">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-[12.5px] whitespace-nowrap">
                     <thead>
-                      <tr className="bg-slate-50 text-[10.5px] uppercase tracking-wide text-slate-400">
+                      <tr className="bg-slate-50 text-slate-400 text-slate-400">
                         <th className="text-left font-medium px-4 py-2.5">Date</th>
                         <th className="text-left font-medium px-4 py-2.5 w-full">What</th>
                         <th className="text-left font-medium px-4 py-2.5 whitespace-nowrap">Category</th>
@@ -119,21 +119,22 @@ export function BusinessExpenses() {
                       {rows.map((r) => (
                         <tr key={r.id} className={clsx('border-t border-slate-100',
                           r.cancelledAt && 'text-slate-300')}>
-                          <td className="px-4 py-3 whitespace-nowrap tabular-nums">{r.incurredOn}</td>
-                          <td className="px-4 py-3">
-                            <div className={clsx(r.cancelledAt ? 'line-through' : 'text-slate-800')}>
+                          <td className="px-4 py-1.5 whitespace-nowrap tabular-nums">{r.incurredOn}</td>
+                          {/* ONE THIN LINE (the firm, 10 Oct): the supplier, or why it was cancelled, beside it. */}
+                          <td className="px-4 py-1.5 max-w-[28rem] truncate">
+                            <span className={clsx(r.cancelledAt ? 'line-through' : 'text-slate-800')}>
                               {r.description}
-                            </div>
+                            </span>
                             {(r.supplier || r.cancelledReason) && (
-                              <div className="text-[12px] text-slate-400 mt-0.5">
-                                {r.cancelledAt ? `Cancelled — ${r.cancelledReason}` : r.supplier}
-                              </div>
+                              <span className="ml-2 text-slate-400">
+                                · {r.cancelledAt ? `Cancelled — ${r.cancelledReason}` : r.supplier}
+                              </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.category}</td>
-                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.amount)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums text-slate-400 whitespace-nowrap">{rand(r.vat)}</td>
-                          <td className="px-4 py-3 text-right">
+                          <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap">{r.category}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums whitespace-nowrap">{rand(r.amount)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums text-slate-400 whitespace-nowrap">{rand(r.vat)}</td>
+                          <td className="px-4 py-1.5 text-right">
                             {!r.cancelledAt && (
                               <button type="button"
                                 onClick={async () => {
@@ -150,14 +151,14 @@ export function BusinessExpenses() {
                         </tr>
                       ))}
                       <tr className="border-t border-slate-200 bg-slate-50">
-                        <td className="px-4 py-3 text-[12.5px] font-bold uppercase tracking-wide
+                        <td className="px-4 py-1.5 text-[12.5px] font-bold uppercase tracking-wide
                           text-slate-600" colSpan={3}>
                           {monthLabel(year, month)}
                         </td>
-                        <td className="px-4 py-3 text-right text-base font-semibold tabular-nums">
+                        <td className="px-4 py-1.5 text-right text-base font-semibold tabular-nums">
                           {rand(total)}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-slate-500">{rand(vat)}</td>
+                        <td className="px-4 py-1.5 text-right tabular-nums text-slate-500">{rand(vat)}</td>
                         <td />
                       </tr>
                     </tbody>

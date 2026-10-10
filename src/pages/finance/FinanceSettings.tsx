@@ -288,9 +288,9 @@ export function FinanceSettings() {
               </span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px]">
+              <table className="w-full min-w-[640px] text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+                  <tr className="border-b border-slate-100 text-left text-slate-400 text-slate-400">
                     <th className="px-4 py-2.5">Item</th>
                     <th className="px-4 py-2.5">What it covers</th>
                     <th className="px-4 py-2.5 text-right">Rate</th>
@@ -330,9 +330,9 @@ export function FinanceSettings() {
               Commission, per client
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[620px]">
+              <table className="w-full min-w-[620px] text-[12.5px] whitespace-nowrap">
                 <thead>
-                  <tr className="border-b border-slate-100 text-left text-[11.5px] font-medium uppercase tracking-[0.06em] text-slate-400">
+                  <tr className="border-b border-slate-100 text-left text-slate-400 text-slate-400">
                     <th className="px-4 py-2.5">Client</th>
                     <th className="px-4 py-2.5 text-right">Accounts</th>
                     <th className="px-4 py-2.5 text-right">Rate</th>

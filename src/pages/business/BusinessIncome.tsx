@@ -96,9 +96,9 @@ export function BusinessIncome() {
             ) : (
               <Card className="overflow-hidden p-0">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-[12.5px] whitespace-nowrap">
                     <thead>
-                      <tr className="bg-slate-50 text-[10.5px] uppercase tracking-wide text-slate-400">
+                      <tr className="bg-slate-50 text-slate-400 text-slate-400">
                         <th className="text-left font-medium px-4 py-2.5 w-full">Client</th>
                         <th className="text-right font-medium px-4 py-2.5">Commission</th>
                         <th className="text-right font-medium px-4 py-2.5 whitespace-nowrap">Fees &amp; costs</th>
@@ -110,12 +110,12 @@ export function BusinessIncome() {
                     <tbody>
                       {rows.map((r) => (
                         <tr key={r.companyId ?? 'none'} className="border-t border-slate-100">
-                          <td className="px-4 py-3 text-slate-800">{r.companyName ?? 'Not from a client'}</td>
-                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.commission + r.commissionVat)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.costs)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.interest)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{rand(r.chargesRaised)}</td>
-                          <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap font-medium">{rand(r.total)}</td>
+                          <td className="px-4 py-1.5 text-slate-800">{r.companyName ?? 'Not from a client'}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums whitespace-nowrap">{rand(r.commission + r.commissionVat)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums whitespace-nowrap">{rand(r.costs)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums whitespace-nowrap">{rand(r.interest)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums whitespace-nowrap">{rand(r.chargesRaised)}</td>
+                          <td className="px-4 py-1.5 text-right tabular-nums whitespace-nowrap font-medium">{rand(r.total)}</td>
                         </tr>
                       ))}
                     </tbody>

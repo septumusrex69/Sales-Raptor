@@ -407,14 +407,14 @@ export function TrustOverview() {
         ) : (
           /* Scrolls sideways inside its card on a phone, rather than pushing the page wider. */
           <Card className="mt-4 p-0 overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[640px] text-[12.5px] whitespace-nowrap">
               <thead>
-                <tr className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="text-left font-bold px-6 pt-5 pb-3">Period / client payover</th>
-                  <th className="text-right font-bold px-4 pt-5 pb-3">Collected</th>
-                  <th className="text-right font-bold px-4 pt-5 pb-3">Client portion</th>
-                  <th className="text-right font-bold px-4 pt-5 pb-3">BF earned</th>
-                  <th className="text-right font-bold px-6 pt-5 pb-3">Other held</th>
+                <tr className=" text-slate-400 text-slate-500">
+                  <th className="text-left font-bold px-3 pt-2 pb-2">Period / client payover</th>
+                  <th className="text-right font-bold px-4 pt-2 pb-2">Collected</th>
+                  <th className="text-right font-bold px-4 pt-2 pb-2">Client portion</th>
+                  <th className="text-right font-bold px-4 pt-2 pb-2">BF earned</th>
+                  <th className="text-right font-bold px-3 pt-2 pb-2">Other held</th>
                 </tr>
               </thead>
               <tbody>
@@ -438,11 +438,11 @@ export function TrustOverview() {
               {cycles.length > 1 && (
                 <tfoot>
                   <tr className="border-t border-slate-200 bg-slate-50 text-slate-600">
-                    <td className="px-6 py-3 text-[11px] font-bold uppercase tracking-wider">All periods</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{rand(totals.collected)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{rand(totals.toClients)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{rand(totals.firmEarned)}</td>
-                    <td className="px-6 py-3 text-right tabular-nums">
+                    <td className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider">All periods</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(totals.collected)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(totals.toClients)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{rand(totals.firmEarned)}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
                       {rand(r2(totals.collected - totals.toClients - totals.firmEarned))}
                     </td>
                   </tr>
@@ -492,27 +492,28 @@ function CycleRow({ cycle, today, previousSeen }: {
   const other = r2(cycle.toDebtors + cycle.unplaced)
   return (
     <tr className="border-t border-slate-100 align-top">
-      <td className="px-6 py-4">
-        <div className="font-semibold text-slate-800">
+      {/* ONE THIN LINE A PERIOD (the firm, 10 Oct): name, payover day and what to do, side by side. */}
+      <td className="px-6 py-2 whitespace-nowrap">
+        <span className="font-semibold text-slate-800">
           {name} &middot; {cycleLabel(cycle.periodStart, cycle.periodEnd)}
-        </div>
-        <div className={clsx('text-[12.5px] mt-1',
+        </span>
+        <span className={clsx('ml-2',
           state.tone === 'late' ? 'text-gold-800 font-medium'
             : cycle.isOpen ? 'text-positive-700' : 'text-slate-500')}>
-          Payover {longDate(cycle.paysOn)}{cycle.isOpen ? ' · provisional' : ''}
+          · payover {longDate(cycle.paysOn)}{cycle.isOpen ? ' · provisional' : ''}
           {state.tone === 'late' ? ' · past its day' : ''}
-        </div>
+        </span>
         {todo && (
           <Link to="/trust/payover"
-            className="mt-1.5 inline-block text-[12.5px] font-medium text-gold-700 hover:text-gold-800">
+            className="ml-2 font-medium text-gold-700 hover:text-gold-800">
             {todo} &rarr;
           </Link>
         )}
       </td>
-      <td className="px-4 py-4 text-right tabular-nums font-semibold text-slate-800">{rand(cycleCollected(cycle))}</td>
-      <td className="px-4 py-4 text-right tabular-nums font-semibold text-positive-700">{rand(cycle.toClients)}</td>
-      <td className="px-4 py-4 text-right tabular-nums font-semibold text-slate-800">{rand(cycle.firmEarned)}</td>
-      <td className="px-6 py-4 text-right tabular-nums font-semibold text-slate-800">{rand(other)}</td>
+      <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">{rand(cycleCollected(cycle))}</td>
+      <td className="px-4 py-2 text-right tabular-nums font-semibold text-positive-700 whitespace-nowrap">{rand(cycle.toClients)}</td>
+      <td className="px-4 py-2 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">{rand(cycle.firmEarned)}</td>
+      <td className="px-6 py-2 text-right tabular-nums font-semibold text-slate-800 whitespace-nowrap">{rand(other)}</td>
     </tr>
   )
 }
@@ -525,10 +526,10 @@ function Owner({ who, what, amount, lead }: {
        wanders with the length of the words beside it cannot be read down. On a phone the
        description drops under the name. */
     <div className="grid grid-cols-[1fr_auto] sm:grid-cols-[minmax(9rem,11rem)_1fr_auto] items-baseline
-      gap-x-4 gap-y-0.5 py-4 border-b border-slate-100 last:border-b-0">
-      <div className="text-[15px] font-semibold text-slate-800">{who}</div>
-      <div className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1 text-[13px] text-slate-500">{what}</div>
-      <div className={clsx('col-start-2 row-start-1 sm:col-start-3 text-right text-lg font-semibold tabular-nums whitespace-nowrap',
+      gap-x-4 gap-y-0.5 py-2.5 border-b border-slate-100 last:border-b-0">
+      <div className="text-[14px] font-semibold text-slate-800">{who}</div>
+      <div className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1 text-[12.5px] text-slate-500">{what}</div>
+      <div className={clsx('col-start-2 row-start-1 sm:col-start-3 text-right text-[15px] font-semibold tabular-nums whitespace-nowrap',
         lead ? 'text-positive-700' : amount < 0 ? 'text-gold-800' : 'text-slate-800')}>
         {rand(amount)}
       </div>
@@ -557,7 +558,7 @@ function FirmHeldCard({ held, owedToFirm }: { held: FirmHeld; owedToFirm: number
           </div>
         </div>
       ))}
-      <div className="flex items-baseline gap-4 py-4">
+      <div className="flex items-baseline gap-4 py-2.5">
         <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">Total held for the firm</div>
         <div className="text-lg font-semibold tabular-nums text-slate-800" data-testid="firm-held-total">{rand(sum)}</div>
       </div>
@@ -572,7 +573,7 @@ function FirmHeldCard({ held, owedToFirm }: { held: FirmHeld; owedToFirm: number
 
 function Subtotal({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
   return (
-    <div className={clsx('flex items-baseline gap-4 py-4 border-t',
+    <div className={clsx('flex items-baseline gap-4 py-2.5 border-t',
       strong ? 'border-slate-300' : 'border-slate-200')}>
       <div className="flex-1 text-xs font-bold uppercase tracking-wider text-slate-500">{label}</div>
       <div className={clsx('font-semibold tabular-nums text-slate-800', strong ? 'text-2xl' : 'text-lg')}>

@@ -310,8 +310,8 @@ try {
         && body.indexOf('11 Aug – 10 Sep 2026') >= 0, true)
 
     /* THE DAY EACH ONE LEAVES, which is the thing the firm asked for by name. */
-    t.ok('the closed cycle quotes its payover date', body.includes('Payover 11 October 2026'))
-    t.ok('...and the open one quotes its own', body.includes('Payover 11 November 2026'))
+    t.ok('the closed cycle quotes its payover date', /payover 11 October 2026/i.test(body))
+    t.ok('...and the open one quotes its own', /payover 11 November 2026/i.test(body))
 
     /* WHAT EACH ONE HOLDS, FOR THE CLIENT AND FOR THE FIRM, SEPARATELY. */
     t.ok("last month's client money is on the page", /R 1 920\.40/.test(body))

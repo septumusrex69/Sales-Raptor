@@ -328,7 +328,7 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
       */}
       <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] queue-scroll"
         data-testid="queue-scroll">
-        <table className="min-w-full text-[12.5px] whitespace-nowrap border-separate border-spacing-0">
+        <table className="min-w-full text-[12.5px] whitespace-nowrap border-separate border-spacing-0 text-[12.5px]">
           <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
             <tr className="text-slate-400">
               <th colSpan={2} className={`${STICKY_HEAD} left-0 z-20`} />
@@ -641,7 +641,7 @@ function BatchSummary({ rows }: { rows: AwaitingPayment[] }) {
       </div>
       {byClient && (
         <div className="mt-2 overflow-x-auto">
-          <table className="min-w-full text-[12px] whitespace-nowrap" data-testid="batch-by-client">
+          <table className="min-w-full text-[12px] whitespace-nowrap text-[12.5px]" data-testid="batch-by-client">
             <thead className="text-[10.5px] uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-2 py-1 text-left font-medium">Client</th>
