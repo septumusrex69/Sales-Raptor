@@ -57,6 +57,11 @@ check('...and is not cut off instead', bodyToStore(long, AT).body_text, null)
 check('...while the markup beside it is still kept', bodyToStore(long, AT).body_html, '<p>ok</p>')
 check('a newsletter’s markup is not kept',
   bodyToStore({ text: 'hi', html: 'y'.repeat(HTML_LIMIT + 1), calendar: '' }, AT).body_html, null)
+/* ...AND NOR ARE ITS WORDS (10 Oct): the text alone made every later open show the flat version
+   instead of going back to the mailbox for the message as written. */
+check('...nor its plain text, so the reader goes to the mailbox for it',
+  bodyToStore({ text: 'hi', html: 'y'.repeat(HTML_LIMIT + 1), calendar: '' }, AT).body_text, null)
+check('the markup limit holds a long pasted thread (a million characters)', HTML_LIMIT, 1_000_000)
 check('an oversized ICS is not kept',
   bodyToStore({ text: '', html: '', calendar: 'z'.repeat(CALENDAR_LIMIT + 1) }, AT).body_calendar, null)
 /* EXACTLY AT THE LIMIT IS INSIDE IT, or the limit is one character tighter than it says. */

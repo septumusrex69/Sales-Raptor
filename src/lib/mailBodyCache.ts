@@ -40,7 +40,10 @@
  * before it is written -- so the figures here are the raw size and not the cost.
  */
 export const TEXT_LIMIT = 100_000
-export const HTML_LIMIT = 200_000
+/* A MILLION, NOT 200 000 (10 Oct): a long reply thread with text pasted from ChatGPT carries an
+   inline style on nearly every word and every quoted message under it, and passed 200 000 with
+   ordinary content. The same ceiling the mailbox read uses for one text part (MAX_TEXT_PART). */
+export const HTML_LIMIT = 1_000_000
 /** An ICS is a few hundred lines at most. A bigger one is not a meeting request. */
 export const CALENDAR_LIMIT = 50_000
 
@@ -75,6 +78,16 @@ export function bodyToStore(body: MailBody, at: string): BodyPatch {
   const keep = (s: string, limit: number) => {
     const t = s ?? ''
     return t.length > 0 && t.length <= limit ? t : null
+  }
+  /*
+   * MARKUP TOO BIG TO KEEP MEANS KEEP NO WORDS EITHER (10 Oct). Kept alone, the plain text made the
+   * cache answer every later open with the flat version -- no bold, no paragraphs -- and the
+   * reader never went back to the mailbox for the real message (the firm: "this email came out
+   * funny in Raptor and fine in Spark"). With nothing kept, hasCachedBody is false and the message
+   * is read out of the mailbox, as written, every time; slower, and right.
+   */
+  if ((body.html ?? '').length > HTML_LIMIT) {
+    return { body_text: null, body_html: null, body_calendar: keep(body.calendar, CALENDAR_LIMIT), body_cached_at: at }
   }
   return {
     body_text: keep(body.text, TEXT_LIMIT),
