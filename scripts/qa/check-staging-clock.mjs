@@ -28,6 +28,7 @@ import {
   resetClock,
 } from '../../src/lib/clock.ts'
 import { firstLineAfter } from '../../src/lib/bankStatement.ts'
+import { exceptionsOf, splitForBatch } from '../../src/lib/paymentsQueue.ts'
 
 let pass = 0
 const failures = []
@@ -141,6 +142,23 @@ ok('the database refuses a statement with a line after today',
 check('the first late line is found', firstLineAfter([{ date: '2026-07-09' }, { date: '2026-07-14' }, { date: '2026-07-12' }], '2026-07-11'), { date: '2026-07-12' })
 check('...a line ON today is not late', firstLineAfter([{ date: '2026-07-11' }], '2026-07-11'), null)
 ok('the browser asks before uploading', /const late = firstLineAfter\(input\.lines, clockToday\(\)\)/.test(stripTs(read('src/lib/payover.ts'))))
+
+/* ---------- 4b. money on a closed account is flagged (the simulation's third cycle) ---------- */
+
+const row = {
+  paymentId: 'p1', client: 'Sim Alpha', receivedOn: '2026-08-27', amount: 300, paidToClient: false,
+  toInterest: 0, toCosts: 0, toReceiptFees: 0, toFees: 0, receiptFee: 0, receiptFeeVat: 0, toCapital: 300,
+  capitalBefore: 1000, capitalAfter: 700, excess: 0, commission: 60, commissionVat: 9, commissionRate: 0.2,
+  toClient: 231, dueToBf: 0, hasRate: true, interestCant: 0, rfCant: 0, feesCant: 0, cameBackFrom: null,
+}
+const flagged = exceptionsOf(row, [], null, { as: 'written_off', on: '2026-08-20' }).find((e) => e.key === 'closed_account')
+check('a payment on a closed account is badged', flagged?.label ?? null, 'Account closed')
+ok('...saying how and when it closed', /written off on 2026-08-20/.test(flagged?.detail ?? ''))
+ok('...as something to check', flagged?.warn === true)
+no('an open account is not badged', exceptionsOf(row, []).some((e) => e.key === 'closed_account'))
+check('it is held out of Approve all', JSON.stringify(splitForBatch([
+  { row, problems: [], exceptions: [flagged] }, { row: { ...row, paymentId: 'p2' }, problems: [], exceptions: [] },
+])), JSON.stringify({ clean: ['p2'], held: ['p1'] }))
 
 /* ---------- 5. the server ---------- */
 

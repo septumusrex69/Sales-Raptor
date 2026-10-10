@@ -21,6 +21,7 @@ import { supabase } from './supabase'
 import { allocationOf, type Allocation } from './allocationRules'
 import { clockToday } from './clock.ts'
 import { firstLineAfter } from './bankStatement.ts'
+import type { ClosedAs } from './paymentsQueue.ts'
 
 export type RunStatus = 'needs_review' | 'ready' | 'approved' | 'sent' | 'paid' | 'void'
 
@@ -1640,6 +1641,24 @@ export async function releasePaymentFromSuspense(paymentId: string): Promise<voi
  * ids, and one `in.(...)` that long is a URL the gateway refuses. A failure here only loses a badge,
  * so it is the caller's to swallow -- the badge is then absent, never drawn as a pass.
  */
+/**
+ * EACH CLOSED ACCOUNT'S CLOSURE, for the "Account closed" badge -- read the same way, for the same
+ * reason. An account still open is simply absent from the map.
+ */
+export async function fetchClosedAccounts(accountIds: string[]): Promise<Map<string, ClosedAs>> {
+  const ids = [...new Set(accountIds)]
+  const out = new Map<string, ClosedAs>()
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await supabase.from('debtor_accounts')
+      .select('id, ended_as, ended_on').in('id', ids.slice(i, i + 150)).not('ended_as', 'is', null)
+    if (error) throw new Error(error.message)
+    for (const r of (data ?? []) as { id: string; ended_as: string; ended_on: string | null }[]) {
+      out.set(r.id, { as: r.ended_as, on: r.ended_on })
+    }
+  }
+  return out
+}
+
 export async function fetchHandoverDates(accountIds: string[]): Promise<Map<string, string>> {
   const ids = [...new Set(accountIds)]
   const out = new Map<string, string>()

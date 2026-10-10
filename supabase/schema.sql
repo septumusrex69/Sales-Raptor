@@ -38062,3 +38062,213 @@ alter table public.account_judgments alter column recorded_at set default public
 alter table public.workflow_run_steps drop constraint workflow_run_steps_state_check;
 alter table public.workflow_run_steps add constraint workflow_run_steps_state_check
   check (state in ('pending', 'held', 'sent', 'cancelled', 'failed', 'skipped'));
+
+
+-- -----------------------------------------------------------------------------------------------------
+-- A STATEMENT RECEIPT MATCHED BY ITS REFERENCE CAN GO BACK TO "NEEDS AN ACCOUNT" (found by the staging
+-- clock's simulation, 10 Oct). import_bank_lines wrote the payment it matched WITHOUT bank_line_id (only
+-- the line pointed at the payment), so reverse_payment_to_unplaced read every auto-matched receipt as
+-- "recorded by hand" and refused it -- and reverse_payment's copy carried no line, so rejecting the copy
+-- could not release it. All three now find the line either way, and the import writes the link.
+-- -----------------------------------------------------------------------------------------------------
+create or replace function public.reverse_payment_to_unplaced(p_payment uuid, p_reason text)
+returns void
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_line uuid;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') or not public.may_approve_payment() then
+    raise exception 'You are not allowed to reverse a payment and put it back unplaced.' using errcode = '42501';
+  end if;
+  select coalesce(p.bank_line_id, (select l.id from public.bank_statement_lines l where l.payment_id = p.id limit 1))
+    into v_line from public.account_payments p where p.id = p_payment;
+  if v_line is null then
+    raise exception 'This payment was recorded by hand, so there is no statement line to put back. Reverse it to the approval queue and reject it there.'
+      using errcode = '22023';
+  end if;
+  v_copy := public.reverse_payment(p_payment, p_reason);
+  if v_copy is not null then
+    perform public.reject_payment(v_copy, 'Reversed to Needs an account: ' || btrim(p_reason), false);
+  end if;
+end $$;
+
+create or replace function public.reverse_payment(p_payment uuid, p_reason text)
+returns uuid
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') then
+    raise exception 'You are not allowed to reverse a payment.' using errcode = '42501';
+  end if;
+  if v_reason is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.reversed_at is not null then
+    raise exception 'That payment has already been reversed.' using errcode = '22023';
+  end if;
+  /*
+   * NOR ONE SWORDFISH ALREADY PAID OVER. Reversing writes a fresh copy of an approved payment for
+   * the engine to split, and the copy does not carry the flag -- so this would have turned frozen
+   * history into a Raptor receipt, fees, trust and all. Imported history is frozen at what was
+   * imported (CLAUDE.md); a correction to it is the firm's decision, made case by case.
+   */
+  if v_pay.paid_over_in_swordfish then
+    raise exception 'That receipt was already paid over in Swordfish. It is history and cannot be reversed here.'
+      using errcode = '22023';
+  end if;
+
+  /* NOR ONE WHOSE OVERPAYMENT WAS MOVED. Reversing re-splits a copy, which would make a second
+     undecided overpayment of money already sitting on the other account -- free to be moved
+     or refunded twice. */
+  if exists (select 1 from public.payment_allocations a where a.payment_id = p_payment
+               and a.status <> 'reversed' and a.excess_disposal = 'moved') then
+    raise exception 'Its overpayment was moved to another of the debtor''s accounts. Reversing it here would count that money twice.'
+      using errcode = '22023';
+  end if;
+
+  update public.account_payments
+     set reversed_at = public.raptor_now(), reversal_reason = v_reason
+   where id = p_payment;
+
+  if v_pay.approved_at is not null then
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, source, details, depositor_name,
+      paid_to_client, is_demo, bank_line_id, created_by, replaces_payment_id,
+      moved_from_allocation_id
+    ) values (
+      v_pay.account_id, v_pay.received_at, v_pay.amount, v_pay.method, v_pay.reference,
+      v_pay.source, v_pay.details, v_pay.depositor_name,
+      v_pay.paid_to_client, v_pay.is_demo,
+      coalesce(v_pay.bank_line_id, (select l.id from public.bank_statement_lines l where l.payment_id = v_pay.id limit 1)),
+      auth.uid(), v_pay.id,
+      v_pay.moved_from_allocation_id
+    )
+    returning id into v_copy;
+  end if;
+
+  return v_copy;
+end $$;
+
+create or replace function public.import_bank_lines(
+  p_account text,
+  p_label text,
+  p_lines jsonb
+) returns table (
+  inserted integer, duplicates integer, allocated integer,
+  unallocated integer, debits integer, notes integer, ambiguous integer
+)
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  ln jsonb;
+  v_id uuid;
+  v_ref text;
+  v_ids uuid[];
+  v_account uuid;
+  v_payment uuid;
+  v_dir text;
+  v_late date;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to import into.' using errcode = '42501';
+  end if;
+
+  -- A STATEMENT CANNOT RUN AHEAD OF THE CLOCK (prompt 10): a line dated after today refuses the
+  -- whole statement, before anything is written, so it cannot be half imported.
+  select min((l->>'date')::date) filter (where (l->>'date')::date > public.raptor_today())
+    into v_late from jsonb_array_elements(p_lines) l;
+  if v_late is not null then
+    raise exception 'That statement has a line dated %, after today (%). A statement cannot be dated after today.',
+      to_char(v_late, 'DD Mon YYYY'), to_char(public.raptor_today(), 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  inserted := 0; duplicates := 0; allocated := 0;
+  unallocated := 0; debits := 0; notes := 0; ambiguous := 0;
+
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    v_dir := ln->>'direction';
+    v_id := null;
+
+    -- ON CONFLICT DO NOTHING IS THE WHOLE DUPLICATE PROTECTION. Statements overlap at month ends
+    -- and the firm will upload September, then September plus the first week of October.
+    insert into public.bank_statement_lines (
+      bank_account, bank_account_label, line_key, txn_date, amount, balance,
+      description, direction, reference, status, imported_by
+    ) values (
+      p_account, p_label, ln->>'key', (ln->>'date')::date,
+      (ln->>'amount')::numeric, nullif(ln->>'balance', '')::numeric,
+      ln->>'description', v_dir, nullif(upper(ln->>'reference'), ''),
+      case when v_dir = 'note' then 'excluded' else 'unallocated' end,
+      auth.uid()
+    )
+    on conflict (line_key) do nothing
+    returning id into v_id;
+
+    if v_id is null then
+      duplicates := duplicates + 1;
+      continue;
+    end if;
+    inserted := inserted + 1;
+
+    if v_dir = 'debit' then debits := debits + 1; continue; end if;
+    if v_dir = 'note' then notes := notes + 1; continue; end if;
+
+    v_ref := nullif(upper(ln->>'reference'), '');
+    if v_ref is null then
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+
+    -- EXACTLY ONE ACCOUNT, OR NOBODY. account_number is the reference the DEBTOR knows and types.
+    -- It is not unique the way case_number is, so a reference naming two accounts is counted and
+    -- left for a person -- guessing credits one debtor with another's money, and a payment is
+    -- immutable once processed. (array_agg, not min(): there is no min(uuid).)
+    select array_agg(a.id) into v_ids
+      from public.debtor_accounts a
+     where upper(a.account_number) = v_ref;
+
+    if v_ids is null or array_length(v_ids, 1) <> 1 then
+      if v_ids is not null and array_length(v_ids, 1) > 1 then ambiguous := ambiguous + 1; end if;
+      unallocated := unallocated + 1;
+      continue;
+    end if;
+    v_account := v_ids[1];
+
+    -- THE PAYMENT. Inserting it fires allocate_payment: receipt fee, interest, costs, capital,
+    -- commission, VAT. paid_to_client IS FALSE -- that flag means the debtor paid the CLIENT
+    -- directly, and this is money in the firm's own trust account. received_at is THE BANK'S
+    -- DATE, because when the money landed is a fact about the bank rather than about when
+    -- somebody uploaded the file -- and the payover cycle cuts on it.
+    insert into public.account_payments (
+      account_id, received_at, amount, method, reference, details, source, paid_to_client, created_by,
+      bank_line_id
+    ) values (
+      v_account,
+      ((ln->>'date')::date::timestamp at time zone 'Africa/Johannesburg'),
+      (ln->>'amount')::numeric,
+      'EFT', v_ref, ln->>'description', 'bank', false, auth.uid(),
+      v_id
+    ) returning id into v_payment;
+
+    update public.bank_statement_lines
+       set status = 'allocated', account_id = v_account, payment_id = v_payment,
+           placed_at = public.raptor_now(), placed_by = auth.uid()
+     where id = v_id;
+
+    allocated := allocated + 1;
+  end loop;
+
+  return next;
+end $$;

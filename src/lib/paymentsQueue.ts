@@ -146,7 +146,14 @@ export function queueFigures(r: QueueInput): QueueFigures {
 
 export type ExceptionKey =
   | 'credit' | 'capital_paid_off' | 'ptc' | 'came_back' | 'in_duplum' | 'needs_rate'
-  | 'before_handover' | 'allocation_mismatch' | 'ptc_mismatch'
+  | 'before_handover' | 'allocation_mismatch' | 'ptc_mismatch' | 'closed_account'
+
+/** How an account was closed, for the "Account closed" badge: ended_as and ended_on. */
+export interface ClosedAs { as: string; on: string | null }
+
+const CLOSED_WORDS: Record<string, string> = {
+  paid_up: 'paid up', settled: 'settled', written_off: 'written off', withdrawn: 'withdrawn by the client',
+}
 
 export interface QueueException {
   key: ExceptionKey
@@ -169,7 +176,7 @@ export interface QueueException {
  * badge is simply not drawn rather than drawn as a pass.
  */
 export function exceptionsOf(
-  r: QueueInput, problems: Violation[], handoverDate: string | null = null,
+  r: QueueInput, problems: Violation[], handoverDate: string | null = null, closed: ClosedAs | null = null,
 ): QueueException[] {
   const f = queueFigures(r)
   const out: QueueException[] = []
@@ -213,6 +220,18 @@ export function exceptionsOf(
     out.push({ key: 'before_handover', label: 'Before handover', warn: true,
       detail: `Received ${r.receivedOn}, before the account was handed over on ${handoverDate}.` })
   }
+  /*
+   * MONEY ON A CLOSED ACCOUNT (prompt 10's third cycle: "a payment arrives on a closed account
+   * (flagged)"). The debtor paid after the file was settled, written off or withdrawn -- usually the
+   * wrong reference, sometimes a debtor who did not know, and on a withdrawn file it is the client's
+   * money to hand back. Held out of Approve all (splitForBatch) and approved alone once somebody has
+   * looked, exactly like a payment that breaks a formula: the money has arrived either way.
+   */
+  if (closed) {
+    out.push({ key: 'closed_account', label: 'Account closed', warn: true,
+      detail: `The account was ${CLOSED_WORDS[closed.as] ?? closed.as}${closed.on ? ` on ${closed.on}` : ''}. `
+        + 'Check it is the right account before approving.' })
+  }
   /* THE SPLIT MUST ADD BACK TO THE PAYMENT, as well as obey the firm's formulas. */
   const unbalanced = !near(f.clientShare + f.bfShare + f.credit, r.amount)
   if (problems.length > 0 || unbalanced) {
@@ -238,10 +257,10 @@ export function exceptionsOf(
 
 /** Every row checked once: the figures, the formulas and the badges. */
 export function checkedRow<T extends QueueInput>(
-  r: T, a: Allocation, handoverDate: string | null = null,
+  r: T, a: Allocation, handoverDate: string | null = null, closed: ClosedAs | null = null,
 ): { row: T; a: Allocation; f: QueueFigures; problems: Violation[]; exceptions: QueueException[] } {
   const problems = checkAllocation(a)
-  return { row: r, a, f: queueFigures(r), problems, exceptions: exceptionsOf(r, problems, handoverDate) }
+  return { row: r, a, f: queueFigures(r), problems, exceptions: exceptionsOf(r, problems, handoverDate, closed) }
 }
 
 /* ============================================================================================== */
@@ -340,10 +359,16 @@ export function totalsByClient(rows: QueueInput[]): ClientTotals[] {
  * the queue for ever with the client never paid. One deliberate press, after reading it, is the
  * check -- the batch is what can no longer carry it through unread.
  */
-export function splitForBatch<T extends { row: { paymentId: string }; problems: Violation[] }>(
+export function splitForBatch<T extends {
+  row: { paymentId: string }; problems: Violation[]; exceptions?: QueueException[]
+}>(
   items: T[],
 ): { clean: string[]; held: string[] } {
   const clean: string[] = []; const held: string[] = []
-  for (const c of items) (c.problems.length > 0 ? held : clean).push(c.row.paymentId)
+  for (const c of items) {
+    /* A broken formula, or money on a closed account -- both are looked at before approving. */
+    const hold = c.problems.length > 0 || (c.exceptions ?? []).some((e) => e.key === 'closed_account')
+    ;(hold ? held : clean).push(c.row.paymentId)
+  }
   return { clean, held }
 }

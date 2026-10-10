@@ -10,12 +10,13 @@ import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import {
   fetchAwaitingApproval, approvePayments, setPaymentAccount, suspendPayment,
   awaitingAllocation, fetchRejectedPayments, rejectPayments, unrejectPayment, fetchHandoverDates,
+  fetchClosedAccounts,
   type AwaitingPayment, type RejectedPayment,
 } from '../../lib/payover'
 import type { Allocation, Violation } from '../../lib/allocationRules'
 import {
   batchReconciliation, batchTotals, checkedRow, splitForBatch, totalsByClient,
-  type QueueException, type QueueFigures,
+  type ClosedAs, type QueueException, type QueueFigures,
 } from '../../lib/paymentsQueue'
 import { cycleStartOn, shortDate } from '../../lib/trustCycles'
 import { clockToday } from '../../lib/clock.ts'
@@ -63,6 +64,7 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
 }) {
   const [rows, setRows] = useState<AwaitingPayment[]>([])
   const [handovers, setHandovers] = useState<Map<string, string>>(new Map())
+  const [closedAccounts, setClosedAccounts] = useState<Map<string, ClosedAs>>(new Map())
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -126,6 +128,8 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
       setPicked((p) => new Set([...p].filter((id) => queue.some((r) => r.paymentId === id))))
       /* The badge only. Without it a row is drawn without "before handover", never with a pass. */
       fetchHandoverDates(queue.map((r) => r.accountId)).then(setHandovers).catch(() => setHandovers(new Map()))
+      /* The "Account closed" badge, read the same way: a failure loses the badge, never the queue. */
+      fetchClosedAccounts(queue.map((r) => r.accountId)).then(setClosedAccounts).catch(() => setClosedAccounts(new Map()))
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not load the day’s payments.')
     } finally { setLoading(false) }
@@ -146,7 +150,8 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
    * not refused: the money has arrived either way. See splitForBatch.
    */
   const checked = useMemo(() => rows.map((r) =>
-    checkedRow(r, awaitingAllocation(r), handovers.get(r.accountId) ?? null)), [rows, handovers])
+    checkedRow(r, awaitingAllocation(r), handovers.get(r.accountId) ?? null, closedAccounts.get(r.accountId) ?? null)),
+  [rows, handovers, closedAccounts])
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
   /* What a batch may carry: never a row that breaks a formula. */
   const batchAll = useMemo(() => splitForBatch(checked), [checked])
