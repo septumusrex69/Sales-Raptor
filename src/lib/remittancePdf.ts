@@ -358,6 +358,8 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
     /** Column drawn in the status colour, if any. */
     statusCol?: number
     footnotes: string[]
+    /** A small line under each row -- the collections' VAT sentence (the firm, 10 Oct). */
+    subLines?: string[]
   }
   const sections: Section[] = []
   if (adv.collections.length) {
@@ -373,6 +375,9 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
       flags: adv.collections.map((c) => c.reversal),
       totals: [7, 8, 9],
       statusCol: 3,
+      /* THE PER-LINE VAT SENTENCE, under each collection (the firm, 10 Oct: "the VAT also needs to
+         be there"). The figures are the row's own, so the sentence and the columns cannot differ. */
+      subLines: adv.collections.map((c) => c.vatLine),
       footnotes: [
         `${late ? '* Captured after the previous cut-off. ' : ''}Handover amount refers to the original account balance.`,
       ],
@@ -451,18 +456,21 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
     let { pg, y } = innerPage(sec.title, subtitleFor)
     y = tableHead(pg, sec.cols, y)
     const footH = 18 + sec.footnotes.reduce((a, f) => a + wrap(safe(f), sans, 7.5, PW - 2 * M).length * 9.5 + 8, 0)
+    /* A row with a sentence under it is taller; the figures move up to make room. */
+    const rowH = sec.subLines ? ROW_H + 9 : ROW_H
+    const base = sec.subLines ? 13 : 15
     for (let i = 0; i < sec.rows.length; i += 1) {
       /*
        * ROOM FOR THIS ROW -- and the last row only goes where its TOTAL and footnotes fit under it.
        * Otherwise the last row moves over with them, so a total never sits on a page of its own
        * under a bare header, which is a page that reads as a second table with nothing in it.
        */
-      const need = ROW_H + (i === sec.rows.length - 1 ? ROW_H + footH : 0)
+      const need = rowH + (i === sec.rows.length - 1 ? ROW_H + footH : 0)
       if (y - need < FOOT + 8) {
         ({ pg, y } = innerPage(`${sec.title} (continued)`, subtitleFor))
         y = tableHead(pg, sec.cols, y)
       }
-      if (i % 2 === 0) box(pg, M, y - ROW_H, PW - 2 * M, ROW_H, ZEBRA)
+      if (i % 2 === 0) box(pg, M, y - rowH, PW - 2 * M, rowH, ZEBRA)
       const red = sec.flags[i]
       let x = M
       for (let ci = 0; ci < sec.cols.length; ci += 1) {
@@ -471,11 +479,18 @@ export async function remittancePdf(adv: RemittanceAdvice, opts: RemittancePdfOp
         const t = clip(safe(cellText(raw)), sans, CELL, c.width - 2 * PAD)
         const color = red ? RED : ci === sec.statusCol ? STATUS : INK
         const p = { size: CELL, color }
-        if (c.right) textRight(pg, t, x + c.width - PAD, y - 15, p)
-        else text(pg, t, x + PAD, y - 15, p)
+        if (c.right) textRight(pg, t, x + c.width - PAD, y - base, p)
+        else text(pg, t, x + PAD, y - base, p)
         x += c.width
       }
-      y -= ROW_H
+      const sub = sec.subLines?.[i]
+      if (sub) {
+        /* Under the debtor and everything to its right: the refs stay clear, as on the mock-up. */
+        const from = M + sec.cols[0].width + sec.cols[1].width + PAD
+        text(pg, clip(safe(sub), sans, 6.4, PW - M - from - PAD), from, y - base - 10,
+          { size: 6.4, color: red ? RED : SLATE })
+      }
+      y -= rowH
     }
 
     /* THE TOTAL ROW, the sum of what is drawn above it -- reversals included, as negatives. */

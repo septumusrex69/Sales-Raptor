@@ -95,6 +95,27 @@ export interface CollectionRow {
   capitalOutstanding: number
   reversal: boolean
   lateCapture: boolean
+  /** The line's VAT sentence, under the row (the firm, 10 Oct: "the VAT also needs to be there"). */
+  vatLine: string
+}
+
+/**
+ * THE PER-LINE VAT SENTENCE (the firm's mock-up; asked for on 10 Oct: "keep the outstanding column
+ * and the VAT also needs to be there"). What came off this collection and why, in one line under it:
+ * "Commission 20% R 60.00 + VAT 15% R 9.00 = R 69.00 deducted". The rate is the payment's own (an
+ * account can be on a band); VAT's rate is read off the two figures, so the sentence can never
+ * disagree with the columns beside it. A reversal says the same deduction is given back.
+ */
+export function vatLine(l: { commission: number; commissionVat: number; commissionRate?: number | null; toCapital: number }, reversal: boolean): string {
+  const c = Math.abs(l.commission)
+  const v = Math.abs(l.commissionVat)
+  const rate = l.commissionRate ?? (Math.abs(l.toCapital) > 0.004 ? c / Math.abs(l.toCapital) : null)
+  const pct = (x: number) => `${Math.round(x * 10000) / 100}%`
+  const vatPct = c > 0.004 ? pct(Math.round((v / c) * 100) / 100) : '15%'
+  const commission = `Commission${rate !== null ? ` ${pct(rate)}` : ''} ${rand(c)}`
+  return reversal
+    ? `${commission} + VAT ${vatPct} ${rand(v)} = ${rand(c + v)} given back with this reversal`
+    : `${commission} + VAT ${vatPct} ${rand(v)} = ${rand(c + v)} deducted`
 }
 
 export interface DirectRow {
@@ -213,6 +234,7 @@ export function buildRemittanceAdvice(input: {
       capitalOutstanding: l.capitalAfter,
       reversal: l.lineKind === 'reversal',
       lateCapture: l.lateCapture,
+      vatLine: vatLine(l, l.lineKind === 'reversal'),
     }))
 
   const direct: DirectRow[] = lines
@@ -374,13 +396,13 @@ export function adviceSchedule(adv: RemittanceAdvice): Uint8Array {
     rows.push([
       head('Your ref'), head('Our ref'), head('Debtor'), head('Status'), head('Handed over'),
       head('Handover amount'), head('Paid'), head('Capital received'), head('Commission'),
-      head('VAT'), head('Capital outstanding'), head('Note'),
+      head('VAT'), head('Capital outstanding'), head('Commission and VAT'), head('Note'),
     ])
     for (const c of adv.collections) {
       rows.push([
         c.yourRef, c.ourRef, c.debtor, c.status, c.handedOver,
         { n: c.handoverAmount }, c.paid, { n: c.capitalReceived }, { n: c.commission },
-        { n: c.vat }, { n: c.capitalOutstanding },
+        { n: c.vat }, { n: c.capitalOutstanding }, c.vatLine,
         [c.reversal ? 'reversal' : '', c.lateCapture ? 'captured after previous cut-off' : '']
           .filter(Boolean).join(' · '),
       ])

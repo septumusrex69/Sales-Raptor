@@ -23,6 +23,7 @@
 import { readFileSync } from 'node:fs'
 import {
   ANNEXURE_B_FOOTNOTE, adviceBody, adviceSchedule, adviceSubject, advStatus, buildRemittanceAdvice,
+  vatLine,
 } from '../../src/lib/remittanceAdvice.ts'
 
 import { rand, amount, randOrDash, ratePercent, NBSP } from '../../src/lib/money.ts'
@@ -309,6 +310,31 @@ const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
   ok('...and a run below nil cannot be marked paid', /if \(select net_payover from public\.payover_runs where id = p_run\) < 0 then\s*raise exception/.test(mpp.slice(0, mpp.indexOf('end $$;'))))
 }
 
+/* ---------------- the firm's answers of 10 Oct: OUTSTANDING stays, and the VAT sentence goes on every line ---------------- */
+
+/* "Keep the outstanding column and the VAT also needs to be there." */
+const SP = (t) => t.replace(/\u00a0/g, ' ')
+check('the VAT sentence says what came off a collection, and why',
+  SP(vatLine({ commission: 150, commissionVat: 22.5, toCapital: 500 }, false)),
+  'Commission 30% R 150.00 + VAT 15% R 22.50 = R 172.50 deducted')
+check('...on the payment\'s own rate when it has one',
+  SP(vatLine({ commission: 69.53, commissionVat: 10.43, toCapital: 463.5, commissionRate: 0.15 }, false)),
+  'Commission 15% R 69.53 + VAT 15% R 10.43 = R 79.96 deducted')
+check('...and a reversal says it is given back, without a minus',
+  SP(vatLine({ commission: -180, commissionVat: -27, toCapital: -900 }, true)),
+  'Commission 20% R 180.00 + VAT 15% R 27.00 = R 207.00 given back with this reversal')
+const vatAdv = build([line()])
+check('every collection carries it', vatAdv.collections.map((c) => SP(c.vatLine)),
+  ['Commission 30% R 150.00 + VAT 15% R 22.50 = R 172.50 deducted'])
+const vatPdfSrc = readFileSync(new URL('../../src/lib/remittancePdf.ts', import.meta.url), 'utf8')
+ok('the PDF draws it under each collection', /subLines: adv\.collections\.map\(\(c\) => c\.vatLine\)/.test(vatPdfSrc)
+  && /const sub = sec\.subLines\?\.\[i\]/.test(vatPdfSrc))
+ok('...and keeps the OUTSTANDING column', /\{ head: 'VAT', width: 48, right: true \}, \{ head: 'Outstanding', width: 70, right: true \}/.test(vatPdfSrc))
+const vatAdvSrc = readFileSync(new URL('../../src/lib/remittanceAdvice.ts', import.meta.url), 'utf8')
+ok('the spreadsheet carries it too', /\{ n: c\.vat \}, \{ n: c\.capitalOutstanding \}, c\.vatLine,/.test(vatAdvSrc))
+
 console.log(`\ncheck-remittance-advice: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)
+
+
