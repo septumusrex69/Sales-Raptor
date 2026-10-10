@@ -32873,3 +32873,90 @@ as $$
     from cash c, held h, unplaced u
    where public.has_capability('finance.view')
 $$;
+
+-- ============================================================================================
+-- THE TRUST ACCOUNT'S OWN INTEREST AND CHARGES, RECONCILED ON THE BUSINESS SIDE (10 Oct)
+--
+-- The firm: "the trust is not a place of expenses. There's interest, yes, but the interest is due
+-- to the company ... you can't pay expenses out of the trust." Interest the bank pays on the trust
+-- account is the firm's (confirmed 8 Oct); a bank charge the bank takes from it is the firm's COST,
+-- owed by Bredell Ferreira to the trust -- either taken from the firm's own share still in trust,
+-- or, where that share is not enough, repaid from the business account (a transfer in). The firm
+-- believes the bank recovers it from the business account itself; if so it never touches the trust
+-- statement and nothing here moves.
+--
+-- trust_bank_costs: the period's interest, charges and repayments from the business account, the
+-- same figures since the beginning, and the firm's balance in trust now. Negative held = the firm
+-- owes the trust, which is the one case that needs a person to act.
+--
+-- business_month's MADE now takes the period's bank charges off: they were left out of `earned`
+-- (correctly -- a cost is not a negative earning) and out of `spent` (only captured expenses), so
+-- Made overstated the month by exactly them (staging: R115.00). Same return shape, so the grants
+-- stay; earned, drawn and the rest unchanged.
+-- ============================================================================================
+
+create or replace function public.trust_bank_costs(p_from date, p_to date)
+returns table(interest numeric, charges numeric, repaid numeric,
+              interest_to_date numeric, charges_to_date numeric, repaid_to_date numeric,
+              firm_held numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select amount, public.firm_entry_kind(reason) as kind,
+           (entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to as in_period
+      from public.trust_creditor_entries
+     where party = 'firm'
+  )
+  select coalesce(sum(amount) filter (where kind = 'bank_interest' and in_period), 0),
+         coalesce(-sum(amount) filter (where kind = 'bank_charge' and in_period), 0),
+         coalesce(sum(amount) filter (where kind = 'transfer_in' and in_period), 0),
+         coalesce(sum(amount) filter (where kind = 'bank_interest'), 0),
+         coalesce(-sum(amount) filter (where kind = 'bank_charge'), 0),
+         coalesce(sum(amount) filter (where kind = 'transfer_in'), 0),
+         coalesce(sum(amount), 0)
+    from e
+  having public.has_capability('business.view')
+$$;
+revoke all on function public.trust_bank_costs(date, date) from public, anon;
+grant execute on function public.trust_bank_costs(date, date) to authenticated;
+
+create or replace function public.business_month(p_from date, p_to date)
+returns table(earned numeric, drawn numeric, still_in_trust numeric, invoiced numeric,
+              invoices_paid numeric, owed_by_clients numeric, expenses numeric, expenses_vat numeric,
+              made numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with firm as (
+    select coalesce(sum(amount) filter (where public.firm_entry_kind(reason) not in ('drawing', 'charge_recovered', 'bank_charge', 'transfer_in')), 0) as earned,
+           coalesce(-sum(amount) filter (where public.firm_entry_kind(reason) = 'drawing'), 0) as drawn,
+           coalesce(-sum(amount) filter (where public.firm_entry_kind(reason) = 'bank_charge'), 0) as bank_charges
+      from public.trust_creditor_entries
+     where party = 'firm'
+       and (entry_at at time zone 'Africa/Johannesburg')::date between p_from and p_to
+  ),
+  held as (
+    select coalesce(sum(amount), 0) as bal from public.trust_creditor_entries where party = 'firm'
+  ),
+  charges as (
+    select coalesce(sum(amount + vat) filter (where cancelled_at is null), 0) as invoiced,
+           coalesce(sum(amount + vat) filter (where cancelled_at is null and paid_at is not null), 0) as paid
+      from public.client_charges
+     where raised_on between p_from and p_to
+  ),
+  owing as (
+    select coalesce(sum(amount + vat), 0) as bal from public.client_charges
+     where cancelled_at is null and paid_at is null
+  ),
+  spent as (
+    select coalesce(sum(amount), 0) as ex, coalesce(sum(vat), 0) as vat
+      from public.business_expenses
+     where cancelled_at is null and incurred_on between p_from and p_to
+  )
+  select f.earned, f.drawn, h.bal, c.invoiced, c.paid, o.bal, s.ex, s.vat,
+         f.earned + c.invoiced - s.ex - f.bank_charges
+    from firm f, held h, charges c, owing o, spent s
+   where public.has_capability('business.view')
+$$;

@@ -27,12 +27,17 @@ const INCOME = [
 const MONTH = [{ earned: 338.55, drawn: 20, still_in_trust: 358.55, invoiced: 115, invoices_paid: 0,
   owed_by_clients: 115, expenses: 0, expenses_vat: 0, made: 453.55 }]
 
+/* The trust account's interest and charges (10 Oct): staging's R12.34 interest and two R57.50 charges. */
+let BANK = { interest: 12.34, charges: 115, repaid: 0, interest_to_date: 12.34, charges_to_date: 115,
+  repaid_to_date: 0, firm_held: 358.55 }
+
 let sent = []
 function handlers(me) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [me] })],
     [(u) => /\/rpc\/business_income/.test(u), () => ({ body: INCOME })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: MONTH })],
+    [(u) => /\/rpc\/trust_bank_costs/.test(u), () => ({ body: [BANK] })],
     [(u) => /\/rpc\/business_drawings/.test(u), () => ({
       body: [{ id: 'd1', entry_at: '2026-10-07T08:00:00Z', amount: 20, reference: 'EFT 0042', drawn_by: 'Stephan' }],
     })],
@@ -61,6 +66,9 @@ try {
 
     await page.getByRole('link', { name: 'Drawings' }).first().click()
     await page.getByTestId('held-for-firm').waitFor({ timeout: 20000 })
+    /* The figure draws R 0.00 first and the held amount once trust_position answers: wait for it,
+       or the assertion below races the request (Playwright's locators race React). */
+    await page.getByTestId('held-for-firm').filter({ hasText: /358/ }).waitFor({ timeout: 10000 }).catch(() => {})
     t.ok('Drawings says what the firm may draw', /358[\s,.]55|358.55/.test(await page.getByTestId('held-for-firm').innerText()))
     t.ok('...and lists the month\'s drawings', await page.getByText('EFT 0042').first().isVisible())
 
@@ -101,6 +109,31 @@ try {
     t.ok('...naming each client', await page.getByText('Kestrel Insurance').first().isVisible())
     t.ok('...and says VAT on commission is not kept', await page.getByText('Collected for SARS, not kept').first().isVisible())
     await t.shot(page, 'business-income')
+    await context.close()
+  }
+
+  /* ---------------- the trust account's interest and charges (the firm, 10 Oct) ---------------- */
+  {
+    const { context, page } = await open(browser, ADMIN, '/business')
+    const card = page.getByTestId('trust-bank-costs')
+    await card.waitFor({ timeout: 20000 })
+    const text = (await card.innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    t.ok('the bank charges are the firm\'s cost', /Bank charges \(the firm.s cost\)\s*\(R 115\.00\)/.test(text))
+    t.ok('...the interest the firm\'s income', /Interest paid by the bank \(the firm.s\)\s*R 12\.34/.test(text))
+    t.ok('...and while the firm\'s share covers them, no client money does', /no client money pays for them/.test(text))
+    const month = (await page.locator('body').innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    t.ok('the month lists the charges under what was spent', /Trust account bank charges\s*\(R 115\.00\)/.test(month))
+    await context.close()
+  }
+  {
+    BANK = { ...BANK, firm_held: -102.66 }
+    const { context, page } = await open(browser, ADMIN, '/business')
+    const card = page.getByTestId('trust-bank-costs')
+    await card.waitFor({ timeout: 20000 })
+    const text = (await card.innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    t.ok('a firm share below nothing is money owed to the trust', /Bredell Ferreira owes the trust\s*R 102\.66/.test(text))
+    t.ok('...and it says how to pay it back', /Pay this back from the business account/.test(text))
+    await t.shot(page, 'business-trust-bank-costs')
     await context.close()
   }
 } catch (e) {

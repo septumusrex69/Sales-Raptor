@@ -44,7 +44,8 @@ export interface BusinessMonth {
   expenses: number
   expensesVat: number
   /**
-   * WHAT THE FIRM MADE: earned plus invoiced, less spent.
+   * WHAT THE FIRM MADE: earned plus invoiced, less spent, less the trust account's bank charges
+   * (10 Oct: a cost, owed by the firm to the trust -- left out of both earned and spent before).
    *
    * NOT DRAWN LESS SPENT. Money earned and still sitting in trust has been earned; a month read on
    * drawings would say the firm made nothing in any month it chose not to transfer, which is a
@@ -81,4 +82,45 @@ export function monthLabel(year: number, month: number): string {
 /** VAT is split out because the firm reclaims it; the cash that left is the inclusive figure. */
 export function expenseTotal(e: Pick<BusinessExpense, 'amount' | 'vat'>): number {
   return Math.round((e.amount + e.vat + Number.EPSILON) * 100) / 100
+}
+
+/**
+ * THE TRUST ACCOUNT'S OWN INTEREST AND CHARGES (trust_bank_costs), and what they leave to do.
+ *
+ * The firm, 10 Oct: "the trust is not a place of expenses. There's interest, yes, but the interest
+ * is due to the company ... you can't pay expenses out of the trust." Interest the bank pays on
+ * the trust account is the firm's income; a bank charge taken from it is the firm's cost, owed by
+ * Bredell Ferreira to the trust. It is covered by the firm's own share still in trust; only when
+ * that share is below nothing (`firmHeld` < 0) is the trust actually short, and then the business
+ * account has to pay it back -- the one state somebody has to act on.
+ */
+export interface TrustBankCosts {
+  interest: number
+  charges: number
+  /** Paid back into the trust from the business account. */
+  repaid: number
+  interestToDate: number
+  chargesToDate: number
+  repaidToDate: number
+  /** The firm's balance on the trust ledger now. Negative = the firm owes the trust. */
+  firmHeld: number
+}
+
+export function trustBankCostsState(c: TrustBankCosts): { tone: 'clear' | 'bad'; line: string; owed: number } {
+  const owed = Math.round(Math.max(0, -c.firmHeld) * 100) / 100
+  if (owed > 0) {
+    return {
+      tone: 'bad',
+      owed,
+      line: 'The charges are more than Bredell Ferreira holds in trust, so client money is covering them. '
+        + 'Pay this back from the business account and allocate it on Trust → Exceptions as “from the business account”.',
+    }
+  }
+  return {
+    tone: 'clear',
+    owed: 0,
+    line: c.chargesToDate > 0
+      ? 'Covered by Bredell Ferreira’s own share in trust — no client money pays for them.'
+      : 'No bank charges have come off the trust account.',
+  }
 }

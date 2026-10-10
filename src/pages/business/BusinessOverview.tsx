@@ -6,8 +6,8 @@ import { rand } from '../../lib/money'
 import { Link } from 'react-router-dom'
 import { fetchClientDebts, type ClientDebt } from '../../lib/business'
 import { fetchTrustPosition, type TrustPosition } from '../../lib/trust'
-import { monthBounds, monthLabel, thisMonth, type BusinessMonth } from '../../lib/businessMonth'
-import { fetchBusinessMonth } from '../../lib/businessApi'
+import { monthBounds, monthLabel, thisMonth, trustBankCostsState, type BusinessMonth, type TrustBankCosts } from '../../lib/businessMonth'
+import { fetchBusinessMonth, fetchTrustBankCosts } from '../../lib/businessApi'
 
 /**
  * WHAT THE FIRM IS WORTH THIS MONTH — or the part of it Raptor can honestly answer today.
@@ -27,6 +27,7 @@ export function BusinessOverview() {
   const [debts, setDebts] = useState<ClientDebt[]>([])
   const [trust, setTrust] = useState<TrustPosition | null>(null)
   const [month, setMonth] = useState<BusinessMonth | null>(null)
+  const [bank, setBank] = useState<TrustBankCosts | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -34,8 +35,10 @@ export function BusinessOverview() {
     let live = true
     const now = thisMonth(new Date())
     const b = monthBounds(now.year, now.month)
-    Promise.all([fetchClientDebts(), fetchTrustPosition(), fetchBusinessMonth(b.from, b.to)])
-      .then(([d, t, m]) => { if (live) { setDebts(d); setTrust(t); setMonth(m) } })
+    Promise.all([fetchClientDebts(), fetchTrustPosition(), fetchBusinessMonth(b.from, b.to),
+      /* A reconciliation beside the month, not part of its arithmetic: unreadable, it is not drawn. */
+      fetchTrustBankCosts(b.from, b.to).catch(() => null)])
+      .then(([d, t, m, k]) => { if (live) { setDebts(d); setTrust(t); setMonth(m); setBank(k) } })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -154,6 +157,11 @@ export function BusinessOverview() {
             <Row label="Earned" value={rand(month?.earned ?? 0)} />
             <Row label="Invoiced to clients" value={rand(month?.invoiced ?? 0)} />
             <Row label="Spent" value={`(${rand(month?.expenses ?? 0)})`} />
+            {/* THE TRUST ACCOUNT'S BANK CHARGES ARE A COST (the firm, 10 Oct), and business_month's
+                Made already takes them off -- drawn here so the column adds up to it. */}
+            {(bank?.charges ?? 0) > 0 && (
+              <Row label="Trust account bank charges" value={`(${rand(bank?.charges ?? 0)})`} />
+            )}
             <div className="flex justify-between pt-2 border-t border-slate-100">
               <span className="text-[13px] font-semibold text-slate-700">
                 {(month?.made ?? 0) < 0 ? 'Lost' : 'Made'}
@@ -182,9 +190,52 @@ export function BusinessOverview() {
               See what it went on &rarr;
             </Link>
           </Card>
+
+          {bank && <TrustBankCard costs={bank} />}
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * THE TRUST ACCOUNT'S INTEREST AND CHARGES, RECONCILED.
+ *
+ * The firm, 10 Oct: "the trust is not a place of expenses. There's interest, yes, but the interest
+ * is due to the company ... you can't pay expenses out of the trust." So the two things the BANK
+ * does to the trust account are drawn together, as the firm's: interest in (its income), charges
+ * out (its cost, owed to the trust), and what that leaves. The one state that needs a person is the
+ * firm's share in trust going below nothing -- client money covering a bank charge -- and then the
+ * card says what to pay back and how.
+ */
+function TrustBankCard({ costs }: { costs: TrustBankCosts }) {
+  const state = trustBankCostsState(costs)
+  const net = Math.round((costs.interestToDate - costs.chargesToDate) * 100) / 100
+  return (
+    <div className="mt-4" data-testid="trust-bank-costs"><Card className={clsx('p-5 space-y-2.5 border-t-4',
+      state.tone === 'bad' ? 'border-t-negative-500' : 'border-t-positive-600')}>
+      <div className="text-[13px] font-semibold text-slate-700">Trust account: interest and charges</div>
+      <div className="text-[12px] text-slate-400">Since the first trust statement</div>
+      <Row label="Interest paid by the bank (the firm's)" value={rand(costs.interestToDate)} />
+      <Row label="Bank charges (the firm's cost)" value={`(${rand(costs.chargesToDate)})`} />
+      {costs.repaidToDate > 0 && <Row label="Paid back from the business account" value={rand(costs.repaidToDate)} />}
+      <div className="flex justify-between pt-2 border-t border-slate-100 text-[13px]">
+        <span className="font-semibold text-slate-700">Interest less charges</span>
+        <span className={clsx('font-semibold tabular-nums', net < 0 ? 'text-negative-700' : 'text-positive-700')}>{rand(net)}</span>
+      </div>
+      {state.owed > 0 && (
+        <div className="flex justify-between text-[13px] font-semibold text-negative-700">
+          <span>Bredell Ferreira owes the trust</span><span className="tabular-nums">{rand(state.owed)}</span>
+        </div>
+      )}
+      <p className={clsx('text-[12px] leading-relaxed pt-1', state.tone === 'bad' ? 'text-negative-700' : 'text-slate-500')}>
+        {state.line}
+      </p>
+      <p className="text-[12px] text-slate-400 leading-relaxed">
+        Charges come from the trust statement; do not capture them again under Expenses. If the
+        bank takes them from the business account instead, they will not appear here.
+      </p>
+    </Card></div>
   )
 }
 

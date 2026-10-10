@@ -27,6 +27,7 @@ import { readFileSync } from 'node:fs'
 import { INCOME_PARTS, incomeTotals, toIncomeRow } from '../../src/lib/businessIncome.ts'
 import { CAPABILITIES, ROLE_CAPABILITIES } from '../../src/lib/capabilities.ts'
 import { canDrawFromTrust, canViewIncome } from '../../src/lib/permissions.ts'
+import { trustBankCostsState } from '../../src/lib/businessMonth.ts'
 
 let pass = 0
 const failures = []
@@ -160,6 +161,25 @@ ok('...and listed only for whoever may open it', /canViewIncome\(currentUser\) \
 ok('Drawings is routed', /path="drawings" element=\{<BusinessDrawings \/>\}/.test(app))
 ok('...and the button is drawn off both ticks', /const mayDraw = canDrawFromTrust\(currentUser\)/.test(drawings)
   && /\{mayDraw && \(/.test(drawings))
+
+/* ---- the trust account's interest and charges (the firm, 10 Oct: "the trust is not a place of
+   expenses ... the interest is due to the company") ---- */
+const bankCosts = liveFn('trust_bank_costs')
+ok('trust_bank_costs reads the firm\'s own entries only', /where party = 'firm'/.test(bankCosts))
+ok('...interest and charges by the one classifier', /kind = 'bank_interest'/.test(bankCosts) && /kind = 'bank_charge'/.test(bankCosts)
+  && /public\.firm_entry_kind\(reason\)/.test(bankCosts))
+ok('...repayments from the business account', /kind = 'transfer_in'/.test(bankCosts))
+ok('...behind the business tick, as no row', /having public\.has_capability\('business\.view'\)/.test(bankCosts))
+ok('...revoked from public and anon', sql.includes('revoke all on function public.trust_bank_costs(date, date) from public, anon;'))
+ok('Made takes the trust account\'s bank charges off', /f\.earned \+ c\.invoiced - s\.ex - f\.bank_charges/.test(liveFn('business_month')))
+{
+  const base = { interest: 12.34, charges: 115, repaid: 0, interestToDate: 12.34, chargesToDate: 115, repaidToDate: 0 }
+  check('covered by the firm\'s share: nothing owed', trustBankCostsState({ ...base, firmHeld: 0 }).owed, 0)
+  ok('...and says no client money pays for them', /no client money pays for them/.test(trustBankCostsState({ ...base, firmHeld: 0 }).line))
+  check('the firm\'s share below nothing is owed to the trust', trustBankCostsState({ ...base, firmHeld: -102.66 }), {
+    tone: 'bad', owed: 102.66, line: trustBankCostsState({ ...base, firmHeld: -102.66 }).line })
+  ok('...and says to pay it back from the business account', /Pay this back from the business account/.test(trustBankCostsState({ ...base, firmHeld: -1 }).line))
+}
 
 /* The firm, 10 Oct: the back office's client-by-client table "overcomplicates things". The firm's
    figures as a whole; one client is the picker. */

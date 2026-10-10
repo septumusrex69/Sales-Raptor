@@ -295,8 +295,7 @@ export function TrustOverview() {
             owners beside them.
           */}
           <Card className={clsx('lg:col-span-5 px-6 py-6 flex flex-col border-t-4',
-            verdict.tone === 'bad' ? 'border-t-negative-500' : verdict.tone === 'warn' ? 'border-t-amber-400' : 'border-t-positive-600')}
-            data-testid="ownership-recon">
+            verdict.tone === 'bad' ? 'border-t-negative-500' : verdict.tone === 'warn' ? 'border-t-amber-400' : 'border-t-positive-600')}>
             <div className="flex items-center justify-between gap-3">
               <div className="text-lg font-semibold text-slate-800">Ownership reconciliation</div>
               <span className={clsx('rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap',

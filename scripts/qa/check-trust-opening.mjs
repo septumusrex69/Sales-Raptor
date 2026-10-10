@@ -114,7 +114,7 @@ ok('the band says when no opening balance is captured', /no opening balance capt
 ok('the overview reads where the bank figure starts', /fetchTrustOpening\(\)/.test(page))
 
 /* The firm, 10 Oct: the reconciliation was "a weird pink thing". A white card; the state is a rule and a pill. */
-const recon = page.slice(page.indexOf('data-testid="ownership-recon"') - 400, page.indexOf('Ownership reconciliation</div>'))
+const recon = page.slice(page.indexOf('Ownership reconciliation</div>') - 700, page.indexOf('Ownership reconciliation</div>'))
 ok('the reconciliation is a card with a coloured rule, not a tinted panel',
   /<Card className=\{clsx\('lg:col-span-5[^']*border-t-4'/.test(recon) && !/'bg-negative-50' : 'bg-positive-50'/.test(page))
 

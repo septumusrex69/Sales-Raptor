@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { BusinessExpense, BusinessMonth, ExpenseCategory } from './businessMonth'
+import type { BusinessExpense, BusinessMonth, ExpenseCategory, TrustBankCosts } from './businessMonth'
 import { toIncomeRow, type IncomeRow } from './businessIncome'
 
 /** The firm's own books, read and written. Split from businessMonth.ts so a check can import that. */
@@ -18,6 +18,19 @@ export async function fetchBusinessMonth(from: string, to: string): Promise<Busi
     earned: n(r.earned), drawn: n(r.drawn), stillInTrust: n(r.still_in_trust),
     invoiced: n(r.invoiced), invoicesPaid: n(r.invoices_paid), owedByClients: n(r.owed_by_clients),
     expenses: n(r.expenses), expensesVat: n(r.expenses_vat), made: n(r.made),
+  }
+}
+
+/** The trust account's interest and charges for the period, and the firm's balance in trust. Null = refused. */
+export async function fetchTrustBankCosts(from: string, to: string): Promise<TrustBankCosts | null> {
+  const { data, error } = await supabase.rpc('trust_bank_costs', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  const r = (data as Record<string, unknown>[] | null)?.[0]
+  if (!r) return null
+  return {
+    interest: n(r.interest), charges: n(r.charges), repaid: n(r.repaid),
+    interestToDate: n(r.interest_to_date), chargesToDate: n(r.charges_to_date), repaidToDate: n(r.repaid_to_date),
+    firmHeld: n(r.firm_held),
   }
 }
 
