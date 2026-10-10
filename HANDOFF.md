@@ -509,6 +509,13 @@ An approved receipt inserted there runs the real engine (allocation + ledger ent
 live deployment), not this branch. Fetch `claude/sales-raptor-review-p1pzx2` before believing
 anything is missing.
 
+**Every preview branch now gets the staging settings (10 Oct).** `VITE_SUPABASE_URL`,
+`VITE_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and `EMAIL_CREDENTIALS_KEY` were scoped in
+Vercel to `claude/sales-raptor-review-p1pzx2` alone, so a new session's branch built a preview that
+loaded and drew nothing (the Supabase client throws at import). They now apply to all Preview
+branches. That old branch was also fast-forwarded to `claude/new-session-ecohkn` so the link the
+firm already uses shows the current work.
+
 **Break-test convention, and it is not optional.** After writing a check, break the thing it guards
 and confirm it fails. Twice this session a "break test" was equivalent code and proved nothing;
 once a sed silently failed to apply and the green result was meaningless. Verify the sabotage
