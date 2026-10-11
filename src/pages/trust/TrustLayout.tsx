@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Users, Scale, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Coins, Users, Scale, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -35,6 +35,9 @@ const ITEMS: RailItem[] = [
   /* What still has to go out, and on which reference (the firm, 8 Oct). After the runs, because an
      approved run is what lands here. */
   { to: '/trust/payments-out', label: 'Payments to make', icon: Send },
+  /* A debtor's overpayment, start to finish (the firm, 11 Oct: "a separate section for like
+     overpayments") -- decided, refunded, parked -- instead of across three screens. */
+  { to: '/trust/overpayments', label: 'Overpayments', icon: Coins },
   { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
   /* Every client: what we hold for them, what they owe us (the firm, 10 Oct: "a ledger for clients.
      Who owes us and who we paid"). */

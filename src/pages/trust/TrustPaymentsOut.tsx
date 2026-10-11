@@ -30,7 +30,7 @@ import { clockNowMs, clockToday } from '../../lib/clock.ts'
  * statement". Marking by hand never stops that match; it only records what was done at the bank.
  */
 type Tab = 'pay' | 'paid'
-type Paying = { kind: 'payover' | 'refund'; id: string; payee: string; amount: number; reference: string }
+export type Paying = { kind: 'payover' | 'refund'; id: string; payee: string; amount: number; reference: string }
 
 export function TrustPaymentsOut() {
   const { currentUser } = useAuth()
@@ -315,7 +315,7 @@ function PaidList({ paid }: { paid: PaidOut[] }) {
 }
 
 /** Marking a payment paid by hand: the reference it went out on (prefilled) and the day. */
-function MarkPaidBox({ paying, today, onClose, onSave }: {
+export function MarkPaidBox({ paying, today, onClose, onSave }: {
   paying: Paying; today: string; onClose: () => void; onSave: (ref: string, date: string) => Promise<void>
 }) {
   const [ref, setRef] = useState(paying.reference)

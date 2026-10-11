@@ -54,6 +54,7 @@ const TrustOverview = lazy(() => import('./pages/trust/TrustOverview').then((m) 
 const TrustLedger = lazy(() => import('./pages/trust/TrustLedger').then((m) => ({ default: m.TrustLedger })))
 const ClientBalances = lazy(() => import('./pages/trust/ClientBalances').then((m) => ({ default: m.ClientBalances })))
 const TrustPaymentsOut = lazy(() => import('./pages/trust/TrustPaymentsOut').then((m) => ({ default: m.TrustPaymentsOut })))
+const TrustOverpayments = lazy(() => import('./pages/trust/TrustOverpayments').then((m) => ({ default: m.TrustOverpayments })))
 const BusinessLayout = lazy(() => import('./pages/business/BusinessLayout').then((m) => ({ default: m.BusinessLayout })))
 const BusinessOverview = lazy(() => import('./pages/business/BusinessOverview').then((m) => ({ default: m.BusinessOverview })))
 const BusinessExpenses = lazy(() => import('./pages/business/BusinessExpenses').then((m) => ({ default: m.BusinessExpenses })))
@@ -189,6 +190,7 @@ function App() {
                 <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
                 <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
                 <Route path="payments-out" element={<TrustPaymentsOut />} handle={{ title: 'Payments to make' }} />
+                <Route path="overpayments" element={<TrustOverpayments />} handle={{ title: 'Overpayments' }} />
                 <Route path="ledger" element={<TrustLedger />} handle={{ title: 'Trust ledger' }} />
                 <Route path="clients" element={<ClientBalances />} handle={{ title: 'Client balances' }} />
                 <Route path="exceptions" element={<FinanceExceptions />} handle={{ title: 'Exceptions' }} />
