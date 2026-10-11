@@ -58,7 +58,8 @@ export function groupRunsByCycle<T extends GroupableRun>(
       const total = Math.round(list.reduce((s, r) => s + r.netPayover, 0) * 100) / 100
       let title: string; let tone: CycleGroup<T>['tone']; let state: string
       if (mode === 'paid') {
-        title = 'Paid'; tone = 'done'; state = `Paid over · was due ${dayLabel(paysOn)}`
+        /* FINALISED (11 Oct): paid, or below nil and carried forward -- nothing left to do on it. */
+        title = 'Finalised'; tone = 'done'; state = `Paid over or carried forward · was due ${dayLabel(paysOn)}`
       } else if (openStart && start >= openStart) {
         title = 'Running'; tone = 'early'
         state = `Still collecting · closes at midnight on ${dayLabel(end)} · paid out ${dayLabel(paysOn)}`

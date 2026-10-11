@@ -241,9 +241,20 @@ export function FinanceWorkQueue() {
   }
 
   const isRunning = (r: WorkQueueRow) => !!cycle && r.periodStart >= cycle.periodStart
-  const running = rows.filter((r) => r.status !== 'paid' && isRunning(r))
-  const closed = rows.filter((r) => r.status !== 'paid' && !isRunning(r))
-  const paid = rows.filter((r) => r.status === 'paid')
+  /*
+   * FINALISED, NOT ONLY PAID (the firm, 11 Oct, of MPG-2606 sitting under "Due today" for ever: "maybe
+   * instead of paid, we should say finalised ... and move it there as well"). A run below nil has
+   * nothing to pay and can never be marked paid; once its advice has gone (or the client paid the
+   * shortfall into the business account) there is nothing left to do ON THE RUN. The money is not
+   * forgotten: the next run opens with it as "Brought forward", and the client's statement and
+   * Client balances carry it as owed to us until it is set off or paid. Approved and not yet sent
+   * stays in Closed -- the advice telling them they owe us is still to go.
+   */
+  const isFinal = (r: WorkQueueRow) => r.status === 'paid'
+    || (r.netPayover <= 0 && (r.status === 'sent' || (r.status === 'approved' && settled.has(r.runId))))
+  const running = rows.filter((r) => !isFinal(r) && isRunning(r))
+  const closed = rows.filter((r) => !isFinal(r) && !isRunning(r))
+  const paid = rows.filter(isFinal)
   /* Nothing to pay yet (mid-cycle, or after the 11th's payments went): open on Running instead. */
   const tabShown = tabParam === null && closed.length === 0 && running.length > 0 ? 'running' : tab
   const q = query.trim().toLowerCase()
@@ -355,7 +366,7 @@ export function FinanceWorkQueue() {
                     tabShown === t ? 'border-navy-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700',
                   )}
                 >
-                  {t === 'running' ? 'Running' : t === 'closed' ? 'Closed · to pay' : 'Paid'}
+                  {t === 'running' ? 'Running' : t === 'closed' ? 'Closed · to pay' : 'Finalised'}
                   {/* Brackets kept for the reader of innerText; drawn as a pill. */}
                   <span className="rounded-full bg-slate-100 px-2 py-px text-[11.5px] text-slate-600">
                     <span className="sr-only">(</span>{count}<span className="sr-only">)</span>
@@ -470,7 +481,7 @@ export function FinanceWorkQueue() {
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
                   {(q || statusFilter) ? 'No run on this tab matches the search or filter.'
                     : tabShown === 'paid'
-                    ? 'Nothing has been paid over yet.'
+                    ? 'Nothing has been finalised yet: a run moves here once it is paid, or once a run where the client owes us has gone to them.'
                     : tabShown === 'running'
                       ? 'Nothing processed in this cycle yet. A client appears here, with its run built, as soon as a payment for it is approved.'
                       : 'Nothing is waiting to be paid. A cycle moves here at midnight on the 10th, when it closes.'}
@@ -556,6 +567,12 @@ export function FinanceWorkQueue() {
                       <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-emerald-700"
                         data-testid="paid-to-us" title="The client paid the shortfall into the business account">
                         Paid to us
+                      </span>
+                    ) : r.netPayover < 0 && isFinal(r) ? (
+                      /* FINALISED BELOW NIL: what they owe has gone forward to their next run. */
+                      <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-negative-700"
+                        data-testid="carried-forward" title="Brought forward as the opening line of this client's next run, and on their statement until it is set off or paid">
+                        Carried to next run
                       </span>
                     ) : r.nextStep === 'paid' && r.netPayover < 0 ? (
                       /* A RUN BELOW NIL HAS NOTHING TO PAY: the client owes us, and it comes off their

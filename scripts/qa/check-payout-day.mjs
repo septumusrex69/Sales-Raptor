@@ -73,6 +73,13 @@ ok('approval refuses before the payout day without a reason', dayAt >= 0 && dayA
 ok('approving early releases the payout too', /released_at = coalesce\(released_at, public\.raptor_now\(\)\)/.test(liveFn('approve_payover_run_early')))
 ok('the queue holds a ready run until its day', /const waitsForDay = \(r: WorkQueueRow\) => r\.status === 'ready'/.test(strip(read('src/pages/finance/FinanceWorkQueue.tsx'))))
 
+/* FINALISED (the firm, 11 Oct): a run below nil whose advice went is finished, not "Due today" for ever. */
+const q11 = strip(read('src/pages/finance/FinanceWorkQueue.tsx'))
+ok('a sent run below nil is finalised, beside the paid ones',
+  /const isFinal = \(r: WorkQueueRow\) => r\.status === 'paid'\s*\|\| \(r\.netPayover <= 0 && \(r\.status === 'sent'/.test(q11)
+  && /const paid = rows\.filter\(isFinal\)/.test(q11) && /!isFinal\(r\) && !isRunning\(r\)/.test(q11))
+ok('...under a tab that says Finalised', /: 'Finalised'\}/.test(q11))
+
 /* ---------------- 2. the browser asks first ---------------- */
 const mail = strip(read('src/lib/remittanceEmail.ts'))
 const send = mail.slice(mail.indexOf('export async function sendRemittanceAdvice'))
