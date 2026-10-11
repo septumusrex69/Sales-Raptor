@@ -110,13 +110,38 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
 - `check-payout-day` (27, break-tested four ways); `check-payover-groups`, `check-payments-out` and
   `e2e/payover-sends` (44) updated for the gate.
 
-**Asked of the firm and NOT built yet (§4):**
-- A withdrawal should come off THIS month's payout, not wait for the next cycle's run. Proposed: a
-  set-off charge rides the next payout whose advice has not gone; an approved-but-unsent run drops
-  back to Ready with a note and is approved again. Waiting for a yes.
-- An **Overpayments** item in the Trust rail (To decide · To refund · Parked · Refunded) -- the
-  firm asked for "a separate section for overpayments"; today they are split over Exceptions,
-  Payments to make and the Trust overview.
+**Later the same session:**
+- **A run is APPROVED on its payout day** (the firm: "it goes into a ready state, but then you only
+  approve it by the time that you pay it out"). `approve_payover_run` refuses before
+  `payover_pays_on` without a reason; `approve_payover_run_early` (reason) also releases the
+  payout. Queue: "Approve on 11 Aug", bulk approve takes due runs only, the Ready tile counts only
+  what can be approved now. This replaced the "drop an approved run back to Ready" idea.
+- **NOT APPLIED -- `supabase/pending/2026-10-11_build_payover_run_payout_window.sql`.** The
+  build_payover_run change that makes a withdrawal (set-off charge) come off the payout BEFORE
+  which it was raised, and takes it back from a later open run. The Supabase MCP asks a person to
+  confirm any SQL containing DELETE; the confirmation never reached the firm's iPad (three tries,
+  "cancelled"). Until it is applied a charge raised after a cycle closes still rides the NEXT
+  cycle's run. Apply on staging from the SQL editor (or retry the MCP with the user at a desktop),
+  then append it to schema.sql and delete the pending file. `check-payout-day` does not assert it.
+- **Prompt 11 -- find and reverse a payment.** History search (account number, RAP-, client
+  reference, debtor, bank words, amount-as-amount); Account column = client's number over ours;
+  Reverse on each History row, on the account's Transactions tab (`AccountPaymentsList`) and on
+  each run line, all one `ReversePaymentModal` that reads the payment by id; the opened History
+  payment unfolds under its row in a sticky panel held to the scroller's width; tooltips say why a
+  payment cannot be reversed. Tiles: Unmatched reads `unallocated_receipts`; Ready counts approvable.
+- **PTC <-> trust re-capture** (the firm: "from a PTC to an ACB or an ACB to a PTC"):
+  `reverse_payment_switching_side` = reverse + the copy back in the queue on the other side; a
+  receipt off the trust statement cannot become a PTC. A third option in the Reverse box.
+- **Finalised** replaces the Paid tab on the queue: paid runs, and runs below nil whose advice has
+  gone ("Carried to next run") -- MPG-2606 sat under Due today for ever.
+- **Trust -> Overpayments** (To decide · To refund · Parked · Refunded), reusing the disposal box,
+  `mark_refund_paid` and ParkedCredits.
+- Checks: `check-payment-search` (25), `check-payout-day` (32); e2e `payment-reverse` (20),
+  `overpayments` (7), `payover-sends` (46), `check-payments` (29).
+
+**Proposed to the firm, waiting for a yes (§4):** settlement acceptance must carry proof -- pin the
+client's email from the account's Emails tab or upload the document to the account's Documents --
+linked from the settlement, the statement line and the client file; the account holds the one copy.
 
 **Fifth session (10 October, evening), on `claude/staging-clock`** (started from `1848079`):
 
