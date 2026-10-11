@@ -83,10 +83,13 @@ check('Payments in no longer embeds the allocation at all', /payment_allocations
  * "ALREADY PAID OVER" WAS THE SENTENCE THAT NEVER DREW. The Reverse box moved to Check, where the
  * payover run arrives as a joined column -- not an embed -- so it is read straight off the row.
  */
-const check_ = read('src/pages/finance/CheckPayments.tsx')
-ok('the Reverse box is on Check', /function ReverseModal\(/.test(check_))
-ok('...and its "already paid over" warning reads the run off the posted row',
-  /const invoiced = Boolean\(row\.runInvoice\)/.test(check_))
+/* PROMPT 11: ONE BOX, opened from History, the account and the run, reading the payment by id. */
+const check_ = read('src/components/finance/ReversePaymentModal.tsx')
+ok('the Reverse box is one component every screen opens', /export function ReversePaymentModal\(/.test(check_)
+  && ['src/pages/finance/CheckPayments.tsx', 'src/pages/finance/RunDetail.tsx', 'src/components/accounts/AccountPaymentsList.tsx']
+    .every((f) => /<ReversePaymentModal /.test(read(f))))
+ok('...and its "already paid over" warning reads the run that carried it',
+  /const invoiced = !!row\?\.runStatus && \['approved', 'sent', 'paid'\]\.includes\(row\.runStatus\)/.test(check_))
 ok('...which payments_posted joins in SQL', /left join public\.payover_runs r on r\.id = a\.payover_run_id/.test(sql))
 
 /* ---------------- and a payment with no split yet is still findable ---------------- */

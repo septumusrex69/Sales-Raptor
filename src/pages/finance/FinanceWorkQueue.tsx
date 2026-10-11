@@ -7,7 +7,7 @@ import { rand } from '../../lib/money'
 import {
   NEXT_STEP_LABEL, RUN_STATUS_LABEL,
   approveRun, buildRun, fetchBuildable, markRunPaid, fetchCycle, fetchTiles, fetchWorkQueue,
-  fetchReleasedRunIds, isStagingDeployment, refreshRuns, resetRun,
+  fetchReleasedRunIds, fetchUnallocatedReceipts, isStagingDeployment, refreshRuns, resetRun,
   type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
@@ -124,6 +124,9 @@ export function FinanceWorkQueue() {
   const [progress, setProgress] = useState<string | null>(null)
   /* Approved runs released for payout before their day (release_payover_run_early). */
   const [released, setReleased] = useState<Set<string>>(new Set())
+  /* THE REAL UNMATCHED STATEMENT LINES (prompt 11): the tile said "Bank import unavailable" long
+     after the import worked, beside a zero the database hard-coded. */
+  const [unmatched, setUnmatched] = useState<{ count: number; amount: number } | null>(null)
   /* How long after a cycle closes it is paid (Trust settings); one month unless the firm changed it. */
   const [lag, setLag] = useState(1)
   /* MARK PAID, FROM HERE (the firm, 10 Oct: "the mark as paid button should ... just immediately
@@ -151,6 +154,9 @@ export function FinanceWorkQueue() {
       setRows(q)
       setSettled(await fetchSettledRunIds().catch(() => new Set<string>()))
       setReleased(await fetchReleasedRunIds().catch(() => new Set<string>()))
+      setUnmatched(await fetchUnallocatedReceipts()
+        .then((u) => ({ count: u.length, amount: Math.round(u.reduce((t, x) => t + Math.abs(x.amount), 0) * 100) / 100 }))
+        .catch(() => null))
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
     } catch (e) {
@@ -247,13 +253,23 @@ export function FinanceWorkQueue() {
   /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
   const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'paid' ? 'paid' : 'open', lag, cycle?.today ?? null)
   const pickedRows = rows.filter((r) => picked.has(r.runId))
-  const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r)).map((r) => r.runId)
-  /* THE PAYOUT DAY (11 Oct): an approved run's advice and payment wait for payover_pays_on unless it
+    /* THE PAYOUT DAY (11 Oct): an approved run's advice and payment wait for payover_pays_on unless it
      was released early. A sent run went out already, so it is not held again. The database refuses
      the same; this is so the bar never offers what would be refused. */
   const paysOn = (r: WorkQueueRow) => paysOnFor(r.periodEnd, lag)
   const isDue = (r: WorkQueueRow) => r.status !== 'approved' || released.has(r.runId)
     || (!!cycle && cycle.today >= paysOn(r))
+  /* APPROVED ON THE PAYOUT DAY, NOT BEFORE (the firm, 11 Oct: "only approve the previous month's
+     payments ... you only approve it by the time that you pay it out"). Until then a closed run stays
+     Ready and keeps taking in what is raised for it -- a withdrawal comes off THIS payout rather than
+     sending an approved run back. Approving earlier is the run page's Approve early, with a reason. */
+  const waitsForDay = (r: WorkQueueRow) => r.status === 'ready' && !stillOpen(r) && !!cycle && cycle.today < paysOn(r)
+  const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r)).map((r) => r.runId)
+  const approveLater = pickedRows.filter(waitsForDay)
+  const readyNow = rows.filter((r) => r.status === 'ready' && !stillOpen(r) && !waitsForDay(r))
+  const readyLater = rows.filter((r) => r.status === 'ready' && (stillOpen(r) || waitsForDay(r)))
+  /* The soonest day any of them may be approved: the payout day, or for a running cycle its own. */
+  const readyLaterDay = readyLater.map((r) => paysOn(r)).sort()[0] ?? null
   const scheduled = pickedRows.filter((r) => r.status === 'approved' && !isDue(r))
   const toEmail = pickedRows.filter((r) => r.status === 'approved' && isDue(r)).map((r) => r.runId)
   /* Only what is ready to pay: approved or sent, on its day, and not below nil -- a run below nil is
@@ -298,11 +314,17 @@ export function FinanceWorkQueue() {
         <Tile icon={<Users size={20} />} label="Net due to clients" value={rand(tiles?.dueToClients ?? 0)}
           note="After commission, VAT and set-offs" />
         <Tile icon={<FileText size={20} />} label="Unmatched payments"
-          value={`${tiles?.unmatchedCount ?? 0} · ${rand(tiles?.unmatchedAmount ?? 0)}`}
-          note="Bank import unavailable" />
+          value={unmatched ? `${unmatched.count} · ${rand(unmatched.amount)}` : '—'}
+          note={unmatched === null ? 'Could not read the statement lines'
+            : unmatched.count > 0 ? 'Statement lines with no account yet' : 'Every statement line is placed'}
+          to="/trust/exceptions" />
+        {/* ONLY WHAT CAN BE APPROVED NOW (prompt 11): it counted runs in the cycle still running, and
+            -- since 11 Oct -- closed runs waiting for their payout day; neither can be approved. */}
         <Tile icon={<CheckCircle2 size={20} />} label="Ready to approve" accent
-          value={String(tiles?.readyCount ?? 0)}
-          note={(tiles?.needsReviewCount ?? 0) > 0 ? `${tiles?.needsReviewCount} more need review` : undefined}
+          value={String(readyNow.length)}
+          note={readyLater.length > 0
+            ? `${readyLater.length} more ready on ${fmtDay(readyLaterDay ?? '')}${(tiles?.needsReviewCount ?? 0) > 0 ? ` · ${tiles?.needsReviewCount} need review` : ''}`
+            : (tiles?.needsReviewCount ?? 0) > 0 ? `${tiles?.needsReviewCount} more need review` : undefined}
           action={(
             <button type="button" data-testid="review-runs"
               onClick={() => {
@@ -395,6 +417,11 @@ export function FinanceWorkQueue() {
             {busy === 'bulk' && (
               <span className="inline-flex items-center gap-1.5 text-slate-600" data-testid="bulk-progress">
                 <Loader2 className="h-4 w-4 animate-spin text-slate-400" />{progress ?? 'Working…'}
+              </span>
+            )}
+            {busy !== 'bulk' && approveLater.length > 0 && (
+              <span className="text-[12.5px] text-slate-500" data-testid="bulk-approve-later">
+                {approveLater.length} approved on {fmtDay(paysOn(approveLater[0]))}, the payout day
               </span>
             )}
             {busy !== 'bulk' && scheduled.length > 0 && (
@@ -519,6 +546,11 @@ export function FinanceWorkQueue() {
                       <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-slate-400" data-testid="still-open"
                         title="Approve early from the run, with a reason">
                         Open until {fmtDay(r.periodEnd)}
+                      </span>
+                    ) : r.nextStep === 'approve' && waitsForDay(r) ? (
+                      <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-slate-500" data-testid="approve-on-day"
+                        title="Approved on its payout day; until then it takes in anything raised for this client. Approve early from the run, with a reason.">
+                        Approve on {fmtDay(paysOn(r))}
                       </span>
                     ) : r.netPayover < 0 && settled.has(r.runId) ? (
                       <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-emerald-700"

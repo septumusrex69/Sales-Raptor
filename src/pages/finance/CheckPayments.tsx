@@ -1,8 +1,6 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import clsx from 'clsx'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw, Search, X } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
-import { Modal, inputClass } from '../../components/ui/Modal'
 import { useAuth } from '../../store/AuthContext'
 import { canReversePayment } from '../../lib/permissions'
 import { useAppStore } from '../../store/AppStore'
@@ -11,8 +9,11 @@ import { accountRate } from '../../lib/commissionRule'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import {
-  fetchPostedPayments, postedAllocation, reversePayment, reversePaymentToUnplaced, type PostedPayment,
+  fetchPostedPayments, postedAllocation, type PostedPayment,
 } from '../../lib/payover'
+import { ReversePaymentModal } from '../../components/finance/ReversePaymentModal'
+import { matchesPayment, reverseBlocked } from '../../lib/paymentSearch'
+import { fetchClientReferences } from '../../lib/paymentReverse'
 import { checkAllocation, feesSideTaking, type Violation } from '../../lib/allocationRules'
 import {
   FeeBodyCells, FeeHeadCells, feeColumns, toggled, type SectionKey,
@@ -69,6 +70,28 @@ export function CheckPayments() {
   const mayReverse = canReversePayment(currentUser)
   const [reversing, setReversing] = useState<PostedPayment | null>(null)
   /*
+   * ONE BOX THAT SEARCHES EVERYTHING (prompt 11). The firm needed to reverse R3 500.00 on KLR/1005
+   * and had to know its month, open its client and find its row by eye. A search ignores the month
+   * and the folders: every month, every client, and the matching rows shown with both. Clearing it
+   * puts the folders back as they were.
+   */
+  const [query, setQuery] = useState('')
+  const searching = query.trim().length > 0
+  /* The client's own reference is not on a posted payment; read once for the accounts listed. */
+  const [clientRefs, setClientRefs] = useState<Map<string, string>>(new Map())
+  /* THE WIDTH THE OPENED PANEL MAY USE: the visible scroll area, not the table (see the row). */
+  const scroller = useRef<HTMLDivElement | null>(null)
+  const [viewWidth, setViewWidth] = useState<number | null>(null)
+  useEffect(() => {
+    const el = scroller.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setViewWidth(el.clientWidth))
+    ro.observe(el)
+    setViewWidth(el.clientWidth)
+    return () => ro.disconnect()
+    /* The table, and so the scroller, only exists once the payments have loaded. */
+  }, [loading, rows.length])
+  /*
    * FILED BY CLIENT, THEN NARROWED BY MONTH (the firm, 10 Oct: "under the client. So it's
    * organized, it's filed. And here is just a bunch of list of stuff"). A client is a closed
    * folder until opened; the month narrows every folder at once.
@@ -78,7 +101,11 @@ export function CheckPayments() {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
-    try { setRows(await fetchPostedPayments()) }
+    try {
+      const posted = await fetchPostedPayments()
+      setRows(posted)
+      setClientRefs(await fetchClientReferences(posted.map((r) => r.accountId)).catch(() => new Map()))
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not load the posted payments.') }
     finally { setLoading(false) }
   }, [])
@@ -103,7 +130,9 @@ export function CheckPayments() {
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
   const older = useMemo(() => checked.filter((c) => c.row.beforeTheRecord), [checked])
   const months = useMemo(() => [...new Set(rows.map((r) => r.receivedOn.slice(0, 7)))].sort().reverse(), [rows])
-  const shown = (onlyBroken ? broken : checked).filter((c) => month === 'all' || c.row.receivedOn.startsWith(month))
+  const shown = (onlyBroken ? broken : checked).filter((c) => (searching
+    ? matchesPayment({ ...c.row, clientReference: clientRefs.get(c.row.accountId) ?? null }, query)
+    : month === 'all' || c.row.receivedOn.startsWith(month)))
   /* ONE FOLDER A CLIENT, the one paid most recently first; a client's payments newest first inside. */
   const folders = useMemo(() => {
     const by = new Map<string, typeof shown>()
@@ -122,7 +151,7 @@ export function CheckPayments() {
   /* Open by itself when there is only one to open, or when the list is narrowed to the broken ones. */
   /* The total is of what is shown, so the month narrows it too. */
   const total = shown.reduce((n, c) => n + c.row.amount, 0)
-  const isOpenClient = (k: string) => onlyBroken || folders.length === 1 || openClients.has(k)
+  const isOpenClient = (k: string) => searching || onlyBroken || folders.length === 1 || openClients.has(k)
   const toggleClient = (k: string) => setOpenClients((p) => (p.has(k) ? new Set([...p].filter((x) => x !== k)) : new Set([...p, k])))
 
   function toggleSection(k: SectionKey) { setOpened((p) => toggled(p, k)) }
@@ -142,8 +171,20 @@ export function CheckPayments() {
               payment for its split or to reverse it. Every formula is still run over every one.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <select value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Month"
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} data-testid="history-search"
+                aria-label="Search payments" placeholder="Account, RAP-, debtor, bank reference or amount"
+                className="w-72 max-w-full rounded-lg border border-slate-200 bg-white py-1 pl-7 pr-7 text-[12.5px] text-slate-700" />
+              {searching && (
+                <button type="button" onClick={() => setQuery('')} aria-label="Clear the search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </label>
+            <select value={month} disabled={searching} title={searching ? 'A search covers every month' : undefined} onChange={(e) => setMonth(e.target.value)} aria-label="Month"
               className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[12.5px] text-slate-700">
               <option value="all">Every month</option>
               {months.map((m) => <option key={m} value={m}>{monthName(m)}</option>)}
@@ -200,11 +241,11 @@ export function CheckPayments() {
             tab, where they are checked before they post.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" ref={scroller}>
             <table className="w-full list-table whitespace-nowrap">
               <thead className="text-[10.5px] uppercase tracking-wide text-slate-500">
                 <tr className="border-b border-slate-100 text-slate-400">
-                  <th colSpan={5} />
+                  <th colSpan={6} />
                   <th colSpan={feeColumns(opened)}
                     className="px-2 py-1.5 text-left font-semibold tracking-wider border-l border-slate-200">
                     The fees side — half the payment
@@ -221,6 +262,7 @@ export function CheckPayments() {
                   <th className="px-2 py-2 text-left font-medium">Account</th>
                   <th className="px-2 py-2 text-left font-medium">Debtor</th>
                   <th className="px-2 py-2 text-right font-medium">Payment</th>
+                  <th className="px-2 py-2" />
                   <FeeHeadCells opened={opened} onToggle={toggleSection} />
                   <th className="px-2 py-2 text-right font-normal text-slate-400 border-l border-slate-200">
                     Capital outstanding
@@ -242,7 +284,7 @@ export function CheckPayments() {
                     <Fragment key={f.client}>
                       <tr className="cursor-pointer border-b border-slate-100 bg-slate-50 hover:bg-slate-100"
                         data-testid="history-client" onClick={() => toggleClient(f.client)}>
-                        <td colSpan={5} className="px-3 py-1.5">
+                        <td colSpan={6} className="px-3 py-1.5">
                           <span className="inline-flex items-center gap-2">
                             {on ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
                             <span className="font-semibold text-slate-800">{f.client}</span>
@@ -261,14 +303,18 @@ export function CheckPayments() {
                         <PostedRow key={r.paymentId} r={r} a={a} problems={problems}
                           opened={opened}
                           isOpen={open === r.paymentId}
-                          onOpen={() => setOpen(open === r.paymentId ? null : r.paymentId)} />
+                          onOpen={() => setOpen(open === r.paymentId ? null : r.paymentId)}
+                          mayReverse={mayReverse}
+                          onReverse={() => setReversing(r)}
+                          viewWidth={viewWidth}
+                          span={feeColumns(opened) + 15} />
                       ))}
                     </Fragment>
                   )
                 })}
                 {folders.length === 0 && (
-                  <tr><td colSpan={feeColumns(opened) + 14} className="px-4 py-8 text-center text-[13px] text-slate-400">
-                    No payment in that month.
+                  <tr><td colSpan={feeColumns(opened) + 15} className="px-4 py-8 text-center text-[13px] text-slate-400">
+                    {searching ? 'No payment matches that search, in any month.' : 'No payment in that month.'}
                   </td></tr>
                 )}
               </tbody>
@@ -277,64 +323,14 @@ export function CheckPayments() {
         )}
       </Card>
 
-      {/*
-        THE OPENED RECEIPT IS BELOW THE TABLE AND NOT INSIDE IT, which is a layout decision the
-        screenshot made for me.
-        
-        A panel in a `colSpan` cell takes the TABLE's width, and this table is wider than the
-        window -- fifteen columns before anybody opens a fee section, and five more each time they
-        do. So the third of its three columns, the one headed "Whether it holds", was drawn off the
-        right-hand edge: the verdict, which is the entire point of the screen, was the part you had
-        to scroll sideways to read. Outside the table it takes the card's width and always fits.
-        
-        AND IT READS BETTER FOR THE SAME REASON THE FIRM'S OWN SCREENS DO: a row is for finding one
-        receipt among many, and this is for reading one closely. They are different jobs and the
-        table stays a table.
-      */}
-      {open && (() => {
-        const c = checked.find((x) => x.row.paymentId === open)
-        if (!c) return null
-        return (
-          <Card className="mt-4">
-            {/* NAMED FOR THE BROWSER CHECK, which has to read this panel and must not find it by
-                counting table rows -- it is deliberately not one. */}
-            <div data-check-panel>
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-[15px] font-semibold text-slate-800">
-                {c.row.caseNumber ?? c.row.accountNumber} · {c.row.debtor}
-              </h3>
-              <div className="flex items-center gap-3">
-                <p className="text-[12px] text-slate-500">
-                  {rand(c.row.amount)} banked {formatDate(c.row.receivedOn)}
-                </p>
-                {mayReverse && !c.row.reversedOn && (
-                  <button type="button" onClick={() => setReversing(c.row)}
-                    className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-100">
-                    Reverse
-                  </button>
-                )}
-              </div>
-            </div>
-            <Opened r={c.row} a={c.a} problems={c.problems} />
-            </div>
-          </Card>
-        )
-      })()}
       {reversing && (
-        <ReverseModal row={reversing} onClose={() => setReversing(null)}
+        <ReversePaymentModal paymentId={reversing.paymentId} onClose={() => setReversing(null)}
           onDone={async () => { setReversing(null); setOpen(null); await load() }} />
       )}
     </div>
   )
 }
 
-/**
- * REVERSING ASKS WHY, AND THE ANSWER IS KEPT.
- *
- * It becomes the cancellation reason on the receipt fee -- so the account's own ledger says a fee
- * was raised and then cancelled because the cheque came back, rather than the fee simply
- * vanishing. Everything else follows in the database.
- */
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
   'September', 'October', 'November', 'December']
 /* Written out rather than through Intl: en-ZA abbreviates September to "Sept" (CLAUDE.md). */
@@ -342,130 +338,52 @@ function monthName(ym: string): string {
   return `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`
 }
 
-function ReverseModal({ row, onClose, onDone }: { row: PostedPayment; onClose: () => void; onDone: () => Promise<void> }) {
-  const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  /*
-   * WHERE IT GOES (the firm, 10 Oct): back to the approval queue on this debtor (the figures were
-   * wrong -- or move it to the right debtor there), or back to Needs an account (the wrong
-   * reference -- it is somebody else's money). Only a receipt off a statement has a line to put back.
-   */
-  const fromStatement = row.bankDescription !== null
-  const [to, setTo] = useState<'queue' | 'unplaced'>('queue')
-  /* ALREADY ON A RUN: the invoice that carried it is not touched -- see below. */
-  const invoiced = Boolean(row.runInvoice)
-  return (
-    <Modal title="Reverse this payment" onClose={onClose} width={440}>
-      <div className="space-y-3">
-        <p className="text-[13px] text-slate-600">
-          {rand(row.amount)} received {formatDate(row.receivedOn)}. The receipt fee is cancelled, the
-          capital goes back on the account, and every later payment is re-split against the balances
-          this one moved.
-        </p>
-        {/*
-          WHERE THE MONEY GOES, which the firm asked about directly: "not really the suspense
-          account -- it goes back into a state ready for approval." Said here because it is the
-          difference between a reversal that loses the receipt and one that hands it back to be
-          redone, and nobody should have to find that out by looking afterwards.
-        */}
-        <div className="space-y-2" data-testid="reverse-to">
-          <div className="text-xs font-medium text-slate-600">Where does the money go?</div>
-          <label className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[13px] text-slate-700">
-            <input type="radio" className="mt-1" checked={to === 'queue'} onChange={() => setTo('queue')} />
-            <span>
-              <span className="font-medium">Back to the approval queue</span>
-              <span className="block text-xs text-slate-500">
-                The figures were wrong, or it belongs on another of this debtor&rsquo;s files. It waits
-                on Payments in as {rand(row.amount)} to be moved or approved again.
-              </span>
-            </span>
-          </label>
-          <label className={clsx('flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[13px]',
-            fromStatement ? 'text-slate-700' : 'text-slate-400')}>
-            <input type="radio" className="mt-1" disabled={!fromStatement} checked={to === 'unplaced'}
-              onChange={() => setTo('unplaced')} data-testid="reverse-to-unplaced" />
-            <span>
-              <span className="font-medium">Back to Needs an account</span>
-              <span className="block text-xs text-slate-500">
-                {fromStatement
-                  ? 'The wrong reference: it is somebody else\u2019s money. The statement line goes back to be placed on the right debtor.'
-                  : 'Only for a receipt off a bank statement. This one was recorded by hand: send it to the queue and reject it there.'}
-              </span>
-            </span>
-          </label>
-        </div>
-        <p className="rounded-lg bg-brand-50 px-3 py-2 text-[13px] text-slate-700">
-          Until it is approved or placed again, the Trust overview shows it under
-          {to === 'queue' ? ' Waiting for approval' : ' Unallocated receipts'}. This reversal stays on
-          the ledger with your reason on it.
-        </p>
-        {invoiced && (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
-            This payment has already been paid over to the client. The client now owes back
-            what it was paid from it: that comes off their next payover as a negative line, and
-            Bredell Ferreira&rsquo;s fees on it are taken back.
-          </p>
-        )}
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Why</label>
-          <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputClass}
-            placeholder="Cheque returned, debit order unpaid, captured twice…" />
-        </div>
-        {error && <p className="rounded-lg bg-negative-50 px-3 py-2 text-[13px] text-negative-700">{error}</p>}
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
-          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
-          {/*
-            THROUGH THE FUNCTION, NOT AT THE TABLE. account_payments is one of the four ledgers
-            with no update policy: a direct PATCH matches no rows, PostgREST answers 204, and the
-            box would close on a reversal that never happened. reverse_payment asks
-            payment.reverse and keeps the reason; the rest is the trigger on reversed_at.
-          */}
-          <button type="button" disabled={busy || !reason.trim()}
-            onClick={() => {
-              setBusy(true); setError(null)
-              void (to === 'unplaced'
-                ? reversePaymentToUnplaced(row.paymentId, reason.trim())
-                : reversePayment(row.paymentId, reason.trim()))
-                .then(async () => { await onDone(); setBusy(false) })
-                .catch((e: unknown) => {
-                  setError(e instanceof Error ? e.message : 'That payment could not be reversed.')
-                  setBusy(false)
-                })
-            }}
-            className="rounded-lg bg-negative-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-negative-700 disabled:opacity-50">
-            {busy ? 'Reversing…' : 'Reverse it'}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-/** One receipt as a row. What it did in full is drawn below the table -- see the screen. */
-function PostedRow({ r, a, problems, opened, isOpen, onOpen }: {
+/** One receipt as a row, and -- opened -- what it did in full, directly under it. */
+function PostedRow({ r, a, problems, opened, isOpen, onOpen, mayReverse, onReverse, viewWidth, span }: {
   r: PostedPayment
   a: ReturnType<typeof postedAllocation>
   problems: Violation[]
   opened: Set<SectionKey>
   isOpen: boolean
   onOpen: () => void
+  mayReverse: boolean
+  onReverse: () => void
+  /** The visible width of the scrolling table, which the opened panel is held to. */
+  viewWidth: number | null
+  /** How many columns the table has, for the opened row's one cell. */
+  span: number
 }) {
+  /*
+   * WHY IT CANNOT BE REVERSED, SAID ON THE BUTTON rather than the button silently missing (prompt
+   * 11). A posted payment is approved and never Swordfish history (that has no allocation), so in
+   * practice this is "already reversed" -- but the rule is the one every screen uses.
+   */
+  const blocked = reverseBlocked({ approved: true, reversedOn: r.reversedOn, swordfish: false })
+  const rowRef = useRef<HTMLTableRowElement | null>(null)
+  useEffect(() => {
+    if (isOpen) rowRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [isOpen])
   return (
     <>
-      <tr className={`border-b border-slate-50 ${
+      <tr ref={rowRef} onClick={onOpen} data-testid="history-payment"
+        className={`cursor-pointer border-b border-slate-50 ${
         problems.length > 0 ? 'bg-amber-50'
           : r.reversedOn ? 'bg-slate-50'
             : isOpen ? 'bg-gold-50/40' : ''}`}>
         <td className="px-3 py-1.5">
-          <button type="button" onClick={onOpen} className="text-slate-400 hover:text-navy-950"
+          <button type="button" onClick={(e) => { e.stopPropagation(); onOpen() }} className="text-slate-400 hover:text-navy-950"
             title={isOpen ? 'Close this receipt' : 'Open this receipt end to end'}>
             {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           </button>
         </td>
         <td className="px-2 py-1.5 text-slate-600">{formatDate(r.receivedOn)}</td>
-        <td className="px-2 py-1.5 text-slate-600">
-          {r.caseNumber ?? r.accountNumber}
+        {/* THE CLIENT'S NUMBER FIRST (prompt 11): KLR/1005 is the one on the statement and the
+            one the client quotes; our RAP- reference sits under it in grey. */}
+        <td className="px-2 py-1 text-slate-700 leading-tight" data-testid="history-account">
+          <span className="font-medium">{r.accountNumber ?? r.caseNumber}</span>
+          {r.accountNumber && r.caseNumber && (
+            <span className="block text-[11px] text-slate-400">{r.caseNumber}</span>
+          )}
           {problems.length > 0 && (
             <span className="ml-1 inline-flex align-middle text-amber-700"
               title={problems.map((v) => `${v.rule} — ${v.detail}`).join('\n')}>
@@ -482,6 +400,17 @@ function PostedRow({ r, a, problems, opened, isOpen, onOpen }: {
         </td>
         <td className="px-2 py-1.5 text-slate-600 max-w-[12rem] truncate">{r.debtor}</td>
         <td className="px-2 py-1.5 text-right tabular-nums font-medium text-navy-950">{rand(r.amount)}</td>
+        {/* REVERSE ON THE ROW, BESIDE THE AMOUNT -- inside the first screenful on an iPad, where the
+            far right of a twenty-column table is not. */}
+        <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+          {mayReverse && (
+            <button type="button" onClick={onReverse} disabled={!!blocked} data-testid="history-reverse"
+              title={blocked ?? 'Reverse this payment'}
+              className="rounded-md border border-slate-200 px-2 py-0.5 text-[11.5px] font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40">
+              Reverse
+            </button>
+          )}
+        </td>
         <FeeBodyCells a={a} opened={opened} />
         <td className="px-2 py-1.5 text-right tabular-nums text-slate-400 border-l border-slate-200">
           {rand(r.capitalBefore)}
@@ -529,7 +458,40 @@ function PostedRow({ r, a, problems, opened, isOpen, onOpen }: {
           {r.reference ?? r.bankDescription ?? '—'}
         </td>
       </tr>
+      {/*
+        OPENED UNDER ITS OWN ROW (the firm, 11 Oct: "it's stupid that you have to scroll all the way
+        down ... it should just go down below the payment itself").
 
+        IT WAS MOVED BELOW THE TABLE ONCE FOR A REASON THAT STILL HOLDS: a panel in a colSpan cell
+        takes the TABLE's width, wider than the screen, and pushed "Whether it holds" off the right
+        edge. Both fixes are kept: the row is here, and the panel inside it is position: sticky at
+        left 0 and exactly as wide as the VISIBLE scroll area, so all three of its columns fit on an
+        iPad however far the table scrolls.
+      */}
+      {isOpen && (
+        <tr className="border-b border-slate-100 bg-white">
+          <td colSpan={span} className="p-0 whitespace-normal">
+            <div data-check-panel className="sticky left-0 px-4 py-3"
+              style={viewWidth ? { width: viewWidth } : undefined}>
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-[15px] font-semibold text-slate-800">
+                  {r.accountNumber ?? r.caseNumber}{r.caseNumber && r.accountNumber ? ` · ${r.caseNumber}` : ''} · {r.debtor}
+                </h3>
+                <div className="flex items-center gap-3">
+                  <p className="text-[12px] text-slate-500">{rand(r.amount)} banked {formatDate(r.receivedOn)}</p>
+                  {mayReverse && (
+                    <button type="button" onClick={onReverse} disabled={!!blocked} title={blocked ?? 'Reverse this payment'}
+                      className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40">
+                      Reverse
+                    </button>
+                  )}
+                </div>
+              </div>
+              <Opened r={r} a={a} problems={problems} />
+            </div>
+          </td>
+        </tr>
+      )}
     </>
   )
 }

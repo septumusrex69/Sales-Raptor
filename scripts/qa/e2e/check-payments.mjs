@@ -177,9 +177,11 @@ try {
       t.ok(`the opened receipt shows "${heading}"`,
         (await page.locator(`text=${heading}`).count()) > 0)
     }
-    /* BELOW THE TABLE, NOT INSIDE IT -- see the comment on the screen. A panel in a colSpan cell
-       takes the table's width, and this table is wider than the window, so the verdict column was
-       drawn off the right-hand edge. */
+    /* UNDER ITS OWN ROW SINCE PROMPT 11 (the firm: "it should just go down below the payment
+       itself"), in a panel held to the visible width -- the reason it once moved below the table
+       was a colSpan cell taking the table's width and pushing the verdict off the right edge. */
+    t.check('the opened receipt unfolds directly under its row',
+      await page.locator('tr[data-testid="history-payment"] + tr [data-check-panel]').count(), 1)
     const panel = await page.locator('[data-check-panel]').innerText()
     t.ok('it says every formula holds', /Every formula holds/.test(panel))
     /* THE THREE FIGURES THE FIRM WOULD CHECK BY HAND, written out as sums rather than as answers. */
@@ -200,9 +202,7 @@ try {
     const { context, page } = await openCheck(browser, [BAD])
     await page.locator('tbody tr:not([data-testid="history-client"])').first().locator('button').first().click()
     await page.waitForTimeout(200)
-    /* BELOW THE TABLE, NOT INSIDE IT -- see the comment on the screen. A panel in a colSpan cell
-       takes the table's width, and this table is wider than the window, so the verdict column was
-       drawn off the right-hand edge. */
+    /* Under its own row -- see the first receipt above. */
     const panel = await page.locator('[data-check-panel]').innerText()
     t.ok('the wrong one names the formula that broke',
       /The client is paid capital less commission and its VAT/.test(panel))
@@ -228,9 +228,7 @@ try {
     t.ok('and the row says it was not checked', /not checked/.test(row))
     await page.locator('tbody tr:not([data-testid="history-client"])').first().locator('button').first().click()
     await page.waitForTimeout(200)
-    /* BELOW THE TABLE, NOT INSIDE IT -- see the comment on the screen. A panel in a colSpan cell
-       takes the table's width, and this table is wider than the window, so the verdict column was
-       drawn off the right-hand edge. */
+    /* Under its own row -- see the first receipt above. */
     const panel = await page.locator('[data-check-panel]').innerText()
     t.ok('the panel explains why rather than accusing it', /did not record what the split was computed against/.test(panel))
     t.ok('...and says it is not being called wrong', /not being called wrong/.test(panel))

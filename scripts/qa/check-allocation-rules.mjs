@@ -445,7 +445,8 @@ ok('...and keeps no copy of its own',
     (tbody.match(/<td\b/g) ?? []).length + (tbody.match(/<Td\b/g) ?? []).length, cols)
 }
 for (const [name, screen, fixedExpected] of [
-  ['the check screen', checkScreen, 14],
+  /* Fifteen since prompt 11: Reverse sits on the row, beside the amount. */
+  ['the check screen', checkScreen, 15],
 ]) {
   ok(`${name} draws the shared sections`,
     /FeeHeadCells opened=/.test(screen) && /FeeBodyCells a=/.test(screen))
@@ -485,10 +486,19 @@ for (const [name, screen, fixedExpected] of [
  * to do and it fails silently -- the panel renders, every figure is in the DOM, and the one that
  * matters is off-screen.
  */
-ok('the opened receipt is drawn outside the scrolling table',
-  /data-check-panel/.test(checkScreen)
-  && !/colSpan=\{span\}/.test(checkScreen)
-  && checkScreen.indexOf('data-check-panel') > checkScreen.indexOf('</table>'))
+/*
+ * PROMPT 11 MOVED IT BACK UNDER ITS ROW, AND KEPT THE FIX. The firm: "it's stupid that you have to
+ * scroll all the way down ... it should just go down below the payment itself." So it is an
+ * expansion row again -- and the panel inside it is sticky at the left and held to the width of the
+ * VISIBLE scroll area, which is what stops the table's width pushing "Whether it holds" off-screen.
+ * Both halves asserted: the row without the width is the bug this note was first written about.
+ */
+ok('the opened receipt unfolds under its own row', /\{isOpen && \(\s*<tr/.test(checkScreen) && /colSpan=\{span\}/.test(checkScreen))
+ok('...in a panel held to the visible width, not the table\u2019s',
+  /data-check-panel className="sticky left-0/.test(checkScreen) && /style=\{viewWidth \? \{ width: viewWidth \} : undefined\}/.test(checkScreen)
+  && /new ResizeObserver\(\(\) => setViewWidth\(el\.clientWidth\)\)/.test(checkScreen))
+ok('...and it is drawn once, by the row', (checkScreen.match(/data-check-panel/g) ?? []).length === 1
+  && checkScreen.indexOf('data-check-panel') > checkScreen.indexOf('function PostedRow('))
 
 /* AND THE RULES ARE RUN ON BOTH, not merely available to them. This is the firm's "if anything
    touches a formula, there is a problem", and a library nothing calls is a library nothing

@@ -19,7 +19,8 @@ import { MarkPaidModal } from './MarkPaidModal'
 import { useBackLink, useRecordName } from '../../lib/backLink'
 import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
 import { fetchReceiptForRun, recordClientPayment, type ClientBusinessReceipt } from '../../lib/clientBusinessReceipts'
-import { canViewBusiness, canViewFinance } from '../../lib/permissions'
+import { canReversePayment, canViewBusiness, canViewFinance } from '../../lib/permissions'
+import { ReversePaymentModal } from '../../components/finance/ReversePaymentModal'
 import { useAuth } from '../../store/AuthContext'
 import { clockToday } from '../../lib/clock.ts'
 import { paysOnFor } from '../../lib/payoverGroups'
@@ -102,6 +103,10 @@ export function RunDetail() {
   const [payModal, setPayModal] = useState(false)
   const [earlyModal, setEarlyModal] = useState(false)
   const [releaseModal, setReleaseModal] = useState(false)
+  /* A payment line reversed from here (prompt 11): the run itself is never edited. */
+  const [reversing, setReversing] = useState<string | null>(null)
+  const { currentUser } = useAuth()
+  const mayReverse = canReversePayment(currentUser)
   /* The payout lag from Trust settings, to say which day this run pays on. */
   const [lag, setLag] = useState(1)
   const [emailModal, setEmailModal] = useState(false)
@@ -212,6 +217,7 @@ export function RunDetail() {
      advice and the EFT wait; the database refuses them too (assert_payover_run_due). */
   const paysOn = paysOnFor(run.period_end, lag)
   const scheduled = run.status === 'approved' && !run.released_at && clockToday() < paysOn
+  const beforeDay = clockToday() < paysOn
 
   return (
     <div className="space-y-4">
@@ -244,14 +250,21 @@ export function RunDetail() {
             <span className={clsx('rounded-full px-2.5 py-1 text-[11.5px] font-semibold', STATUS_TONE[run.status])}>
               {RUN_STATUS_LABEL[run.status]}
             </span>
-            {run.status === 'ready' && !cycleStillOpen(run.period_end) && (
+            {/* APPROVED ON THE PAYOUT DAY (the firm, 11 Oct): before it -- cycle open or closed -- only
+                with a reason, which also releases the advice and the payment. */}
+            {run.status === 'ready' && !beforeDay && (
               <button type="button" disabled={busy} onClick={() => void act(() => approveRun(run.id))}
                 className="rounded-lg bg-navy-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
                 Approve
               </button>
             )}
             {/* THE CYCLE IS STILL OPEN: approving now is allowed, with a reason (the firm, 8 Oct). */}
-            {run.status === 'ready' && cycleStillOpen(run.period_end) && (
+            {run.status === 'ready' && beforeDay && (
+              <span className="text-[12.5px] text-slate-500" data-testid="run-approve-on-day">
+                Approved on {fmtDay(paysOn)}
+              </span>
+            )}
+            {run.status === 'ready' && beforeDay && (
               <button type="button" disabled={busy} onClick={() => setEarlyModal(true)}
                 className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-[13px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50">
                 Approve early…
@@ -406,6 +419,7 @@ export function RunDetail() {
                 <th className="px-2 py-2 text-right font-medium">Commission</th>
                 <th className="px-2 py-2 text-right font-medium">VAT</th>
                 <th className="px-3 py-2 text-right font-normal text-slate-400">Capital outstanding</th>
+                {mayReverse && <th className="px-3 py-2" />}
               </tr>
             </thead>
             <tbody>
@@ -432,10 +446,22 @@ export function RunDetail() {
                   <td className="px-3 py-2 text-right tabular-nums text-slate-400">
                     {r.lineKind === 'carried' ? '\u2014' : rand(r.capitalAfter)}
                   </td>
+                  {/* REVERSE FROM THE RUN (prompt 11). The run is never edited: on a run that has gone
+                      out, the box says the reversal becomes a negative line on the next one. */}
+                  {mayReverse && (
+                    <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                      {r.paymentId && (r.lineKind === 'trust' || r.lineKind === 'ptc') && (
+                        <button type="button" onClick={() => setReversing(r.paymentId)} data-testid="run-line-reverse"
+                          className="text-[12px] font-medium text-slate-500 underline-offset-2 hover:text-negative-700 hover:underline">
+                          Reverse
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
+                <tr><td colSpan={mayReverse ? 10 : 9} className="px-4 py-10 text-center text-sm text-slate-400">Nothing matches that.</td></tr>
               )}
             </tbody>
           </table>
@@ -443,6 +469,10 @@ export function RunDetail() {
       </Card>
 
       {open && <PaymentPanel row={open} audit={audit} onClose={() => setOpen(null)} />}
+      {reversing && (
+        <ReversePaymentModal paymentId={reversing} onClose={() => setReversing(null)}
+          onDone={async () => { setReversing(null); await load() }} />
+      )}
       {emailModal && advice && run && (
         <EmailAdviceModal
           advice={advice}
@@ -454,7 +484,7 @@ export function RunDetail() {
         />
       )}
       {earlyModal && run && (
-        <EarlyApproveModal periodEnd={run.period_end} onClose={() => setEarlyModal(false)}
+        <EarlyApproveModal periodEnd={run.period_end} paysOn={paysOn} onClose={() => setEarlyModal(false)}
           onSave={async (reason) => { await act(() => approveRunEarly(run.id, reason)); setEarlyModal(false) }} />
       )}
       {releaseModal && run && (
@@ -573,18 +603,22 @@ function PaymentPanel({ row, audit, onClose }: {
  * APPROVING BEFORE THE CUT-OFF. The firm, 8 Oct: "you shouldn't just do it" -- so it asks why, and
  * says plainly what happens to a payment processed later in the cycle.
  */
-function EarlyApproveModal({ periodEnd, onClose, onSave }: {
-  periodEnd: string; onClose: () => void; onSave: (reason: string) => Promise<void>
+function EarlyApproveModal({ periodEnd, paysOn, onClose, onSave }: {
+  periodEnd: string; paysOn: string; onClose: () => void; onSave: (reason: string) => Promise<void>
 }) {
+  const open = cycleStillOpen(periodEnd)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const enough = reason.trim().length >= 10
   return (
-    <Modal title="Approve before the cycle closes" onClose={onClose} width={480}>
+    <Modal title={open ? 'Approve before the cycle closes' : 'Approve before the payout day'} onClose={onClose} width={480}>
       <div className="space-y-3">
         <p className="text-[13px] text-slate-600">
-          This cycle runs until {fmtDay(periodEnd)}. A payment processed for this client after you
-          approve goes into the next cycle&rsquo;s run, not this one.
+          {open
+            ? <>This cycle runs until {fmtDay(periodEnd)} and pays over on {fmtDay(paysOn)}. </>
+            : <>This run pays over on {fmtDay(paysOn)}. </>}
+          Approving now also releases its advice and payment now. A payment or a withdrawal for this
+          client after you approve goes into the next run, not this one.
         </p>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="early-reason">Why now?</label>

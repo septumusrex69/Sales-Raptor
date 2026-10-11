@@ -36,7 +36,8 @@ import { timeOnDesk, firmToday } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
-import { canApproveSettlement, canRecordPayment } from '../../lib/permissions'
+import { canApproveSettlement, canRecordPayment, canReversePayment } from '../../lib/permissions'
+import { AccountPaymentsList } from '../../components/accounts/AccountPaymentsList'
 import { isQuotable, type Settlement } from '../../lib/settlement'
 import { fetchSettlement } from '../../lib/settlementApi'
 import { SettlementPanel } from '../../components/accounts/SettlementPanel'
@@ -1926,6 +1927,10 @@ export function AccountDetail() {
 
       {tab === 'Transactions' && (
         <Card>
+          {/* PAYMENTS FIRST, EACH WITH REVERSE (prompt 11): the account is where a debtor's "that
+              payment isn't mine" lands, and it was the one place a payment could not be undone. */}
+          <AccountPaymentsList accountId={account.id} mayReverse={canReversePayment(currentUser)}
+            onReversed={reload} />
           <StatementTable statement={statement?.lines ?? []} account={account} breakdown={b}
             handedOver={account.capitalHandedOver}
             /* The day the figures were struck, printed on the page. The same one the statement

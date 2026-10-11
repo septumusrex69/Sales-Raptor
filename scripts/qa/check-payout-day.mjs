@@ -65,6 +65,14 @@ ok('...needs a reason of ten characters', /length\(coalesce\(v_why, ''\)\) < 10/
 ok('...and keeps who and why', /released_by = auth\.uid\(\), released_reason = v_why/.test(release))
 ok('payments to make lists a run before its day as scheduled', /then 'scheduled' else r\.status end/.test(liveFn('payments_to_make')))
 
+/* AND APPROVED ON THE PAYOUT DAY (the firm, 11 Oct: "you only approve it by the time that you pay it
+   out"), so a withdrawal raised before it comes off it instead of sending an approved run back. */
+const approve = liveFn('approve_payover_run')
+const dayAt = approve.indexOf('raptor_today() < public.payover_pays_on(v_end)')
+ok('approval refuses before the payout day without a reason', dayAt >= 0 && dayAt < approve.indexOf('update public.payover_runs'))
+ok('approving early releases the payout too', /released_at = coalesce\(released_at, public\.raptor_now\(\)\)/.test(liveFn('approve_payover_run_early')))
+ok('the queue holds a ready run until its day', /const waitsForDay = \(r: WorkQueueRow\) => r\.status === 'ready'/.test(strip(read('src/pages/finance/FinanceWorkQueue.tsx'))))
+
 /* ---------------- 2. the browser asks first ---------------- */
 const mail = strip(read('src/lib/remittanceEmail.ts'))
 const send = mail.slice(mail.indexOf('export async function sendRemittanceAdvice'))

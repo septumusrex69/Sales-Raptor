@@ -241,7 +241,7 @@ ok('...and the rows are paged', /checked\.slice\(page \* PAGE, page \* PAGE \+ P
 
 check('Payments in no longer lists every payment', /Every client|Trust and client-direct|from\('account_payments'\)/.test(page), false)
 check('...nor reverses one', /reversePayment|ReverseModal/.test(page), false)
-ok('Reverse lives on Check', /reversePayment\(row\.paymentId/.test(checkPage) && /mayReverse && !c\.row\.reversedOn/.test(checkPage))
+ok('Reverse lives on Check', /<ReversePaymentModal paymentId=\{reversing\.paymentId\}/.test(checkPage) && /\{mayReverse && \(/.test(checkPage))
 /* ON ONE LINE, as the firm's mock-up draws them: Record payment is passed to the import's own row. */
 ok('Record payment and Import bank statement sit on one line', /<BankImportCard compact[\s\S]{0,200}leading=\{\([\s\S]{0,500}Record payment/.test(page))
 ok('the four overview tiles', ['Waiting for approval', 'Processed into trust', 'Paid to clients · PTC', 'Needs an account']

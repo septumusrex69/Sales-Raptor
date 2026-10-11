@@ -1,0 +1,62 @@
+/**
+ * FINDING A PAYMENT, AND WHAT MAY STOP IT BEING REVERSED (prompt 11).
+ *
+ * The firm needed KLR/1005's R3 500.00 and could not find it. What this holds: the search matches
+ * the account number however it is spaced or cased, the amount however it is typed -- and an amount
+ * as an AMOUNT, so "350" is R350 and not every figure containing 350 -- the client's reference, the
+ * debtor and the bank's words; and the reasons a reversal is refused are said, not hidden.
+ * Also that a receipt off the trust statement cannot be re-captured as paid to the client.
+ *
+ * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-payment-search.mjs
+ */
+import { readFileSync } from 'node:fs'
+import { amountOf, matchesPayment, reverseBlocked } from '../../src/lib/paymentSearch.ts'
+
+let pass = 0
+const failures = []
+const check = (name, actual, expected) => {
+  const a = JSON.stringify(actual); const b = JSON.stringify(expected)
+  if (a === b) { pass += 1; return }
+  failures.push(`${name}\n    expected ${b}\n    got      ${a}`)
+}
+const ok = (name, actual) => check(name, actual, true)
+
+const KLR = { accountNumber: 'KLR/1005', caseNumber: 'RAP-124296', clientReference: 'KLR-CUST-1005',
+  debtor: 'Thandi Mokoena', client: 'Karoo Linen Rentals', reference: 'KLR1005',
+  bankDescription: 'FNB APP PAYMENT FROM KLR1005', amount: 3500 }
+const HTH = { ...KLR, accountNumber: 'HTH/4001', caseNumber: 'RAP-124310', clientReference: null,
+  debtor: 'Ndlovu Plant Hire', client: 'Highveld Tool Hire', reference: 'HTH4001', bankDescription: 'ACB CREDIT', amount: 350 }
+
+for (const q of ['KLR/1005', 'klr / 1005', 'RAP-124296', 'rap-124296', 'KLR-CUST-1005', 'mokoena', 'FNB APP', '3500', '3 500', 'R3 500.00', 'r3500,00', '3500.00']) {
+  ok(`"${q}" finds KLR/1005's R3 500.00`, matchesPayment(KLR, q))
+}
+check('"350" is the R350, not every amount containing 350', [matchesPayment(KLR, '350'), matchesPayment(HTH, '350')], [false, true])
+ok('an empty search hides nothing', matchesPayment(KLR, '   '))
+check('amounts parse the ways a person types them', ['3500', 'R 3 500.00', '3500,5', 'KLR1005', '35.123'].map(amountOf), [3500, 3500, 3500.5, null, null])
+
+check('a reversed payment says so', reverseBlocked({ approved: true, reversedOn: '2026-07-10', swordfish: false }), 'Already reversed.')
+ok('Swordfish history says why it cannot be reversed', /Swordfish/.test(reverseBlocked({ approved: true, reversedOn: null, swordfish: true }) ?? ''))
+ok('an unapproved one points to the queue', /approval queue/.test(reverseBlocked({ approved: false, reversedOn: null, swordfish: false }) ?? ''))
+check('an approved, unreversed Raptor payment may be reversed', reverseBlocked({ approved: true, reversedOn: null, swordfish: false }), null)
+
+/* THE SAME BOX FROM EVERY DOOR, GATED ON THE SAME TICK. */
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8')
+ok('History, the account and the run all open the one box',
+  ['src/pages/finance/CheckPayments.tsx', 'src/pages/finance/RunDetail.tsx', 'src/components/accounts/AccountPaymentsList.tsx']
+    .every((f) => /<ReversePaymentModal /.test(read(f))))
+ok('...the account shows Reverse only to who holds payment.reverse', /mayReverse=\{canReversePayment\(currentUser\)\}/.test(read('src/pages/accounts/AccountDetail.tsx')))
+ok('...and the run the same', /const mayReverse = canReversePayment\(currentUser\)/.test(read('src/pages/finance/RunDetail.tsx')))
+
+/* PTC <-> TRUST (the firm, 11 Oct). */
+const sql = read('supabase/schema.sql')
+const at = sql.lastIndexOf('create or replace function public.reverse_payment_switching_side(')
+const body = at >= 0 ? sql.slice(at, sql.indexOf('end $$;', at)) : ''
+ok('switching side asks payment.reverse', /has_capability\('payment\.reverse'\)/.test(body))
+const refuse = body.indexOf('cannot be made a payment to the client')
+ok('a statement receipt cannot become a PTC, refused before anything is reversed',
+  refuse >= 0 && refuse < body.indexOf('public.reverse_payment('))
+ok('...and the copy goes back to the queue on the other side', /update public\.account_payments set paid_to_client = p_paid_to_client where id = v_copy/.test(body))
+
+if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
+console.log(`check-payment-search: ${pass} passed, ${failures.length} failed`)
+process.exit(failures.length ? 1 : 0)

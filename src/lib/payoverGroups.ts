@@ -67,11 +67,11 @@ export function groupRunsByCycle<T extends GroupableRun>(
            11th is not the one that closed last night -- read only off `dueEnd`, it was called
            Overdue on the very morning it fell due (11 Oct). */
         title = 'Due today'; tone = 'now'
-        state = `Paid out today · make the EFT, then email the advice`
+        state = `Paid out today · approve, make the EFT, then email the advice`
       } else if (today ? today < paysOn : (dueEnd !== null && end === dueEnd)) {
-        /* APPROVED ANY TIME, PAID ON THE DAY (11 Oct): the advice and the EFT wait for it. */
+        /* APPROVED, PAID AND ADVISED ON THE DAY (11 Oct): until then it stays Ready and takes in what is raised for it. */
         title = 'Closed'; tone = 'now'
-        state = `Nothing more goes in · check and approve now · advice and payment on ${dayLabel(paysOn)}`
+        state = `Nothing more goes in · approved, paid and advised on ${dayLabel(paysOn)}`
       } else {
         title = 'Overdue'; tone = 'late'
         state = `Closed ${dayLabel(end)} · was due ${dayLabel(paysOn)} and is not yet paid`

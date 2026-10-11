@@ -39,7 +39,7 @@ const sql = read('supabase/schema.sql')
 const lib = read('src/lib/payover.ts')
 const screen = read('src/pages/finance/AwaitingApproval.tsx')
 /* THE REVERSE BOX MOVED TO CHECK when the all-payments list left Payments in. */
-const modal = read('src/pages/finance/CheckPayments.tsx')
+const modal = read('src/components/finance/ReversePaymentModal.tsx')
 
 /* schema.sql is append-only: the LAST definition is the live one, and both spellings exist --
    a function whose return type changed cannot be replaced, so it is dropped and created plainly. */
@@ -282,9 +282,9 @@ ok('the ledger no longer refuses the removal through a foreign key', fkGone > 0 
     && /having public\.has_capability\('finance\.view'\)/.test(aw))
   const page = stripC(read('src/pages/trust/TrustOverview.tsx'))
   ok('the overview names it under Not accounted for', /who="Waiting for approval"/.test(page) && /awaiting: awaiting\?\.amount \?\? 0/.test(page))
-  const box = read('src/pages/finance/CheckPayments.tsx')
+  const box = read('src/components/finance/ReversePaymentModal.tsx')
   ok('Reverse asks where the money goes', /Back to the approval queue/.test(box) && /Back to Needs an account/.test(box)
-    && /reversePaymentToUnplaced\(row\.paymentId, reason\.trim\(\)\)/.test(box))
+    && /reversePaymentToUnplaced\(row\.paymentId, why\)/.test(box))
 }
 
 console.log(`\ncheck-reversal-returns: ${pass} passed, ${failures.length} failed`)

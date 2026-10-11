@@ -43,6 +43,8 @@ const QUEUE = [
   { ...q('C', 'Lowveld Motors', '2026-07-11', '2026-08-10', 120, 'sent'), next_step: 'paid' },
   /* Ready in the cycle being paid now, and ready in the cycle still open (not approvable yet). */
   { ...q('E', 'Silverleaf Body Corporate', '2026-08-11', '2026-09-10', 500, 'ready'), next_step: 'approve' },
+  /* Ready in a cycle whose payout day (11 Sep) has passed: the one a bulk approval may take. */
+  { ...q('F', 'Mopane Lodges', '2026-07-11', '2026-08-10', 250, 'ready'), next_step: 'approve' },
   { ...q('D', 'Karoo Fleet Hire', '2026-09-11', '2026-10-10', 3031.31, 'ready'), next_step: 'approve' },
 ]
 const calls = []
@@ -105,33 +107,38 @@ try {
   /* The firm, 10 Oct: three tabs -- Running, Closed (to pay), Paid. Closed opens first when it has
      anything: the overdue cycle on top in red, then the one waiting for its payover day. */
   t.check('the Closed tab holds the closed cycles', heads.length, 2)
-  t.ok('the overdue cycle first, saying it was due', /^Overdue[\s\S]*1 client[\s\S]*was due 11 Sep and is not yet paid/i.test(heads[0] ?? ''))
+  t.ok('the overdue cycle first, saying it was due', /^Overdue[\s\S]*2 clients[\s\S]*was due 11 Sep and is not yet paid/i.test(heads[0] ?? ''))
   t.ok('...then the closed one, with its payover day and total',
-    /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · check and approve now · advice and payment on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
+    /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · approved, paid and advised on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
   t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now"]')
   t.ok('the tabs count what is in them',
-    /Running\s*\(?\s*1\s*\)?/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay\s*\(?\s*4\s*\)?/.test(await page.getByTestId('tab-closed').innerText()))
+    /Running\s*\(?\s*1\s*\)?/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay\s*\(?\s*5\s*\)?/.test(await page.getByTestId('tab-closed').innerText()))
 
   /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
   t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
   t.check('...so there is no Build a run button', await page.getByRole('button', { name: /Build a run/ }).count(), 0)
-  for (const name of ['Silverleaf Body Corporate', 'Baobab Property']) {
+  for (const name of ['Silverleaf Body Corporate', 'Baobab Property', 'Mopane Lodges']) {
     await page.getByRole('checkbox', { name: `Select ${name}` }).check()
   }
   const bar = page.getByTestId('bulk-bar')
   const barText = await bar.innerText()
   /* THE PAYOUT DAY (11 Oct): today is 8 Oct and Baobab's approved run pays on the 11th, so its advice
      is not offered -- the bar says when it goes instead. */
+  /* AND APPROVED ON THAT DAY TOO (11 Oct): Silverleaf's cycle closed on 10 Sep but it pays on the 11th,
+     so it stays Ready; Mopane's payout day has passed, so it may be approved now. */
   t.ok('the bulk bar offers only what the picked runs are ready for',
-    /2 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 0/.test(barText))
+    /3 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 0/.test(barText))
+  t.ok('...and says when the ready one is approved', /1 approved on 11 Oct 2026, the payout day/.test(barText))
+  t.ok('a ready run before its payout day says when it is approved instead of offering Approve',
+    /Approve on 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Silverleaf' }).innerText()))
   t.ok('...and says when the approved one is due', /1 not yet due: advice and payment on 11 Oct/.test(barText))
   t.ok('the approved run says when it pays rather than offering a button',
     /Pays 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Baobab' }).innerText()))
   await t.shot(page, 'payover-queue-cycles')
   await bar.getByRole('button', { name: 'Approve 1' }).click()
   await page.getByTestId('bulk-note').waitFor({ timeout: 10000 }).catch(() => {})
-  t.check('...and approves the ready one whose cycle has closed, and nothing else',
-    JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['E']))
+  t.check('...and approves the ready one whose payout day has come, and nothing else',
+    JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['F']))
   t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
 
   /* ---- MARK PAID FROM THE LIST (the firm, 10 Oct: "just immediately show you that pop-up") ---- */

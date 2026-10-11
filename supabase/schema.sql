@@ -39574,3 +39574,208 @@ begin
     end;
   end loop;
 end $$;
+
+
+-- 2026-10-11: a run is APPROVED on its payout day (or early, with a reason, which also releases it).
+create or replace function public.refresh_payover_runs()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_open date := public.payover_cycle_start(public.raptor_now());
+  v_last date := public.payover_cycle_start(((v_open - 1)::timestamp) at time zone 'Africa/Johannesburg');
+  v_cycle date;
+  v_end date;
+  v_company uuid;
+  v_count integer := 0;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  foreach v_cycle in array array[v_last, v_open] loop
+    v_end := public.payover_cycle_end(v_cycle);
+    for v_company in
+      select distinct d.company_id
+        from public.payment_allocations a
+        join public.account_payments p on p.id = a.payment_id
+        join public.debtor_accounts d on d.id = a.account_id
+       where a.payover_run_id is null
+         and a.status <> 'reversed'
+         and not p.is_demo
+         and not p.paid_over_in_swordfish
+         /* A PTC rides the next payover: the same window build_payover_run claims it on. */
+         and p.allocated_on <= case when a.paid_to_client
+                                    then public.payover_ptc_until(v_end) else v_end end
+         and (p.allocated_on >= v_cycle
+              /* late for a run approved early: build_payover_run claims it into this one */
+              or exists (select 1 from public.payover_runs e
+                          where e.company_id = d.company_id
+                            and e.status in ('approved', 'sent', 'paid')
+                            and p.allocated_on between e.period_start
+                              and case when a.paid_to_client
+                                       then public.payover_ptc_until(e.period_end) else e.period_end end))
+      union
+      select r.company_id from public.payover_runs r
+       where r.period_start = v_cycle and public.payover_run_is_open(r.status)
+      /*
+       * A CHARGE TO SET OFF IS A REASON FOR A RUN ON ITS OWN. A client whose debtors paid nothing
+       * this cycle had no run, so a withdrawal raised against it (set_off, "comes off the next
+       * payover") had nothing to come off: it sat on the client statement and never reached the
+       * queue, and nobody saw that the client owed the firm (the firm, 11 Oct, withdrawing
+       * SBB/2006). build_payover_run claims exactly these -- raised by the cycle's end, unclaimed,
+       * not cancelled, not paid -- and a run with only a charge on it is below nil: "Client owes
+       * us", carried until it is paid or set off.
+       */
+      union
+      select c.company_id from public.client_charges c
+       where c.settlement = 'set_off'
+         and c.payover_run_id is null
+         and c.cancelled_at is null
+         and c.paid_at is null
+         /* raised before this cycle's payout day: build_payover_run's own window (11 Oct) */
+         and c.raised_on < public.payover_pays_on(v_end)
+    loop
+      if exists (select 1 from public.payover_runs
+                  where company_id = v_company and period_start = v_cycle
+                    and not public.payover_run_is_open(status)) then
+        continue;
+      end if;
+      perform public.build_payover_run(v_company, v_cycle);
+      v_count := v_count + 1;
+    end loop;
+  end loop;
+  return v_count;
+end $$;
+
+create or replace function public.approve_payover_run(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_status text;
+  v_end date;
+  v_early text;
+  v_why text;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  select status, period_end, early_reason into v_status, v_end, v_early from public.payover_runs where id = p_run;
+  if v_status is null then raise exception 'No such payover run.'; end if;
+  if not public.payover_run_is_open(v_status) then
+    raise exception 'That run is already %.', v_status;
+  end if;
+  /* NOT BEFORE THE CYCLE HAS CLOSED WITHOUT A REASON (the firm, 8 Oct: "there should be a good
+     reason"). approve_payover_run_early writes one; anything arriving later in the cycle goes to
+     the next run (build_payover_run). */
+  if v_end >= public.raptor_today() and nullif(btrim(coalesce(v_early, '')), '') is null then
+    raise exception 'This cycle runs until %. To approve it before then, give the reason.',
+      to_char(v_end, 'DD Mon YYYY') using errcode = '22023';
+  end if;
+
+  /* AND ON ITS PAYOUT DAY, NOT BEFORE (the firm, 11 Oct): "only approve the previous month's
+     payments ... it goes into a ready state, but then you only approve it by the time that you pay
+     it out." Until then the run stays Ready and is rebuilt as things arrive for it -- above all a
+     withdrawal charge, which then comes off THIS payout instead of sending an approved run back
+     for approval. The same reason lets it through: approving early is paying early. */
+  if public.raptor_today() < public.payover_pays_on(v_end) and nullif(btrim(coalesce(v_early, '')), '') is null then
+    raise exception 'This run is approved on its payout day, %. Until then it stays ready and takes in anything raised for it. To approve it before then, give the reason.',
+      to_char(public.payover_pays_on(v_end), 'FMDD Mon YYYY') using errcode = '22023';
+  end if;
+
+  select string_agg(b.detail, '; ') into v_why from public.payover_run_blockers(p_run) b;
+  if v_why is not null then
+    raise exception 'This run cannot be approved yet: %', v_why;
+  end if;
+
+  update public.payover_runs
+     set status = 'approved', approved_by = auth.uid(), approved_at = public.raptor_now()
+   where id = p_run;
+end $$;
+
+create or replace function public.approve_payover_run_early(p_run uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) < 10 then
+    raise exception 'Say why this run is being approved before its payout day.' using errcode = '22023';
+  end if;
+  /* APPROVING EARLY IS PAYING EARLY (11 Oct): approval now happens on the payout day, so a run
+     approved before it, with a reason, is released for its advice and payment by the same press. */
+  update public.payover_runs
+     set early_reason = btrim(p_reason), early_by = auth.uid(), early_at = public.raptor_now(),
+         released_reason = coalesce(released_reason, btrim(p_reason)),
+         released_by = coalesce(released_by, auth.uid()),
+         released_at = coalesce(released_at, public.raptor_now())
+   where id = p_run and public.payover_run_is_open(status);
+  if not found then raise exception 'That run is not open to approve.' using errcode = '22023'; end if;
+  /* The ordinary approval, blockers and all. If it refuses, the reason goes with it. */
+  perform public.approve_payover_run(p_run);
+end $$;
+
+
+-- ============================================================================================
+-- REVERSED AND CAPTURED THE OTHER WAY: A PTC THAT WAS INTO TRUST, OR THE REVERSE (11 Oct 2026).
+--
+-- The firm: "a payment to be changed from a PTC to an ACB or an ACB to a PTC. ACB is paid to the
+-- trust, direct payment." A receipt captured on the wrong side splits wrongly from the start -- a
+-- PTC owes the firm its share, a trust receipt owes the client theirs -- so it is not edited: it is
+-- reversed like any other (reverse_payment, every rule and the reason kept), and the copy that goes
+-- back to the approval queue carries the other side. Approving it there splits it afresh.
+--
+-- ONE DIRECTION IS REFUSED FOR A RECEIPT OFF THE STATEMENT. A line on the trust statement is money
+-- that arrived in trust; calling it paid to the client would leave the bank line pointing at a
+-- receipt that says the money never came to us. Only a receipt recorded by hand can become a PTC.
+-- ============================================================================================
+create or replace function public.reverse_payment_switching_side(
+  p_payment uuid, p_reason text, p_paid_to_client boolean)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_pay public.account_payments%rowtype;
+  v_copy uuid;
+begin
+  if not public.has_capability('payment.reverse') then
+    raise exception 'You are not allowed to reverse a payment.' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(p_reason, '')), '') is null then
+    raise exception 'Say why the payment is being reversed.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment;
+  if not found then
+    raise exception 'That payment no longer exists.' using errcode = 'P0002';
+  end if;
+  if v_pay.paid_to_client = p_paid_to_client then
+    raise exception 'It is already captured as %.',
+      case when p_paid_to_client then 'paid to the client' else 'paid into trust' end using errcode = '22023';
+  end if;
+  if p_paid_to_client and (v_pay.bank_line_id is not null
+       or exists (select 1 from public.bank_statement_lines l where l.payment_id = p_payment)) then
+    raise exception 'This receipt is on the trust bank statement, so the money came to us. It cannot be made a payment to the client.'
+      using errcode = '22023';
+  end if;
+
+  v_copy := public.reverse_payment(p_payment, btrim(p_reason)
+    || case when p_paid_to_client then ' (captured again as paid to the client)' else ' (captured again as paid into trust)' end);
+  if v_copy is null then
+    raise exception 'That payment was never approved, so there is nothing to reverse. Change it in the approval queue.'
+      using errcode = '22023';
+  end if;
+  update public.account_payments set paid_to_client = p_paid_to_client where id = v_copy;
+  return v_copy;
+end $$;
+revoke execute on function public.reverse_payment_switching_side(uuid, text, boolean) from public, anon;
+grant execute on function public.reverse_payment_switching_side(uuid, text, boolean) to authenticated;
