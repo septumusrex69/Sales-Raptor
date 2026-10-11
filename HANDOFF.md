@@ -4,7 +4,8 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **10 October 2026, evening**, end of the fifth session on `claude/staging-clock`.
+Last updated: **11 October 2026, evening**, sixth session, on `claude/payout-day` (branched from
+`claude/staging-clock` at `52ee490`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
@@ -73,6 +74,49 @@ own and is green: `workspace-split` (124), `payover-sends` (42), `client-stateme
 ## 2. What shipped this session
 
 Newest first. Each commit message carries the full reasoning; this is the index.
+
+### Sixth session (11 Oct) — the payout day, the spinners, and a withdrawal that read as Active
+
+Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, clock at 10 Jul.
+
+- **A payover goes out on its payout day.** The firm: *"I shouldn't be able to email all the
+  payovers because [they] should only be going out on the next month ... when we do the payment"*,
+  and not ready before *"unless you override it somehow"*. Approval is unchanged (any time after the
+  cycle closes). The FIRST advice send, marking sent and marking paid now call
+  `assert_payover_run_due` before writing; the override is `release_payover_run_early(run, reason)`
+  (Administrator, ten characters, kept as `payover_runs.released_*`). Nothing is emailed by itself on
+  the day: the day makes it due, a person sends it. The statement path (`allocate_bank_line`) is NOT
+  gated -- money found on the statement has already left. `payments_to_make` lists a run before its
+  day as `scheduled` ("Not yet due"); the queue shows "Pays 11 Jul" instead of a button and the bulk
+  bar counts what is not yet due; the run page offers **Release early…** with a reason.
+  `sendRemittanceAdvice` asks BEFORE building the PDF -- the database's refusal comes at the record
+  step, after the email has gone. The four 2606 advices already sent on 10 Jul stay as they are.
+- **The queue's cycle bands read the date.** With a one-month lag the cycle paid on the 11th is not
+  the one that closed last night, so `groupRunsByCycle` called it Overdue on the morning it fell
+  due. It now takes `today`: Due today / Closed / Overdue.
+- **"It just keeps on loading."** The logs showed every press FINISHED (approve 4 runs: 2 s; email
+  4 advices: ~55 s, about 13 s each; the 29-day clock jump: 25 s then a reload) -- what the firm saw
+  was a bare spinner for most of a minute and, on a dropped connection, a spinner that never ended
+  because the busy flag was cleared on the last line. Now: every bulk press goes through `bulk()`
+  with a `finally` and says what it is doing ("Emailing 2 of 4 · Seabreeze…"); the clock route
+  walks 20 s a call instead of 240 s so the banner moves, and a call that does not come back asks
+  `raptor_clock` where the clock got to and carries on (`fetchWithin`, 90 s).
+- **A withdrawn account read Active / New.** `withdraw_account` writes `ended_as` and leaves
+  Swordfish's status alone (imported history is frozen), and the account page read only the status.
+  The hero pill now says "Withdrawn by the client · date" and both positions get `closed: ended`.
+- **A set-off charge with no receipts behind it had no run.** `refresh_payover_runs` only built runs
+  for clients with allocations, so a withdrawal charge for a client whose debtors paid nothing that
+  cycle never reached the queue. It now also builds for unclaimed `set_off` charges.
+- `check-payout-day` (27, break-tested four ways); `check-payover-groups`, `check-payments-out` and
+  `e2e/payover-sends` (44) updated for the gate.
+
+**Asked of the firm and NOT built yet (§4):**
+- A withdrawal should come off THIS month's payout, not wait for the next cycle's run. Proposed: a
+  set-off charge rides the next payout whose advice has not gone; an approved-but-unsent run drops
+  back to Ready with a note and is approved again. Waiting for a yes.
+- An **Overpayments** item in the Trust rail (To decide · To refund · Parked · Refunded) -- the
+  firm asked for "a separate section for overpayments"; today they are split over Exceptions,
+  Payments to make and the Trust overview.
 
 **Fifth session (10 October, evening), on `claude/staging-clock`** (started from `1848079`):
 

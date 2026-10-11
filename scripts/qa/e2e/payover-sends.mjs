@@ -59,6 +59,8 @@ const handlers = [
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
   /* The client's list asks by company; the run page asks for one. */
   [(u) => /\/rest\/v1\/payover_runs\?.*company_id=eq/.test(u), () => ({ body: CLIENT_RUNS })],
+  /* Nothing released early for payout (release_payover_run_early): every approved run waits for its day. */
+  [(u) => /\/rest\/v1\/payover_runs\?.*released_at/.test(u), () => ({ body: [] })],
   [(u) => /\/rest\/v1\/payover_runs\?/.test(u), () => ({ body: runShown })],
   [(u) => /\/rest\/v1\/bank_statement_lines\?/.test(u), () => ({ body: [{ payover_run_id: 'run-0', txn_date: '2026-09-16' }] })],
   [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [{ id: 'c2', name: 'Baobab Property Managers (Pty) Ltd', owner_id: ADMIN.id }] })],
@@ -105,7 +107,7 @@ try {
   t.check('the Closed tab holds the closed cycles', heads.length, 2)
   t.ok('the overdue cycle first, saying it was due', /^Overdue[\s\S]*1 client[\s\S]*was due 11 Sep and is not yet paid/i.test(heads[0] ?? ''))
   t.ok('...then the closed one, with its payover day and total',
-    /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · check, approve and pay on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
+    /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · check and approve now · advice and payment on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
   t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now"]')
   t.ok('the tabs count what is in them',
     /Running\s*\(?\s*1\s*\)?/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay\s*\(?\s*4\s*\)?/.test(await page.getByTestId('tab-closed').innerText()))
@@ -118,8 +120,13 @@ try {
   }
   const bar = page.getByTestId('bulk-bar')
   const barText = await bar.innerText()
+  /* THE PAYOUT DAY (11 Oct): today is 8 Oct and Baobab's approved run pays on the 11th, so its advice
+     is not offered -- the bar says when it goes instead. */
   t.ok('the bulk bar offers only what the picked runs are ready for',
-    /2 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 1/.test(barText))
+    /2 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 0/.test(barText))
+  t.ok('...and says when the approved one is due', /1 not yet due: advice and payment on 11 Oct/.test(barText))
+  t.ok('the approved run says when it pays rather than offering a button',
+    /Pays 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Baobab' }).innerText()))
   await t.shot(page, 'payover-queue-cycles')
   await bar.getByRole('button', { name: 'Approve 1' }).click()
   await page.getByTestId('bulk-note').waitFor({ timeout: 10000 }).catch(() => {})

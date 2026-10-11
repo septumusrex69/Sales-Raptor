@@ -48,7 +48,13 @@ export async function firmClock(admin: SupabaseClient): Promise<{ today: string;
  * response says how far it got and the browser calls again with `resume`, which carries on from the
  * day the database is on without logging the jump a second time.
  */
-const BUDGET_MS = 240_000
+/*
+ * TWENTY SECONDS A CALL, NOT FOUR MINUTES. One long call walked a whole month and said nothing until
+ * it had finished; on the iPad that read as stuck (11 Oct), and a phone or tablet that drops a quiet
+ * connection leaves the browser waiting on an answer that is never delivered. Short calls give the
+ * banner a day to show every few seconds, and the browser carries on from where the clock is.
+ */
+const BUDGET_MS = 20_000
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isStagingDatabase(process.env.VITE_SUPABASE_URL)) {

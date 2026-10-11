@@ -41,7 +41,7 @@ import {
   type AdviceRunRow, type RemittanceAdvice,
 } from './remittanceAdvice'
 import { remittancePdf } from './remittancePdf'
-import { fetchRunPayments, markRunSent } from './payover'
+import { assertRunDue, fetchRunPayments, markRunSent } from './payover'
 import { XLSX_MIME, toBase64 } from './xlsxWrite'
 
 export async function sendRemittanceAdvice(
@@ -49,6 +49,10 @@ export async function sendRemittanceAdvice(
   to: string,
   run: { id: string; companyId: string; status: string },
 ): Promise<void> {
+  /* ASKED FIRST, BEFORE ANYTHING IS BUILT OR SENT. The database refuses the first send of a run
+     before its payout day too, but it can only do so at the RECORD step -- after the email has
+     gone. A refusal here is a client not told they were paid when they were not. */
+  if (run.status === 'approved') await assertRunDue(run.id)
   const { bytes, problem } = await remittancePdf(adv)
   if (problem) throw new Error(problem)
   const sheet = adviceSchedule(adv)
@@ -184,11 +188,19 @@ export async function loadRunAdvice(runId: string): Promise<{
  * so each is stored, sent and recorded exactly as a single send is. A client with no address on
  * file is SKIPPED and named rather than guessed at; one that fails does not stop the rest.
  */
-export async function sendAdviceForRuns(runIds: string[]): Promise<{ sent: string[]; skipped: string[] }> {
+export async function sendAdviceForRuns(
+  runIds: string[],
+  /* EACH ONE TAKES TEN SECONDS OR MORE -- a PDF, a schedule, two copies kept, an email through the
+     firm's mailbox -- so four clients is most of a minute. Said one at a time, or the button looks
+     stuck (the firm, 11 Oct: "it just keeps on loading"). */
+  onProgress?: (done: number, total: number, client: string | null) => void,
+): Promise<{ sent: string[]; skipped: string[] }> {
   const sent: string[] = []; const skipped: string[] = []
-  for (const id of runIds) {
+  for (const [i, id] of runIds.entries()) {
+    onProgress?.(i, runIds.length, null)
     try {
       const { advice, run, to, client } = await loadRunAdvice(id)
+      onProgress?.(i, runIds.length, client)
       if (!to) { skipped.push(`${client}: no email address on file`); continue }
       await sendRemittanceAdvice(advice, to, run)
       sent.push(client)
@@ -196,5 +208,6 @@ export async function sendAdviceForRuns(runIds: string[]): Promise<{ sent: strin
       skipped.push(e instanceof Error ? e.message : 'could not be sent')
     }
   }
+  onProgress?.(runIds.length, runIds.length, null)
   return { sent, skipped }
 }

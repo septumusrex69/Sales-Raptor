@@ -39222,3 +39222,355 @@ begin
   returning id into v_id;
   return v_id;
 end $$;
+
+
+-- 2026-10-11: a set-off charge with no receipts behind it still gets a run (withdrawals).
+create or replace function public.refresh_payover_runs()
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_open date := public.payover_cycle_start(public.raptor_now());
+  v_last date := public.payover_cycle_start(((v_open - 1)::timestamp) at time zone 'Africa/Johannesburg');
+  v_cycle date;
+  v_end date;
+  v_company uuid;
+  v_count integer := 0;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  foreach v_cycle in array array[v_last, v_open] loop
+    v_end := public.payover_cycle_end(v_cycle);
+    for v_company in
+      select distinct d.company_id
+        from public.payment_allocations a
+        join public.account_payments p on p.id = a.payment_id
+        join public.debtor_accounts d on d.id = a.account_id
+       where a.payover_run_id is null
+         and a.status <> 'reversed'
+         and not p.is_demo
+         and not p.paid_over_in_swordfish
+         /* A PTC rides the next payover: the same window build_payover_run claims it on. */
+         and p.allocated_on <= case when a.paid_to_client
+                                    then public.payover_ptc_until(v_end) else v_end end
+         and (p.allocated_on >= v_cycle
+              /* late for a run approved early: build_payover_run claims it into this one */
+              or exists (select 1 from public.payover_runs e
+                          where e.company_id = d.company_id
+                            and e.status in ('approved', 'sent', 'paid')
+                            and p.allocated_on between e.period_start
+                              and case when a.paid_to_client
+                                       then public.payover_ptc_until(e.period_end) else e.period_end end))
+      union
+      select r.company_id from public.payover_runs r
+       where r.period_start = v_cycle and public.payover_run_is_open(r.status)
+      /*
+       * A CHARGE TO SET OFF IS A REASON FOR A RUN ON ITS OWN. A client whose debtors paid nothing
+       * this cycle had no run, so a withdrawal raised against it (set_off, "comes off the next
+       * payover") had nothing to come off: it sat on the client statement and never reached the
+       * queue, and nobody saw that the client owed the firm (the firm, 11 Oct, withdrawing
+       * SBB/2006). build_payover_run claims exactly these -- raised by the cycle's end, unclaimed,
+       * not cancelled, not paid -- and a run with only a charge on it is below nil: "Client owes
+       * us", carried until it is paid or set off.
+       */
+      union
+      select c.company_id from public.client_charges c
+       where c.settlement = 'set_off'
+         and c.payover_run_id is null
+         and c.cancelled_at is null
+         and c.paid_at is null
+         and c.raised_on <= v_end
+         /* an older one nothing claimed rides the open cycle, not a run for a month long shut */
+         and (c.raised_on >= v_cycle or v_cycle = v_open)
+    loop
+      if exists (select 1 from public.payover_runs
+                  where company_id = v_company and period_start = v_cycle
+                    and not public.payover_run_is_open(status)) then
+        continue;
+      end if;
+      perform public.build_payover_run(v_company, v_cycle);
+      v_count := v_count + 1;
+    end loop;
+  end loop;
+  return v_count;
+end $$;
+
+
+-- 2026-10-11: the payout day gate (advice and payment wait for payover_pays_on unless released early).
+-- ============================================================================================
+-- A PAYOVER GOES OUT ON ITS PAYOUT DAY, AND NOT BEFORE (the firm, 11 Oct 2026).
+--
+-- "I shouldn't be able to email all the payovers because [they] should only be going out on the
+-- next month ... when we do the payment." The 2606 runs of the simulation were approved and their
+-- advice emailed on 10 Jul, a day before the 11 Jul payout: four clients told they had been paid
+-- money that had not left the account. Approval may happen any time after the cycle closes -- it
+-- is checking the figures -- but the advice and the payment are the PAYOUT, and the payout has a
+-- day: payover_pays_on(period_end), the lag the firm set in Trust settings.
+--
+-- So an approved run is SCHEDULED until that day and DUE from it. Before it, the advice cannot go
+-- and the run cannot be marked paid -- unless somebody RELEASES it early, with a reason, which is
+-- kept on the run with who and when (the firm: "unless you override it somehow"). Approving early
+-- already works that way; this is the same shape one step later.
+--
+-- NOT AUTOMATIC ON THE DAY. Nothing is emailed by itself on the 11th: an advice that goes out on
+-- the calendar says "we have paid you" whether or not the EFT has been made. The day makes the run
+-- DUE; a person still sends it.
+--
+-- NOT ON THE STATEMENT PATH. A payout found on the bank statement has already left the account;
+-- allocate_bank_line records what happened and is not refused for having happened early.
+-- ============================================================================================
+
+alter table public.payover_runs
+  add column if not exists released_at timestamptz,
+  add column if not exists released_by uuid references public.profiles(id),
+  add column if not exists released_reason text;
+
+comment on column public.payover_runs.released_at is
+  'Released for payout before its payout day (payover_pays_on), with released_reason and released_by. Null: it waits for the day.';
+
+create or replace function public.payover_run_due(p_run uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select public.raptor_today() >= public.payover_pays_on(r.period_end) or r.released_at is not null
+    from public.payover_runs r where r.id = p_run
+$$;
+revoke execute on function public.payover_run_due(uuid) from public, anon;
+grant execute on function public.payover_run_due(uuid) to authenticated;
+
+/* The sentence every refusal carries, so the queue, the run page and the database say one thing. */
+create or replace function public.assert_payover_run_due(p_run uuid)
+returns void
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare v_run public.payover_runs%rowtype;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'The trust account is not yours to pay from.' using errcode = '42501';
+  end if;
+  select * into v_run from public.payover_runs where id = p_run;
+  if not found then raise exception 'No such payover run.' using errcode = 'P0002'; end if;
+  if public.raptor_today() < public.payover_pays_on(v_run.period_end) and v_run.released_at is null then
+    raise exception '% pays over on %. Its advice goes out and it is paid on that day, not before. Release it early, with a reason, if this client is to be paid now.',
+      v_run.invoice_number, to_char(public.payover_pays_on(v_run.period_end), 'FMDD Mon YYYY')
+      using errcode = '22023';
+  end if;
+end $$;
+revoke execute on function public.assert_payover_run_due(uuid) from public, anon;
+grant execute on function public.assert_payover_run_due(uuid) to authenticated;
+
+create or replace function public.release_payover_run_early(p_run uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_why text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  /* Ten characters, the same floor approving early has: "x" is not a reason. */
+  if length(coalesce(v_why, '')) < 10 then
+    raise exception 'Say why this client is being paid before the payout day.' using errcode = '22023';
+  end if;
+  update public.payover_runs
+     set released_at = public.raptor_now(), released_by = auth.uid(), released_reason = v_why
+   where id = p_run and status = 'approved' and released_at is null;
+  if not found then
+    raise exception 'Only an approved run that has not been released can be released early.' using errcode = '22023';
+  end if;
+end $$;
+revoke execute on function public.release_payover_run_early(uuid, text) from public, anon;
+grant execute on function public.release_payover_run_early(uuid, text) to authenticated;
+
+/* THE FIRST SEND IS THE PAYOUT'S; A REVISION OF ONE ALREADY SENT IS NOT HELD AGAIN. */
+create or replace function public.record_payover_send(
+  p_run uuid, p_sent_to text, p_subject text, p_snapshot jsonb, p_pdf_path text, p_xlsx_path text)
+returns integer
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_run public.payover_runs%rowtype; v_version integer;
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Recording a payover advice is not yours to do.' using errcode = '42501';
+  end if;
+  select * into v_run from public.payover_runs where id = p_run;
+  if not found then raise exception 'No such payover run.' using errcode = 'P0002'; end if;
+  if v_run.status not in ('approved', 'sent', 'paid') then
+    raise exception 'Only an approved run is sent to a client.' using errcode = '22023';
+  end if;
+  if v_run.status = 'approved' then perform public.assert_payover_run_due(p_run); end if;
+  if nullif(btrim(coalesce(p_pdf_path, '')), '') is null or nullif(btrim(coalesce(p_xlsx_path, '')), '') is null then
+    raise exception 'The copy of what was sent has to be kept with it.' using errcode = '22023';
+  end if;
+  select coalesce(max(version), 0) + 1 into v_version from public.payover_run_sends where run_id = p_run;
+  insert into public.payover_run_sends (run_id, company_id, version, sent_by, sent_to, subject,
+                                        net_payover, snapshot, pdf_path, xlsx_path)
+  values (p_run, v_run.company_id, v_version, auth.uid(), btrim(p_sent_to), p_subject,
+          v_run.net_payover, p_snapshot, p_pdf_path, p_xlsx_path);
+  return v_version;
+end $$;
+
+create or replace function public.mark_payover_run_sent(p_run uuid)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN (security definer bypasses RLS).
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  perform public.assert_payover_run_due(p_run);
+  update public.payover_runs set status = 'sent', sent_at = public.raptor_now()
+   where id = p_run and status = 'approved';
+  if not found then raise exception 'Only an approved run can be sent.'; end if;
+end $$;
+
+create or replace function public.mark_payover_run_paid(
+  p_run uuid, p_reference text, p_paid_at timestamptz default public.raptor_now())
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  -- ADMINISTRATOR ONLY, AND THE GUARD IS THE FUNCTION'S OWN. This is security definer, so
+  -- row-level security does not apply -- the policies on payover_runs are bypassed the moment
+  -- somebody calls this. IS DISTINCT FROM, NOT <>: current_user_role() reads a row from
+  -- profiles by auth.uid(), so an unauthenticated caller gets NULL, and `null <> 'Administrator'`
+  -- is NULL rather than true -- a plain <> would let precisely the wrong caller through.
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'The Finance section is Administrator only.' using errcode = '42501';
+  end if;
+  /* WHEN THE STATEMENT IS THE ONLY WAY (the firm, for go-live): nothing is paid until the bank says so. */
+  if coalesce((select payouts_statement_only from public.firm_settings limit 1), false) then
+    raise exception 'Payments out are confirmed from the bank statement only. Import the statement and allocate the line under Exceptions.' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(p_reference, '')), '') is null then
+    raise exception 'Say which EFT paid it -- the reference is what reconciles this invoice to the bank.';
+  end if;
+  /* NOTHING IS PAID ON A RUN BELOW NIL (10 Oct): the client owes the firm, and the next run brings
+     it forward as its opening line whether or not this one is marked. Marking it paid would write
+     a payment out of money that never left the account. */
+  if (select net_payover from public.payover_runs where id = p_run) < 0 then
+    raise exception 'This run is below nil: the client owes us, and it comes off their next payover. There is nothing to pay.'
+      using errcode = '22023';
+  end if;
+  /* AND NOT BEFORE ITS DAY, unless released early (11 Oct). A run already SENT was released by
+     sending it -- whether on the day or early -- so it is not asked again. */
+  if (select status from public.payover_runs where id = p_run) = 'approved' then
+    perform public.assert_payover_run_due(p_run);
+  end if;
+  update public.payover_runs
+     set status = 'paid', paid_at = p_paid_at, eft_reference = btrim(p_reference)
+   where id = p_run and status in ('approved', 'sent');
+  if not found then raise exception 'Only an approved or sent run can be marked paid.'; end if;
+end $$;
+
+
+-- 2026-10-11: a run before its payout day is listed as scheduled.
+create or replace function public.payments_to_make()
+returns table(kind text, id uuid, payee text, amount numeric, reference text, status text,
+              due_on date, since timestamptz, detail text, company_id uuid, account_id uuid,
+              case_number text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select 'payover', r.id, coalesce(c.name, 'Client'), r.net_payover,
+         public.payment_out_reference('payover', r.invoice_number),
+         /* SCHEDULED: approved, before its payout day and not released early (11 Oct). It is
+            listed so the month ahead can be seen, and it is not yet a payment to make. */
+         case when r.status = 'approved' and r.released_at is null
+                   and public.raptor_today() < public.payover_pays_on(r.period_end)
+              then 'scheduled' else r.status end,
+         /* THE DAY IT IS DUE: the 11th, payover_lag_months after the cycle closed on the 10th. */
+         (r.period_end + make_interval(months => coalesce(f.payover_lag_months, 1)))::date + 1,
+         coalesce(r.sent_at, r.approved_at), nullif(btrim(coalesce(c.banking_details, '')), ''),
+         r.company_id, null::uuid, r.invoice_number
+    from public.payover_runs r
+    left join public.companies c on c.id = r.company_id
+    left join public.firm_settings f on true
+   where public.has_capability('finance.view') and r.status in ('approved', 'sent')
+     /* NOTHING GOES OUT ON A RUN AT OR BELOW NIL (10 Oct): the client owes the firm, and the next
+        run brings it forward as its opening line. Listed, it read as a payment to make of -R x. */
+     and r.net_payover > 0
+  union all
+  select 'refund', o.id, o.payable_to, o.amount,
+         public.payment_out_reference('refund', coalesce(d.case_number, d.account_number)), 'due',
+         null::date, o.instructed_at, o.reason, d.company_id, o.account_id, d.case_number
+    from public.trust_payments_out o
+    left join public.debtor_accounts d on d.id = o.account_id
+   where public.has_capability('finance.view') and o.paid_at is null and o.cancelled_at is null
+   order by 7 nulls last, 8
+$$;
+
+
+
+-- 2026-10-11: the revoke list, with the payout day gate's functions.
+do $$
+declare fn text;
+begin
+  foreach fn in array array[
+    'approve_payover_run(uuid)', 'build_payover_run(uuid, date)',
+    'mark_payover_run_paid(uuid, text, timestamptz)', 'mark_payover_run_sent(uuid)',
+    'payover_cycle_now()',
+    'preview_allocation(uuid, numeric, boolean, date, uuid)',
+    'reallocate_account(uuid)', 'money_position(uuid)',
+    'payover_work_queue(date)', 'payover_cycle_tiles(date)', 'payover_run_payments(uuid)',
+    'finance_exception_jobs()', 'payment_audit(uuid)', 'account_ledger(uuid)',
+    'expected_from_promises(date, date)', 'import_bank_lines(text, text, jsonb)',
+    'place_bank_line(uuid, uuid)', 'reconcile_bank_debit(uuid, uuid)',
+    'unallocated_receipts()', 'unreconciled_payouts()', 'bank_import_history()',
+    'record_manual_payment(uuid, numeric, date, boolean, text, text, text, boolean, uuid)',
+    'may_record_payment()', 'may_approve_payment()',
+    'approve_payment(uuid)', 'approve_payments(uuid[])', 'payments_awaiting_approval()',
+    'payments_posted(date, date)',
+    'reject_payment(uuid, text, boolean)', 'reject_payments(uuid[], text, boolean)',
+    'unreject_payment(uuid)', 'payments_rejected(date)',
+    'payover_buildable(date)', 'is_staging_database()',
+    'reset_payover_run(uuid)', 'move_payment_to_cycle(uuid, date)',
+    'void_payover_run(uuid)',
+    /* THE CLIENT ACCOUNT. */
+    'raise_client_charge(uuid, text, text, numeric, numeric, text, uuid, date)',
+    'cancel_client_charge(uuid, text)',
+    'mark_client_charge_paid(uuid, text, timestamptz)',
+    'client_account(uuid)',
+    'recompute_payover_run(uuid)',
+    'split_bank_line(uuid, jsonb)', 'reverse_payment(uuid, text)',
+    'set_payment_account(uuid, uuid)', 'suspend_payment(uuid, text)',
+    'release_payment_from_suspense(uuid)', 'suspended_payments()',
+    /* PAYMENTS IN'S OVERVIEW TILES. */
+    'payments_in_month(date, date)',
+    /* THE QUEUE THAT BUILDS ITS OWN RUNS (8 Oct). */
+    'refresh_payover_runs()',
+    /* APPROVING BEFORE THE CUT-OFF, WITH A REASON (8 Oct). */
+    'approve_payover_run_early(uuid, text)',
+    /* REVERSING TO NEEDS AN ACCOUNT (10 Oct). */
+    'reverse_payment_to_unplaced(uuid, text)',
+    /* THE PAYOUT DAY GATE AND ITS OVERRIDE (11 Oct). */
+    'assert_payover_run_due(uuid)', 'release_payover_run_early(uuid, text)',
+    'payover_run_due(uuid)'
+  ] loop
+    begin
+      execute format('revoke execute on function public.%s from public, anon', fn);
+    exception when undefined_function then
+      raise notice 'skipped %', fn;
+    end;
+  end loop;
+end $$;

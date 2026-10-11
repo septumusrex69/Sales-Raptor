@@ -7,11 +7,11 @@ import { rand } from '../../lib/money'
 import {
   NEXT_STEP_LABEL, RUN_STATUS_LABEL,
   approveRun, buildRun, fetchBuildable, markRunPaid, fetchCycle, fetchTiles, fetchWorkQueue,
-  isStagingDeployment, refreshRuns, resetRun,
+  fetchReleasedRunIds, isStagingDeployment, refreshRuns, resetRun,
   type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
-import { groupRunsByCycle, periodLabel } from '../../lib/payoverGroups'
+import { groupRunsByCycle, paysOnFor, periodLabel } from '../../lib/payoverGroups'
 import { supabase } from '../../lib/supabase'
 import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
@@ -119,6 +119,11 @@ export function FinanceWorkQueue() {
   const [staging, setStaging] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [note, setNote] = useState<string | null>(null)
+  /* WHAT A BULK PRESS IS DOING NOW, in words: "Emailing 2 of 4 · Seabreeze Body Corporate". A spinner
+     alone for most of a minute read as stuck (the firm, 11 Oct). */
+  const [progress, setProgress] = useState<string | null>(null)
+  /* Approved runs released for payout before their day (release_payover_run_early). */
+  const [released, setReleased] = useState<Set<string>>(new Set())
   /* How long after a cycle closes it is paid (Trust settings); one month unless the firm changed it. */
   const [lag, setLag] = useState(1)
   /* MARK PAID, FROM HERE (the firm, 10 Oct: "the mark as paid button should ... just immediately
@@ -145,6 +150,7 @@ export function FinanceWorkQueue() {
       setLag(Number((f.data as { payover_lag_months?: number } | null)?.payover_lag_months ?? 1))
       setRows(q)
       setSettled(await fetchSettledRunIds().catch(() => new Set<string>()))
+      setReleased(await fetchReleasedRunIds().catch(() => new Set<string>()))
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
     } catch (e) {
@@ -183,29 +189,49 @@ export function FinanceWorkQueue() {
      8 Oct). So a bulk approval leaves it out, and its row says where to do it. */
   const stillOpen = (r: WorkQueueRow) => !!cycle && r.periodEnd >= cycle.today
 
-  async function bulkApprove(ids: string[]) {
+  /*
+   * EVERY BULK PRESS ENDS, WHATEVER HAPPENS INSIDE IT. The busy flag used to be cleared on the last
+   * line, after the reload -- so anything that threw on the way (a dropped connection on the iPad
+   * above all) left the spinner turning for ever over work that had in fact been done, and the
+   * only way out was another tab and back (the firm, 11 Oct). `finally` is what makes it end.
+   */
+  async function bulk(work: () => Promise<string>) {
     setBusy('bulk'); setError(null); setNote(null)
-    const failed: string[] = []
-    for (const id of ids) {
-      try { await approveRun(id) } catch (e) {
-        const r = rows.find((x) => x.runId === id)
-        failed.push(`${r?.client ?? 'A run'}: ${e instanceof Error ? e.message : 'could not be approved'}`)
-      }
+    try {
+      setNote(await work())
+      setPicked(new Set())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not finish. Reload to see what was done.')
+    } finally {
+      setProgress('Bringing the list up to date…')
+      await load().catch(() => {})
+      setProgress(null)
+      setBusy(null)
     }
-    setNote(`${ids.length - failed.length} approved${failed.length ? `; ${failed.length} not: ${failed.join('; ')}` : ''}.`)
-    setPicked(new Set())
-    await load()
-    setBusy(null)
+  }
+
+  async function bulkApprove(ids: string[]) {
+    await bulk(async () => {
+      const failed: string[] = []
+      for (const [i, id] of ids.entries()) {
+        const r = rows.find((x) => x.runId === id)
+        setProgress(`Approving ${i + 1} of ${ids.length}${r ? ` · ${r.client}` : ''}`)
+        try { await approveRun(id) } catch (e) {
+          failed.push(`${r?.client ?? 'A run'}: ${e instanceof Error ? e.message : 'could not be approved'}`)
+        }
+      }
+      return `${ids.length - failed.length} approved${failed.length ? `; ${failed.length} not: ${failed.join('; ')}` : ''}.`
+    })
   }
 
   async function bulkEmail(ids: string[]) {
-    setBusy('bulk'); setError(null); setNote(null)
-    const out = await sendAdviceForRuns(ids)
-    setNote(`Advice sent to ${out.sent.length} ${out.sent.length === 1 ? 'client' : 'clients'}`
-      + `${out.skipped.length ? `; not sent: ${out.skipped.join('; ')}` : ''}.`)
-    setPicked(new Set())
-    await load()
-    setBusy(null)
+    await bulk(async () => {
+      const out = await sendAdviceForRuns(ids, (done, total, client) => {
+        if (done < total) setProgress(`Emailing ${done + 1} of ${total}${client ? ` · ${client}` : ''}`)
+      })
+      return `Advice sent to ${out.sent.length} ${out.sent.length === 1 ? 'client' : 'clients'}`
+        + `${out.skipped.length ? `; not sent: ${out.skipped.join('; ')}` : ''}.`
+    })
   }
 
   const isRunning = (r: WorkQueueRow) => !!cycle && r.periodStart >= cycle.periodStart
@@ -219,27 +245,34 @@ export function FinanceWorkQueue() {
     .filter((r) => (!q || r.client.toLowerCase().includes(q) || (r.invoiceNumber ?? '').toLowerCase().includes(q))
       && (!statusFilter || r.status === statusFilter))
   /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
-  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'paid' ? 'paid' : 'open', lag)
+  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'paid' ? 'paid' : 'open', lag, cycle?.today ?? null)
   const pickedRows = rows.filter((r) => picked.has(r.runId))
   const toApprove = pickedRows.filter((r) => r.status === 'ready' && !stillOpen(r)).map((r) => r.runId)
-  const toEmail = pickedRows.filter((r) => r.status === 'approved').map((r) => r.runId)
-  /* Only what is ready to pay: approved or sent, and not below nil -- a run below nil is the client
-     owing us, and mark_payover_run_paid refuses it. */
-  const toPay = statementOnly ? [] : pickedRows.filter((r) => (r.status === 'approved' || r.status === 'sent') && r.netPayover >= 0)
+  /* THE PAYOUT DAY (11 Oct): an approved run's advice and payment wait for payover_pays_on unless it
+     was released early. A sent run went out already, so it is not held again. The database refuses
+     the same; this is so the bar never offers what would be refused. */
+  const paysOn = (r: WorkQueueRow) => paysOnFor(r.periodEnd, lag)
+  const isDue = (r: WorkQueueRow) => r.status !== 'approved' || released.has(r.runId)
+    || (!!cycle && cycle.today >= paysOn(r))
+  const scheduled = pickedRows.filter((r) => r.status === 'approved' && !isDue(r))
+  const toEmail = pickedRows.filter((r) => r.status === 'approved' && isDue(r)).map((r) => r.runId)
+  /* Only what is ready to pay: approved or sent, on its day, and not below nil -- a run below nil is
+     the client owing us, and mark_payover_run_paid refuses it. */
+  const toPay = statementOnly ? [] : pickedRows.filter((r) => (r.status === 'approved' || r.status === 'sent') && isDue(r) && r.netPayover >= 0)
 
   async function payRuns(refs: Record<string, string>, date: string) {
-    setBusy('bulk'); setError(null); setNote(null)
-    const failed: string[] = []
     const list = paying ?? []
-    for (const r of list) {
-      try { await markRunPaid(r.id, refs[r.id].trim(), new Date(`${date}T12:00:00`).toISOString()) } catch (e) {
-        failed.push(`${r.client}: ${e instanceof Error ? e.message : 'could not be marked paid'}`)
+    setPaying(null)
+    await bulk(async () => {
+      const failed: string[] = []
+      for (const [i, r] of list.entries()) {
+        setProgress(`Marking ${i + 1} of ${list.length} paid · ${r.client}`)
+        try { await markRunPaid(r.id, refs[r.id].trim(), new Date(`${date}T12:00:00`).toISOString()) } catch (e) {
+          failed.push(`${r.client}: ${e instanceof Error ? e.message : 'could not be marked paid'}`)
+        }
       }
-    }
-    setNote(`${list.length - failed.length} marked paid${failed.length ? `; ${failed.length} not: ${failed.join('; ')}` : ''}.`)
-    setPaying(null); setPicked(new Set())
-    await load()
-    setBusy(null)
+      return `${list.length - failed.length} marked paid${failed.length ? `; ${failed.length} not: ${failed.join('; ')}` : ''}.`
+    })
   }
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
@@ -359,7 +392,16 @@ export function FinanceWorkQueue() {
               </button>
             )}
             <button type="button" onClick={() => setPicked(new Set())} className="text-slate-500 underline">Clear</button>
-            {busy === 'bulk' && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+            {busy === 'bulk' && (
+              <span className="inline-flex items-center gap-1.5 text-slate-600" data-testid="bulk-progress">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />{progress ?? 'Working…'}
+              </span>
+            )}
+            {busy !== 'bulk' && scheduled.length > 0 && (
+              <span className="text-[12.5px] text-slate-500" data-testid="bulk-scheduled">
+                {scheduled.length} not yet due: advice and payment on {fmtDay(paysOn(scheduled[0]))}
+              </span>
+            )}
           </div>
         )}
         {note && <p className="mx-4 mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900" data-testid="bulk-note">{note}</p>}
@@ -489,6 +531,13 @@ export function FinanceWorkQueue() {
                       <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-negative-700"
                         data-testid="owes-us">
                         Client owes us
+                      </span>
+                    ) : r.status === 'approved' && !isDue(r) ? (
+                      /* SCHEDULED: approved, waiting for its payout day. Releasing it early is on the
+                         run, with a reason -- the same place approving early is. */
+                      <span className="inline-block whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-[12px] font-medium text-slate-500"
+                        data-testid="scheduled" title="The advice goes out and it is paid on its payout day. Release it early from the run, with a reason.">
+                        Pays {fmtDay(paysOn(r))}
                       </span>
                     ) : r.nextStep && (
                       <button

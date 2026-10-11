@@ -32,7 +32,7 @@ const g = groupRunsByCycle(runs, OPEN, 'open')
 check('the one that leaves soonest is first, one group per cycle', g.map((x) => x.periodStart), ['2026-07-11', '2026-08-11', '2026-09-11'])
 check('each named for where it stands', g.map((x) => x.tone), ['late', 'now', 'early'])
 check('...in words', g.map((x) => x.title), ['Overdue', 'Closed', 'Running'])
-check('the closed cycle says nothing more goes in, and when it is paid', g[1]?.state, 'Nothing more goes in · check, approve and pay on 11 Oct')
+check('the closed cycle says nothing more goes in, and when it is paid', g[1]?.state, 'Nothing more goes in · check and approve now · advice and payment on 11 Oct')
 check('the running cycle says when it closes and when it is paid', g[2]?.state, 'Still collecting · closes at midnight on 10 Oct · paid out 11 Nov')
 check('an overdue one says it was due', g[0]?.state, 'Closed 10 Aug · was due 11 Sep and is not yet paid')
 check('the total is the runs\' own figures', g[1]?.total, 18125.6)
@@ -43,10 +43,16 @@ check('with no open cycle known nothing is called this month', groupRunsByCycle(
 check('the payover day follows the lag', [paysOnFor('2026-09-10', 1), paysOnFor('2026-09-10', 0), paysOnFor('2026-12-10', 1)],
   ['2026-10-11', '2026-09-11', '2027-01-11'])
 check('...and the group uses it', groupRunsByCycle([run('2026-08-11', '2026-09-10', 1)], OPEN, 'open', 2)[0]?.paysOn, '2026-11-11')
+/* 11 Oct, THE PAYOUT DAY, lag one month: the cycle being paid today closed on 10 Sep, not last
+   night. It was called Overdue on the morning it fell due. */
+const onDay = groupRunsByCycle([run('2026-08-11', '2026-09-10', 1), run('2026-09-11', '2026-10-10', 2)], '2026-10-11', 'open', 1, '2026-10-11')
+check('on its payout day a cycle is due today, not overdue', onDay.map((x) => x.title), ['Due today', 'Closed'])
+check('...and the one that closed last night waits for its own day', onDay[1]?.state, 'Nothing more goes in · check and approve now · advice and payment on 11 Nov')
+check('the day after, it is overdue', groupRunsByCycle([run('2026-08-11', '2026-09-10', 1)], '2026-10-11', 'open', 1, '2026-10-12')[0]?.title, 'Overdue')
 check('nothing to group is no groups', groupRunsByCycle([], OPEN, 'open'), [])
 
 const page = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
-check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tabShown === 'paid' \? 'paid' : 'open', lag\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
+check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tabShown === 'paid' \? 'paid' : 'open', lag, cycle\?\.today \?\? null\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payover-groups: ${pass} passed, ${failures.length} failed`)

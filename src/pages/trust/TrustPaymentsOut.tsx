@@ -197,7 +197,9 @@ export function TrustPaymentsOut() {
                           <Link to={`/accounts/${p.accountId}`} className="text-gold-700 hover:text-gold-800">Refund · {p.caseNumber ?? 'the debtor'}</Link>
                         )}
                         <span className="text-slate-400">
-                          {' \u00b7 '}{p.kind === 'payover' ? (p.status === 'sent' ? 'Advice sent' : 'Approved') : 'Overpayment refunded'}
+                          {' \u00b7 '}{p.kind === 'payover'
+                            ? (p.status === 'sent' ? 'Advice sent' : p.status === 'scheduled' ? 'Approved, waiting for its day' : 'Approved')
+                            : 'Overpayment refunded'}
                         </span>
                       </td>
                       <td className="px-3 py-1.5">
@@ -214,6 +216,14 @@ export function TrustPaymentsOut() {
                       <td className="px-3 py-1.5 text-right">
                         {statementOnly ? (
                           <span className="text-[11.5px] text-slate-400 whitespace-nowrap">Paid from the statement</span>
+                        ) : p.status === 'scheduled' ? (
+                          /* NOT BEFORE ITS DAY (11 Oct): mark_payover_run_paid refuses it, so nothing
+                             is offered here; releasing early is on the run, with a reason. */
+                          <Link to={`/trust/runs/${p.id}`} data-testid="scheduled-payout"
+                            className="text-[11.5px] text-slate-400 whitespace-nowrap hover:text-slate-600"
+                            title="Paid on its payout day. Release it early from the run, with a reason.">
+                            Not yet due
+                          </Link>
                         ) : (
                         <button type="button"
                           onClick={() => setPaying({ kind: p.kind, id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}

@@ -40,7 +40,7 @@ export interface CycleGroup<T extends GroupableRun> {
  *   RUNNING  -- still collecting: every payment approved today lands here until midnight on the 10th.
  */
 export function groupRunsByCycle<T extends GroupableRun>(
-  runs: T[], openStart: string | null, mode: 'open' | 'paid', lagMonths = 1,
+  runs: T[], openStart: string | null, mode: 'open' | 'paid', lagMonths = 1, today: string | null = null,
 ): CycleGroup<T>[] {
   const byStart = new Map<string, T[]>()
   for (const r of runs) {
@@ -62,9 +62,16 @@ export function groupRunsByCycle<T extends GroupableRun>(
       } else if (openStart && start >= openStart) {
         title = 'Running'; tone = 'early'
         state = `Still collecting · closes at midnight on ${dayLabel(end)} · paid out ${dayLabel(paysOn)}`
-      } else if (dueEnd && end === dueEnd) {
+      } else if (today && today === paysOn) {
+        /* ITS DAY IS TODAY, and that is not late. With a lag of a month the cycle being paid on the
+           11th is not the one that closed last night -- read only off `dueEnd`, it was called
+           Overdue on the very morning it fell due (11 Oct). */
+        title = 'Due today'; tone = 'now'
+        state = `Paid out today · make the EFT, then email the advice`
+      } else if (today ? today < paysOn : (dueEnd !== null && end === dueEnd)) {
+        /* APPROVED ANY TIME, PAID ON THE DAY (11 Oct): the advice and the EFT wait for it. */
         title = 'Closed'; tone = 'now'
-        state = `Nothing more goes in · check, approve and pay on ${dayLabel(paysOn)}`
+        state = `Nothing more goes in · check and approve now · advice and payment on ${dayLabel(paysOn)}`
       } else {
         title = 'Overdue'; tone = 'late'
         state = `Closed ${dayLabel(end)} · was due ${dayLabel(paysOn)} and is not yet paid`

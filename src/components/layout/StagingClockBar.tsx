@@ -41,13 +41,21 @@ export function StagingClockBar({ clock }: { clock: FirmClock | null }) {
   const jump = async (to: string) => {
     setError(null)
     setBusy(`Moving the clock to ${bannerDate(to)}…`)
-    const done = await jumpStagingClock(to, null, (reached) =>
-      setBusy(`Moving the clock to ${bannerDate(to)} — reached ${bannerDate(reached)}…`))
+    /* NOTHING LEFT TURNING. Whatever happens in there, the line ends in either a reload or a
+       sentence -- never "Moving the clock…" over a clock that has already moved (11 Oct). */
+    let done: Awaited<ReturnType<typeof jumpStagingClock>>
+    try {
+      done = await jumpStagingClock(to, null, (reached) =>
+        setBusy(`Moving the clock to ${bannerDate(to)} — reached ${bannerDate(reached)}…`))
+    } catch (e) {
+      done = { ok: false, error: e instanceof Error ? e.message : 'The jump stopped.' }
+    }
     if (!done.ok) {
       setBusy(null)
       setError(done.error)
       return
     }
+    setBusy(`Arrived at ${bannerDate(to)} — reloading…`)
     window.location.reload()
   }
 

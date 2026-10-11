@@ -25,7 +25,7 @@ import {
   type AccountDocument, type Arrangement, type PromiseToPay, type Workspace,
 } from '../../lib/accountWorkspace'
 import { buildTimeline, filterTimeline, groupByDay, type TimelineEntry } from '../../lib/accountTimeline'
-import { isWrittenOff } from '../../lib/accountStatus'
+import { accountEnded, isWrittenOff } from '../../lib/accountStatus'
 import {
   canFreezeAccounts, canHandOutAccounts, canViewClients, canViewFinance, isAssignableOwner,
 } from '../../lib/permissions'
@@ -1067,7 +1067,15 @@ export function AccountDetail() {
    * disagree. The bucket goes in because half the inherited book has no sub-status and Swordfish's
    * own filing is the only record that a promise was made or broken.
    */
+  /*
+   * ENDED BY RAPTOR IS CLOSED, WHATEVER THE INHERITED STATUS SAYS. withdraw_account (and the other
+   * endings) write `ended_as` and leave Swordfish's 'Active' where it was -- imported history is
+   * frozen -- so reading only the status reported a file the client had taken back as "New, nobody
+   * has made the first call" (the firm, 11 Oct, on SBB/2006). `closed` is the rung's own input.
+   */
+  const ended = accountEnded(account)
   const position = deskPosition({
+    closed: ended,
     status: account.status,
     subStatus: account.subStatus,
     bucket: account.bucket,
@@ -1259,6 +1267,7 @@ export function AccountDetail() {
    * Composed from records, never from the main comment. See accountNarrative.
    */
   const clientReport = positionReport({
+    closed: ended,
     status: account.status,
     subStatus: account.subStatus,
     paidInPeriod: false,
@@ -1595,7 +1604,14 @@ export function AccountDetail() {
         }
       >
         <div className="flex items-center gap-2">
-          <StatusPill status={account.status} inDuplum={account.inDuplum} />
+          {/* HOW IT ENDED, NOT THE COLUMN IT CAME IN ON. A withdrawn account kept its green
+              'Active' pill from Swordfish; the pill is the first thing read on the page. */}
+          {account.endedAs
+            ? <span data-testid="account-ended-pill"
+                className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                {ENDING_LABEL[account.endedAs]}{account.endedOn ? ` · ${formatDate(account.endedOn)}` : ''}
+              </span>
+            : <StatusPill status={account.status} inDuplum={account.inDuplum} />}
           {account.prescribed && (
             <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-negative-50 text-negative-700"
               title="Three years have run since the last payment or acknowledgement. It can no longer be enforced.">

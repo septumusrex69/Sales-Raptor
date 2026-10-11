@@ -443,6 +443,34 @@ export function cycleStillOpen(periodEnd: string, today: string = todaySast()): 
   return periodEnd >= today
 }
 
+/**
+ * THE PAYOUT DAY GATE (the firm, 11 Oct: "I shouldn't be able to email all the payovers because
+ * [they] should only be going out on the next month ... when we do the payment").
+ *
+ * An approved run is SCHEDULED until payover_pays_on and DUE from it; before that its advice may not
+ * go and it may not be marked paid, unless it is RELEASED early with a reason. The database refuses
+ * either way (assert_payover_run_due, inside record_payover_send, mark_payover_run_sent and
+ * mark_payover_run_paid) -- this is so a screen can ask BEFORE it builds a PDF and emails it, rather
+ * than learn from the record step that a client has been told something untrue.
+ */
+export async function assertRunDue(runId: string): Promise<void> {
+  const { error } = await supabase.rpc('assert_payover_run_due', { p_run: runId })
+  if (error) throw new Error(error.message)
+}
+
+export async function releaseRunEarly(runId: string, reason: string): Promise<void> {
+  const { error } = await supabase.rpc('release_payover_run_early', { p_run: runId, p_reason: reason })
+  if (error) throw new Error(error.message)
+}
+
+/** Runs released for payout before their day, so the queue can treat them as due. */
+export async function fetchReleasedRunIds(): Promise<Set<string>> {
+  const { data, error } = await supabase.from('payover_runs')
+    .select('id').not('released_at', 'is', null).in('status', ['approved', 'sent'])
+  if (error) throw new Error(error.message)
+  return new Set(((data ?? []) as { id: string }[]).map((r) => r.id))
+}
+
 export async function markRunSent(runId: string): Promise<void> {
   const { error } = await supabase.rpc('mark_payover_run_sent', { p_run: runId })
   if (error) throw new Error(error.message)

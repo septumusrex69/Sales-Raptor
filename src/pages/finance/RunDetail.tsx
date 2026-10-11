@@ -8,6 +8,7 @@ import { rand, ratePercent } from '../../lib/money'
 import { supabase } from '../../lib/supabase'
 import {
   RUN_STATUS_LABEL, approveRun, approveRunEarly, cycleStillOpen, fetchPaymentAudit, fetchRunPayments, markRunPaid,
+  releaseRunEarly,
   type RunPayment, type RunStatus,
 } from '../../lib/payover'
 import { adviceBody, adviceFromRun, adviceSubject, buildRemittanceAdvice } from '../../lib/remittanceAdvice'
@@ -21,6 +22,7 @@ import { fetchReceiptForRun, recordClientPayment, type ClientBusinessReceipt } f
 import { canViewBusiness, canViewFinance } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
 import { clockToday } from '../../lib/clock.ts'
+import { paysOnFor } from '../../lib/payoverGroups'
 
 /**
  * ONE PAYOVER RUN, AND THE PAYMENTS UNDER IT.
@@ -64,6 +66,10 @@ interface RunRow {
   early_at?: string | null
   /* Who approved it early (the firm, 10 Oct: "it should say who made the note"). */
   early?: { name: string | null } | null
+  /* RELEASED FOR PAYOUT BEFORE ITS DAY (11 Oct): the advice and the EFT may go now; who and why. */
+  released_at?: string | null
+  released_reason?: string | null
+  released?: { name: string | null } | null
   /* Below nil and paid by the client into the business account (record_client_business_receipt). */
   settled_direct_receipt_id?: string | null
 }
@@ -95,6 +101,9 @@ export function RunDetail() {
   const [busy, setBusy] = useState(false)
   const [payModal, setPayModal] = useState(false)
   const [earlyModal, setEarlyModal] = useState(false)
+  const [releaseModal, setReleaseModal] = useState(false)
+  /* The payout lag from Trust settings, to say which day this run pays on. */
+  const [lag, setLag] = useState(1)
   const [emailModal, setEmailModal] = useState(false)
   const [sends, setSends] = useState<AdviceSend[]>([])
   const [receipt, setReceipt] = useState<ClientBusinessReceipt | null>(null)
@@ -106,7 +115,7 @@ export function RunDetail() {
     try {
       const { data, error: e } = await supabase
         .from('payover_runs')
-        .select('*, companies(name, code, commission_rate, vat_number, email), early:profiles!payover_runs_early_by_fkey(name)')
+        .select('*, companies(name, code, commission_rate, vat_number, email), early:profiles!payover_runs_early_by_fkey(name), released:profiles!payover_runs_released_by_fkey(name)')
         .eq('id', id)
         .maybeSingle()
       if (e) throw new Error(e.message)
@@ -124,8 +133,9 @@ export function RunDetail() {
         amount: x.amount === null || x.amount === undefined ? null : Number(x.amount),
       })))
       const { data: fs } = await supabase.from('firm_settings')
-        .select('firm_name, physical_address, phone, email, vat_number').limit(1).maybeSingle()
-      const f = fs as { firm_name: string; physical_address: string | null; phone: string | null; email: string | null; vat_number: string | null } | null
+        .select('firm_name, physical_address, phone, email, vat_number, payover_lag_months').limit(1).maybeSingle()
+      const f = fs as { firm_name: string; physical_address: string | null; phone: string | null; email: string | null; vat_number: string | null; payover_lag_months: number | null } | null
+      setLag(Number(f?.payover_lag_months ?? 1))
       setFirm(f ? {
         name: f.firm_name, address: f.physical_address, phone: f.phone,
         email: f.email, vatNumber: f.vat_number,
@@ -198,6 +208,11 @@ export function RunDetail() {
   if (loading) return <div className="py-16 text-center text-slate-400"><Loader2 className="mx-auto w-5 h-5 animate-spin" /></div>
   if (!run) return <div className="py-16 text-center text-sm text-slate-400">{error ?? 'Not found.'}</div>
 
+  /* THE PAYOUT DAY (11 Oct): approved is checked, not paid. Until its day -- or a release -- the
+     advice and the EFT wait; the database refuses them too (assert_payover_run_due). */
+  const paysOn = paysOnFor(run.period_end, lag)
+  const scheduled = run.status === 'approved' && !run.released_at && clockToday() < paysOn
+
   return (
     <div className="space-y-4">
       <Link to={back.to} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" data-testid="back-link">
@@ -246,7 +261,18 @@ export function RunDetail() {
               className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
               Preview statement
             </button>
-            {run.status === 'approved' && (
+            {scheduled && (
+              <>
+                <span className="text-[12.5px] text-slate-500" data-testid="run-scheduled">
+                  Advice and payment on {fmtDay(paysOn)}
+                </span>
+                <button type="button" disabled={busy} onClick={() => setReleaseModal(true)}
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-[13px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50">
+                  Release early…
+                </button>
+              </>
+            )}
+            {run.status === 'approved' && !scheduled && (
               <button type="button" disabled={busy || !advice} onClick={() => setEmailModal(true)}
                 className="rounded-lg bg-navy-900 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-navy-800 disabled:opacity-50">
                 Email advice
@@ -269,7 +295,7 @@ export function RunDetail() {
                 Nothing to pay: comes off their next payover
               </span>
             )}
-            {(run.status === 'approved' || run.status === 'sent') && !statementOnly && run.net_payover >= 0 && (
+            {(run.status === 'approved' || run.status === 'sent') && !scheduled && !statementOnly && run.net_payover >= 0 && (
               <button type="button" disabled={busy} onClick={() => setPayModal(true)}
                 className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                 Mark paid
@@ -331,6 +357,11 @@ export function RunDetail() {
         {run.early_reason && (
           <p className="mt-2 text-xs text-amber-800" data-testid="early-reason">
             Approved before the cycle closed{run.early?.name ? ` by ${run.early.name}` : ''}{run.early_at ? ` on ${fmtDay(run.early_at.slice(0, 10))}` : ''}: {run.early_reason}
+          </p>
+        )}
+        {run.released_at && (
+          <p className="mt-2 text-xs text-amber-800" data-testid="released-reason">
+            Released for payout before {fmtDay(paysOn)}{run.released?.name ? ` by ${run.released.name}` : ''} on {fmtDay(run.released_at.slice(0, 10))}: {run.released_reason}
           </p>
         )}
         {run.eft_reference && (
@@ -425,6 +456,10 @@ export function RunDetail() {
       {earlyModal && run && (
         <EarlyApproveModal periodEnd={run.period_end} onClose={() => setEarlyModal(false)}
           onSave={async (reason) => { await act(() => approveRunEarly(run.id, reason)); setEarlyModal(false) }} />
+      )}
+      {releaseModal && run && (
+        <ReleaseEarlyModal paysOn={paysOn} onClose={() => setReleaseModal(false)}
+          onSave={async (reason) => { await act(() => releaseRunEarly(run.id, reason)); setReleaseModal(false) }} />
       )}
       {payModal && run && (
         <MarkPaidModal
@@ -563,6 +598,42 @@ function EarlyApproveModal({ periodEnd, onClose, onSave }: {
             onClick={() => { setBusy(true); void onSave(reason.trim()).finally(() => setBusy(false)) }}
             className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
             Approve now
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * PAYING BEFORE THE PAYOUT DAY (the firm, 11 Oct: "it should not be in a ready state before, unless
+ * you override it somehow"). The same shape as approving early: a reason, kept with the name.
+ */
+function ReleaseEarlyModal({ paysOn, onClose, onSave }: {
+  paysOn: string; onClose: () => void; onSave: (reason: string) => Promise<void>
+}) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const enough = reason.trim().length >= 10
+  return (
+    <Modal title="Pay before the payout day" onClose={onClose} width={480}>
+      <div className="space-y-3">
+        <p className="text-[13px] text-slate-600">
+          This run pays over on {fmtDay(paysOn)}. Releasing it lets you email the advice and pay it
+          now. Every other client still waits for the day.
+        </p>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="release-reason">Why now?</label>
+          <textarea id="release-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
+            className={inputClass} placeholder="e.g. the client asked for the money before month end and the run is checked" />
+          <p className="mt-1 text-[11.5px] text-slate-400">Kept on the run with your name.</p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={onClose} className="rounded-lg px-3.5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" disabled={busy || !enough}
+            onClick={() => { setBusy(true); void onSave(reason.trim()).finally(() => setBusy(false)) }}
+            className="rounded-lg bg-navy-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-navy-800 disabled:opacity-50">
+            Release now
           </button>
         </div>
       </div>
