@@ -23,7 +23,31 @@ import { firmDay } from './dateLabels.ts'
 import { describeArrangement } from './arrangements.ts'
 import { PROMISE_ENDED, promiseCancelWords } from './promiseRules.ts'
 
-export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query' | 'main_comment'
+export type TimelineKind = 'action' | 'payment' | 'note' | 'promise' | 'query' | 'main_comment' | 'status'
+
+/**
+ * WHERE THE ACCOUNT STANDS CHANGED: closed, put on hold, re-opened (prompt 11). The firm withdrew
+ * KLR/1006 and the timeline said nothing -- the account read as if nothing had happened, and the
+ * one entry it did show, a reversal a month earlier, was read as caused by the withdrawal. Each of
+ * these carries its own day, who and why, and the charge it raised, so neither can be mistaken for
+ * the other. Read from account_status_events, which a trigger fills on every change of book.
+ */
+export interface StatusChange {
+  id: string
+  at: string
+  fromBook: string | null
+  toBook: string | null
+  /** How it closed, where it closed: withdrawn, settled, paid_up, written_off. */
+  endedAs: string | null
+  reason: string | null
+  by: string | null
+  /** A charge raised with it -- the withdrawal fee -- incl. VAT, and how it is settled. */
+  charge: { total: number; settlement: string } | null
+}
+
+const ENDED_WORDS: Record<string, string> = {
+  withdrawn: 'Withdrawn by the client', settled: 'Settled', paid_up: 'Paid up', written_off: 'Written off',
+}
 
 export interface TimelineEntry {
   id: string
@@ -108,6 +132,8 @@ const NOTE_ACTION: Record<string, string> = {
  */
 const RANK: Record<TimelineKind, number> = {
   payment: 0, promise: 1, query: 2, action: 3, main_comment: 4, note: 5,
+  /* A close on a day of work comes after it: it is what the day ended in. */
+  status: 6,
 }
 
 /**
@@ -156,8 +182,31 @@ export function buildTimeline(
    * eighteen months later when a debtor says they were never contacted.
    */
   contacts: AccountContact[] = [],
+  statusChanges: StatusChange[] = [],
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = []
+
+  for (const c of statusChanges) {
+    const title = c.toBook === 'closed'
+      ? (c.endedAs ? ENDED_WORDS[c.endedAs] ?? 'Closed' : 'Closed')
+      : c.toBook === 'on_hold' ? 'Put on hold'
+        : c.fromBook === 'closed' || c.fromBook === 'on_hold' ? 'Re-opened' : null
+    if (!title) continue
+    const charge = c.charge
+      ? `${c.endedAs === 'withdrawn' ? 'Withdrawal charge' : 'Charge'} R${c.charge.total.toFixed(2)} incl. VAT, ${
+        c.charge.settlement === 'invoice' ? 'invoiced to the client' : 'set off against the next payover'}`
+      : null
+    entries.push({
+      id: `status:${c.id}`,
+      kind: 'status',
+      date: dayOf(c.at),
+      at: c.at,
+      title: c.reason ? `${title} — ${c.reason}` : title,
+      detail: charge,
+      by: c.by,
+      automated: false,
+    })
+  }
 
   /*
    * ---- THE FIRST THING THAT EVER HAPPENED TO THIS ACCOUNT ----

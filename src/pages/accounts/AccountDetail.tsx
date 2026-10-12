@@ -41,6 +41,8 @@ import { AccountPaymentsList } from '../../components/accounts/AccountPaymentsLi
 import { isQuotable, type Settlement } from '../../lib/settlement'
 import { fetchSettlement } from '../../lib/settlementApi'
 import { SettlementPanel } from '../../components/accounts/SettlementPanel'
+import { fetchStatusChanges } from '../../lib/accountEndingApi'
+import type { StatusChange } from '../../lib/accountTimeline'
 import { ENDING_LABEL, ENDING_SHORT } from '../../lib/accountEnding'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
@@ -660,13 +662,22 @@ export function AccountDetail() {
      row nobody has evidence for is the firm asserting a liability it cannot prove. */
   const suretyOnFile = useMemo(() => suretyName(authorised, firmToday()), [authorised])
 
+  /* Closes, holds and re-opens, with who, why and any charge (prompt 11). Re-read when the account
+     changes, which is what a withdrawal does. */
+  const [statusChanges, setStatusChanges] = useState<StatusChange[]>([])
+  useEffect(() => {
+    if (!account?.id) return
+    let live = true
+    void fetchStatusChanges(account.id).then((c) => { if (live) setStatusChanges(c) }).catch(() => {})
+    return () => { live = false }
+  }, [account?.id, account?.endedAs, account?.holdReason])
   const timeline = useMemo(
     () => buildTimeline(ledgers, workspace?.notes ?? [], workspace?.promises ?? [], account && {
       handoverDate: account.handoverDate,
       defaultDate: account.defaultDate,
       importedAt: account.createdAt,
-    }, workspace?.contacts ?? []),
-    [ledgers, workspace, account],
+    }, workspace?.contacts ?? [], statusChanges),
+    [ledgers, workspace, account, statusChanges],
   )
 
   const ceiling = useMemo(() => {

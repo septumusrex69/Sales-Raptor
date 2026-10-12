@@ -17,6 +17,7 @@
 import { readFileSync } from 'node:fs'
 import { balanceInputFor } from '../../src/lib/balanceInput.ts'
 import { buildStatement, computeBalance } from '../../src/lib/accountBalance.ts'
+import { buildTimeline } from '../../src/lib/accountTimeline.ts'
 
 let pass = 0
 const failures = []
@@ -63,6 +64,24 @@ ok('...as does the ledger for a page of accounts',
 ok('the ledger total counts live money only', /paid: live\.filter\(\(r\) => !r\.reversed_at\)/.test(book))
 ok('the balance input leaves out reversed and rejected', /\.filter\(\(p\) => !p\.reversedAt && !p\.rejectedAt\)/.test(read('src/lib/balanceInput.ts')))
 ok('Collected counts the payments that stand', /const livePayments = \(ledgers\?\.payments \?\? \[\]\)\.filter\(\(p\) => !p\.reversedAt\)\.length/.test(read('src/pages/accounts/AccountDetail.tsx')))
+
+/* THE TIMELINE SAYS WHAT HAPPENED, EACH ON ITS OWN DAY (prompt 11). */
+const tl = buildTimeline({
+  payments: [{ id: 'orig', receivedAt: '2026-07-02T22:00:00Z', amount: 1100, method: 'EFT', reference: null, details: null,
+    paidToClient: false, reversedAt: '2026-07-10T15:48:47Z', reversalReason: 'Wrong ref', reversedTo: 'placed on MPG/3003', receiptFeeLegacy: null }],
+  fees: [], accruals: [], totals: { paid: 0, feesExclVat: 0, feesInclVat: 0, interest: 0, feeCount: 0 },
+}, [], [], null, [], [
+  { id: 'e1', at: '2026-08-10T04:10:01Z', fromBook: 'active', toBook: 'closed', endedAs: 'withdrawn',
+    reason: 'Wrongful handover', by: 'Stephan', charge: { total: 136.88, settlement: 'set_off' } },
+])
+const pay = tl.find((e) => e.id === 'pay:orig')
+check('a reversed receipt is still "Payment received", struck through', [pay?.title, pay?.status], ['Payment received', 'reversed'])
+ok('...on the Johannesburg day', pay?.date === '2026-07-03')
+ok('...saying when, why and where it went', /Reversed 10\/07\/2026 — Wrong ref → placed on MPG\/3003/.test(pay?.detail ?? ''))
+const closed = tl.find((e) => e.id === 'status:e1')
+check('the withdrawal is on the timeline with its reason', closed?.title, 'Withdrawn by the client — Wrongful handover')
+check('...its charge', closed?.detail, 'Withdrawal charge R136.88 incl. VAT, set off against the next payover')
+check('...and who', closed?.by, 'Stephan')
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-live-money: ${pass} passed, ${failures.length} failed`)

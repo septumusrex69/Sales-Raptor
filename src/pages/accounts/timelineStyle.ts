@@ -1,7 +1,7 @@
 import {
   Banknote, CalendarClock, FileSignature, FileSearch, HandCoins, Mail, MailOpen,
   MapPinned, MessageCircleQuestion, MessageSquare, MessagesSquare, Phone, ScrollText,
-  StickyNote, Undo2, MessageSquareQuote, type LucideIcon,
+  StickyNote, Undo2, MessageSquareQuote, FolderClosed, type LucideIcon,
 } from 'lucide-react'
 import type { TimelineEntry } from '../../lib/accountTimeline'
 
@@ -33,6 +33,8 @@ const NOTE: TimelineStyle = { icon: StickyNote, ring: 'bg-slate-100', fg: 'text-
  * The main comment, changed. Gold, because gold is this palette's "carries weight" and this is
  * the one line the next person reads before they ring — not another sticky note among fifty.
  */
+/* A CLOSE, A HOLD OR A RE-OPEN (prompt 11): a change in where the account stands, not an action on it. */
+const STATUS: TimelineStyle = { icon: FolderClosed, ring: 'bg-slate-200', fg: 'text-slate-700' }
 const MAIN_COMMENT: TimelineStyle = { icon: MessageSquareQuote, ring: 'bg-gold-50', fg: 'text-gold-600' }
 /* A dispute takes the negative colour: it is the debtor pushing back, and it changes the call. */
 const QUERY: TimelineStyle = { icon: MessageCircleQuestion, ring: 'bg-negative-50', fg: 'text-negative' }
@@ -92,6 +94,7 @@ export function styleFor(entry: TimelineEntry): TimelineStyle {
   if (entry.kind === 'note') return (entry.actionCode ? CHANNEL[entry.actionCode] : undefined) ?? NOTE
   if (entry.kind === 'query') return QUERY
   if (entry.kind === 'main_comment') return MAIN_COMMENT
+  if (entry.kind === 'status') return STATUS
 
   const code = entry.actionCode ?? BY_DESCRIPTION.find(([re]) => re.test(entry.title))?.[1]
   const style: TimelineStyle = (code ? CHANNEL[code] : undefined) ?? FALLBACK
