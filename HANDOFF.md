@@ -116,7 +116,9 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
   `payover_pays_on` without a reason; `approve_payover_run_early` (reason) also releases the
   payout. Queue: "Approve on 11 Aug", bulk approve takes due runs only, the Ready tile counts only
   what can be approved now. This replaced the "drop an approved run back to Ready" idea.
-- **NOT APPLIED -- `supabase/pending/2026-10-11_build_payover_run_payout_window.sql`.** The
+- **APPLIED 12 Oct (the user, SQL editor) and mirrored at the end of schema.sql; the pending file is
+  gone. Proved rolled back: KLR's 10 Aug charge -> PO-KLR-2607, and back off PO-KLR-2608. `check-payout-day` (34)
+  asserts it.** Originally: `supabase/pending/2026-10-11_build_payover_run_payout_window.sql`. The
   build_payover_run change that makes a withdrawal (set-off charge) come off the payout BEFORE
   which it was raised, and takes it back from a later open run. The Supabase MCP asks a person to
   confirm any SQL containing DELETE; the confirmation never reached the firm's iPad (three tries,
@@ -154,8 +156,7 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
   NOT BUILT: rule 5, re-opening a file and re-splitting its held credit -- there is no re-open at all
   yet and it touches the withdrawal charge; asked the firm.
 - The withdrawn pill says "Withdrawn · date" (the firm: "only have to say withdrawn").
-- `build_payover_run` pending SQL: tried a fourth time, cancelled again. The user asked to be
-  reminded when back at a desktop (saved to memory).
+- `build_payover_run` pending SQL: applied by the user on 12 Oct (see above).
 
 **12 Oct, afternoon (prompt 11 v3, URGENT first):**
 - **A reversed or rejected payment counted on the account (KLR/1006).** The statement, Collected and

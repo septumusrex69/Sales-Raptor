@@ -118,6 +118,15 @@ ok('the desk position is told the account ended', /deskPosition\(\{\s*closed: en
 ok('...and so is what the client sees', /positionReport\(\{\s*closed: ended,/.test(acct))
 ok('the hero says how it ended rather than the imported status', /account\.endedAs\s*\?\s*<span data-testid="account-ended-pill"/.test(acct))
 
+/* A WITHDRAWAL COMES OFF THE PAYOUT IT WAS RAISED BEFORE (the firm: "the withdrawal will be taken off
+   that month's payment"). Claimed by raised_on < this run's payout day, not by the cycle it fell in,
+   and taken back from a later run that is still open if that one got to it first. Proved on staging
+   12 Oct (rolled back): KLR's 10 Aug charge -> PO-KLR-2607 (pays 11 Aug), and back off PO-KLR-2608. */
+const bprI = sql.lastIndexOf('create or replace function public.build_payover_run(')
+const bpr = bprI < 0 ? '' : sql.slice(bprI, sql.indexOf('end $$;', bprI))
+ok('build_payover_run claims set-off charges by the payout day', (bpr.match(/c\.raised_on < public\.payover_pays_on\(v_end\)/g) ?? []).length >= 2)
+ok('...and takes them back from a later open run, recomputing it', /v_from uuid\[\]/.test(bpr) && /recompute_payover_run\(x\) from unnest\(v_from\)/.test(bpr))
+
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payout-day: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)
