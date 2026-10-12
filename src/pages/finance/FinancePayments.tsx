@@ -131,7 +131,9 @@ export function FinancePayments() {
 
       {/* SUSPENSE LIVES HERE, BELOW THE PENDING PAYMENTS, at the firm's asking -- named the way
           their mock-up names it: Needs an account. */}
-      <UnallocatedReceipts refreshKey={changed} onPlaced={bump} onTotals={onUnmatched} />
+      <div id="needs-an-account" className="scroll-mt-4">
+        <UnallocatedReceipts refreshKey={changed} onPlaced={bump} onTotals={onUnmatched} />
+      </div>
 
       {recording && (
         <RecordPaymentModal onClose={() => setRecording(false)}

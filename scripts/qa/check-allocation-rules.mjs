@@ -332,7 +332,12 @@ ok('the in duplum ceiling is attributed to the oldest fees',
  * AND BOTH THE SCREEN AND THE LEDGER ASK IT. This is the assertion that makes the shared function
  * worth having: either caller gathering the split itself would be the drift the sharing prevents.
  */
-const allocate = strip(lastFn('allocate_payment'))
+/* THE SPLIT ITSELF: after the closed-account branch, which posts no split at all and returns
+   (prompt 11). Read whole, its literal noughts and its own engine_balances would answer for it. */
+const allocateAll = strip(lastFn('allocate_payment'))
+const allocate = allocateAll.includes("'v2-closed-credit'")
+  ? allocateAll.slice(allocateAll.indexOf('end if;', allocateAll.indexOf("'v2-closed-credit'")))
+  : allocateAll
 ok('allocate_payment is in the schema', allocate.length > 2000)
 ok('the preview and the posting both ask fee_split',
   /public\.fee_split\(\s*p_account, p_exclude_payment/.test(preview)

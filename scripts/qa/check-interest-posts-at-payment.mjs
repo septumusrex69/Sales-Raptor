@@ -87,7 +87,12 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '
 const accrue = strip(lastFn('open_interest'))
 const post = strip(lastFn('accrue_interest_to'))
 const movements = strip(lastFn('account_movements'))
-const allocate = strip(lastFn('allocate_payment'))
+/* THE SPLIT ITSELF: after the closed-account branch, which posts no split at all and returns
+   (prompt 11). Read whole, its literal noughts and its own engine_balances would answer for it. */
+const allocateAll = strip(lastFn('allocate_payment'))
+const allocate = allocateAll.includes("'v2-closed-credit'")
+  ? allocateAll.slice(allocateAll.indexOf('end if;', allocateAll.indexOf("'v2-closed-credit'")))
+  : allocateAll
 const preview = strip(lastFn('preview_allocation'))
 
 /* THE FLOOR, BEFORE ANYTHING IS ASSERTED ABOUT WHAT IS IN THEM. An empty string satisfies every

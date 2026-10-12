@@ -57,6 +57,23 @@ ok('a statement receipt cannot become a PTC, refused before anything is reversed
   refuse >= 0 && refuse < body.indexOf('public.reverse_payment('))
 ok('...and the copy goes back to the queue on the other side', /update public\.account_payments set paid_to_client = p_paid_to_client where id = v_copy/.test(body))
 
+/* MONEY ON A CLOSED ACCOUNT IS THE DEBTOR'S CREDIT (prompt 11, the firm, 12 Oct: "this should just
+   be an overpayment"). Nothing split, nothing charged, before any interest is brought up to date. */
+const lastFn = (name) => {
+  const i = sql.lastIndexOf(`create or replace function public.${name}(`)
+  return i < 0 ? '' : sql.slice(i, sql.indexOf('end $$;', i))
+}
+const alloc = lastFn('allocate_payment')
+const closedAt = alloc.indexOf("if v_acct.ended_as is not null or coalesce(v_acct.write_off_reason, '') <> ''")
+ok('a receipt on a closed account is caught', closedAt >= 0)
+ok('...before interest is posted or a receipt fee raised', closedAt >= 0 && closedAt < alloc.indexOf('accrue_interest_to')
+  && closedAt < alloc.indexOf('insert into public.account_fees'))
+const branch = closedAt >= 0 ? alloc.slice(closedAt, alloc.indexOf('return v_id;', closedAt)) : ''
+ok('...and the whole amount is the credit, every taking nought', /0, 0, 0, v_pay\.amount,/.test(branch) && /'v2-closed-credit'/.test(branch))
+const preview = lastFn('preview_allocation')
+ok('the queue previews it the same way', /excess_credit := greatest\(coalesce\(p_amount, 0\), 0\);/.test(preview)
+  && preview.indexOf("d.ended_as is not null") < preview.indexOf('finance_split('))
+
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payment-search: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

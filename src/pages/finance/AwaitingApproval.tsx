@@ -452,8 +452,12 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
                         className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Move</button>
                       <button type="button" onClick={() => setParking(r)}
                         className="text-slate-400 underline underline-offset-2 hover:text-slate-700">Suspense</button>
+                      {/* "NOT OURS", SAID ON THE BUTTON (prompt 11): Reject was being used to mean
+                          refund. A receipt on a closed file is approved and held as a credit;
+                          Reject is only for money that was never this debtor's. */}
                       <button type="button" onClick={() => setRejecting([r])}
-                        className="text-slate-400 underline underline-offset-2 hover:text-negative-700">Reject</button>
+                        title="Never this debtor's money: back to Needs an account to be placed on the right one. Not for a refund -- approve it and refund it under Overpayments."
+                        className="text-slate-400 underline underline-offset-2 hover:text-negative-700">Reject · not theirs</button>
                     </span>
                   </Td>
                 </tr>

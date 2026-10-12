@@ -28,6 +28,14 @@
  */
 export type AccountEnding = 'paid_up' | 'settled' | 'written_off' | 'withdrawn'
 
+/** The one-word form, for a pill or a badge where the full label wraps. */
+export const ENDING_SHORT: Record<AccountEnding, string> = {
+  paid_up: 'Paid up',
+  settled: 'Settled',
+  written_off: 'Written off',
+  withdrawn: 'Withdrawn',
+}
+
 export const ENDING_LABEL: Record<AccountEnding, string> = {
   paid_up: 'Paid up',
   settled: 'Settled',

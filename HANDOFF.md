@@ -139,6 +139,24 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
 - Checks: `check-payment-search` (25), `check-payout-day` (32); e2e `payment-reverse` (20),
   `overpayments` (7), `payover-sends` (46), `check-payments` (29).
 
+**12 Oct, morning:**
+- **Settlement proof built** (the firm said yes): `approve_settlement_with_proof` needs a pinned
+  account email or an uploaded account document (no perusal fee), checked to be on the same
+  account; the old `approve_settlement` only refuses. Panel shows/opens the proof; client Account tab
+  lists accepted settlements. check-settlement (59), e2e/settlement (24).
+- **Prompt 11, closed accounts:** `allocate_payment` posts NO split on an account with `ended_as`,
+  a write-off reason or a closed/written-off status -- the whole receipt is `excess_credit`
+  (engine `v2-closed-credit`, PTC -> `with_client`), so it lands on Overpayments to refund / move /
+  release. `preview_allocation` matches, so the queue shows no fees. The queue badge says
+  "Account withdrawn 10 Jul · R1 000.00 held as credit"; Reject reads "Reject · not theirs"; a credit
+  line on Exceptions offers "Place on an account". Proved on staging (rolled back): SBB/2006's R1 000
+  -> R0 fees, R1 000 credit, refund payment out 'BF RAP-124303', trust difference unchanged.
+  NOT BUILT: rule 5, re-opening a file and re-splitting its held credit -- there is no re-open at all
+  yet and it touches the withdrawal charge; asked the firm.
+- The withdrawn pill says "Withdrawn · date" (the firm: "only have to say withdrawn").
+- `build_payover_run` pending SQL: tried a fourth time, cancelled again. The user asked to be
+  reminded when back at a desktop (saved to memory).
+
 **Proposed to the firm, waiting for a yes (§4):** settlement acceptance must carry proof -- pin the
 client's email from the account's Emails tab or upload the document to the account's Documents --
 linked from the settlement, the statement line and the client file; the account holds the one copy.

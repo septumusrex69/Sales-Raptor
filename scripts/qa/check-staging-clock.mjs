@@ -152,9 +152,13 @@ const row = {
   toClient: 231, dueToBf: 0, hasRate: true, interestCant: 0, rfCant: 0, feesCant: 0, cameBackFrom: null,
 }
 const flagged = exceptionsOf(row, [], null, { as: 'written_off', on: '2026-08-20' }).find((e) => e.key === 'closed_account')
-check('a payment on a closed account is badged', flagged?.label ?? null, 'Account closed')
+/* Since prompt 11 the badge says what approving does: held whole as the debtor's credit. */
+check('a payment on a closed account is badged', flagged?.label ?? null, 'Account written off 20 Aug · 300.00 held as credit')
 ok('...saying how and when it closed', /written off on 2026-08-20/.test(flagged?.detail ?? ''))
 ok('...as something to check', flagged?.warn === true)
+/* PROMPT 11: approving it holds the whole of it as the debtor's credit, and Reject is not the refund. */
+ok('...and says the receipt will be held as the debtor\u2019s credit', /held as the debtor's credit: no fees/.test(flagged?.detail ?? ''))
+ok('...that Reject is only for money that was never theirs', /Reject only if it was never this debtor's money/.test(flagged?.detail ?? ''))
 no('an open account is not badged', exceptionsOf(row, []).some((e) => e.key === 'closed_account'))
 check('it is held out of Approve all', JSON.stringify(splitForBatch([
   { row, problems: [], exceptions: [flagged] }, { row: { ...row, paymentId: 'p2' }, problems: [], exceptions: [] },

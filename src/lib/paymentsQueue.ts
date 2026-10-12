@@ -152,7 +152,10 @@ export type ExceptionKey =
 export interface ClosedAs { as: string; on: string | null }
 
 const CLOSED_WORDS: Record<string, string> = {
-  paid_up: 'paid up', settled: 'settled', written_off: 'written off', withdrawn: 'withdrawn by the client',
+  paid_up: 'paid up', settled: 'settled', written_off: 'written off', withdrawn: 'withdrawn',
+}
+const CLOSED_SHORT: Record<string, string> = {
+  paid_up: 'paid up', settled: 'settled', written_off: 'written off', withdrawn: 'withdrawn',
 }
 
 export interface QueueException {
@@ -227,10 +230,22 @@ export function exceptionsOf(
    * money to hand back. Held out of Approve all (splitForBatch) and approved alone once somebody has
    * looked, exactly like a payment that breaks a formula: the money has arrived either way.
    */
+  /*
+   * AND SINCE PROMPT 11 IT SAYS WHAT APPROVING DOES (the firm, 12 Oct: "this should just be an
+   * overpayment ... not rejection, refund"). Nothing is split on a closed file; the whole receipt is
+   * held as the debtor's credit and decided on Overpayments -- refund, move or release. So the
+   * ordinary press is Approve; Reject is only for money that was never this debtor's.
+   */
   if (closed) {
-    out.push({ key: 'closed_account', label: 'Account closed', warn: true,
-      detail: `The account was ${CLOSED_WORDS[closed.as] ?? closed.as}${closed.on ? ` on ${closed.on}` : ''}. `
-        + 'Check it is the right account before approving.' })
+    const when = `${CLOSED_WORDS[closed.as] ?? closed.as}${closed.on ? ` on ${closed.on}` : ''}`
+    out.push({ key: 'closed_account',
+      label: `Account ${CLOSED_SHORT[closed.as] ?? closed.as}${closed.on ? ` ${dayMonth(closed.on)}` : ''} · ${r.paidToClient ? 'with the client' : `${amount(r.amount)} held as credit`}`,
+      warn: true,
+      detail: r.paidToClient
+        ? `The account was ${when}. Paid to the client directly: nothing is processed, the client sorts it out with the debtor.`
+        : `The account was ${when}. ${amount(r.amount)} will be held as the debtor's credit: no fees, `
+          + 'interest or commission. Refund it, move it or release it to the client under Overpayments. '
+          + 'Reject only if it was never this debtor\'s money.' })
   }
   /* THE SPLIT MUST ADD BACK TO THE PAYMENT, as well as obey the firm's formulas. */
   const unbalanced = !near(f.clientShare + f.bfShare + f.credit, r.amount)
@@ -253,6 +268,13 @@ export function exceptionsOf(
         + `${amount(r2(r.dueToBf + r.commissionVat))}.` })
   }
   return out
+}
+
+/** "2026-07-10" -> "10 Jul", written out (en-ZA says "Sept"). */
+function dayMonth(iso: string): string {
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const [, mm, dd] = iso.slice(0, 10).split('-').map(Number)
+  return mm && dd ? `${dd} ${m[mm - 1]}` : iso
 }
 
 /** Every row checked once: the figures, the formulas and the badges. */

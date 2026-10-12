@@ -184,9 +184,15 @@ function LineRow({ line, candidates, business, onDone }: {
           className="px-3 py-1.5 rounded-lg text-sm font-medium bg-navy-950 text-white disabled:opacity-50 inline-flex items-center gap-1.5">
           {busy && <Loader2 size={13} className="animate-spin" />} Allocate
         </button>
+        {/* PLACE IT ON AN ACCOUNT -- the way back for a receipt rejected off a closed file (prompt
+            11). Placed on SBB/2006 and approved, it is held whole as the debtor's credit and refunded
+            from there; a credit line is never refunded directly, so the money always has an owner
+            while it waits. */}
         {line.direction === 'credit' && (
-          <Link to="/trust/payments" className="text-xs font-medium text-[var(--c-steel)] hover:underline">
-            A debtor’s payment? Place it under Payments in
+          <Link to="/trust/payments#needs-an-account" data-testid="place-on-account"
+            title="A debtor's payment, including one rejected off a closed account: place it on the account under Payments in, Needs an account. On a closed account it is held as the debtor's credit."
+            className="text-xs font-medium text-[var(--c-steel)] hover:underline">
+            Place on an account
           </Link>
         )}
       </div>

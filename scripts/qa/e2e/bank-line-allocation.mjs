@@ -68,7 +68,7 @@ try {
   /* A DEBTOR'S PAYMENT IS PLACED, NOT ALLOCATED. */
   const receipt = page.getByTestId('line-to-allocate').filter({ hasText: 'CAPITEC T NGUBANE' })
   t.check('a receipt opens on nothing chosen', await receipt.getByLabel('What this line was').inputValue(), '')
-  t.ok('...and points at Payments in to place it', await receipt.getByRole('link', { name: /Place it under Payments in/ }).isVisible())
+  t.ok('...and offers to place it on an account (prompt 11)', await receipt.getByRole('link', { name: /Place on an account/ }).isVisible())
   t.check('...and cannot be called a bank charge', await receipt.locator('option[value="bank_charge"]').count(), 0)
 
   /* "OTHER" NEEDS A REASON. */

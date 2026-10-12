@@ -41,7 +41,7 @@ import { AccountPaymentsList } from '../../components/accounts/AccountPaymentsLi
 import { isQuotable, type Settlement } from '../../lib/settlement'
 import { fetchSettlement } from '../../lib/settlementApi'
 import { SettlementPanel } from '../../components/accounts/SettlementPanel'
-import { ENDING_LABEL } from '../../lib/accountEnding'
+import { ENDING_LABEL, ENDING_SHORT } from '../../lib/accountEnding'
 import { MoneyPanel } from './MoneyPanel'
 import { DebtorDetailsPanel, DocumentsPanel, MainComment, useWriter } from './AccountWorkspacePanels'
 import { QueryPanel, OutcomeOutstanding } from './QueryPanel'
@@ -1609,8 +1609,10 @@ export function AccountDetail() {
               'Active' pill from Swordfish; the pill is the first thing read on the page. */}
           {account.endedAs
             ? <span data-testid="account-ended-pill"
-                className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                {ENDING_LABEL[account.endedAs]}{account.endedOn ? ` · ${formatDate(account.endedOn)}` : ''}
+                className="whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                {/* ONE WORD (the firm, 12 Oct: "you only have to say withdrawn, not withdrawn by the
+                    client"): the long label wrapped under the debtor's name on the iPad. */}
+                {ENDING_SHORT[account.endedAs] ?? ENDING_LABEL[account.endedAs]}{account.endedOn ? ` · ${formatDate(account.endedOn)}` : ''}
               </span>
             : <StatusPill status={account.status} inDuplum={account.inDuplum} />}
           {account.prescribed && (
