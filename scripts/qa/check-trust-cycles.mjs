@@ -292,7 +292,7 @@ const control = from < 0 ? '' : page.slice(from, page.indexOf('Paid straight to 
 ok('the ownership block was found', control.length > 500 && control.length < 14000)
 let at = -1
 for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"',
-  'Ownership reconciliation', 'Less: accounted for', 'text-slate-800">Not accounted for<']) {
+  'Ownership reconciliation', 'Less: accounted for', 'Not accounted for {head.notAccounted']) {
   const found = control.indexOf(line)
   ok(`the ownership block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)
@@ -306,7 +306,9 @@ for (const line of ['Total accounted for', 'Total not accounted for', 'label="In
 /* Since 10 Oct: the money in the bank with an owner -- each cycle's clients and firm, the firm's
    interest and charges, the debtors -- read from trust_cash_by_cycle; no PTC, no unplaced receipts. */
 ok('accounted for is summed from the bank money by cycle, without the unplaced receipts',
-  /const accounted = r2\(sum\(\(c\) => c\.forClients \+ c\.forFirm\) \+ firmOther \+ forDebtors\)/.test(page)
+  (/const accounted = accountedFromCash\(cash\)/.test(page)
+    && /return r2\(cash\.reduce\(\(t, c\) => t \+ c\.forClients \+ c\.forFirm \+ c\.firmOther \+ c\.forDebtors, 0\)\)/.test(
+      readFileSync(new URL('../../src/lib/trustUnaccounted.ts', import.meta.url), 'utf8')))
   && !/const accounted = [^\n]*unidentified/.test(page))
 ok('...and what is not accounted for is the BANK less that sum, through trustHeadline',
   /trustHeadline\(\{\s*trustCash: position\.trustCash, owners: accounted,/.test(page))

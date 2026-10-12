@@ -96,9 +96,23 @@ Newest first. Each commit message carries the full reasoning; this is the index.
   regenerating -- the advice copies are as sent; the client's Payovers tab is unchanged. Band titles:
   Running -> Collecting, Closed -> Waiting. `check-payover-groups` 32 (break-tested twice),
   `e2e/payover-sends` 56 (break-tested), `check-payout-day` updated.
-- **Asked, not built yet (in this order):** (1) the Trust overview's "Not accounted for" opens ONE
-  list of everything behind the figure, each line with its action there (place / book / match) --
-  the firm: "now you're going to like 50 different places to allocate things"; (2) **a client's
+- **"Not accounted for" opens every item behind it** (the firm, 12 Oct: "If I click on that, it
+  should show me everything ... now you're going to like 50 different places"). `/trust/unaccounted`
+  (`TrustUnaccounted.tsx`, pure `trustUnaccounted.ts`), opened from the overview's headline figure
+  and the reconciliation's. Built from readers that already exist: `payments_out_paid` (marked paid,
+  not on a statement), `bank_lines_to_allocate` (receipts to place, debits to explain),
+  `trust_awaiting_approval`; signed by their effect, they add up to the figure and anything left is a
+  line of its own. **FOUND:** staging's whole R14 258.64 was three payovers (R11 333.17) and two
+  refunds (R2 925.47) marked paid whose statement was not imported -- the overview called that "In the
+  bank, not yet in the books", which is backwards; reworded. Overview and list read "accounted for"
+  from one function (`accountedFromCash`). Actions LINK to where each job is done (run, Payments to
+  make, Exceptions, Payments in); allocating a line inside the list itself is the next step if the
+  firm wants it. `check-trust-unaccounted` 18 (break-tested twice), `e2e/trust-unaccounted` 9
+  (break-tested); `check-firm-held`, `check-trust-cycles` follow the helper. Proved against staging:
+  the five items sum to R14 258.64, remainder nil.
+- **Red before S7, not touched:** `e2e/workspace-split` "last month's collections is one of the
+  answers" fails on `37d4b09` too -- date-dependent like `e2e/performance`.
+- **Asked, not built yet:** (2) **a client's
   payment into the business account against their STATEMENT, not one run** -- part payments and
   instalment plans (§4 item 13). Proposed to the firm on 12 Oct (record against the client, clear
   oldest first, rest set off at the next payover, an arrangement as a schedule); **waiting for their

@@ -113,7 +113,10 @@ ok('the overview takes them out of the debtors\' line', /amount=\{r2\(forDebtors
 ok('...and draws them as their own line, among the owners (before the total accounted for)',
   page.indexOf('who="Overpayments kept"') > 0 && page.indexOf('who="Overpayments kept"') < page.indexOf('label="Total accounted for"'))
 ok('...while the total accounted for is still the debtors\' whole balance',
-  /const accounted = r2\(sum\(\(c\) => c\.forClients \+ c\.forFirm\) \+ firmOther \+ forDebtors\)/.test(page))
+  /* S7: read through accountedFromCash, shared with the Not accounted for list. */
+  (/const accounted = accountedFromCash\(cash\)/.test(page)
+    && /return r2\(cash\.reduce\(\(t, c\) => t \+ c\.forClients \+ c\.forFirm \+ c\.firmOther \+ c\.forDebtors, 0\)\)/.test(
+      readFileSync(new URL('../../src/lib/trustUnaccounted.ts', import.meta.url), 'utf8'))))
 
 /* ---- a client in debit is subtracted ONCE ----
  * owedToClients is the clients' NET balance, already pulled down by a client in debit, and the

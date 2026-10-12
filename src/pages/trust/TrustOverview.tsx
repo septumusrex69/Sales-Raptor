@@ -17,6 +17,7 @@ import { PayoverCheck, PtcAgeAnalysis, PtcByPayover } from './TrustPtc'
 import { trustChecks, trustHeadline, trustVerdict } from '../../lib/trustBalance'
 import { firmHeldLines, firmHeldSum, type FirmHeld } from '../../lib/firmHeld'
 import { clockToday } from '../../lib/clock.ts'
+import { accountedFromCash } from '../../lib/trustUnaccounted'
 
 /**
  * IS THE TRUST ACCOUNT RIGHT, AND WHOSE PAYOVER IS EACH PART OF IT WAITING FOR?
@@ -172,7 +173,7 @@ export function TrustOverview() {
   const sum = (f: (c: TrustCashCycle) => number) => r2(cash.reduce((t, c) => t + f(c), 0))
   const firmOther = sum((c) => c.firmOther)
   const forDebtors = sum((c) => c.forDebtors)
-  const accounted = r2(sum((c) => c.forClients + c.forFirm) + firmOther + forDebtors)
+  const accounted = accountedFromCash(cash)
   const head = trustHeadline({
     trustCash: position.trustCash, owners: accounted,
     unidentified: position.unidentified,
@@ -236,7 +237,10 @@ export function TrustOverview() {
           <Figure label="Accounted for" value={rand(head.accounted)} />
           <div className="mt-2 text-xs text-slate-300">Due to clients, Bredell Ferreira and debtors</div>
         </div>
-        <div>
+        {/* THE FIGURE OPENS EVERY ITEM BEHIND IT (S7, the firm: "If I click on that, it should show me
+            everything"). */}
+        <Link to="/trust/unaccounted" data-testid="open-unaccounted"
+          className="block rounded-xl -m-2 p-2 hover:bg-white/5 transition-colors">
           <Figure label="Not accounted for" value={rand(head.notAccounted)}
             tone={head.notAccounted === 0 ? undefined : head.otherGap < 0 ? 'text-negative-300' : 'text-amber-300'} />
           {/* THE VERDICT IS ON THE PANEL, not inferred from a zero: nobody should have to know
@@ -246,8 +250,9 @@ export function TrustOverview() {
             {head.notAccounted === 0 && head.otherGap === 0
               ? 'Every rand has an owner'
               : head.otherGap < 0 ? 'Bank holds less than the books owe' : 'Needs placing or explaining'}
+            {head.notAccounted !== 0 && <span className="ml-1 underline underline-offset-2">· See every item</span>}
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* --------------------------- who owns the money --------------------------- */}
@@ -317,7 +322,10 @@ export function TrustOverview() {
               <Owner who="Bank / ledger difference"
                 what={head.otherGap < 0
                   ? (openingSet ? 'The bank holds less than the books owe' : 'The books owe more than the imported statements hold \u2014 capture the opening balance')
-                  : 'In the bank, not yet in the books'}
+                  /* Not "in the bank, not yet in the books": on staging (12 Oct) the whole of it was
+                     payments out MARKED PAID whose statement had not been imported -- in the books,
+                     not yet out of the bank. The list says which, item by item. */
+                  : 'The bank and the books differ \u2014 see every item'}
                 amount={head.otherGap} />
             )}
             {head.residual !== 0 && (
@@ -348,7 +356,9 @@ export function TrustOverview() {
             <Recon label="In the trust account" value={rand(head.inTrust)} />
             <Recon label="Less: accounted for" value={rand(head.accounted)} />
             <div className="mt-4 pt-4 border-t border-slate-200/70 flex items-baseline gap-4">
-              <div className="flex-1 text-[15px] font-semibold text-slate-800">Not accounted for</div>
+              <Link to="/trust/unaccounted" className="flex-1 text-[15px] font-semibold text-slate-800 hover:text-gold-700">
+                Not accounted for {head.notAccounted !== 0 && <span className="text-[12.5px] font-medium text-gold-700">· see every item</span>}
+              </Link>
               <div className={clsx('text-2xl font-semibold tabular-nums',
                 head.notAccounted === 0 ? 'text-positive-700' : head.otherGap < 0 ? 'text-negative-700' : 'text-amber-700')}>
                 {rand(head.notAccounted)}
