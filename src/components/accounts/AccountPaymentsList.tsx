@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Loader2, RotateCcw } from 'lucide-react'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
+import { firmDay } from '../../lib/dateLabels'
 import { fetchAccountPayments, type AccountPaymentRow } from '../../lib/paymentReverse'
 import { reverseBlocked } from '../../lib/paymentSearch'
 import { ReversePaymentModal } from '../finance/ReversePaymentModal'
@@ -56,15 +57,18 @@ export function AccountPaymentsList({ accountId, mayReverse, onReversed }: {
             {rows.map((p) => {
               const blocked = reverseBlocked({ approved: p.approved, reversedOn: p.reversedOn, swordfish: p.swordfish })
               return (
-                <tr key={p.id} className="border-b border-slate-50 last:border-0" data-testid="account-payment">
+                <tr key={p.id} data-testid="account-payment"
+                  className={`border-b border-slate-50 last:border-0 ${p.reversedOn ? 'text-slate-400' : ''}`}>
                   <td className="px-3 py-1.5 text-slate-600">{formatDate(p.receivedOn)}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-800">{rand(p.amount)}</td>
+                  {/* STRUCK THROUGH WHEN REVERSED: it is in no total (prompt 11). */}
+                  <td className={`px-2 py-1.5 text-right tabular-nums font-medium ${p.reversedOn ? 'line-through text-slate-400' : 'text-slate-800'}`}>{rand(p.amount)}</td>
                   <td className="px-2 py-1.5 text-slate-600">{p.paidToClient ? 'Paid to the client' : 'Into trust'}</td>
                   <td className="px-2 py-1.5 max-w-[14rem] truncate text-slate-500" title={p.reference ?? ''}>{p.reference ?? '—'}</td>
                   <td className="px-2 py-1.5 text-slate-500">
                     {p.reversedOn ? (
                       <span className="inline-flex items-center gap-1" title={p.reversalReason ?? ''}>
-                        <RotateCcw size={11} /> Reversed {formatDate(p.reversedOn.slice(0, 10))}
+                        <RotateCcw size={11} /> Reversed {formatDate(firmDay(p.reversedOn))}
+                        {p.reversalReason ? ` — ${p.reversalReason}` : ''}{p.reversedTo ? ` → ${p.reversedTo}` : ''}
                       </span>
                     ) : p.swordfish ? 'Swordfish history'
                       : p.approved ? 'Processed' : 'Waiting for approval'}

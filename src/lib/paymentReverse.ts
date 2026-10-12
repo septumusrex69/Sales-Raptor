@@ -1,4 +1,6 @@
 import { supabase } from './supabase'
+import { firmDay } from './dateLabels'
+import { reversalFates } from './accountBook'
 
 /**
  * EVERYTHING THE REVERSE BOX NEEDS ABOUT ONE PAYMENT, READ BY ITS ID (prompt 11).
@@ -51,7 +53,7 @@ export async function fetchReverseTarget(paymentId: string): Promise<ReverseTarg
     runStatus = (r as { status?: string } | null)?.status ?? null
   }
   return {
-    paymentId: p.id, accountId: p.account_id, amount: Number(p.amount), receivedOn: String(p.received_at).slice(0, 10),
+    paymentId: p.id, accountId: p.account_id, amount: Number(p.amount), receivedOn: firmDay(String(p.received_at)),
     paidToClient: !!p.paid_to_client, fromStatement, swordfish: !!p.paid_over_in_swordfish,
     approved: !!p.approved_at, reversedOn: p.reversed_at, runInvoice, runStatus,
   }
@@ -79,6 +81,8 @@ export interface AccountPaymentRow {
   approved: boolean
   reversedOn: string | null
   reversalReason: string | null
+  /** Where a reversed one went: "placed on MPG/3003", "back in the approval queue"... */
+  reversedTo: string | null
   swordfish: boolean
 }
 
@@ -87,11 +91,15 @@ export async function fetchAccountPayments(accountId: string): Promise<AccountPa
     .select('id, received_at, amount, paid_to_client, reference, approved_at, reversed_at, reversal_reason, paid_over_in_swordfish, rejected_at, is_demo')
     .eq('account_id', accountId).is('rejected_at', null).order('received_at', { ascending: false }).limit(500)
   if (error) throw new Error(error.message)
-  return ((data ?? []) as Record<string, unknown>[]).filter((r) => !r.is_demo).map((r) => ({
-    id: String(r.id), receivedOn: String(r.received_at).slice(0, 10), amount: Number(r.amount ?? 0),
+  const rows = ((data ?? []) as Record<string, unknown>[]).filter((r) => !r.is_demo)
+  const fates = await reversalFates(rows.filter((r) => r.reversed_at).map((r) => String(r.id))).catch(() => new Map<string, string>())
+  return rows.map((r) => ({
+    /* THE JOHANNESBURG DAY: 00:00 on 3 Jul is stored as 22:00 on the 2nd (prompt 11). */
+    id: String(r.id), receivedOn: firmDay(String(r.received_at)), amount: Number(r.amount ?? 0),
     paidToClient: !!r.paid_to_client, reference: (r.reference as string | null) ?? null,
     approved: !!r.approved_at, reversedOn: (r.reversed_at as string | null) ?? null,
-    reversalReason: (r.reversal_reason as string | null) ?? null, swordfish: !!r.paid_over_in_swordfish,
+    reversalReason: (r.reversal_reason as string | null) ?? null,
+    reversedTo: fates.get(String(r.id)) ?? null, swordfish: !!r.paid_over_in_swordfish,
   }))
 }
 

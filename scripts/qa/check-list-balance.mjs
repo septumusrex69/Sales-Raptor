@@ -115,7 +115,7 @@ const lib = read('src/lib/balanceInput.ts')
 ok('the assembly hands over what the debt earned', /amount: i\.amountAccrued/.test(lib))
 ok('...and never the pre-clipped figure', !/amountRecoverable/.test(lib))
 /* A REVERSED PAYMENT IS NOT A PAYMENT. Left in, every reversal would reduce a balance twice. */
-ok('a reversed payment is left out', /\.filter\(\(p\) => !p\.reversedAt\)/.test(lib))
+ok('a reversed payment is left out, and a rejected one (prompt 11)', /\.filter\(\(p\) => !p\.reversedAt && !p\.rejectedAt\)/.test(lib))
 /* THE PAYMENT'S ID TRAVELS, so an item 9 fee row can be matched to the payment it was raised on
    and the receipt fee is not counted here AND computed again. */
 ok('the payment id travels with it', /id: p\.id,/.test(lib))

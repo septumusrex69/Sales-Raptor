@@ -19,6 +19,7 @@ import { feeIsTheOnlyRecord, feeStands } from './accountBalance.ts'
 import type { AccountLedgers } from './accountBook'
 import type { AccountContact, AccountNote, PromiseToPay } from './accountWorkspace'
 import { feeLabel } from './feeLabel.ts'
+import { firmDay } from './dateLabels.ts'
 import { describeArrangement } from './arrangements.ts'
 import { PROMISE_ENDED, promiseCancelWords } from './promiseRules.ts'
 
@@ -59,7 +60,10 @@ export interface TimelineEntry {
   automated: boolean
 }
 
-const dayOf = (iso: string) => iso.slice(0, 10)
+/* THE JOHANNESBURG DAY (prompt 11): a payment received at 00:00 on 3 Jul is stored as 22:00 on the
+   2nd, and the first ten characters of that said 02 Jul beside a statement that said 03 Jul. A plain
+   date passes through unchanged. */
+const dayOf = (iso: string) => (iso.length > 10 ? firmDay(iso) : iso.slice(0, 10))
 
 /* dd/mm/yyyy, which is how South Africa writes a date and how every other date on this screen is
    drawn. Built by hand rather than through toLocaleDateString: en-ZA renders September as
@@ -308,8 +312,14 @@ export function buildTimeline(
       kind: 'payment',
       date: dayOf(p.receivedAt),
       at: p.receivedAt,
-      title: p.reversedAt ? 'Payment reversed' : 'Payment received',
-      detail: [p.method, p.reference, p.details, p.paidToClient ? 'Paid direct to client' : null]
+      /* RECEIVED, AND STRUCK THROUGH IF IT WAS REVERSED (prompt 11). "Payment reversed" as its own
+         title read as something the withdrawal did; the line says when, why and where it went. */
+      title: 'Payment received',
+      detail: [
+        p.reversedAt
+          ? `Reversed ${displayDay(firmDay(p.reversedAt))}${p.reversalReason ? ` — ${p.reversalReason}` : ''}${p.reversedTo ? ` → ${p.reversedTo}` : ''}`
+          : null,
+        p.method, p.reference, p.details, p.paidToClient ? 'Paid direct to client' : null]
         .filter(Boolean)
         .join(' · ') || null,
       amount: p.amount,

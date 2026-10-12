@@ -1267,6 +1267,9 @@ export function AccountDetail() {
    *
    * Composed from records, never from the main comment. See accountNarrative.
    */
+  /* THE PAYMENTS THAT STAND (prompt 11): a reversed one is not collected. Rejected copies never
+     reach the ledger at all (fetchLedgers). The figure beside it is the balance's own. */
+  const livePayments = (ledgers?.payments ?? []).filter((p) => !p.reversedAt).length
   const clientReport = positionReport({
     closed: ended,
     status: account.status,
@@ -1720,7 +1723,7 @@ export function AccountDetail() {
                 ? ` · ${formatMoney(b.interestAccruing)} interest over ${b.interestAccruingDays} ${b.interestAccruingDays === 1 ? 'day' : 'days'}`
                 : '')
             : undefined} strong />
-        <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${ledgers?.payments.length ?? 0} payments`} />
+        <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${livePayments} ${livePayments === 1 ? 'payment' : 'payments'}`} />
         <Figure
           label="Next promise"
           value={due ? formatMoney(due.amount) : '—'}

@@ -610,6 +610,13 @@ export interface LedgerPayment {
   details: string | null
   paidToClient: boolean
   reversedAt: string | null
+  /** Why it was reversed, where it was (prompt 11: a reversal says its reason on the timeline). */
+  reversalReason?: string | null
+  /**
+   * WHERE A REVERSED RECEIPT WENT (prompt 11): "back in the approval queue", "rejected", or
+   * "placed on MPG/3003". Null on a live payment, and on a reversal whose copy cannot be read.
+   */
+  reversedTo?: string | null
   /**
    * The receipt fee Swordfish actually charged on this payment, excluding VAT.
    *
@@ -724,7 +731,7 @@ export async function fetchLedgersForAccounts(
    */
   const [payments, fees, accruals] = await Promise.all([
     fetchAllRows(() => supabase.from('account_payments')
-      .select('account_id,id,received_at,amount,paid_to_client,reversed_at,receipt_fee_legacy')
+      .select('account_id,id,received_at,amount,paid_to_client,reversed_at,receipt_fee_legacy,rejected_at')
       .in('account_id', ids).order('id'), { table: 'payments' }),
     fetchAllRows(() => supabase.from('account_fees')
       .select('account_id,incurred_at,description,amount_excl_vat,vat_amount,billed,segments,cancelled_at,annexure_item,payment_id,legacy_name')
@@ -736,6 +743,10 @@ export async function fetchLedgersForAccounts(
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   for (const r of (payments ?? []) as any[]) {
+    /* A REJECTED RECEIPT WAS NEVER THE DEBTOR'S PAYMENT (prompt 11) -- above all the copy a reversal
+       leaves behind on its way to Needs an account. It counted R1 100 on KLR/1006 after the money
+       had been placed on another debtor. It is in no total, on no screen. */
+    if (r.rejected_at) continue
     out.get(r.account_id)?.payments.push({
       id: r.id,
       receivedAt: r.received_at,
@@ -799,7 +810,7 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
    */
   const [payments, fees, accruals] = await Promise.all([
     fetchAllRows(() => supabase.from('account_payments')
-      .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,receipt_fee_legacy')
+      .select('id,received_at,amount,method,reference,details,paid_to_client,reversed_at,reversal_reason,receipt_fee_legacy,rejected_at')
       .eq('account_id', accountId).order('received_at', { ascending: false }).order('id'),
       { table: 'payments' }),
     fetchAllRows(() => supabase.from('account_fees')
@@ -814,8 +825,11 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const feeRows = (fees ?? []) as any[]
+  /* NEVER THE DEBTOR'S (prompt 11): a rejected receipt, including the copy a reversal leaves. */
+  const live = ((payments ?? []) as any[]).filter((r) => !r.rejected_at)
+  const fates = await reversalFates(live.filter((r) => r.reversed_at).map((r) => r.id)).catch(() => new Map<string, string>())
   return {
-    payments: (payments ?? []).map((r: any) => ({
+    payments: live.map((r: any) => ({
       id: r.id,
       receivedAt: r.received_at,
       amount: Number(r.amount),
@@ -824,6 +838,8 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       details: r.details,
       paidToClient: !!r.paid_to_client,
       reversedAt: r.reversed_at,
+      reversalReason: r.reversal_reason ?? null,
+      reversedTo: fates.get(r.id) ?? null,
       receiptFeeLegacy: r.receipt_fee_legacy === null || r.receipt_fee_legacy === undefined
         ? null : Number(r.receipt_fee_legacy),
     })),
@@ -860,13 +876,49 @@ export async function fetchLedgers(accountId: string): Promise<AccountLedgers> {
       amountRecoverable: Number(r.amount_recoverable ?? 0),
     })),
     totals: {
-      paid: (payments ?? []).reduce((t: number, r: any) => t + Number(r.amount), 0),
+      /* Live money only: a reversed receipt is not paid, a rejected one never was. */
+      paid: live.filter((r) => !r.reversed_at).reduce((t: number, r: any) => t + Number(r.amount), 0),
       feesExclVat: feeRows.reduce((t, r) => t + Number(r.amount_excl_vat ?? 0), 0),
       feesInclVat: feeRows.reduce((t, r) => t + Number(r.amount_excl_vat ?? 0) + Number(r.vat_amount ?? 0), 0),
       interest: (accruals ?? []).reduce((t: number, r: any) => t + Number(r.amount_accrued ?? 0), 0),
       feeCount: feeRows.length,
     },
   }
+}
+
+/**
+ * WHERE EACH REVERSED RECEIPT WENT, in the firm's words (prompt 11: "Reversed 10 Jul -- Wrong ref ->
+ * placed on MPG/3003"). A reversal leaves a copy (replaces_payment_id): back in the approval queue
+ * while unapproved, re-split if approved, or rejected on its way to Needs an account -- in which
+ * case its statement line may since have been placed on another debtor.
+ */
+export async function reversalFates(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (ids.length === 0) return out
+  const { data } = await supabase.from('account_payments')
+    .select('replaces_payment_id, account_id, approved_at, rejected_at, bank_line_id')
+    .in('replaces_payment_id', ids)
+  const copies = (data ?? []) as { replaces_payment_id: string; account_id: string; approved_at: string | null; rejected_at: string | null; bank_line_id: string | null }[]
+  const lines = copies.filter((c) => c.rejected_at && c.bank_line_id).map((c) => c.bank_line_id as string)
+  const placedOn = new Map<string, string>()
+  if (lines.length) {
+    const { data: ls } = await supabase.from('bank_statement_lines').select('id, payment_id').in('id', lines)
+    const pays = ((ls ?? []) as { id: string; payment_id: string | null }[]).filter((l) => l.payment_id)
+    if (pays.length) {
+      const { data: ps } = await supabase.from('account_payments')
+        .select('id, debtor_accounts(account_number, case_number)').in('id', pays.map((l) => l.payment_id as string))
+      const num = new Map(((ps ?? []) as unknown as { id: string; debtor_accounts: { account_number: string | null; case_number: string | null } | null }[])
+        .map((p) => [p.id, p.debtor_accounts?.account_number ?? p.debtor_accounts?.case_number ?? 'another account']))
+      for (const l of pays) placedOn.set(l.id, num.get(l.payment_id as string) ?? 'another account')
+    }
+  }
+  for (const c of copies) {
+    out.set(c.replaces_payment_id,
+      c.rejected_at
+        ? (c.bank_line_id && placedOn.has(c.bank_line_id) ? `placed on ${placedOn.get(c.bank_line_id)}` : 'back to Needs an account')
+        : c.approved_at ? 'processed again' : 'back in the approval queue')
+  }
+  return out
 }
 
 export interface BookSummary {

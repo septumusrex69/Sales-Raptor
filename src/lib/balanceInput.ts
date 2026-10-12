@@ -46,6 +46,8 @@ export interface LedgerRows {
     amount: number
     paidToClient: boolean
     reversedAt: string | null
+    /** A rejected receipt was never the debtor's payment; it is left out like a reversed one. */
+    rejectedAt?: string | null
     receiptFeeLegacy: number | null
   }[]
   fees: {
@@ -96,7 +98,8 @@ export function balanceInputFor(input: {
     accrueTo: input.today,
     ledgers: {
       payments: ledgers.payments
-        .filter((p) => !p.reversedAt)
+        /* LIVE MONEY ONLY (prompt 11): reversed is undone, rejected never was. */
+        .filter((p) => !p.reversedAt && !p.rejectedAt)
         .map((p) => ({
           /* THE ID TRAVELS, so an item 9 fee row can be matched to the payment it was raised on
              and the same fee is not counted a second time. See splitFeeLedger. */
