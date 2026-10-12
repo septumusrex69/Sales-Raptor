@@ -1,5 +1,10 @@
 # Handoff — where Raptor stands
 
+> **This session: S7 · Clean Break** — branch `claude/s07-clean-break`, from `claude/payout-day` at `37d4b09`.
+> **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
+> S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break.
+> **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
+
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
@@ -74,6 +79,30 @@ own and is green: `workspace-split` (124), `payover-sends` (42), `client-stateme
 ## 2. What shipped this session
 
 Newest first. Each commit message carries the full reasoning; this is the index.
+
+### S7 · Clean Break (12 Oct)
+
+- **Payover runs: four tabs, one cycle each** (the firm, 12 Oct, on staging day 11 Aug: "in the
+  closed to pay, two months were mixed. That's confusing"; "There's nothing in running. I don't know
+  why"). With a one-month lag there are always THREE live cycles and the queue had two working tabs,
+  so the cycle paid that morning and the one that closed the night before shared "Closed · to pay".
+  Now **Collecting · Waiting · To pay · History**, decided by `queueTabOf` (payoverGroups.ts) from the
+  date alone: Collecting = the open cycle (its band is drawn even with no runs); Waiting = closed,
+  before `paysOnFor` and not released; To pay = on/after the payout day or released early, overdue
+  in red; History = finished (`isFinal`, unchanged). Opens on To pay, else Waiting, else Collecting
+  (`defaultQueueTab`). Old `?tab=running/closed/paid` still land (`parseQueueTab`). **History** shows one
+  payout at a time (month picker, default the latest) with Collected / Paid out / Date paid (the
+  Johannesburg day) / Reference; a search on client or run number looks across every payout. No
+  regenerating -- the advice copies are as sent; the client's Payovers tab is unchanged. Band titles:
+  Running -> Collecting, Closed -> Waiting. `check-payover-groups` 32 (break-tested twice),
+  `e2e/payover-sends` 56 (break-tested), `check-payout-day` updated.
+- **Asked, not built yet (in this order):** (1) the Trust overview's "Not accounted for" opens ONE
+  list of everything behind the figure, each line with its action there (place / book / match) --
+  the firm: "now you're going to like 50 different places to allocate things"; (2) **a client's
+  payment into the business account against their STATEMENT, not one run** -- part payments and
+  instalment plans (§4 item 13). Proposed to the firm on 12 Oct (record against the client, clear
+  oldest first, rest set off at the next payover, an arrangement as a schedule); **waiting for their
+  yes** -- it changes how client debt is recorded.
 
 ### Sixth session (11 Oct) — the payout day, the spinners, and a withdrawal that read as Active
 

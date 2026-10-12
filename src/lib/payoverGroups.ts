@@ -61,8 +61,8 @@ export function groupRunsByCycle<T extends GroupableRun>(
         /* FINALISED (11 Oct): paid, or below nil and carried forward -- nothing left to do on it. */
         title = 'Finalised'; tone = 'done'; state = `Paid over or carried forward · was due ${dayLabel(paysOn)}`
       } else if (openStart && start >= openStart) {
-        title = 'Running'; tone = 'early'
-        state = `Still collecting · closes at midnight on ${dayLabel(end)} · paid out ${dayLabel(paysOn)}`
+        title = 'Collecting'; tone = 'early'
+        state = collectingState(end, lagMonths)
       } else if (today && today === paysOn) {
         /* ITS DAY IS TODAY, and that is not late. With a lag of a month the cycle being paid on the
            11th is not the one that closed last night -- read only off `dueEnd`, it was called
@@ -71,7 +71,7 @@ export function groupRunsByCycle<T extends GroupableRun>(
         state = `Paid out today · approve, make the EFT, then email the advice`
       } else if (today ? today < paysOn : (dueEnd !== null && end === dueEnd)) {
         /* APPROVED, PAID AND ADVISED ON THE DAY (11 Oct): until then it stays Ready and takes in what is raised for it. */
-        title = 'Closed'; tone = 'now'
+        title = 'Waiting'; tone = 'now'
         state = `Nothing more goes in · approved, paid and advised on ${dayLabel(paysOn)}`
       } else {
         title = 'Overdue'; tone = 'late'
@@ -79,6 +79,69 @@ export function groupRunsByCycle<T extends GroupableRun>(
       }
       return { key: start, title, tone, state, paysOn, periodStart: start, periodEnd: end, runs: list, total }
     })
+}
+
+/** What the open cycle's band says, with or without a run in it yet. */
+export function collectingState(end: string, lagMonths: number): string {
+  return `Still collecting · closes at midnight on ${dayLabel(end)} · paid out ${dayLabel(paysOnFor(end, lagMonths))}`
+}
+
+/*
+ * FOUR TABS, ONE CYCLE EACH (S7, the firm, 12 Oct: "in the closed to pay, two months were mixed.
+ * That's confusing"). With a payover a month after the cycle closes there are always THREE live
+ * cycles -- the one collecting, the one that closed and waits a month for its day, and the one due
+ * now -- and the queue had two working tabs, so on the 11th "Closed · to pay" held both the cycle
+ * paid that morning and the one that closed the night before and pays next month.
+ *
+ *   COLLECTING -- the open cycle; payments approved today land here.
+ *   WAITING    -- closed, before its payout day. Checked and fixed; approved on the day.
+ *   TO PAY     -- on or after its payout day (or released early, with a reason), not finished.
+ *                 An overdue cycle is here too, in red, on top.
+ *   HISTORY    -- finished: paid, or below nil and carried forward.
+ *
+ * Decided by the date alone, so a run moves tab on the morning its day comes and nobody moves it.
+ */
+export type QueueTab = 'collecting' | 'waiting' | 'topay' | 'history'
+
+export interface TabbableRun { periodStart: string; periodEnd: string }
+
+export function queueTabOf(
+  r: TabbableRun, opts: { final: boolean; released: boolean; openStart: string | null; today: string | null; lagMonths: number },
+): QueueTab {
+  if (opts.final) return 'history'
+  if (opts.openStart && r.periodStart >= opts.openStart) return 'collecting'
+  if (opts.released) return 'topay'
+  /* With no today known the run is shown as due rather than hidden as waiting. */
+  if (opts.today && opts.today < paysOnFor(r.periodEnd, opts.lagMonths)) return 'waiting'
+  return 'topay'
+}
+
+/** Opens on what is due; if nothing is, on what is waiting; then on what is collecting. */
+export function defaultQueueTab(counts: Record<QueueTab, number>): QueueTab {
+  if (counts.topay > 0) return 'topay'
+  if (counts.waiting > 0 || counts.collecting === 0) return 'waiting'
+  return 'collecting'
+}
+
+/** The address's ?tab=, old names included: a link from before S7 still lands somewhere sensible. */
+export function parseQueueTab(param: string | null): QueueTab | null {
+  switch (param) {
+    case 'collecting': case 'running': return 'collecting'
+    case 'waiting': return 'waiting'
+    case 'topay': case 'closed': return 'topay'
+    case 'history': case 'paid': case 'finalised': return 'history'
+    default: return null
+  }
+}
+
+/** History's month picker: every payout day a finished run belongs to, newest first. */
+export function historyPayouts(runs: { periodEnd: string }[], lagMonths: number): string[] {
+  return [...new Set(runs.map((r) => paysOnFor(r.periodEnd, lagMonths)))].sort().reverse()
+}
+
+export function payoutLabel(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return `Payout ${d} ${MONTHS[m - 1]} ${y}`
 }
 
 /** The payover day: the day after the cycle closes, `lagMonths` later (a cycle ending 10 Sep pays 11 Oct). */

@@ -77,8 +77,9 @@ ok('the queue holds a ready run until its day', /const waitsForDay = \(r: WorkQu
 const q11 = strip(read('src/pages/finance/FinanceWorkQueue.tsx'))
 ok('a sent run below nil is finalised, beside the paid ones',
   /const isFinal = \(r: WorkQueueRow\) => r\.status === 'paid'\s*\|\| \(r\.netPayover <= 0 && \(r\.status === 'sent'/.test(q11)
-  && /const paid = rows\.filter\(isFinal\)/.test(q11) && /!isFinal\(r\) && !isRunning\(r\)/.test(q11))
-ok('...under a tab that says Finalised', /: 'Finalised'\}/.test(q11))
+  && /final: isFinal\(r\)/.test(q11))
+/* S7: Finalised became History, one payout at a time. */
+ok('...under the History tab', /history: 'History'/.test(q11))
 
 /* ---------------- 2. the browser asks first ---------------- */
 const mail = strip(read('src/lib/remittanceEmail.ts'))

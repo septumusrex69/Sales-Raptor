@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, CheckCircle2, CreditCard, FileText, Filter, Loader2, Search, Users } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, CreditCard, FileText, Filter, Loader2, Search, Users } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
@@ -11,7 +11,11 @@ import {
   type Buildable, type Cycle, type CycleTiles, type RunStatus, type WorkQueueRow,
 } from '../../lib/payover'
 import { Modal } from '../../components/ui/Modal'
-import { groupRunsByCycle, paysOnFor, periodLabel } from '../../lib/payoverGroups'
+import {
+  collectingState, defaultQueueTab, groupRunsByCycle, historyPayouts, parseQueueTab, payoutLabel, paysOnFor, periodLabel,
+  queueTabOf, type QueueTab,
+} from '../../lib/payoverGroups'
+import { firmDay } from '../../lib/dateLabels'
 import { supabase } from '../../lib/supabase'
 import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
@@ -97,11 +101,13 @@ function Tile({ icon, label, value, note, to, accent, action }: {
 export function FinanceWorkQueue() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  /* THREE TABS, AS THE FIRM DREW THEM (10 Oct): RUNNING (still collecting), CLOSED (cut-off passed,
-     waiting for its payover day -- an overdue one is here too, in red), PAID (the history). */
-  const tabParam = params.get('tab')
-  const tab: 'running' | 'closed' | 'paid' = tabParam === 'paid' ? 'paid' : tabParam === 'running' ? 'running' : 'closed'
+  /* FOUR TABS, ONE CYCLE EACH (S7, 12 Oct): Collecting, Waiting, To pay, History -- see queueTabOf.
+     No ?tab= means "open on what is due" (defaultQueueTab), decided once the runs are in. */
+  const tabParam = parseQueueTab(params.get('tab'))
   const [query, setQuery] = useState('')
+  /* HISTORY'S MONTH, by payout day. Empty is the latest payout. A search ignores it and looks across
+     every month (the firm: "go and find them"). */
+  const [payout, setPayout] = useState('')
   const [statusFilter, setStatusFilter] = useState<RunStatus | ''>('')
 
   const [cycle, setCycle] = useState<Cycle | null>(null)
@@ -240,7 +246,6 @@ export function FinanceWorkQueue() {
     })
   }
 
-  const isRunning = (r: WorkQueueRow) => !!cycle && r.periodStart >= cycle.periodStart
   /*
    * FINALISED, NOT ONLY PAID (the firm, 11 Oct, of MPG-2606 sitting under "Due today" for ever: "maybe
    * instead of paid, we should say finalised ... and move it there as well"). A run below nil has
@@ -252,17 +257,28 @@ export function FinanceWorkQueue() {
    */
   const isFinal = (r: WorkQueueRow) => r.status === 'paid'
     || (r.netPayover <= 0 && (r.status === 'sent' || (r.status === 'approved' && settled.has(r.runId))))
-  const running = rows.filter((r) => !isFinal(r) && isRunning(r))
-  const closed = rows.filter((r) => !isFinal(r) && !isRunning(r))
-  const paid = rows.filter(isFinal)
-  /* Nothing to pay yet (mid-cycle, or after the 11th's payments went): open on Running instead. */
-  const tabShown = tabParam === null && closed.length === 0 && running.length > 0 ? 'running' : tab
+  const tabOf = (r: WorkQueueRow): QueueTab => queueTabOf(r, {
+    final: isFinal(r), released: released.has(r.runId), openStart: cycle?.periodStart ?? null, today: cycle?.today ?? null, lagMonths: lag,
+  })
+  const byTab: Record<QueueTab, WorkQueueRow[]> = { collecting: [], waiting: [], topay: [], history: [] }
+  for (const r of rows) byTab[tabOf(r)].push(r)
+  const counts = { collecting: byTab.collecting.length, waiting: byTab.waiting.length, topay: byTab.topay.length, history: byTab.history.length }
+  const tabShown: QueueTab = tabParam ?? defaultQueueTab(counts)
   const q = query.trim().toLowerCase()
-  const shown = (tabShown === 'paid' ? paid : tabShown === 'running' ? running : closed)
+  const payouts = historyPayouts(byTab.history, lag)
+  const payoutShown = payout && payouts.includes(payout) ? payout : (payouts[0] ?? '')
+  const shown = byTab[tabShown]
     .filter((r) => (!q || r.client.toLowerCase().includes(q) || (r.invoiceNumber ?? '').toLowerCase().includes(q))
-      && (!statusFilter || r.status === statusFilter))
-  /* In cycles: this month's first, then anything older still not paid (the firm, 8 Oct). */
-  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'paid' ? 'paid' : 'open', lag, cycle?.today ?? null)
+      && (!statusFilter || r.status === statusFilter)
+      /* History shows one payout at a time, unless a search is looking across all of them. */
+      && (tabShown !== 'history' || !!q || paysOnFor(r.periodEnd, lag) === payoutShown))
+  /* In cycles: the one that leaves soonest first (the firm, 8 Oct); History newest first. */
+  const groups = groupRunsByCycle(shown, cycle?.periodStart ?? null, tabShown === 'history' ? 'paid' : 'open', lag, cycle?.today ?? null)
+  /* THE OPEN CYCLE IS SHOWN EVEN EMPTY (the firm, 12 Oct: "There's nothing in running. I don't know
+     why"). On the first day of a cycle nothing has been processed yet; a bare 0 read as broken. */
+  const emptyCollecting = tabShown === 'collecting' && groups.length === 0 && !q && !statusFilter && !!cycle
+  const isHistory = tabShown === 'history'
+  const TAB_LABEL: Record<QueueTab, string> = { collecting: 'Collecting', waiting: 'Waiting', topay: 'To pay', history: 'History' }
   const pickedRows = rows.filter((r) => picked.has(r.runId))
     /* THE PAYOUT DAY (11 Oct): an approved run's advice and payment wait for payover_pays_on unless it
      was released early. A sent run went out already, so it is not held again. The database refuses
@@ -339,9 +355,10 @@ export function FinanceWorkQueue() {
           action={(
             <button type="button" data-testid="review-runs"
               onClick={() => {
-                /* To the tab the ready runs are on, showing only them. */
-                const onClosed = closed.some((r) => r.status === 'ready')
-                setParams(onClosed ? {} : { tab: 'running' }, { replace: true })
+                /* To the tab the ready runs are on -- those that may be approved now first -- showing only them. */
+                const to: QueueTab = readyNow.length > 0 ? tabOf(readyNow[0])
+                  : byTab.waiting.some((r) => r.status === 'ready') ? 'waiting' : 'collecting'
+                setParams({ tab: to }, { replace: true })
                 setStatusFilter('ready')
               }}
               className="mt-1 inline-flex items-center gap-1 text-[13px] font-medium text-sky-700 hover:text-sky-900">
@@ -353,22 +370,24 @@ export function FinanceWorkQueue() {
       <Card padded={false}>
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 px-4 pt-3">
           <div className="flex gap-4">
-            {(['running', 'closed', 'paid'] as const).map((t) => {
-              const count = t === 'running' ? running.length : t === 'closed' ? closed.length : paid.length
+            {(['collecting', 'waiting', 'topay', 'history'] as const).map((t) => {
+              const count = counts[t]
               return (
                 <button
                   key={t}
                   type="button"
                   data-testid={`tab-${t}`}
-                  onClick={() => setParams(t === 'closed' ? {} : { tab: t }, { replace: true })}
+                  onClick={() => setParams({ tab: t }, { replace: true })}
                   className={clsx(
                     '-mb-px flex items-center gap-2 border-b-2 px-1 pb-2.5 pt-1 text-[13.5px] font-medium transition-colors',
                     tabShown === t ? 'border-navy-900 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700',
                   )}
                 >
-                  {t === 'running' ? 'Running' : t === 'closed' ? 'Closed · to pay' : 'Finalised'}
-                  {/* Brackets kept for the reader of innerText; drawn as a pill. */}
-                  <span className="rounded-full bg-slate-100 px-2 py-px text-[11.5px] text-slate-600">
+                  {TAB_LABEL[t]}
+                  {/* Brackets kept for the reader of innerText; drawn as a pill. To pay holding
+                      anything is the one that is work today, so it is tinted. */}
+                  <span className={clsx('rounded-full px-2 py-px text-[11.5px]',
+                    t === 'topay' && count > 0 ? 'bg-gold-100 text-gold-800' : 'bg-slate-100 text-slate-600')}>
                     <span className="sr-only">(</span>{count}<span className="sr-only">)</span>
                   </span>
                 </button>
@@ -376,12 +395,25 @@ export function FinanceWorkQueue() {
             })}
           </div>
           <div className="flex flex-wrap items-center gap-2 pb-2">
+            {/* HISTORY, ONE PAYOUT AT A TIME (S7): "what went out on 11 Sep?". A search looks across
+                every payout, so the picker steps aside while one is typed. */}
+            {isHistory && payouts.length > 0 && (
+              <label className={clsx('flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-600',
+                q && 'opacity-50')}>
+                <CalendarDays size={14} className="text-slate-400" />
+                <select value={payoutShown} onChange={(e) => setPayout(e.target.value)} disabled={!!q}
+                  aria-label="Payout month" data-testid="history-payout" className="bg-transparent outline-none">
+                  {payouts.map((p) => <option key={p} value={p}>{payoutLabel(p)}</option>)}
+                </select>
+              </label>
+            )}
             <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
               <Search size={14} className="text-slate-400" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search clients…"
+              <input value={query} onChange={(e) => setQuery(e.target.value)}
+                placeholder={isHistory ? 'Client or run number…' : 'Search clients…'}
                 aria-label="Search clients" className="w-44 bg-transparent text-[13px] outline-none placeholder:text-slate-400" />
             </label>
-            <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-600">
+            {!isHistory && <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-600">
               <Filter size={14} className="text-slate-400" />
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as RunStatus | '')}
                 aria-label="Filter by status" className="bg-transparent outline-none">
@@ -390,7 +422,7 @@ export function FinanceWorkQueue() {
                   <option key={st} value={st}>{RUN_STATUS_LABEL[st]}</option>
                 ))}
               </select>
-            </label>
+            </label>}
             {/*
               THE PRESS THAT MAKES A RUN AT ALL, for a cycle other than the running one. Staging
               only: in production the runs build themselves (refresh_payover_runs on open).
@@ -463,12 +495,24 @@ export function FinanceWorkQueue() {
                 </th>
                 <th className="px-2 py-2 font-medium">Client</th>
                 <th className="px-2 py-2 font-medium">Run</th>
-                <th className="px-2 py-2 text-right font-medium">Payments</th>
-                <th className="px-2 py-2 text-right font-medium" title="Collected by Bredell Ferreira into trust">Collected</th>
-                <th className="px-2 py-2 text-right font-medium">PTC set-off</th>
-                <th className="px-2 py-2 text-right font-medium">To pay</th>
+                {isHistory ? (
+                  /* HISTORY READS WHAT WENT OUT (S7): how much, on what day, on which reference. */
+                  <>
+                    <th className="px-2 py-2 text-right font-medium" title="Collected by Bredell Ferreira into trust">Collected</th>
+                    <th className="px-2 py-2 text-right font-medium">Paid out</th>
+                    <th className="px-2 py-2 font-medium">Date paid</th>
+                    <th className="px-2 py-2 font-medium">Reference</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-2 py-2 text-right font-medium">Payments</th>
+                    <th className="px-2 py-2 text-right font-medium" title="Collected by Bredell Ferreira into trust">Collected</th>
+                    <th className="px-2 py-2 text-right font-medium">PTC set-off</th>
+                    <th className="px-2 py-2 text-right font-medium">To pay</th>
+                  </>
+                )}
                 <th className="px-2 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Next step</th>
+                <th className="px-3 py-2 font-medium">{isHistory ? '' : 'Next step'}</th>
               </tr>
             </thead>
             <tbody>
@@ -477,14 +521,33 @@ export function FinanceWorkQueue() {
                   <Loader2 className="mx-auto w-5 h-5 animate-spin" />
                 </td></tr>
               )}
-              {!loading && shown.length === 0 && (
+              {!loading && emptyCollecting && cycle && (
+                <>
+                  <tr className="border-b border-slate-100" data-testid="cycle-group" data-tone="early">
+                    <td colSpan={9} className="p-0">
+                      <div className="flex flex-wrap items-center justify-between gap-x-4 border-l-4 border-l-slate-400 bg-slate-50 px-4 py-1.5">
+                        <div className="flex flex-wrap items-center gap-x-2">
+                          <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-[11.5px] font-bold uppercase tracking-wide text-slate-700">Collecting</span>
+                          <span className="text-[13px] font-semibold text-slate-800">{periodLabel(cycle.periodStart, cycle.periodEnd)}</span>
+                          <span className="text-[12.5px] text-slate-500">· {collectingState(cycle.periodEnd, lag)}</span>
+                        </div>
+                        <span className="text-[14px] font-semibold tabular-nums text-slate-800">{rand(0)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-400">
+                    Nothing processed in this cycle yet. A client appears here, with its run built, as soon as a payment for it is approved.
+                  </td></tr>
+                </>
+              )}
+              {!loading && shown.length === 0 && !emptyCollecting && (
                 <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
                   {(q || statusFilter) ? 'No run on this tab matches the search or filter.'
-                    : tabShown === 'paid'
+                    : tabShown === 'history'
                     ? 'Nothing has been finalised yet: a run moves here once it is paid, or once a run where the client owes us has gone to them.'
-                    : tabShown === 'running'
-                      ? 'Nothing processed in this cycle yet. A client appears here, with its run built, as soon as a payment for it is approved.'
-                      : 'Nothing is waiting to be paid. A cycle moves here at midnight on the 10th, when it closes.'}
+                    : tabShown === 'waiting'
+                      ? 'Nothing is waiting for its payout day. A cycle moves here at midnight on the 10th, when it closes.'
+                      : 'Nothing is due to be paid. A closed cycle moves here on its payout day, the 11th.'}
                 </td></tr>
               )}
               {!loading && groups.map((g) => (
@@ -539,15 +602,30 @@ export function FinanceWorkQueue() {
                     {r.invoiceNumber}
                     {g.tone === 'done' && <span className="text-slate-400">{' · '}{fmtDay(r.periodStart)}–{fmtDay(r.periodEnd)}</span>}
                   </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{r.payments}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{rand(r.trustCapital)}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
-                    {r.ptcSetOff ? `− ${rand(r.ptcSetOff)}` : '—'}
-                  </td>
-                  {/* Below nil is the client owing us (the firm, 10 Oct): said, not a minus sign. */}
-                  <td className={clsx('px-2 py-1.5 text-right font-semibold tabular-nums', r.netPayover < 0 && 'text-negative-700')}>
-                    {r.netPayover < 0 ? `owes us ${rand(-r.netPayover)}` : rand(r.netPayover)}
-                  </td>
+                  {isHistory ? (
+                    <>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{rand(r.trustCapital)}</td>
+                      <td className={clsx('px-2 py-1.5 text-right font-semibold tabular-nums', r.netPayover < 0 && 'text-negative-700')}>
+                        {r.netPayover < 0 ? `owed us ${rand(-r.netPayover)}` : rand(r.netPayover)}
+                      </td>
+                      <td className="px-2 py-1.5 tabular-nums text-slate-600" data-testid="history-paid-on">
+                        {r.paidAt ? fmtDay(firmDay(r.paidAt)) : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-slate-600" data-testid="history-reference">{r.eftReference ?? '—'}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{r.payments}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{rand(r.trustCapital)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
+                        {r.ptcSetOff ? `− ${rand(r.ptcSetOff)}` : '—'}
+                      </td>
+                      {/* Below nil is the client owing us (the firm, 10 Oct): said, not a minus sign. */}
+                      <td className={clsx('px-2 py-1.5 text-right font-semibold tabular-nums', r.netPayover < 0 && 'text-negative-700')}>
+                        {r.netPayover < 0 ? `owes us ${rand(-r.netPayover)}` : rand(r.netPayover)}
+                      </td>
+                    </>
+                  )}
                   <td className="px-2 py-1.5"><Pill status={r.status} /></td>
                   <td className="px-3 py-1.5">
                     {r.nextStep === 'approve' && stillOpen(r) ? (

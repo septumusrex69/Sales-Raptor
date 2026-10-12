@@ -46,7 +46,14 @@ const QUEUE = [
   /* Ready in a cycle whose payout day (11 Sep) has passed: the one a bulk approval may take. */
   { ...q('F', 'Mopane Lodges', '2026-07-11', '2026-08-10', 250, 'ready'), next_step: 'approve' },
   { ...q('D', 'Karoo Fleet Hire', '2026-09-11', '2026-10-10', 3031.31, 'ready'), next_step: 'approve' },
+  /* HISTORY (S7): two finished runs paid in two different months. H was paid at 00:30 on 12 Sep in
+     Johannesburg, which is still 11 Sep in UTC -- the date paid must read the firm's day. */
+  { ...q('G', 'Thandeka Catering', '2026-06-11', '2026-07-10', 700, 'paid'), next_step: null,
+    paid_at: '2026-08-11T10:00:00Z', eft_reference: 'BF PO-G' },
+  { ...q('H', 'Umhlanga Storage', '2026-07-11', '2026-08-10', 900, 'paid'), next_step: null,
+    paid_at: '2026-09-11T22:30:00Z', eft_reference: 'BF PO-H' },
 ]
+let queue = QUEUE
 const calls = []
 /* Three stages: on the statement, paid by hand and not yet on it, and still owed. */
 const CLIENT_RUNS = [
@@ -69,7 +76,7 @@ const handlers = [
   [(u) => /\/rest\/v1\/payover_run_sends\?/.test(u), () => ({ body: sends })],
   [(u) => /\/rest\/v1\/firm_settings\?/.test(u), () => ({ body: { firm_name: 'Bredell Ferreira', physical_address: null, phone: null, email: null, vat_number: null, payouts_statement_only: false } })],
   [(u) => /\/rpc\/payover_cycle_now/.test(u), () => ({ body: [{ period_start: '2026-09-11', period_end: '2026-10-10', days_left: 2, today: '2026-10-08' }] })],
-  [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: QUEUE })],
+  [(u) => /\/rpc\/payover_work_queue/.test(u), () => ({ body: queue })],
   [(u) => /\/rpc\/(refresh_payover_runs|approve_payover_run_early|approve_payover_run|mark_payover_run_paid)/.test(u),
     (u, req) => { calls.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...(req.postDataJSON() ?? {}) }); return { body: 0 } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
@@ -99,49 +106,62 @@ try {
     && (await page.getByText(/What was sent before is kept as it was/).count()) > 0)
   await page.getByRole('button', { name: 'Cancel' }).click()
 
-  /* ---- THE QUEUE IN CYCLES (the firm, 8 Oct: "this month to process / previous month pending") ---- */
+  /* ---- FOUR TABS, ONE CYCLE EACH (S7, the firm, 12 Oct: "in the closed to pay, two months were mixed") ---- */
+  /* Today is 8 Oct. Collecting: 11 Sep - 10 Oct. Waiting: 11 Aug - 10 Sep (pays 11 Oct). To pay: the
+     11 Jul - 10 Aug cycle, whose day (11 Sep) has passed -- overdue. */
   await page.goto(`http://127.0.0.1:${PORT}/trust/payover`, { waitUntil: 'domcontentloaded' })
   const groups = page.getByTestId('cycle-group')
+  const queueTab = (name) => page.getByTestId(`tab-${name}`)
+  const heads = async () => (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
+  const openTab = async (name, tone) => {
+    await queueTab(name).click()
+    await page.locator(`[data-testid="cycle-group"][data-tone="${tone}"]`).first().waitFor({ timeout: 10000 })
+  }
   await groups.first().waitFor({ timeout: 15000 })
-  const heads = (await groups.allInnerTexts()).map((x) => x.split(String.fromCharCode(0xa0)).join(' '))
-  /* The firm, 10 Oct: three tabs -- Running, Closed (to pay), Paid. Closed opens first when it has
-     anything: the overdue cycle on top in red, then the one waiting for its payover day. */
-  t.check('the Closed tab holds the closed cycles', heads.length, 2)
-  t.ok('the overdue cycle first, saying it was due', /^Overdue[\s\S]*2 clients[\s\S]*was due 11 Sep and is not yet paid/i.test(heads[0] ?? ''))
-  t.ok('...then the closed one, with its payover day and total',
-    /^Closed[\s\S]*3 clients[\s\S]*Nothing more goes in · approved, paid and advised on 11 Oct[\s\S]*R 18 625\.60/i.test(heads[1] ?? ''))
-  t.check('...each in its own colour', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late","now"]')
-  t.ok('the tabs count what is in them',
-    /Running\s*\(?\s*1\s*\)?/.test(await page.getByTestId('tab-running').innerText()) && /Closed · to pay\s*\(?\s*5\s*\)?/.test(await page.getByTestId('tab-closed').innerText()))
+  t.ok('the tabs are Collecting, Waiting, To pay, History, each counting its runs',
+    /Collecting\s*\(?\s*1\s*\)?/.test(await queueTab('collecting').innerText()) && /Waiting\s*\(?\s*3\s*\)?/.test(await queueTab('waiting').innerText())
+      && /To pay\s*\(?\s*2\s*\)?/.test(await queueTab('topay').innerText()) && /History\s*\(?\s*2\s*\)?/.test(await queueTab('history').innerText()))
+  let h = await heads()
+  t.check('it opens on To pay, which holds ONE cycle', h.length, 1)
+  t.ok('...the overdue one, saying it was due', /^Overdue[\s\S]*2 clients[\s\S]*was due 11 Sep and is not yet paid/i.test(h[0] ?? ''))
+  t.check('...in red', JSON.stringify(await groups.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))), '["late"]')
+
+  await openTab('waiting', 'now')
+  h = await heads()
+  t.check('Waiting holds ONE cycle, not mixed with the one due', h.length, 1)
+  t.ok('...the one that closed, with its payover day and total',
+    /^Waiting[\s\S]*3 clients[\s\S]*Nothing more goes in · approved, paid and advised on 11 Oct[\s\S]*R 18 625\.60/i.test(h[0] ?? ''))
 
   /* ---- THE RUNS BUILD THEMSELVES, AND ARE WORKED IN BULK (the firm, 8 Oct) ---- */
   t.ok('opening the queue brings every run up to date', calls.some((c) => c.fn === 'refresh_payover_runs'))
   t.check('...so there is no Build a run button', await page.getByRole('button', { name: /Build a run/ }).count(), 0)
-  for (const name of ['Silverleaf Body Corporate', 'Baobab Property', 'Mopane Lodges']) {
+  /* APPROVED ON THE DAY (11 Oct): Silverleaf's cycle pays on the 11th, so it stays Ready until then. */
+  t.ok('a ready run before its payout day says when it is approved instead of offering Approve',
+    /Approve on 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Silverleaf' }).innerText()))
+  t.ok('the approved run says when it pays rather than offering a button',
+    /Pays 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Baobab' }).innerText()))
+  for (const name of ['Silverleaf Body Corporate', 'Baobab Property']) {
     await page.getByRole('checkbox', { name: `Select ${name}` }).check()
   }
+  /* A pick survives a change of tab, so a bulk press can take runs from both. */
+  await openTab('topay', 'late')
+  await page.getByRole('checkbox', { name: 'Select Mopane Lodges' }).check()
   const bar = page.getByTestId('bulk-bar')
   const barText = await bar.innerText()
-  /* THE PAYOUT DAY (11 Oct): today is 8 Oct and Baobab's approved run pays on the 11th, so its advice
-     is not offered -- the bar says when it goes instead. */
-  /* AND APPROVED ON THAT DAY TOO (11 Oct): Silverleaf's cycle closed on 10 Sep but it pays on the 11th,
-     so it stays Ready; Mopane's payout day has passed, so it may be approved now. */
   t.ok('the bulk bar offers only what the picked runs are ready for',
     /3 selected/.test(barText) && /Approve 1/.test(barText) && /Email advice 0/.test(barText))
   t.ok('...and says when the ready one is approved', /1 approved on 11 Oct 2026, the payout day/.test(barText))
-  t.ok('a ready run before its payout day says when it is approved instead of offering Approve',
-    /Approve on 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Silverleaf' }).innerText()))
   t.ok('...and says when the approved one is due', /1 not yet due: advice and payment on 11 Oct/.test(barText))
-  t.ok('the approved run says when it pays rather than offering a button',
-    /Pays 11 Oct/.test(await page.getByTestId('queue-run').filter({ hasText: 'Baobab' }).innerText()))
   await t.shot(page, 'payover-queue-cycles')
   await bar.getByRole('button', { name: 'Approve 1' }).click()
   await page.getByTestId('bulk-note').waitFor({ timeout: 10000 }).catch(() => {})
   t.check('...and approves the ready one whose payout day has come, and nothing else',
     JSON.stringify(calls.filter((c) => c.fn === 'approve_payover_run').map((c) => c.p_run)), JSON.stringify(['F']))
   t.ok('...saying what it did', /1 approved/.test(await page.getByTestId('bulk-note').innerText().catch(() => '')))
+  t.ok('...and stays on the tab it was on', /tab=topay/.test(page.url()))
 
   /* ---- MARK PAID FROM THE LIST (the firm, 10 Oct: "just immediately show you that pop-up") ---- */
+  await openTab('waiting', 'now')
   await page.getByTestId('queue-run').filter({ hasText: 'Summit Fitness' }).getByRole('button', { name: 'Mark paid' }).click()
   const ref = page.getByLabel('EFT reference')
   await ref.waitFor({ timeout: 5000 }).catch(() => {})
@@ -153,10 +173,13 @@ try {
   t.check('...and marks it paid through the function, on that reference',
     JSON.stringify(paidOne.map((c) => [c.p_run, /PO-A/.test(c.p_reference ?? '')])), JSON.stringify([['A', true]]))
 
-  /* AND SEVERAL AT ONCE, each on its own reference, one date. */
-  for (const name of ['Summit Fitness', 'Lowveld Motors']) {
-    await page.getByTestId('queue-run').filter({ hasText: name }).getByRole('checkbox').check()
-  }
+  /* AND SEVERAL AT ONCE, each on its own reference, one date -- from two tabs. */
+  await page.getByTestId('queue-run').filter({ hasText: 'Summit Fitness' }).getByRole('checkbox').check()
+  /* A row with a button, measured here to hold the Collecting tab's text-only row against it. */
+  const buttonRowHeight = await page.getByTestId('queue-run').filter({ has: page.locator('button') }).first()
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height)).catch(() => -1)
+  await openTab('topay', 'late')
+  await page.getByTestId('queue-run').filter({ hasText: 'Lowveld Motors' }).getByRole('checkbox').check()
   await page.getByTestId('bulk-pay').click()
   await page.getByRole('button', { name: 'Mark 2 paid' }).waitFor({ timeout: 5000 }).catch(() => {})
   t.ok('the bulk bar marks the picked runs paid, each with its own reference',
@@ -166,20 +189,31 @@ try {
   t.check('...and calls the function once a run',
     JSON.stringify(calls.filter((c) => c.fn === 'mark_payover_run_paid').map((c) => c.p_run).slice(1).sort()), JSON.stringify(['A', 'C']))
 
-  /* A row with a button, measured here to hold the Running tab's text-only row against it. */
-  const buttonRowHeight = await page.getByTestId('queue-run').filter({ has: page.locator('button') }).first()
-    .evaluate((el) => Math.round(el.getBoundingClientRect().height)).catch(() => -1)
+  /* ---- HISTORY (S7): one payout at a time, searchable across all of them ---- */
+  await openTab('history', 'done')
+  t.check('History opens on the latest payout', await page.getByTestId('history-payout').inputValue(), '2026-09-11')
+  t.check('...showing only that payout\'s runs', JSON.stringify((await page.getByTestId('queue-run').allInnerTexts()).map((x) => /Umhlanga/.test(x))), '[true]')
+  /* en-ZA writes September as "Sept". */
+  t.ok('...with the date paid on the firm\'s calendar (00:30 on 12 Sep, not UTC\'s 11th)',
+    /^12 Sept? 2026$/.test((await page.getByTestId('history-paid-on').first().innerText()).split(String.fromCharCode(0xa0)).join(' ')))
+  t.check('...and the reference it went out on', await page.getByTestId('history-reference').first().innerText(), 'BF PO-H')
+  await page.getByTestId('history-payout').selectOption('2026-08-11')
+  await page.getByTestId('queue-run').filter({ hasText: 'Thandeka' }).waitFor({ timeout: 5000 })
+  t.check('another month is one pick away', await page.getByTestId('queue-run').count(), 1)
+  await page.getByTestId('history-payout').selectOption('2026-09-11')
+  await page.getByTestId('queue-run').filter({ hasText: 'Umhlanga' }).waitFor({ timeout: 5000 })
+  await page.getByLabel('Search clients').fill('po-g')
+  await page.getByTestId('queue-run').filter({ hasText: 'Thandeka' }).waitFor({ timeout: 5000 })
+  t.ok('a search finds a run in another month by its number', (await page.getByTestId('queue-run').count()) === 1
+    && await page.getByTestId('history-payout').isDisabled())
+  await page.getByLabel('Search clients').fill('')
 
-  /* ---- THE RUNNING TAB: still collecting ---- */
-  await page.getByTestId('tab-running').click()
-  /* Wait for the Running band itself: the locator would otherwise read the Closed tab's first band. */
-  await page.locator('[data-testid="cycle-group"][data-tone="early"]').waitFor({ timeout: 10000 })
+  /* ---- THE COLLECTING TAB: still collecting ---- */
+  await openTab('collecting', 'early')
   const runningHead = (await groups.first().innerText()).split(String.fromCharCode(0xa0)).join(' ')
-  t.ok('Running holds the open cycle, still collecting', /^Running[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(runningHead))
+  t.ok('Collecting holds the open cycle, still collecting', /^Collecting[\s\S]*1 client[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(runningHead))
   t.ok('...and its run says so instead of offering Approve',
     /Open until 10 Oct 2026/.test(await page.getByTestId('queue-run').filter({ hasText: 'Karoo Fleet Hire' }).innerText()))
-  /* ONE HEIGHT FOR EVERY RUN (the firm, 10 Oct): "make them all as big as the email advice" lines.
-     Presence first, so a missing button row cannot pass as equal. */
   /* THE FIRM'S DRAWING (10 Oct): four cards, no status legend, a search over the clients. */
   /* The status filter's options name every status too, so they are read out of the page first. */
   const pageText = await page.locator('main').evaluate((m) => {
@@ -201,6 +235,17 @@ try {
     .evaluate((el) => Math.round(el.getBoundingClientRect().height))
   t.ok('a run row with a button was measured', buttonRowHeight > 0)
   t.check('...and an "Open until" row stands exactly as tall', openRowHeight, buttonRowHeight)
+
+  /* THE OPEN CYCLE IS SHOWN EVEN EMPTY (the firm, 12 Oct: "There's nothing in running. I don't know
+     why"): on its first day nothing has been processed yet. */
+  queue = QUEUE.filter((r) => r.run_id !== 'D')
+  await page.goto(`http://127.0.0.1:${PORT}/trust/payover?tab=collecting`, { waitUntil: 'domcontentloaded' })
+  await page.locator('[data-testid="cycle-group"][data-tone="early"]').waitFor({ timeout: 15000 })
+  const emptyHead = (await groups.first().innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.ok('an empty open cycle still shows its band and when it pays',
+    /^Collecting[\s\S]*11 Sep 2026 – 10 Oct 2026[\s\S]*Still collecting · closes at midnight on 10 Oct · paid out 11 Nov/i.test(emptyHead))
+  t.ok('...and says why it is empty', (await page.getByText('Nothing processed in this cycle yet').count()) === 1)
+  queue = QUEUE
 
   /* ---- APPROVING BEFORE THE CYCLE CLOSES, WITH A REASON (the firm, 8 Oct) ---- */
   runShown = OPEN_RUN
