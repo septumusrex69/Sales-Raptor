@@ -163,6 +163,17 @@ function round(v: number): number {
  */
 export const SMALL_RESIDUE = 50
 
+/**
+ * IS AN OPEN ACCOUNT READY TO CLOSE, ON ITS WHOLE BALANCE? Nil or less is paid up; under R50 left
+ * after the division is a small balance, closed as settled; anything more is still being collected.
+ * Pure, so Ready to close and the approval queue read the same rule the close box advises on.
+ */
+export function readyKindFor(balance: number): 'paid_up' | 'small_balance' | null {
+  if (balance <= 0.005) return 'paid_up'
+  if (balance < SMALL_RESIDUE) return 'small_balance'
+  return null
+}
+
 export function endingAdvice(balance: number): { ending: AccountEnding; because: string } {
   /*
    * THE SENTENCE DOES NOT RESTATE THE FIGURE. The screen says what is outstanding in its own
@@ -172,11 +183,18 @@ export function endingAdvice(balance: number): { ending: AccountEnding; because:
   if (balance <= 0) {
     return { ending: 'paid_up', because: 'The debt was settled in full.' }
   }
+  /*
+   * A SMALL BALANCE CLOSES AS SETTLED (the firm, 12 Oct: "if after the division there is ... under
+   * 50 rand, then the account should ask you if it can be closed ... as settled ... small balance").
+   * It replaced the earlier reading -- a residue under R50 as a write-off -- because what happened
+   * is the debtor paid and the last few rand were let go, which is a settlement, not a debt nobody
+   * recovered. The remainder is the settlement discount on the statement (accountBalance).
+   */
   if (balance < SMALL_RESIDUE) {
     return {
-      ending: 'written_off',
-      because: `That is under R${SMALL_RESIDUE}, which is less than it costs to chase, but `
-        + 'letting it go is still a write-off and it still needs a reason.',
+      ending: 'settled',
+      because: `That is under R${SMALL_RESIDUE}, less than it costs to chase. Close it as settled: `
+        + 'the small balance is waived.',
     }
   }
   return {

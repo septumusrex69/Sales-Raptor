@@ -66,9 +66,6 @@ export function CloseReadyBox({ rows, intro, onClose, onDone }: {
                   {r.client ? <span className="font-normal text-slate-400"> · {r.client}</span> : null}
                 </div>
                 <div className="text-slate-500">{readyLabel(r, rand)}</div>
-                {r.kind === 'paid_up' && (
-                  <div className="text-[12px] text-amber-800">Interest or fees may still stand behind the capital — open the statement if unsure.</div>
-                )}
               </div>
             </li>
           ))}

@@ -10,6 +10,8 @@
  */
 import { computeBalance, buildStatement } from '../../src/lib/accountBalance.ts'
 import { accrueToDate, coveredTo } from '../../src/lib/interestAccrual.ts'
+import { accrueToFor } from '../../src/lib/balanceInput.ts'
+import { readFileSync } from 'node:fs'
 
 let failed = 0
 let passed = 0
@@ -531,6 +533,28 @@ const empty = { payments: [], fees: [], interest: [] }
   check('...and the balance stays below nil', over.balance < 0 ? 1 : 0, 1)
   const open = computeBalance({ ...settled, settledOn: null })
   check('an open account waives nothing', open.waived, 0)
+}
+
+/*
+ * A WRITE-OFF RUNS ON TO PRESCRIPTION; AN ENDED FILE STOPS (the firm, 12 Oct: "written off accounts
+ * ... should continue to run until prescription ... it can stop running on withdrawn accounts, ...
+ * paid up accounts"). Strings compared as dates, so the checks use the "stops on" day as a number.
+ */
+{
+  const day = (s) => (s === null ? -1 : Number(s.replaceAll('-', '')))
+  check('an open account runs to today', day(accrueToFor({}, '2026-10-12')), 20261012)
+  check('a written-off account runs to today too', day(accrueToFor({ endedAs: 'written_off', endedOn: '2026-05-01' }, '2026-10-12')), 20261012)
+  check('...until it prescribes', day(accrueToFor({ endedAs: 'written_off', prescriptionDate: '2026-08-31' }, '2026-10-12')), 20260831)
+  check('a prescription still to come does not stop it', day(accrueToFor({ prescriptionDate: '2027-01-31' }, '2026-10-12')), 20261012)
+  check('flagged prescribed with no date: no open interest at all', day(accrueToFor({ prescribed: true }, '2026-10-12')), -1)
+  check('withdrawn stops on the day it ended', day(accrueToFor({ endedAs: 'withdrawn', endedOn: '2026-08-10' }, '2026-10-12')), 20260810)
+  check('paid up stops on the day it ended', day(accrueToFor({ endedAs: 'paid_up', endedOn: '2026-08-10' }, '2026-10-12')), 20260810)
+  const sql = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
+  const oi = sql.slice(sql.lastIndexOf('create or replace function public.open_interest('))
+  const body = oi.slice(0, oi.indexOf('end $$;'))
+  check('the database no longer stops interest on a written-off status', /~\* 'written\.off' then return/.test(body) ? 1 : 0, 0)
+  check('...stops it at prescription', /p_as_at := least\(p_as_at, v_acct\.prescription_date\)/.test(body) ? 1 : 0, 1)
+  check('...and on the day a withdrawn, paid-up or settled file ended', /ended_as in \('withdrawn', 'paid_up', 'settled'\)/.test(body) ? 1 : 0, 1)
 }
 
 /*

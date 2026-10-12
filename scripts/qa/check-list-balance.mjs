@@ -127,7 +127,7 @@ ok('dates are read as the firm’s day', /firmDay\(p\.receivedAt\)/.test(lib)
    and the firm's day is not the server's. */
 ok('...and the day is passed in rather than read', !/new Date\(\)/.test(lib))
 
-/* A WRITTEN-OFF ACCOUNT STOPS ACCRUING, and on the same day for both screens. */
+/* A WRITTEN-OFF ACCOUNT RUNS ON TO PRESCRIPTION (the firm, 12 Oct), the same for both screens. */
 const off = balanceInputFor({
   account: {
     capitalHandedOver: 1000, handoverDate: '2026-01-01', interestRateAnnual: 24,
@@ -137,7 +137,8 @@ const off = balanceInputFor({
   today: '2026-10-02',
   writtenOff: (s) => /written.off/i.test(s),
 })
-check('a written-off account stops where it was written off', off.writtenOffAt, '2026-03-01')
+check('a written-off account no longer stops where it was written off', off.writtenOffAt, null)
+check('...its interest runs to today', off.accrueTo, '2026-10-02')
 check('...and a live one does not stop at all', rrc5.writtenOffAt, null)
 
 /* ---------------------------------------------------------------------------------------------

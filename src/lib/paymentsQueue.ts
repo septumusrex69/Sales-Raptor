@@ -204,7 +204,8 @@ export function exceptionsOf(
   if (r.capitalBefore > CENT && r.capitalAfter <= CENT) {
     out.push({ key: 'capital_paid_off', label: 'Capital paid off', warn: false,
       detail: 'Capital is nought after this payment. That is not the same as settled — interest '
-        + 'and fees may still stand. Approving it offers to close the account as paid up.' })
+        + 'and fees may still stand. Approving it works out the whole balance: nothing left offers a '
+        + 'paid-up close, under R50 a settled one.' })
   }
   /*
    * THE PAYMENT THAT FINISHES A SETTLEMENT, said before it is approved (the firm, 12 Oct: "when we

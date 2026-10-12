@@ -73,6 +73,30 @@ export interface LedgerRows {
  * Carried here rather than decided per screen, or the list and the account would stop a written-off
  * account's clock on two different days.
  */
+/**
+ * HOW FAR INTEREST RUNS: to today, not to the last monthly posting (without that the balance stands
+ * still between postings and a collector quotes a stale settlement) -- EXCEPT where the debt stops
+ * earning, which is the same list open_interest holds in the database, so the account page and the
+ * split agree:
+ *   - prescribed: to the prescription date; flagged with no date, not at all (NCA s126B -- a
+ *     prescribed debt may not be collected, so nothing may be added to it either);
+ *   - withdrawn or paid up: to the day it ended (settled has its own stop, settledOn);
+ *   - written off: NOT stopped. It runs on to prescription, at the firm's instruction.
+ * Null means no open period, which computeBalance reads as "show what was posted".
+ */
+export function accrueToFor(
+  account: { endedAs?: string | null; endedOn?: string | null; prescribed?: boolean; prescriptionDate?: string | null },
+  today: string,
+): string | null {
+  let to = today
+  if (account.prescribed && !account.prescriptionDate) return null
+  if (account.prescriptionDate && account.prescriptionDate < to) to = account.prescriptionDate
+  if ((account.endedAs === 'withdrawn' || account.endedAs === 'paid_up') && account.endedOn && account.endedOn < to) {
+    to = account.endedOn
+  }
+  return to
+}
+
 export function balanceInputFor(input: {
   account: {
     capitalHandedOver: number
@@ -83,26 +107,34 @@ export function balanceInputFor(input: {
     /** How and when Raptor closed it, where it did (`ended_as`, `ended_on`). */
     endedAs?: string | null
     endedOn?: string | null
+    /** Prescription, as imported or recorded: the day the debt may no longer be collected. */
+    prescribed?: boolean
+    prescriptionDate?: string | null
   }
   ledgers: LedgerRows
   /** Today in Johannesburg. Passed in: this file has no clock. */
   today: string
-  /** Whether this account's status reads as written off. The one function that decides it. */
-  writtenOff: (status: string) => boolean
+  /**
+   * Whether this account's status reads as written off. KEPT IN THE SIGNATURE AND NO LONGER USED to
+   * stop anything: see `accrueTo` below.
+   */
+  writtenOff?: (status: string) => boolean
 }): BalanceInput {
   const { account, ledgers } = input
   return {
     capitalHandedOver: account.capitalHandedOver,
     handoverDate: account.handoverDate,
-    /* RAPTOR'S OWN CLOSE IS EXACT where Swordfish's status is not: the day it was written off or
-       settled is on the row, so the clock stops on it rather than on the last action. */
-    writtenOffAt: account.endedAs === 'written_off' && account.endedOn ? account.endedOn
-      : input.writtenOff(account.status) ? account.lastActionAt : null,
+    /*
+     * A WRITE-OFF NO LONGER STOPS THE CLOCK (the firm, 12 Oct: "written off accounts that's written
+     * off by the firm should continue to run until prescription ... sometimes we write off accounts
+     * and then we ... revisit them"). It used to stop interest and fees on the day; a written-off
+     * file the firm reopens a year later would then have a year of interest missing. So writtenOffAt
+     * is not set from here at all, and prescription is what stops interest -- below.
+     */
+    writtenOffAt: null,
     settledOn: account.endedAs === 'settled' ? account.endedOn ?? null : null,
-    /* Interest runs to today, not to the last monthly posting. Without this the balance stands
-       still between postings and a collector quotes a settlement that is days out of date. */
     interestRateAnnual: account.interestRateAnnual,
-    accrueTo: input.today,
+    accrueTo: accrueToFor(account, input.today),
     ledgers: {
       payments: ledgers.payments
         /* LIVE MONEY ONLY (prompt 11): reversed is undone, rejected never was. */

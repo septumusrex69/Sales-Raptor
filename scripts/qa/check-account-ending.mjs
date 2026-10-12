@@ -214,11 +214,11 @@ ok('...and still the imported status', /isWrittenOff\(account\.status\)/.test(st
  */
 check('the residue the firm named', SMALL_RESIDUE, 50)
 check('nothing outstanding is paid up', endingAdvice(0).ending, 'paid_up')
-check('a small residue is still a write-off', endingAdvice(22.77).ending, 'written_off')
-check('and so is a large balance', endingAdvice(5000).ending, 'written_off')
-/* The small-residue wording says so rather than implying it is a lesser thing. */
-ok('...and the small one says it is still a write-off',
-  /still a write-off/.test(endingAdvice(22.77).because))
+check('a small residue closes as settled (the firm, 12 Oct: "under 50 rand ... as settled")', endingAdvice(22.77).ending, 'settled')
+check('a large balance is still a write-off', endingAdvice(5000).ending, 'written_off')
+check('R50 itself is not small', endingAdvice(50).ending, 'written_off')
+ok('...and the small one says the balance is waived',
+  /small balance is waived/.test(endingAdvice(22.77).because))
 /* NEITHER SENTENCE RESTATES THE BALANCE: the screen says it immediately above, and printing it
    twice in a row reads as a bug even though both halves are correct. */
 for (const b of [0, 22.77, 5000]) {

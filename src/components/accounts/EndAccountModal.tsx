@@ -179,8 +179,8 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
               {balance <= 0 ? 'Nothing is outstanding.' : `${rand(balance)} is still outstanding.`}
             </strong>{' '}
             {ending === 'paid_up' && balance > 0
-              ? `Paid up says the debt was settled, and it was not. ${balance < SMALL_RESIDUE
-                ? `Under R${SMALL_RESIDUE} is not worth chasing, but letting it go is still a write-off.`
+              ? `Paid up says the debt was paid in full, and it was not. ${balance < SMALL_RESIDUE
+                ? `Under R${SMALL_RESIDUE}: close it as settled and the small balance is waived.`
                 : 'Closing it anyway cancels that balance, which is a write-off.'}`
               : advice.because}
           </div>

@@ -4,7 +4,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **12 October 2026, afternoon**, sixth session, on `claude/payout-day` (branched from
+Last updated: **12 October 2026, midday**, sixth session, on `claude/payout-day` (branched from
 `claude/staging-clock` at `52ee490`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -181,6 +181,32 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
   A PTC and Swordfish history are not offered for refund. Proved rolled back on KLR/1004: kept
   payments stay split, a -R900 reversal line on PO-KLR-2607, one refund to make, trust difference
   unchanged. `check-payment-search` (40), `e2e/withdraw-payments` (13), both break-tested.
+
+**12 Oct, midday -- ready to close on the WHOLE balance; interest on write-offs runs to prescription**
+- **The firm corrected "paid up = capital nil"**: "almost always there will still be fees ... this
+  will be regarding the total outstanding balance ... if after the division there is ... under 50
+  rand, then the account should ask you if it can be closed ... as settled ... small balance". So
+  `accounts_ready_to_close` now returns `residue` CANDIDATES (open, had capital, a live payment has
+  gone through it, capital under R50 -- a balance under R50 cannot have more capital than that) and
+  the browser works out the real balance with computeBalance (`readyToClose.balancesOf`), keeping
+  nil -> `paid_up` and under R50 -> `small_balance` (`readyKindFor` in accountEnding.ts). A small
+  balance closes as **settled** with reason "Small balance of R x waived", so the remainder becomes
+  the settlement discount. `endingAdvice` now advises settled (not write-off) under R50, and the
+  close box is handed the WHOLE balance, not `capitalOutstanding` (it was the capital). The firm
+  said "ask ... or automatically close, I don't know" -- built as ASK; automatic is one line away
+  if they want it.
+- **Interest on a written-off account runs on to prescription** (the firm: "written off accounts
+  ... written off by the firm should continue to run until prescription ... it can stop running on
+  withdrawn accounts, ... paid up accounts"; they offered "or stop, and recalculate on re-open" --
+  running on was taken, re-open does not exist). Both engines: `open_interest` (staging + schema)
+  no longer returns on a written-off status; it stops at `prescription_date` (or not at all when
+  flagged prescribed with no date) and at `ended_on` for withdrawn / paid up / settled. In the
+  browser `accrueToFor` (balanceInput.ts) is the same list; `writtenOffAt` is no longer set from an
+  account at all (computeBalance still honours it if a caller passes one). NOTE: staging has 24
+  accounts, none with a prescription date -- the rule is only as good as `prescription_date`, which
+  the Swordfish import sets.
+- Checks: check-ready-to-close 27, check-balance +10, check-account-ending, check-list-balance,
+  check-interest-posts-at-payment, check-firm-day updated; e2e/ready-to-close 11.
 
 **12 Oct, late morning -- settled accounts, closing, and the settlement on the client's report**
 (the firm, on HTH/4004: settled for R5 000, still open, "R7 980 to settle today", client told "In

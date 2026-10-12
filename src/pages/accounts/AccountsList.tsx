@@ -278,7 +278,7 @@ export function AccountsList() {
                 interestRateAnnual: a.interestRateAnnual,
                 status: a.status,
                 lastActionAt: a.lastActionAt,
-                endedAs: a.endedAs,
+                endedAs: a.endedAs, prescribed: a.prescribed, prescriptionDate: a.prescriptionDate,
                 endedOn: a.endedOn,
               },
               ledgers,

@@ -210,7 +210,7 @@ export interface DebtorAccount {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- rows come back as untyped JSON from PostgREST. */
-const toAccount = (r: any): DebtorAccount => ({
+export const toAccount = (r: any): DebtorAccount => ({
   id: r.id,
   companyId: r.company_id,
   handoverId: r.handover_id,

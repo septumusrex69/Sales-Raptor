@@ -87,7 +87,7 @@ ok('...with no UTC slicing left on the ledger',
  */
 const page = read('src/pages/accounts/AccountDetail.tsx')
 ok('interest accrues to the firm’s today', /today: firmToday\(\)/.test(page))
-ok('...and the assembly uses the day it is handed', /accrueTo: input\.today/.test(detail))
+ok('...and the assembly uses the day it is handed', /accrueTo: accrueToFor\(account, input\.today\)/.test(detail))
 ok('...rather than reading a clock of its own', !/new Date\(\)/.test(detail))
 ok('...and the statement is struck on it', /asAt=\{firmToday\(\)\}/.test(page))
 /* AND THE LIST STRIKES ITS OWN ROWS ON THE SAME DAY, or the book and the account would quote

@@ -41194,3 +41194,260 @@ as $$
 $$;
 revoke execute on function public.accounts_ready_to_close(uuid[]) from public, anon;
 grant execute on function public.accounts_ready_to_close(uuid[]) to authenticated;
+
+
+-- ============================================================================================
+-- READY TO CLOSE, ON THE WHOLE BALANCE (the firm, 12 Oct: "almost always there will still be
+-- fees ... this will be regarding the total outstanding balance ... if after the division there is
+-- ... under 50 rand, then the account should ask you if it can be closed ... as settled").
+--
+-- Capital at nil was the wrong test: the 50/50 split pays fees and capital together, so the capital
+-- reaching nil says nothing about whether the debt has. The exact balance is computeBalance's, in
+-- the browser (in duplum is applied there, and the SQL engine reads it differently -- see
+-- balanceInput.ts), so this narrows to the CANDIDATES only: an open account whose capital is under
+-- R50. Every component is non-negative, so a balance under R50 cannot have more capital than that.
+-- The browser then works the balance out and keeps nil (paid in full) and under R50 (small
+-- balance). Kind 'residue' says "candidate, not yet decided".
+-- ============================================================================================
+create or replace function public.accounts_ready_to_close(p_accounts uuid[] default null)
+returns table (
+  account_id uuid, account_number text, case_number text, debtor text, company_id uuid, client text,
+  kind text, settlement_id uuid, settlement_amount numeric, paid_toward numeric,
+  capital_outstanding numeric, last_paid_on date)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with settled as (
+    select s.account_id, s.id as settlement_id, s.amount,
+           coalesce((
+             -- THE SAME SUM account_settlement takes, so the list and the panel cannot disagree.
+             select sum(p.amount) from public.account_payments p
+              where p.account_id = s.account_id
+                and p.approved_at is not null
+                and p.reversed_at is null and p.rejected_at is null and p.suspended_at is null
+                and (p.received_at at time zone 'Africa/Johannesburg')::date
+                    between (s.proposed_at at time zone 'Africa/Johannesburg')::date
+                        and coalesce(s.expires_on, public.settlement_today())
+           ), 0) as paid
+      from public.account_settlements s
+     where s.status = 'approved'
+       and (p_accounts is null or s.account_id = any(p_accounts))
+  ), found as (
+    select st.account_id, 'settled'::text as kind, st.settlement_id, st.amount, st.paid
+      from settled st
+     where st.paid >= st.amount
+    union all
+    select d.id, 'residue', null::uuid, null::numeric, null::numeric
+      from public.debtor_accounts d
+     where d.ended_as is null
+       and coalesce(d.capital_handed_over, 0) > 0
+       and d.capital_outstanding < 50
+       -- "AFTER THE DIVISION": only an account a payment has gone through. A R30 handover nobody
+       -- has paid a cent on is a small debt, not a small balance left over.
+       and exists (select 1 from public.account_payments p
+                    where p.account_id = d.id and p.approved_at is not null
+                      and p.reversed_at is null and p.rejected_at is null)
+       and (p_accounts is null or d.id = any(p_accounts))
+       -- A settlement that is complete says settled, not paid up: the first is the truer ending.
+       and not exists (select 1 from settled st where st.account_id = d.id and st.paid >= st.amount)
+  )
+  select d.id, d.account_number, d.case_number,
+         nullif(btrim(coalesce(d.debtor_first_name, '') || ' ' || coalesce(d.debtor_surname, '')), ''),
+         d.company_id, c.name,
+         f.kind, f.settlement_id, f.amount, f.paid, d.capital_outstanding,
+         (select max((p.received_at at time zone 'Africa/Johannesburg')::date)
+            from public.account_payments p
+           where p.account_id = d.id and p.approved_at is not null
+             and p.reversed_at is null and p.rejected_at is null)
+    from found f
+    join public.debtor_accounts d on d.id = f.account_id
+    left join public.companies c on c.id = d.company_id
+   where d.ended_as is null
+   order by c.name nulls last, d.account_number
+$$;
+revoke execute on function public.accounts_ready_to_close(uuid[]) from public, anon;
+grant execute on function public.accounts_ready_to_close(uuid[]) to authenticated;
+
+-- ============================================================================================
+-- INTEREST ON A WRITTEN-OFF ACCOUNT RUNS TO PRESCRIPTION (the firm, 12 Oct: "written off accounts
+-- that's written off by the firm should continue to run until prescription ... it can stop running
+-- on withdrawn accounts, ... paid up accounts"). Of the two options the firm gave -- run on, or stop
+-- and recalculate on re-opening -- running on was taken: re-opening does not exist yet, and an
+-- interest figure that is already right needs no catch-up nobody would remember to run.
+-- ============================================================================================
+create or replace function public.open_interest(
+  p_account uuid, p_as_at date, p_exclude_payment uuid default null)
+returns table (
+  from_day date, days integer, opening_balance numeric,
+  accrued numeric, recoverable numeric)
+language plpgsql
+stable
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_acct public.debtor_accounts%rowtype;
+  v_covered date;
+  v_from date;
+  v_monthly numeric;
+  v_opening numeric;
+  v_balance numeric;
+  v_accrued numeric := 0;
+  v_month numeric;
+  v_cursor date;
+  v_seg_end date;
+  v_month_end date;
+  v_dim integer;
+  v_day date;
+  v_posted numeric;
+  v_posted_recoverable numeric;
+  v_ceiling numeric;
+  v_recoverable numeric;
+  v_days date[];
+  v_deltas numeric[];
+  v_i integer := 1;
+  v_n integer;
+begin
+  select * into v_acct from public.debtor_accounts where id = p_account;
+  if not found then return; end if;
+
+  /* A RATE OF NOUGHT IS THE CLIENT'S DECISION AND NOT OURS TO OVERRIDE. The firm: "whether or not
+     they charge the interest is up to them. So we will not ask Raptor to calculate this." */
+  if coalesce(v_acct.interest_rate_annual, 0) <= 0 then return; end if;
+
+  /* INTEREST RUNS ON A WRITTEN-OFF ACCOUNT AND STOPS AT PRESCRIPTION (the firm, 12 Oct: "sometimes
+     we write off accounts and then we ... revisit them ... interest should stop running ... after
+     prescription"). A write-off is the firm deciding to stop chasing, not the debt ending; a
+     prescribed debt may not be collected at all (NCA s126B), so nothing accrues past that day.
+     computeBalance reads the same two columns (balanceInput.ts) -- one rule, two engines. */
+  if v_acct.prescribed or (v_acct.prescription_date is not null and v_acct.prescription_date < p_as_at) then
+    if v_acct.prescription_date is null then return; end if;
+    p_as_at := least(p_as_at, v_acct.prescription_date);
+  end if;
+  /* A FILE THAT HAS ENDED STOPS ON THE DAY IT ENDED: withdrawn (the client took it back), paid up,
+     settled (the rest waived). A WRITE-OFF IS NOT ONE OF THEM, on the firm's instruction above. */
+  if v_acct.ended_as in ('withdrawn', 'paid_up', 'settled') and v_acct.ended_on is not null then
+    p_as_at := least(p_as_at, v_acct.ended_on);
+  end if;
+
+  /* WHERE THE CLOCK PICKS UP: the last day a posted accrual covers, or -- with nothing posted --
+     the day BEFORE the handover, so that the handover day itself is the first day that accrues.
+     `days` is Swordfish's EXCLUSIVE offset, so accrued_on + days is the last covered day. */
+  select max(accrued_on + a.days) into v_covered
+    from public.account_interest_accruals a where a.account_id = p_account;
+  if v_covered is null then v_covered := v_acct.handover_date - 1; end if;
+  /* Neither a posted accrual nor a handover date: no day the firm can point at as the day the debt
+     became theirs, so nothing accrues rather than something dated from the row's creation. */
+  if v_covered is null then return; end if;
+
+  v_from := v_covered + 1;
+  if v_from > p_as_at then return; end if;
+
+  /* WHAT THE PERIOD OPENS ON. Capital, plus every accrual already posted, plus every movement
+     dated on or before the anchor. What falls AFTER the anchor is not in here -- it lands during
+     the period, on its own day, which is the whole point. */
+  select coalesce(sum(a.amount_accrued), 0) into v_posted
+    from public.account_interest_accruals a where a.account_id = p_account;
+  /* WHAT INTEREST HAS ALREADY CLAIMED AGAINST THE CEILING, which is a different figure from what
+     the debt earned: a period posted while the account was capped carries a smaller recoverable
+     than accrued, and it is the recoverable half that has used the ceiling up. */
+  select coalesce(sum(a.amount_recoverable), 0) into v_posted_recoverable
+    from public.account_interest_accruals a where a.account_id = p_account;
+  v_balance := greatest(coalesce(v_acct.capital_handed_over, 0), 0) + v_posted;
+  select v_balance + coalesce(sum(m.delta), 0) into v_balance
+    from public.account_movements(p_account, p_exclude_payment) m where m.on_day <= v_covered;
+  v_opening := round(v_balance, 2);
+  v_balance := v_opening;
+
+  /* The movements inside the period, one entry per day, in order. Read once into arrays: asking
+     the view again on each of five hundred days is the same answer five hundred times. */
+  select array_agg(x.on_day order by x.on_day), array_agg(x.delta order by x.on_day)
+    into v_days, v_deltas
+    from (select m.on_day, sum(m.delta) as delta
+            from public.account_movements(p_account, p_exclude_payment) m
+           where m.on_day >= v_from and m.on_day <= p_as_at
+           group by m.on_day) x;
+  v_n := coalesce(array_length(v_days, 1), 0);
+
+  v_monthly := v_acct.interest_rate_annual / 100.0 / 12.0;
+
+  v_cursor := v_from;
+  while v_cursor <= p_as_at loop
+    v_month_end := (date_trunc('month', v_cursor) + interval '1 month - 1 day')::date;
+    v_seg_end := least(v_month_end, p_as_at);
+    v_dim := extract(day from v_month_end)::integer;
+    /* The month's interest is accumulated and joined to the balance ONCE, at the close. Adding it
+       day by day would compound within the month, which the posted history does not do -- the book
+       has always charged a flat 2% of the running balance per month. */
+    v_month := 0;
+    v_day := v_cursor;
+    while v_day <= v_seg_end loop
+      -- Everything dated today lands before today earns anything.
+      while v_i <= v_n and v_days[v_i] <= v_day loop
+        v_balance := v_balance + v_deltas[v_i];
+        v_i := v_i + 1;
+      end loop;
+      -- Guarded above zero because an overpaid account must not earn the debtor interest.
+      if v_balance > 0 then
+        v_month := v_month + v_balance * v_monthly / v_dim;
+      end if;
+      v_day := v_day + 1;
+    end loop;
+    v_accrued := v_accrued + v_month;
+    v_balance := v_balance + v_month;
+    v_cursor := v_seg_end + 1;
+  end loop;
+
+  v_accrued := round(v_accrued, 2);
+  if v_accrued <= 0 then return; end if;
+
+  /* IN DUPLUM. Non-capital may not pass the capital handed over, and the ceiling is fixed there
+     rather than recalculated as the balance falls. `recoverable` is what may actually be collected
+     and `accrued` is what the debt earned: they diverge on a capped account and both are returned,
+     because the client is owed an honest account of what was written off rather than a quietly
+     smaller number. engine_balances counts the recoverable half, so that is the half a split may
+     take. */
+  /* AND IT IS NOT GATED ON A COLUMN ANY MORE. `debtor_accounts.in_duplum` is Swordfish's own "In
+     Duplum" column -- Yes or No, meaning THIS ACCOUNT HAS REACHED THE CEILING -- and it was read
+     here as "this account is SUBJECT to the rule", which is a different question whose answer is
+     yes on every account. Everything Raptor created carried false, so no ceiling engaged.
+     In duplum at common law binds every debt; NCA s103(5) is the wider version and binds credit
+     agreements. Raptor applies the wider one to everything, which on a debt the NCA does not reach
+     under-recovers rather than over-recovers. accountBalance.ts holds the browser's half of this
+     and the whole of the argument. */
+  /*
+   * AND INTEREST FILLS THE CEILING BEFORE THE ANNEXURE B FEES DO.
+   *
+   * THE FIRM: "because interest doesn't charge VAT, it would be beneficial for us if the interest
+   * continues to run, and if the interest runs, it takes interest rather than the Annexure B fees.
+   * So the Annexure B fees is pushed out and the interest comes in. The more interest there is, the
+   * more money we make... interest precedes Annexure B fees in an in duplum scenario."
+   *
+   * THIS LINE USED TO DO THE OPPOSITE. It clipped the new accrual by `ceiling - (fees + posted)`,
+   * so on an account whose fees had already reached the ceiling every month posted
+   * `amount_recoverable = 0` -- and once posted that is a financial record and the interest is gone
+   * for good. RRC00005 was in exactly that state: R437,01 of fees against a R380,00 ceiling, and an
+   * accrual due to be written off to nought.
+   *
+   * THE TOTAL IS UNCHANGED EITHER WAY -- the ceiling is the capital. What changes is WHICH charge
+   * fills it, and that is worth the VAT: a rand of fee is 87 cents to the firm and 13 to SARS, a
+   * rand of interest is a whole rand. engine_balances carries the other half of this, clipping the
+   * COSTS by what interest leaves, so the two cannot add up to more than the ceiling between them.
+   *
+   * MEASURED INCLUDING VAT STILL, which the firm settled in the same breath: "whether or not
+   * there's VAT or not, in duplum reached is in duplum reached."
+   */
+  v_ceiling := greatest(coalesce(v_acct.capital_handed_over, 0), 0);
+  v_recoverable := greatest(0, least(v_accrued, v_ceiling - v_posted_recoverable));
+
+  /* `days` IS THE EXCLUSIVE OFFSET, so from_day + days is the last day covered -- p_as_at. The
+     convention is Swordfish's and `accrualEnd` holds the browser's half of it. */
+  from_day := v_from;
+  days := (p_as_at - v_from);
+  opening_balance := v_opening;
+  accrued := v_accrued;
+  recoverable := v_recoverable;
+  return next;
+end $$;

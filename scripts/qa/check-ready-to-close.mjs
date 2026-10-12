@@ -16,6 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { exceptionsOf } from '../../src/lib/paymentsQueue.ts'
+import { readyKindFor } from '../../src/lib/accountEnding.ts'
 
 let pass = 0
 const failures = []
@@ -63,15 +64,25 @@ ok('...runs as the person, so it lists only what they may see', /security invoke
 ok('...a settlement counts once what reached trust covers the agreed figure', /where st\.paid >= st\.amount/.test(fn))
 ok('...counted the way account_settlement counts it (the window from the offer)',
   /between \(s\.proposed_at at time zone 'Africa\/Johannesburg'\)::date/.test(fn) && /s\.status = 'approved'/.test(fn))
-ok('...paid up means the capital is nil, on an account that had capital', /d\.capital_outstanding <= 0/.test(fn) && /capital_handed_over, 0\) > 0/.test(fn))
+ok('...the candidates are capital under R50, on an account that had capital', /d\.capital_outstanding < 50/.test(fn) && /capital_handed_over, 0\) > 0/.test(fn))
+ok('...and only after the division: a payment has gone through it', /and exists \(select 1 from public\.account_payments p/.test(fn.slice(fn.indexOf("'residue'"))))
 ok('...and only open accounts', /where d\.ended_as is null\s+order by/.test(fn))
 ok('...and anon may not call it', /revoke execute on function public\.accounts_ready_to_close\(uuid\[\]\) from public, anon;/.test(sql))
+
+/* THE WHOLE BALANCE DECIDES (the firm, 12 Oct: "regarding the total outstanding balance ...
+   under 50 rand ... closed ... as settled"). */
+check('nothing left is paid up', readyKindFor(0), 'paid_up')
+check('...as is an overpayment', readyKindFor(-12.5), 'paid_up')
+check('R49.99 left is a small balance', readyKindFor(49.99), 'small_balance')
+check('R50 left is still being collected', readyKindFor(50), null)
+check('fees of R300 behind a nil capital are still being collected', readyKindFor(300), null)
 
 /* 4. CLOSED THE WAY IT ENDED. */
 const lib = read('src/lib/readyToClose.ts')
 const closeFn = lib.slice(lib.indexOf('export async function closeReady'))
 ok('a settled one closes through close_as_settled', /r\.kind === 'settled' && r\.settlementId[\s\S]{0,80}closeAsSettled\(r\.settlementId\)/.test(closeFn))
 ok('a paid-up one through settle_account as paid up', /settleAccount\(r\.accountId, 'paid_up'/.test(closeFn))
+ok('a small balance closes as SETTLED, not written off', /r\.kind === 'small_balance'[\s\S]{0,300}settleAccount\(r\.accountId, 'settled'/.test(closeFn))
 
 /* 5. THE ROUTE. */
 const app = read('src/App.tsx')

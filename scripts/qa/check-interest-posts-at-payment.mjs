@@ -263,18 +263,12 @@ check('...nor in the browser', accrueToDate({
 }), null)
 
 /*
- * A WRITTEN-OFF ACCOUNT STOPPED ACCRUING WHEN IT WAS WRITTEN OFF, and the first version of
- * accrue_interest_to did not know it. `computeBalance` returns no open period at all for one, so
- * posting here would write a permanent row the screen says does not exist -- on the one kind of
- * account where the firm has already decided to stop charging.
+ * A WRITTEN-OFF ACCOUNT RUNS ON TO PRESCRIPTION (the firm, 12 Oct: "written off accounts that's
+ * written off by the firm should continue to run until prescription"). It used to be refused here;
+ * now the SQL stops at the prescription date, and the browser stops where accrueToFor says.
  */
-ok('a written-off account is refused by the SQL',
-  /written\.off' then return; end if/.test(accrue))
-check('...and accrues nothing in the browser', computeBalance({
-  capitalHandedOver: 10000, handoverDate: '2026-01-01',
-  ledgers: { payments: [], fees: [], interest: [] },
-  interestRateAnnual: 24, accrueTo: '2026-09-30', writtenOffAt: '2026-06-30',
-}).interestAccruing, 0)
+ok('a written-off status no longer refuses accrual in the SQL', !/written\.off' then return; end if/.test(accrue))
+ok('...prescription stops it instead', /p_as_at := least\(p_as_at, v_acct\.prescription_date\)/.test(accrue))
 
 /*
  * AN OVERPAID ACCOUNT DOES NOT EARN THE DEBTOR INTEREST. The guard is per-day in the SQL because a

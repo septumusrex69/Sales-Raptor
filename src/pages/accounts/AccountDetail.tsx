@@ -620,7 +620,7 @@ export function AccountDetail() {
         interestRateAnnual: account.interestRateAnnual,
         status: account.status,
         lastActionAt: account.lastActionAt,
-        endedAs: account.endedAs,
+        endedAs: account.endedAs, prescribed: account.prescribed, prescriptionDate: account.prescriptionDate,
         endedOn: account.endedOn,
       },
       ledgers,
@@ -2107,7 +2107,10 @@ export function AccountDetail() {
           accountId={account.id}
           caseNumber={account.caseNumber}
           debtorName={name}
-          balance={account.capitalOutstanding ?? 0}
+          /* THE WHOLE BALANCE, not the capital: "this will be regarding the total outstanding
+             balance ... inclusive of fees, interest, capital" (the firm, 12 Oct). The capital
+             alone read nil on accounts that still owed their fees. */
+          balance={statement?.breakdown.balance ?? account.capitalOutstanding ?? 0}
           canWriteOff={canViewFinance(currentUser)}
           onClose={() => setEnding(false)}
           onDone={() => { setEnding(false); reload() }}

@@ -42,9 +42,9 @@ export function ReadyToClose() {
       <div>
         <h1 className="text-lg font-semibold text-slate-800">Ready to close</h1>
         <p className="text-[13px] text-slate-500">
-          The money is in and the account is still open: a settlement paid in full, or the capital paid off.
-          A settlement closes as settled and the rest is waived by the client; a paid-up account may still
-          have interest or fees behind it, so open it if unsure.
+          The money is in and the account is still open: a settlement paid in full, nothing left owing, or
+          under R50 left after the payment. Under R50 closes as settled and the small balance is waived.
+          The balance is the whole of it — capital, interest and fees — as the account page shows it.
         </p>
       </div>
       <Card padded={false}>
@@ -102,7 +102,9 @@ export function ReadyToClose() {
                       <td className="px-2 py-1.5 text-slate-600">
                         {r.kind === 'settled'
                           ? `Settled · ${rand(r.settlementAmount ?? 0)} paid`
-                          : 'Paid up · capital nil'}
+                          : r.kind === 'small_balance'
+                            ? `Settled · ${rand(r.balance ?? 0)} small balance waived`
+                            : 'Paid up · nothing owing'}
                       </td>
                       <td className="px-2 py-1.5 text-slate-500">{r.lastPaidOn ? formatDate(r.lastPaidOn) : '—'}</td>
                       {mayClose && (
