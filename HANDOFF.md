@@ -182,6 +182,37 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
   payments stay split, a -R900 reversal line on PO-KLR-2607, one refund to make, trust difference
   unchanged. `check-payment-search` (40), `e2e/withdraw-payments` (13), both break-tested.
 
+**12 Oct, late morning -- settled accounts, closing, and the settlement on the client's report**
+(the firm, on HTH/4004: settled for R5 000, still open, "R7 980 to settle today", client told "In
+progress" throughout):
+- **A settled account ends at nil.** `BalanceInput.settledOn` (from `ended_as = 'settled'`,
+  `ended_on`) stops the clock like a write-off and makes what was still owed that day the
+  `waived` figure: a "Settlement discount -- the rest waived by the client" credit line on the
+  statement, balance R0.00. Derived, never stored. An overpaid settled account waives nothing.
+  The first tile reads "Settled · R0.00 · R x waived by the client"; the money panel shows the
+  discount instead of "To settle today". Raptor's own write-off (`ended_as = 'written_off'`) now
+  stops the clock on `ended_on` rather than the last action. check-balance (+9).
+- **`accounts_ready_to_close(p_accounts uuid[] default null)`** (staging + schema.sql): open
+  accounts whose approved settlement is paid in full (`settled`) or whose capital is nil
+  (`paid_up`). Security invoker. On staging it finds HTH/4003 (paid up, never closed).
+- **The approval queue offers the close.** A row that completes an approved settlement is badged
+  "Completes the settlement" (counted as account_settlement counts); "Capital paid off" says it
+  will offer a paid-up close. After approving, the queue asks the database which of those
+  accounts are now finished and opens `CloseReadyBox` -- all ticked, "Not now" to skip. Settled
+  closes via `close_as_settled`, paid up via `settle_account('paid_up')`. Never automatic.
+- **Ready to close** (`/accounts/ready-to-close`, a gold line on the Accounts page when any exist):
+  the net for ones somebody skipped. Not in Trust -- closing is a collections decision.
+- **The settlement on the client's report, as Arranged** (the firm: "just say arranged ... keep
+  it simple"; no new rung): offer -> Negotiating and the client's action ("We are waiting for your
+  approval", with the figure); approved -> Arranged ("A settlement of R5 000 was arranged on ..., to
+  be paid by ..."); lapsed -> Broken arrangement; paid -> Closed ("paid ... in full and the account
+  is closed as settled"). Wired on the account page only -- the accounts list, diary and monthly
+  report do not yet read the settlement (they fetch no offers). check-client-position (+15).
+- **An account with a payment is not "New".** everWorked counts a live payment.
+- check-ready-to-close (20), e2e/ready-to-close (10). Also fixed two e2e tests broken by prompt
+  11 itself: payments-in (two Reverse buttons, the box now reads by id) and reject-payment
+  ("Reject · not theirs").
+
 **Fifth session (10 October, evening), on `claude/staging-clock`** (started from `1848079`):
 
 | Commit | What it is |

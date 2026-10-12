@@ -103,6 +103,13 @@ export interface BalanceInput {
    */
   /** An account written off stops accruing on this date. */
   writtenOffAt?: string | null
+  /**
+   * AN ACCOUNT CLOSED AS SETTLED stops on this date, and whatever it still owed that day is the
+   * settlement discount -- the part of the debt the client agreed to give up for the amount paid.
+   * The firm, on HTH/4004: settled for R5 000 and the page still said R7 980 to settle today.
+   * Derived from the day it closed, never stored: the ledgers it is read from cannot change.
+   */
+  settledOn?: string | null
   vatRate?: number
   /**
    * Annual interest rate as a percentage (24 = 24% a year). With `accrueTo` below, the balance
@@ -137,6 +144,11 @@ export interface BalanceBreakdown {
   settlement: number
   /** Set where a rule stopped the balance growing, so the number can be explained. */
   cappedBy?: 'in duplum' | 'written off'
+  /**
+   * WHAT THE CLIENT GAVE UP ON A SETTLED ACCOUNT: the balance on the day it closed as settled.
+   * Already taken off `balance`, which is why that reads nil. Zero on every other account.
+   */
+  waived: number
   /** How much interest and fees the cap withheld. Nonzero only when `cappedBy` is set. */
   withheld: number
   /**
@@ -307,7 +319,9 @@ function splitFeeLedger(ledgers: LedgerLines) {
 
 export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
-  const stopAt = input.writtenOffAt ?? null
+  /* A SETTLED ACCOUNT STOPS LIKE A WRITTEN-OFF ONE -- nothing accrues on a debt that has ended --
+     and differs only in what the remainder is called: given up by the client, not unrecovered. */
+  const stopAt = input.writtenOffAt ?? input.settledOn ?? null
 
   const within = (date: string) => !stopAt || date <= stopAt
 
@@ -433,7 +447,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     withheldInterest = roundToCents(allInterest - interestKept)
     withheldFees = roundToCents(withheld - withheldInterest)
     cappedBy = 'in duplum'
-  } else if (stopAt) {
+  } else if (input.writtenOffAt) {
     cappedBy = 'written off'
     withheld = roundToCents(
       ledgers.interest.filter((i) => !within(i.from)).reduce((t, i) => t + i.amount, 0)
@@ -444,7 +458,11 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     )
   }
 
-  const balance = roundToCents(capital + recoverableNonCapital - payments)
+  const owed = roundToCents(capital + recoverableNonCapital - payments)
+  /* ONLY WHAT IS STILL OWED IS WAIVED. An overpaid settled account keeps its credit: that is the
+     debtor's money, and a discount below nil would be the firm giving away a refund. */
+  const waived = input.settledOn && owed > 0 ? owed : 0
+  const balance = roundToCents(owed - waived)
 
   /*
    * The receipt fee on a settlement is a FEE, so in duplum binds it like every other fee.
@@ -459,7 +477,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
   const headroom = Math.max(0, roundToCents(capital - recoverableNonCapital))
   /* QUOTED ON THE DAY THE SETTLEMENT IS QUOTED, which is where the balance is being read to.
      `accrueTo` is that day; on a written-off account it is the day the account stopped. */
-  const settlementOn = input.writtenOffAt ?? input.accrueTo ?? input.handoverDate ?? '2000-01-01'
+  const settlementOn = input.writtenOffAt ?? input.settledOn ?? input.accrueTo ?? input.handoverDate ?? '2000-01-01'
   const settlementFee = balance > 0
     ? Math.min(settlementReceiptFee(balance, vatRate, settlementOn), headroom) : 0
 
@@ -479,6 +497,7 @@ export function computeBalance(input: BalanceInput): BalanceBreakdown {
     settlementFee,
     settlement: roundToCents(balance + settlementFee),
     cappedBy,
+    waived,
     withheld,
     withheldFees,
     withheldInterest,
@@ -529,7 +548,7 @@ function openAccrual(
   movements: { date: string; amount: number }[],
 ): { amount: number; days: number; from: string | null } {
   const none = { amount: 0, days: 0, from: null }
-  if (!input.accrueTo || input.writtenOffAt) return none
+  if (!input.accrueTo || input.writtenOffAt || input.settledOn) return none
   const covered = lastCoveredDay(input.ledgers.interest)
     ?? (input.handoverDate ? dayBefore(input.handoverDate) : null)
   /* Still nothing to run from: an account with neither a posted accrual nor a handover date has no
@@ -610,6 +629,8 @@ export type StatementKind =
   | 'fee-no-charge'
   | 'receipt-fee'
   | 'payment'
+  /** What the client gave up when the account was settled; the line that brings it to nil. */
+  | 'settlement-discount'
 
 export interface StatementLine {
   date: string
@@ -646,7 +667,7 @@ export interface Statement {
 export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedule): Statement {
   const { capitalHandedOver: capital, ledgers, vatRate = 0.15 } = input
   const breakdown = computeBalance(input)
-  const stopAt = input.writtenOffAt ?? null
+  const stopAt = input.writtenOffAt ?? input.settledOn ?? null
   /* THE SAME SPLIT THE BALANCE USED. The statement printed the item 9 ROW as an ordinary fee and
      then printed the computed receipt fee under the payment as well -- the same fee on two lines,
      and a running balance that ended at the doubled figure. */
@@ -782,6 +803,18 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
     }
   }
 
+  /* THE DISCOUNT IS A LINE, NOT A FOOTNOTE: a statement's lines must add up to the figure at its
+     foot, and a settled account's foot is nil. It is a credit because it reduces what is owed. */
+  if (input.settledOn && breakdown.waived > 0) {
+    pending.push({
+      date: input.settledOn,
+      kind: 'settlement-discount',
+      description: 'Settlement discount — the rest waived by the client',
+      debit: 0,
+      credit: breakdown.waived,
+    })
+  }
+
   /*
    * Date order, and within a date a fixed order of kinds. Two lines on the same day have no
    * inherent sequence, and letting them fall out in whatever order the ledgers were read in
@@ -791,6 +824,8 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
   const rank: Record<StatementKind, number> = {
     /* A no-charge action sits with the fees, because that is what it would have been. */
     handover: 0, interest: 1, 'interest-accruing': 1, fee: 2, 'fee-no-charge': 2, payment: 3, 'receipt-fee': 4,
+    /* Last on its day: it is whatever the day's other lines left owing. */
+    'settlement-discount': 5,
   }
   /*
    * Day, then kind, then the clock.
@@ -845,6 +880,8 @@ export function buildStatement(input: BalanceInput, _schedule?: AnnexureBSchedul
         + `Annexure B fees is not recoverable`
         + `${breakdown.withheldInterest > 0 ? `, and ${money(breakdown.withheldInterest)} of interest with it` : ''}`
         + `${breakdown.settlementFee === 0 ? ', and the receipt fee on a settlement falls away too' : ''}.`
+      : input.settledOn
+        ? `Settled on ${input.settledOn}.${breakdown.waived > 0 ? ` ${money(breakdown.waived)} was waived by the client.` : ''}`
       : breakdown.cappedBy === 'written off'
         ? `The account was written off on ${stopAt}. ${money(breakdown.withheld)} of later interest and fees is excluded.`
         : undefined,

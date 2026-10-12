@@ -80,6 +80,18 @@ export interface NarrativeInput {
   } | null
   /** A payment received in the period. */
   paidInPeriod?: { amount: number; on: string } | null
+  /**
+   * THE LIVE SETTLEMENT OFFER, where there is one. Its figure IS said, unlike a promise's: it is
+   * the number the client approves, and "an offer" with no amount is not something they can
+   * answer. `on` is when it was put up, approved or closed, as the state makes relevant.
+   */
+  settlement?: {
+    state: 'proposed' | 'approved' | 'lapsed' | 'declined' | 'withdrawn' | 'paid'
+    amount: number
+    proposedOn: string
+    approvedOn?: string | null
+    expiresOn?: string | null
+  } | null
   /** When the debtor disputed the account. */
   disputeRaisedOn?: string | null
   /**
@@ -252,6 +264,27 @@ function whatHappened(input: NarrativeInput): string {
   if (input.frozenReason) {
     const when = input.frozenOn ? ` on ${onDate(input.frozenOn)}` : ''
     return `Work was paused${when} — ${trimStop(input.frozenReason)}.`
+  }
+
+  /*
+   * THE SETTLEMENT, ABOVE THE MONEY: a payment towards an agreed figure is the settlement working,
+   * and the sentence that says so is the one the client needs. An offer waiting on the client
+   * comes first of all, because it is the client's move.
+   */
+  const st = input.settlement
+  if (st?.state === 'proposed') {
+    return `On ${onDate(st.proposedOn)} the debtor offered ${money(st.amount)} in full and final settlement. `
+      + 'We are waiting for your approval.'
+  }
+  if (st?.state === 'approved') {
+    const by = st.expiresOn ? `, to be paid by ${onDate(st.expiresOn)}` : ''
+    return `A settlement of ${money(st.amount)} was arranged${st.approvedOn ? ` on ${onDate(st.approvedOn)}` : ''}${by}.`
+  }
+  if (st?.state === 'lapsed') {
+    return `The debtor did not pay the settlement of ${money(st.amount)} arranged${st.expiresOn ? ` for ${onDate(st.expiresOn)}` : ''}.`
+  }
+  if (st?.state === 'paid') {
+    return `The debtor paid the settlement of ${money(st.amount)} in full and the account is closed as settled.`
   }
 
   if (input.paidInPeriod) {
@@ -468,6 +501,10 @@ function whatNext(input: NarrativeInput): string {
    * client looking at an account that has not moved in four months.
    */
   if (input.frozenReason) return 'Collection will remain paused until we receive further instruction.'
+  /* A SETTLED ACCOUNT HAS NO NEXT STEP, and an offer waiting on the client has said whose move it
+     is already -- "no further action has been scheduled" after it would read as the firm idle. */
+  if (input.settlement?.state === 'paid') return ''
+  if (input.settlement?.state === 'proposed' && !input.next) return ''
   /*
    * NO DIARY DATE IS ITS OWN STATEMENT, and an honest one. An active account with nothing booked
    * is adrift — the firm has stopped working it without deciding to — and a client is entitled

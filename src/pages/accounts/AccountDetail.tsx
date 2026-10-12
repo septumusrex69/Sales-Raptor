@@ -32,7 +32,7 @@ import {
 import { HandOutModal } from './HandOutModal'
 import { CancelArrangementModal } from './CancelArrangementModal'
 import type { Selection } from '../../lib/accountAllocation'
-import { timeOnDesk, firmToday } from '../../lib/dateLabels'
+import { timeOnDesk, firmToday, firmDay } from '../../lib/dateLabels'
 import { styleFor, PROMISE_CHIP, PROMISE_WORDS } from './timelineStyle'
 import { LedgerPanel } from './LedgerPanel'
 import { RecordPaymentModal } from '../finance/RecordPaymentModal'
@@ -620,6 +620,8 @@ export function AccountDetail() {
         interestRateAnnual: account.interestRateAnnual,
         status: account.status,
         lastActionAt: account.lastActionAt,
+        endedAs: account.endedAs,
+        endedOn: account.endedOn,
       },
       ledgers,
       /* TODAY IN JOHANNESBURG. toISOString is UTC, so between midnight and two in the morning
@@ -1086,12 +1088,17 @@ export function AccountDetail() {
    * has made the first call" (the firm, 11 Oct, on SBB/2006). `closed` is the rung's own input.
    */
   const ended = accountEnded(account)
+  /* THE LIVE OFFER'S STATE, which the position and the client's sentence both read. */
+  const settlementState = settlement?.state ?? null
   const position = deskPosition({
     closed: ended,
     status: account.status,
     subStatus: account.subStatus,
     bucket: account.bucket,
-    everWorked: !!account.lastActionAt,
+    settlement: settlementState,
+    /* MONEY IS WORK. HTH/4004 had R7 000 in and read "New -- nobody has made the first call",
+       because only a logged action counted. A payment means somebody got through. */
+    everWorked: !!account.lastActionAt || (ledgers?.payments ?? []).some((p) => !p.reversedAt),
   })
 
   const clientLiaison = users.find((u) => u.id === client?.accountOwnerId)
@@ -1285,6 +1292,7 @@ export function AccountDetail() {
     closed: ended,
     status: account.status,
     subStatus: account.subStatus,
+    settlement: settlementState,
     paidInPeriod: false,
     openQueryWithClient: account.clientActionAsk !== null,
   })
@@ -1331,6 +1339,11 @@ export function AccountDetail() {
          * Same value the panel's own heading uses, so the line and the label cannot disagree.
          */
         position: clientReport.position,
+        /* THE SETTLEMENT, in the firm's words for each state -- see accountNarrative. */
+        settlement: settlement && settlement.state !== 'declined' && settlement.state !== 'withdrawn'
+          ? { state: settlement.state, amount: settlement.amount, proposedOn: firmDay(settlement.proposedAt),
+              approvedOn: settlement.approvedAt ? firmDay(settlement.approvedAt) : null, expiresOn: settlement.expiresOn }
+          : null,
         /*
          * THE DISPUTE, AND WHETHER ANYTHING HAS ACTUALLY ARRIVED.
          *
@@ -1727,6 +1740,13 @@ export function AccountDetail() {
           The figure moves every day, so the tile says so. A collector who quotes a settlement and
           is asked "why is it more than yesterday" needs the answer on the same screen.
         */}
+        {/* A SETTLED ACCOUNT HAS NOTHING TO SETTLE. It said "R 7 980,14 to settle today" on
+            HTH/4004 the day the debtor paid the agreed R5 000 -- the remainder is what the client
+            gave up, and the tile says so rather than quoting it. */}
+        {b && account.endedAs === 'settled' ? (
+          <Figure label="Settled" value={formatMoney(b.balance)}
+            note={b.waived > 0 ? `${formatMoney(b.waived)} waived by the client` : 'nothing was waived'} strong />
+        ) : (
         <Figure label="To settle today" value={b ? formatMoney(b.settlement) : '—'}
           note={b
             ? `incl. ${formatMoney(b.settlementFee)} receipt fee`
@@ -1734,6 +1754,7 @@ export function AccountDetail() {
                 ? ` · ${formatMoney(b.interestAccruing)} interest over ${b.interestAccruingDays} ${b.interestAccruingDays === 1 ? 'day' : 'days'}`
                 : '')
             : undefined} strong />
+        )}
         <Figure label="Collected" value={b ? formatMoney(b.payments) : '—'} note={`${livePayments} ${livePayments === 1 ? 'payment' : 'payments'}`} />
         <Figure
           label="Next promise"
@@ -3180,9 +3201,20 @@ function SummaryPanel({ account, breakdown, note, progress }: {
           </p>
         )}
         <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
-          <Money label="Balance" value={b?.balance} strong />
-          <Money label="Receipt fee if settled" value={b?.settlementFee} />
-          <Money label="To settle today" value={b?.settlement} strong />
+          {/* A SETTLED ACCOUNT SHOWS THE DISCOUNT AND ENDS AT NIL -- quoting a figure to settle on
+              one is the R7 980 the firm found on HTH/4004 (12 Oct). */}
+          {b && b.waived > 0 ? (
+            <>
+              <Money label="Waived by the client on settlement" value={-b.waived} />
+              <Money label="Balance" value={b.balance} strong />
+            </>
+          ) : (
+            <>
+              <Money label="Balance" value={b?.balance} strong />
+              <Money label="Receipt fee if settled" value={b?.settlementFee} />
+              <Money label="To settle today" value={b?.settlement} strong />
+            </>
+          )}
         </div>
         {/*
           HOW FAR THROUGH IT THEY ARE. THE FIRM: "a progress report or a progress bar for a debtor

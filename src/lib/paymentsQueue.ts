@@ -147,6 +147,10 @@ export function queueFigures(r: QueueInput): QueueFigures {
 export type ExceptionKey =
   | 'credit' | 'capital_paid_off' | 'ptc' | 'came_back' | 'in_duplum' | 'needs_rate'
   | 'before_handover' | 'allocation_mismatch' | 'ptc_mismatch' | 'closed_account'
+  | 'completes_settlement'
+
+/** The account's approved settlement and what has already reached trust towards it. */
+export interface LiveSettlement { amount: number; paid: number }
 
 /** How an account was closed, for the "Account closed" badge: ended_as and ended_on. */
 export interface ClosedAs { as: string; on: string | null }
@@ -180,6 +184,7 @@ export interface QueueException {
  */
 export function exceptionsOf(
   r: QueueInput, problems: Violation[], handoverDate: string | null = null, closed: ClosedAs | null = null,
+  settlement: LiveSettlement | null = null,
 ): QueueException[] {
   const f = queueFigures(r)
   const out: QueueException[] = []
@@ -199,7 +204,20 @@ export function exceptionsOf(
   if (r.capitalBefore > CENT && r.capitalAfter <= CENT) {
     out.push({ key: 'capital_paid_off', label: 'Capital paid off', warn: false,
       detail: 'Capital is nought after this payment. That is not the same as settled — interest '
-        + 'and fees may still stand.' })
+        + 'and fees may still stand. Approving it offers to close the account as paid up.' })
+  }
+  /*
+   * THE PAYMENT THAT FINISHES A SETTLEMENT, said before it is approved (the firm, 12 Oct: "when we
+   * approve payments, for example, say that okay, it's been settled"). Approving it offers the
+   * close; it is never done by itself. Counted the way close_as_settled counts (account_settlement's
+   * paid_toward: every approved receipt in the offer's window), so the badge never promises a close
+   * the database would refuse.
+   */
+  if (settlement && !closed && r2(settlement.paid + r.amount) >= settlement.amount - CENT) {
+    out.push({ key: 'completes_settlement', label: 'Completes the settlement', warn: false,
+      detail: `With this payment ${amount(r2(settlement.paid + r.amount))} of the agreed `
+        + `${amount(settlement.amount)} has been paid. Approving it offers to close the account as settled; `
+        + 'the rest of the balance is waived by the client.' })
   }
   if (r.paidToClient) {
     out.push({ key: 'ptc', label: 'PTC', warn: false,
@@ -280,9 +298,10 @@ function dayMonth(iso: string): string {
 /** Every row checked once: the figures, the formulas and the badges. */
 export function checkedRow<T extends QueueInput>(
   r: T, a: Allocation, handoverDate: string | null = null, closed: ClosedAs | null = null,
+  settlement: LiveSettlement | null = null,
 ): { row: T; a: Allocation; f: QueueFigures; problems: Violation[]; exceptions: QueueException[] } {
   const problems = checkAllocation(a)
-  return { row: r, a, f: queueFigures(r), problems, exceptions: exceptionsOf(r, problems, handoverDate, closed) }
+  return { row: r, a, f: queueFigures(r), problems, exceptions: exceptionsOf(r, problems, handoverDate, closed, settlement) }
 }
 
 /* ============================================================================================== */

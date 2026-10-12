@@ -287,6 +287,13 @@ export interface PositionInput {
   underAdministration?: boolean
   /** True once the account is off the book, whatever the inherited status says. */
   closed?: boolean
+  /**
+   * A SETTLEMENT IS AN ARRANGEMENT, and the firm said to call it one: "just say arranged ... keep it
+   * simple". HTH/4004 went from an offer to paid in full and the client was told "In progress" the
+   * whole way, because nothing here knew a settlement existed. The live offer's state, as
+   * `account_settlement` derives it (lapsed included). Paid and closed are the account's `closed`.
+   */
+  settlement?: 'proposed' | 'approved' | 'lapsed' | 'declined' | 'withdrawn' | 'paid' | null
 }
 
 /**
@@ -345,6 +352,16 @@ export function clientPosition(input: PositionInput): ClientPosition {
   if (input.inLegal || /summons|attorney|litigat/i.test(sub)) return 'legal'
   if (input.disputed || /defended|dispute/i.test(sub)) return 'disputed'
   if (/tracing|trace/i.test(sub)) return 'tracing'
+
+  /*
+   * ABOVE MONEY, like a promise would be if it were a stronger fact than a payment: a payment made
+   * towards an agreed settlement is the settlement working, and "Arranged" is what the client
+   * approved. An offer waiting on the client is a negotiation -- the debtor has put a figure up
+   * and the client has to answer it. One not paid by its date is broken, exactly as a promise is.
+   */
+  if (input.settlement === 'approved') return 'arranged'
+  if (input.settlement === 'proposed') return 'negotiating'
+  if (input.settlement === 'lapsed') return 'broken_arrangement'
 
   if (input.paidInPeriod) return 'paying'
   if (/promise\s*to\s*pay|\bptp\b/i.test(sub)) return 'arranged'
@@ -421,8 +438,9 @@ export function clientPosition(input: PositionInput): ClientPosition {
  * Derived, never stored: a dispute already carries `with_client` as a state, and a second copy
  * of the same fact is a second copy to keep in step.
  */
-export function needsClient(input: { openQueryWithClient?: boolean }): boolean {
-  return input.openQueryWithClient === true
+export function needsClient(input: { openQueryWithClient?: boolean; settlement?: PositionInput['settlement'] }): boolean {
+  /* AN OFFER WAITING ON THE CLIENT IS THE CLIENT'S TO ANSWER -- nothing moves until they approve. */
+  return input.openQueryWithClient === true || input.settlement === 'proposed'
 }
 
 export type FrozenBy = 'firm' | 'client'

@@ -135,7 +135,7 @@ try {
       /back on the unallocated list/.test(strip))
 
     /* ---- one row on its own ---- */
-    await page.getByTestId('queue-row').first().getByRole('button', { name: /^Reject$/ }).click()
+    await page.getByTestId('queue-row').first().getByRole('button', { name: /^Reject/ }).click()
     await page.waitForSelector('text=Reject this receipt', { timeout: 5000 })
     t.ok('one row opens a box about one receipt',
       (await page.locator('text=Reject this receipt').count()) > 0)
@@ -173,7 +173,7 @@ try {
   {
     const { context, page } = await openQueue(browser, { waiting: [BY_HAND] })
     await page.getByTestId('queue-heading').waitFor({ timeout: 15000 })
-    await page.getByTestId('queue-row').first().getByRole('button', { name: /^Reject$/ }).click()
+    await page.getByTestId('queue-row').first().getByRole('button', { name: /^Reject/ }).click()
     await page.waitForSelector('text=Reject this receipt', { timeout: 5000 })
 
     /*

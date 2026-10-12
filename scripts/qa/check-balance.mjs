@@ -498,6 +498,42 @@ const empty = { payments: [], fees: [], interest: [] }
 }
 
 /*
+ * A SETTLED ACCOUNT ENDS AT NIL, AND THE REST IS A LINE (the firm, HTH/4004, 12 Oct: settled for
+ * R5 000 and the page still said R7 980 to settle today). Worked by hand: R12 000 capital, R2 000
+ * and R5 000 paid, receipt fees R230 and R575 (10% + VAT, under the cap) -> R5 805 owed on the day
+ * it closed, all of it waived. A fee raised after the close is not owed; interest stops.
+ */
+{
+  const settled = {
+    capitalHandedOver: 12000, handoverDate: '2026-03-18', interestRateAnnual: 0, accrueTo: '2026-10-12',
+    settledOn: '2026-08-10',
+    ledgers: {
+      payments: [
+        { id: 'p1', date: '2026-07-08', amount: 2000, paidToClient: false },
+        { id: 'p2', date: '2026-08-05', amount: 5000, paidToClient: false },
+      ],
+      fees: [{ date: '2026-09-01', description: 'Email', exclVat: 25, vat: 3.75, billed: true }],
+      interest: [],
+    },
+  }
+  const b = computeBalance(settled)
+  check('settled: what it owed on the day is waived', b.waived, 5805)
+  check('settled: the balance is nil', b.balance, 0)
+  check('settled: nothing to settle, no receipt fee quoted', b.settlement, 0)
+  const st = buildStatement(settled)
+  const last = st.lines[st.lines.length - 1]
+  check('settled: the statement ends at nil', last.balance, 0)
+  check('settled: ...on the discount line, a credit for the waived amount', last.kind === 'settlement-discount' ? last.credit : -1, 5805)
+  check('settled: the fee after the close is not on it', st.lines.filter((l) => l.date > '2026-08-10').length, 0)
+  const over = computeBalance({ ...settled, ledgers: { ...settled.ledgers,
+    payments: [...settled.ledgers.payments, { id: 'p3', date: '2026-08-09', amount: 7000, paidToClient: false }] } })
+  check('settled but overpaid: nothing is waived, the credit stays the debtor\'s', over.waived, 0)
+  check('...and the balance stays below nil', over.balance < 0 ? 1 : 0, 1)
+  const open = computeBalance({ ...settled, settledOn: null })
+  check('an open account waives nothing', open.waived, 0)
+}
+
+/*
  * THE LINE run-all.mjs READS. A file that prints no count is counted as ZERO in the
  * headline and is indistinguishable from a healthy one -- a review of this suite found 20
  * files silent that way, about 800 assertion sites reported as nothing.

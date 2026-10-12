@@ -97,6 +97,12 @@ const handlers = [
   }],
   [(u) => /\/rpc\/payments_posted/.test(u), () => ({ body: [POSTED] })],
   [(u) => /\/rpc\/reverse_payment/.test(u), (_u, req) => { sent.push({ reverse: req.postDataJSON() }); return { body: 'copy-1' } }],
+  /* WHAT THE REVERSE BOX READS ABOUT THE PAYMENT, by id (prompt 11: one box from every door). */
+  [(u) => /\/rest\/v1\/account_payments\?(.*&)?id=eq\./.test(u), () => ({ body: {
+    id: 'pay-7', account_id: 'acct-7', amount: 1000, received_at: '2026-09-02T08:00:00Z', paid_to_client: false,
+    bank_line_id: 'line-7', paid_over_in_swordfish: false, approved_at: '2026-09-02T09:00:00Z', reversed_at: null } })],
+  [(u) => /\/rest\/v1\/payment_allocations\?/.test(u), () => ({ body: [{ payover_run_id: 'run-7' }] })],
+  [(u) => /\/rest\/v1\/payover_runs\?(.*&)?id=eq\./.test(u), () => ({ body: { invoice_number: 'PO-KIS-2609', status: 'paid' } })],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
 ]
@@ -231,12 +237,13 @@ try {
   await page.goto(`http://127.0.0.1:${PORT}/trust/check`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('table', { timeout: 15000 })
   await page.getByTitle('Open this receipt end to end').first().click()
-  const reverse = page.getByRole('button', { name: /^Reverse$/ })
+  const reverse = page.getByRole('button', { name: /^Reverse$/ }).first()
   t.ok('Check offers Reverse on the opened receipt', (await reverse.count()) > 0 && await reverse.isVisible())
   if (await reverse.count()) {
     await reverse.click()
-    t.ok('...which says the run it was paid on is not touched', await page.getByText(/already been paid over/).isVisible())
-    await page.getByPlaceholder(/Cheque returned/).fill('Cheque returned')
+    await page.getByTestId('reverse-modal').waitFor({ timeout: 10000 })
+    t.ok('...which says the run it was paid on is not touched', /That run is not changed/.test(await page.getByTestId('reverse-invoiced').innerText().catch(() => '')))
+    await page.getByLabel('Why').fill('Cheque returned')
     await page.getByRole('button', { name: /^Reverse it$/ }).click()
     await page.waitForTimeout(400)
     t.check('...and reverses through the function, with the reason',

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { fetchReadyToClose } from '../../lib/readyToClose'
 import { AlertTriangle, Loader2, Search, UserCheck, X } from 'lucide-react'
 import { BOOK_CHOICES, bookLabel, parseBook } from '../../lib/accountBooks'
 import { Card } from '../../components/ui/Card'
@@ -65,6 +66,14 @@ export function AccountsList() {
   const { currentUser } = useAuth()
   const [params, setParams] = useSearchParams()
   const [accounts, setAccounts] = useState<DebtorAccount[]>([])
+  /* How many accounts have their money in and are still open (12 Oct). Read once; a failure
+     hides the line rather than the book. */
+  const [readyCount, setReadyCount] = useState(0)
+  useEffect(() => {
+    let live = true
+    fetchReadyToClose().then((r) => { if (live) setReadyCount(r.length) }).catch(() => {})
+    return () => { live = false }
+  }, [])
   /*
    * WHAT EACH ROW ACTUALLY OWES, KEYED ON THE ACCOUNT.
    *
@@ -269,6 +278,8 @@ export function AccountsList() {
                 interestRateAnnual: a.interestRateAnnual,
                 status: a.status,
                 lastActionAt: a.lastActionAt,
+                endedAs: a.endedAs,
+                endedOn: a.endedOn,
               },
               ledgers,
               today: firmToday(),
@@ -420,6 +431,17 @@ export function AccountsList() {
               : undefined}
           />
         </div>
+      )}
+
+      {/* ACCOUNTS WHOSE MONEY IS IN AND NOBODY CLOSED THEM (12 Oct). Only when there are some: a
+          line saying "0 ready to close" every morning is a line people learn not to read. */}
+      {readyCount > 0 && (
+        <Link to="/accounts/ready-to-close" data-testid="ready-to-close-link"
+          className="flex items-center justify-between gap-3 rounded-lg border border-gold-300 bg-gold-50 px-4 py-2.5 text-[13px] text-slate-700 hover:bg-gold-100">
+          <span><span className="font-semibold">{readyCount} {readyCount === 1 ? 'account is' : 'accounts are'} ready to close</span>
+            {' '}— the money is in and {readyCount === 1 ? 'it is' : 'they are'} still open.</span>
+          <span className="font-medium text-slate-600">Review</span>
+        </Link>
       )}
 
       {/*

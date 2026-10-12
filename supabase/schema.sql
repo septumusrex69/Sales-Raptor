@@ -41120,3 +41120,77 @@ begin
   end if;
   return v_run;
 end $$;
+
+-- ============================================================================================
+-- ACCOUNTS WHOSE MONEY IS IN AND NOBODY HAS CLOSED THEM (the firm, 12 Oct, on HTH/4004: "accounts
+-- that are paid up from the money you received ... I'm sure it's somewhere flagged to be closed").
+--
+-- Two kinds, and only two, because each is a fact the database already holds:
+--   settled  -- the live settlement is approved and what has reached the trust account towards it
+--               is at least the agreed figure: close_as_settled would accept it today;
+--   paid_up  -- the capital is fully paid. Fees or interest may still stand behind it, which is
+--               why this OFFERS the close rather than doing it -- the person closing sees the
+--               statement first.
+-- Derived, never stored: a flag would need a job to set it and a night it did not run would hide
+-- an account that should have closed.
+--
+-- READ BY TWO SCREENS: the approval queue asks it about the accounts it has just approved (so the
+-- close is offered while the money is in front of somebody), and Ready to close lists the whole
+-- book (so one nobody closed then is not lost). Security invoker: a person sees only the accounts
+-- they may already see.
+-- ============================================================================================
+create or replace function public.accounts_ready_to_close(p_accounts uuid[] default null)
+returns table (
+  account_id uuid, account_number text, case_number text, debtor text, company_id uuid, client text,
+  kind text, settlement_id uuid, settlement_amount numeric, paid_toward numeric,
+  capital_outstanding numeric, last_paid_on date)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with settled as (
+    select s.account_id, s.id as settlement_id, s.amount,
+           coalesce((
+             -- THE SAME SUM account_settlement takes, so the list and the panel cannot disagree.
+             select sum(p.amount) from public.account_payments p
+              where p.account_id = s.account_id
+                and p.approved_at is not null
+                and p.reversed_at is null and p.rejected_at is null and p.suspended_at is null
+                and (p.received_at at time zone 'Africa/Johannesburg')::date
+                    between (s.proposed_at at time zone 'Africa/Johannesburg')::date
+                        and coalesce(s.expires_on, public.settlement_today())
+           ), 0) as paid
+      from public.account_settlements s
+     where s.status = 'approved'
+       and (p_accounts is null or s.account_id = any(p_accounts))
+  ), found as (
+    select st.account_id, 'settled'::text as kind, st.settlement_id, st.amount, st.paid
+      from settled st
+     where st.paid >= st.amount
+    union all
+    select d.id, 'paid_up', null::uuid, null::numeric, null::numeric
+      from public.debtor_accounts d
+     where d.ended_as is null
+       and coalesce(d.capital_handed_over, 0) > 0
+       and d.capital_outstanding <= 0
+       and (p_accounts is null or d.id = any(p_accounts))
+       -- A settlement that is complete says settled, not paid up: the first is the truer ending.
+       and not exists (select 1 from settled st where st.account_id = d.id and st.paid >= st.amount)
+  )
+  select d.id, d.account_number, d.case_number,
+         nullif(btrim(coalesce(d.debtor_first_name, '') || ' ' || coalesce(d.debtor_surname, '')), ''),
+         d.company_id, c.name,
+         f.kind, f.settlement_id, f.amount, f.paid, d.capital_outstanding,
+         (select max((p.received_at at time zone 'Africa/Johannesburg')::date)
+            from public.account_payments p
+           where p.account_id = d.id and p.approved_at is not null
+             and p.reversed_at is null and p.rejected_at is null)
+    from found f
+    join public.debtor_accounts d on d.id = f.account_id
+    left join public.companies c on c.id = d.company_id
+   where d.ended_as is null
+   order by c.name nulls last, d.account_number
+$$;
+revoke execute on function public.accounts_ready_to_close(uuid[]) from public, anon;
+grant execute on function public.accounts_ready_to_close(uuid[]) to authenticated;

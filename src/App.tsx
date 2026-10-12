@@ -74,6 +74,7 @@ const CompanyDetail = lazy(() => import('./pages/companies/CompanyDetail').then(
 const AccountsList = lazy(() => import('./pages/accounts/AccountsList').then((m) => ({ default: m.AccountsList })))
 const AccountDetail = lazy(() => import('./pages/accounts/AccountDetail').then((m) => ({ default: m.AccountDetail })))
 const DisputesBoard = lazy(() => import('./pages/accounts/DisputesBoard').then((m) => ({ default: m.DisputesBoard })))
+const ReadyToClose = lazy(() => import('./pages/accounts/ReadyToClose').then((m) => ({ default: m.ReadyToClose })))
 const QueryDetail = lazy(() => import('./pages/queries/QueryDetail').then((m) => ({ default: m.QueryDetail })))
 const LibraryWorkflows = lazy(() => import('./pages/library/LibraryWorkflows').then((m) => ({ default: m.LibraryWorkflows })))
 const LibraryLetterhead = lazy(() => import('./pages/library/LibraryLetterhead').then((m) => ({ default: m.LibraryLetterhead })))
@@ -233,6 +234,8 @@ function App() {
               */}
               <Route path="/accounts/workflows"
                 element={<Navigate to="/library/workflows/standard-collections" replace />} />
+              {/* Accounts whose money is in and nobody closed them (12 Oct). Before :id, like workflows. */}
+              <Route path="/accounts/ready-to-close" element={<ReadyToClose />} handle={{ title: 'Ready to close' }} />
               <Route path="/accounts/:id" element={<AccountDetail />} handle={{ title: 'Account' }} />
               <Route path="/diary" element={<DiaryPage />} handle={{ title: 'Diary' }} />
               <Route path="/performance" element={<CollectorDashboard />} handle={{ title: 'Collections' }} />

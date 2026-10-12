@@ -80,6 +80,9 @@ export function balanceInputFor(input: {
     interestRateAnnual: number
     status: string
     lastActionAt: string | null
+    /** How and when Raptor closed it, where it did (`ended_as`, `ended_on`). */
+    endedAs?: string | null
+    endedOn?: string | null
   }
   ledgers: LedgerRows
   /** Today in Johannesburg. Passed in: this file has no clock. */
@@ -91,7 +94,11 @@ export function balanceInputFor(input: {
   return {
     capitalHandedOver: account.capitalHandedOver,
     handoverDate: account.handoverDate,
-    writtenOffAt: input.writtenOff(account.status) ? account.lastActionAt : null,
+    /* RAPTOR'S OWN CLOSE IS EXACT where Swordfish's status is not: the day it was written off or
+       settled is on the row, so the clock stops on it rather than on the last action. */
+    writtenOffAt: account.endedAs === 'written_off' && account.endedOn ? account.endedOn
+      : input.writtenOff(account.status) ? account.lastActionAt : null,
+    settledOn: account.endedAs === 'settled' ? account.endedOn ?? null : null,
     /* Interest runs to today, not to the last monthly posting. Without this the balance stands
        still between postings and a collector quotes a settlement that is days out of date. */
     interestRateAnnual: account.interestRateAnnual,

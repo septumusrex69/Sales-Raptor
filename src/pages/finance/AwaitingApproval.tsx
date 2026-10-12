@@ -16,8 +16,10 @@ import {
 import type { Allocation, Violation } from '../../lib/allocationRules'
 import {
   batchReconciliation, batchTotals, checkedRow, splitForBatch, totalsByClient,
-  type ClosedAs, type QueueException, type QueueFigures,
+  type ClosedAs, type LiveSettlement, type QueueException, type QueueFigures,
 } from '../../lib/paymentsQueue'
+import { fetchLiveSettlements, fetchReadyToClose, type ReadyToClose } from '../../lib/readyToClose'
+import { CloseReadyBox } from '../../components/accounts/CloseReadyBox'
 import { cycleStartOn, shortDate } from '../../lib/trustCycles'
 import { clockToday } from '../../lib/clock.ts'
 /*
@@ -65,6 +67,10 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
   const [rows, setRows] = useState<AwaitingPayment[]>([])
   const [handovers, setHandovers] = useState<Map<string, string>>(new Map())
   const [closedAccounts, setClosedAccounts] = useState<Map<string, ClosedAs>>(new Map())
+  /* The approved settlement on each account, for "Completes the settlement" (12 Oct). */
+  const [liveSettlements, setLiveSettlements] = useState<Map<string, LiveSettlement>>(new Map())
+  /* Accounts an approval has just finished, offered for closing while the money is on screen. */
+  const [closeOffer, setCloseOffer] = useState<ReadyToClose[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -130,6 +136,8 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
       fetchHandoverDates(queue.map((r) => r.accountId)).then(setHandovers).catch(() => setHandovers(new Map()))
       /* The "Account closed" badge, read the same way: a failure loses the badge, never the queue. */
       fetchClosedAccounts(queue.map((r) => r.accountId)).then(setClosedAccounts).catch(() => setClosedAccounts(new Map()))
+      /* The settlement badge, read the same way: a failure loses the badge, never the queue. */
+      fetchLiveSettlements(queue.map((r) => r.accountId)).then(setLiveSettlements).catch(() => setLiveSettlements(new Map()))
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not load the day’s payments.')
     } finally { setLoading(false) }
@@ -150,8 +158,9 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
    * not refused: the money has arrived either way. See splitForBatch.
    */
   const checked = useMemo(() => rows.map((r) =>
-    checkedRow(r, awaitingAllocation(r), handovers.get(r.accountId) ?? null, closedAccounts.get(r.accountId) ?? null)),
-  [rows, handovers, closedAccounts])
+    checkedRow(r, awaitingAllocation(r), handovers.get(r.accountId) ?? null, closedAccounts.get(r.accountId) ?? null,
+      liveSettlements.get(r.accountId) ?? null)),
+  [rows, handovers, closedAccounts, liveSettlements])
   const broken = useMemo(() => checked.filter((c) => c.problems.length > 0), [checked])
   /* What a batch may carry: never a row that breaks a formula. */
   const batchAll = useMemo(() => splitForBatch(checked), [checked])
@@ -173,10 +182,20 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
     if (ids.length === 0 || busy) return
     setBusy(true); setError(null)
     try {
+      /* WHICH ACCOUNTS THESE ARE, read before the reload takes the rows off the screen. */
+      const accounts = rows.filter((r) => ids.includes(r.paymentId)).map((r) => r.accountId)
       const out = await approvePayments(ids)
       setPicked(new Set())
       await load()
       onApproved()
+      /*
+       * DID THAT FINISH ANY ACCOUNT? (the firm, 12 Oct: "when we approve payments ... say that okay,
+       * it's been settled. You want to close this account"). Asked of the database, after the
+       * money has posted, so the answer is about what is now true rather than what the row
+       * predicted. A failure here loses the offer, never the approval -- Ready to close still
+       * lists them.
+       */
+      fetchReadyToClose(accounts).then(setCloseOffer).catch(() => setCloseOffer([]))
       /* A PAYMENT THAT COULD NOT GO THROUGH NAMES ITSELF and the rest still did -- the database
          approves them one at a time inside one call. Reported rather than swallowed. */
       if (out.problems.length > 0) {
@@ -219,9 +238,20 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
    * thrown out. A line that is wrong when something unusual has happened is worse than no line,
    * because it is read on the day somebody is checking.
    */
+  /* THE CLOSE OFFER, drawn whichever way the queue renders -- approving the last row empties it. */
+  const closeBox = closeOffer.length > 0 ? (
+    <CloseReadyBox rows={closeOffer}
+      intro={closeOffer.length === 1
+        ? 'That payment finished the account. Close it now?'
+        : 'Those payments finished these accounts. Close them now?'}
+      onClose={() => setCloseOffer([])}
+      onDone={() => { setCloseOffer([]); onApproved() }} />
+  ) : null
+
   if (rows.length === 0) {
     return (
       <QueueSection count={0}>
+        {closeBox}
         <Card padded={false}>
           {(error ?? loadError) && (
             <div className="flex items-start gap-2 bg-negative-50 px-4 py-2.5 text-[13px] text-negative-700">
@@ -250,6 +280,7 @@ export function AwaitingApproval({ refreshKey, onApproved, onLoaded }: {
 
   return (
     <QueueSection count={rows.length}>
+    {closeBox}
     <Card padded={false}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
         <p className="text-[12.5px] text-slate-500">

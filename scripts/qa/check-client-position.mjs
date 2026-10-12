@@ -800,6 +800,33 @@ ok('what the debtor said still comes first',
     trace: { lodgedOn: '2026-10-02', round: round() },
   }).happened))
 
+/* A SETTLEMENT IS AN ARRANGEMENT (the firm, 12 Oct: "just say arranged ... keep it simple").
+   HTH/4004 went from an offer to paid in full and the client was told "In progress" throughout. */
+{
+  const base = { status: 'Active', subStatus: null }
+  check('a settlement offer waiting on the client is Negotiating', clientPosition({ ...base, settlement: 'proposed' }), 'negotiating')
+  check('...and is the client\'s to answer', needsClient({ settlement: 'proposed' }), true)
+  check('an approved settlement is Arranged -- no new rung', clientPosition({ ...base, settlement: 'approved' }), 'arranged')
+  check('...even with money coming in towards it', clientPosition({ ...base, settlement: 'approved', paidInPeriod: true }), 'arranged')
+  check('a lapsed settlement is a Broken arrangement', clientPosition({ ...base, settlement: 'lapsed' }), 'broken_arrangement')
+  check('a paid one is Closed with the account', clientPosition({ ...base, settlement: 'paid', closed: true }), 'closed')
+  check('a declined offer changes nothing', clientPosition({ ...base, settlement: 'declined' }), 'in_progress')
+  check('a dispute still outranks a settlement', clientPosition({ ...base, settlement: 'approved', disputed: true }), 'disputed')
+  check('the thirteen rungs are still thirteen', CLIENT_POSITION_ORDER.length, 13)
+  const offer = { state: 'proposed', amount: 5000, proposedOn: '2026-07-10' }
+  ok('the client is told the offer and that it waits on them',
+    /offered R5\D?000 in full and final settlement\. We are waiting for your approval\.$/.test(accountNarrative({ settlement: offer })))
+  ok('...an approved one says arranged, and by when',
+    /settlement of R5\D?000 was arranged on .*, to be paid by/.test(accountNarrative({ settlement: { ...offer, state: 'approved', approvedOn: '2026-07-11', expiresOn: '2026-11-18' } })))
+  ok('...and a paid one says it closed as settled',
+    /closed as settled/.test(accountNarrative({ settlement: { ...offer, state: 'paid' } })))
+  check('money is work: an account with a payment is not New',
+    deskPosition({ ...base, everWorked: true }), 'in_progress')
+  ok('...and the account page counts a live payment as worked',
+    /everWorked: !!account\.lastActionAt \|\| \(ledgers\?\.payments \?\? \[\]\)\.some\(\(p\) => !p\.reversedAt\)/.test(
+      readFileSync(new URL('../../src/pages/accounts/AccountDetail.tsx', import.meta.url), 'utf8')))
+}
+
 if (failures.length) {
   console.log(`\n${failures.length} FAILED:\n`)
   for (const f of failures) console.log('  ✗ ' + f + '\n')
