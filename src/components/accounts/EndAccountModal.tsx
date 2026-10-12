@@ -8,7 +8,11 @@ import {
   endingAdvice, withdrawalTotal,
   type AccountEnding, type WithdrawalBasis, type WithdrawalCharge,
 } from '../../lib/accountEnding'
-import { fetchWithdrawalBasis, settleAccount, withdrawAccount } from '../../lib/accountEndingApi'
+import {
+  fetchReceiptsOnFile, fetchWithdrawalBasis, settleAccount, withdrawAccount, withdrawAccountRefunding,
+  type ReceiptOnFile,
+} from '../../lib/accountEndingApi'
+import { formatDate } from '../../data/mockData'
 
 /**
  * ENDING AN ACCOUNT, THREE WAYS.
@@ -23,9 +27,11 @@ import { fetchWithdrawalBasis, settleAccount, withdrawAccount } from '../../lib/
  * WITHDRAWN IS THE CLIENT'S DOING AND COSTS THEM MONEY; the other two are the firm's. The box
  * changes shape completely between them, which is the honest reflection of that.
  */
-export function EndAccountModal({ accountId, caseNumber, balance, canWriteOff, onClose, onDone }: {
+export function EndAccountModal({ accountId, caseNumber, debtorName, balance, canWriteOff, onClose, onDone }: {
   accountId: string
   caseNumber: string | null
+  /** Who a refund is paid to, unless somebody types otherwise. */
+  debtorName?: string | null
   /** What is still outstanding, which decides whether paid up is even truthful. */
   balance: number
   /** finance.view. Writing off and withdrawing are the Administrator's; paid up is not. */
@@ -44,6 +50,34 @@ export function EndAccountModal({ accountId, caseNumber, balance, canWriteOff, o
   const [preset, setPreset] = useState<string>('arrangement')
   const [charge, setCharge] = useState<WithdrawalCharge>({ fees: true, interest: true, commission: true })
   const [typed, setTyped] = useState('')
+
+  /*
+   * THE PAYMENTS ALREADY ON THE ACCOUNT (prompt 11; the firm, 12 Oct: "it should ask what to do with
+   * the payment ... refunded to the debtor or keep it on the account ... by default, keep it on the
+   * account. Like majority of accounts that are withdrawn with payments on it."). KEEP changes no
+   * money. REFUND reverses each chosen receipt, holds it as the debtor's credit and refunds it; one
+   * the client was already paid over, the client owes back on its next run.
+   */
+  const [receipts, setReceipts] = useState<ReceiptOnFile[] | null>(null)
+  const [payments, setPayments] = useState<'keep' | 'refund'>('keep')
+  const [refundIds, setRefundIds] = useState<Set<string>>(new Set())
+  const [payableTo, setPayableTo] = useState(debtorName ?? '')
+  useEffect(() => {
+    if (ending !== 'withdrawn' || receipts || !canWriteOff) return
+    let live = true
+    fetchReceiptsOnFile(accountId)
+      .then((r) => {
+        if (!live) return
+        setReceipts(r)
+        setRefundIds(new Set(r.filter(refundable).map((x) => x.id)))
+      })
+      .catch(() => { if (live) setReceipts([]) })
+    return () => { live = false }
+  }, [ending, receipts, accountId, canWriteOff])
+  const chosen = (receipts ?? []).filter((r) => payments === 'refund' && refundIds.has(r.id))
+  const refundTotal = chosen.reduce((t, r) => t + r.amount, 0)
+  const owedBack = chosen.filter((r) => r.runStatus && ['approved', 'sent', 'paid'].includes(r.runStatus))
+    .reduce((t, r) => t + r.toClient, 0)
 
   useEffect(() => {
     if (ending !== 'withdrawn' || basis || !canWriteOff) return
@@ -69,7 +103,9 @@ export function EndAccountModal({ accountId, caseNumber, balance, canWriteOff, o
     if (busy) return
     setBusy(true); setError(null)
     try {
-      if (ending === 'withdrawn') await withdrawAccount(accountId, reason, effective, note || undefined)
+      if (ending === 'withdrawn' && chosen.length > 0) {
+        await withdrawAccountRefunding(accountId, reason, effective, note || undefined, chosen.map((r) => r.id), payableTo.trim())
+      } else if (ending === 'withdrawn') await withdrawAccount(accountId, reason, effective, note || undefined)
       else await settleAccount(accountId, ending, reason, note || undefined)
       onDone(ending)
     } catch (e: unknown) {
@@ -101,7 +137,7 @@ export function EndAccountModal({ accountId, caseNumber, balance, canWriteOff, o
             <button type="button" onClick={onClose} className={controlClass}>Cancel</button>
             <button
               type="button" onClick={submit}
-              disabled={busy || reason.trim() === ''}
+              disabled={busy || reason.trim() === '' || (chosen.length > 0 && payableTo.trim() === '')}
               className="rounded-lg bg-navy-950 px-4 py-2 text-sm font-semibold text-white
                 disabled:opacity-40"
             >
@@ -161,6 +197,61 @@ export function EndAccountModal({ accountId, caseNumber, balance, canWriteOff, o
             onCharge={(c) => { setCharge(c); setPreset('') }}
             onTyped={setTyped}
           />
+        )}
+
+        {ending === 'withdrawn' && receipts && receipts.length > 0 && (
+          <div className="space-y-2 rounded-lg border border-slate-200 px-4 py-3" data-testid="withdraw-payments">
+            <div className="text-[13px] font-semibold text-slate-700">
+              {receipts.length === 1 ? 'One payment is' : `${receipts.length} payments are`} already on this account
+            </div>
+            <table className="w-full list-table">
+              <tbody>
+                {receipts.map((r) => (
+                  <tr key={r.id} className="border-b border-slate-50 last:border-0">
+                    {payments === 'refund' && (
+                      <td className="w-6 py-1">
+                        <input type="checkbox" aria-label={`Refund ${rand(r.amount)} of ${formatDate(r.receivedOn)}`}
+                          disabled={!refundable(r)} checked={refundIds.has(r.id)}
+                          onChange={() => setRefundIds((p) => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })} />
+                      </td>
+                    )}
+                    <td className="py-1 text-slate-600">{formatDate(r.receivedOn)}</td>
+                    <td className="py-1 text-right tabular-nums font-medium text-slate-800">{rand(r.amount)}</td>
+                    <td className="py-1 pl-3 text-slate-500">
+                      {r.swordfish ? 'Swordfish history — stays as it is'
+                        : r.paidToClient ? 'Paid to the client directly — the client refunds it'
+                          : r.runStatus === 'paid' ? `Paid over on ${r.runInvoice}`
+                            : r.runStatus ? `On ${r.runInvoice} (${r.runStatus})` : 'Not on a run yet'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="space-y-1.5 text-[13px] text-slate-700">
+              <label className="flex items-start gap-2">
+                <input type="radio" className="mt-1" checked={payments === 'keep'} onChange={() => setPayments('keep')} data-testid="withdraw-keep" />
+                <span><span className="font-medium">Keep them on the account</span>
+                  <span className="block text-xs text-slate-500">The usual case. The payments stand, the client keeps what was paid over, and the firm&rsquo;s fees and commission on them stay earned.</span></span>
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="radio" className="mt-1" checked={payments === 'refund'} onChange={() => setPayments('refund')}
+                  disabled={!receipts.some(refundable)} data-testid="withdraw-refund" />
+                <span><span className="font-medium">Refund them to the debtor</span>
+                  <span className="block text-xs text-slate-500">A wrongful handover: the debt was never owed. Each is reversed, its fees taken back, and refunded from trust.</span></span>
+              </label>
+            </div>
+            {payments === 'refund' && (
+              <>
+                <FormField label="Refund paid to" required>
+                  <input className={inputClass} value={payableTo} onChange={(e) => setPayableTo(e.target.value)} />
+                </FormField>
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" data-testid="withdraw-effect">
+                  {chosen.length === 0 ? 'Tick the payments to refund.'
+                    : `${rand(refundTotal)} refunded to the debtor${owedBack > 0 ? `; the client owes back ${rand(owedBack)} on its next payover` : ''}. It appears under Payments to make with its reference.`}
+                </p>
+              </>
+            )}
+          </div>
         )}
 
         <FormField label={ending === 'written_off' ? 'Why it is being written off' : 'Why'} required>
@@ -289,4 +380,9 @@ function Row({ label, value }: { label: string; value: string }) {
       <span>{label}</span><span className="tabular-nums">{value}</span>
     </div>
   )
+}
+
+/** A trust receipt Raptor processed: a PTC is the client's to refund, Swordfish history is frozen. */
+function refundable(r: ReceiptOnFile): boolean {
+  return !r.paidToClient && !r.swordfish
 }

@@ -2085,6 +2085,7 @@ export function AccountDetail() {
         <EndAccountModal
           accountId={account.id}
           caseNumber={account.caseNumber}
+          debtorName={name}
           balance={account.capitalOutstanding ?? 0}
           canWriteOff={canViewFinance(currentUser)}
           onClose={() => setEnding(false)}

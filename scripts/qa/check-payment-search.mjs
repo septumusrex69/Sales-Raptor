@@ -64,15 +64,42 @@ const lastFn = (name) => {
   return i < 0 ? '' : sql.slice(i, sql.indexOf('end $$;', i))
 }
 const alloc = lastFn('allocate_payment')
-const closedAt = alloc.indexOf("if v_acct.ended_as is not null or coalesce(v_acct.write_off_reason, '') <> ''")
+const closedAt = alloc.indexOf('if (v_acct.ended_as is not null')
 ok('a receipt on a closed account is caught', closedAt >= 0)
+/* ONLY MONEY RECEIVED ON OR AFTER THE CLOSE, or a receipt explicitly held. A reversal re-splits the
+   payments after it; tested on the bare ended_as, a payment KEPT through a withdrawal would come back
+   as a credit the first time anything earlier on the account was reversed. */
+const closedTest = closedAt >= 0 ? alloc.slice(closedAt, alloc.indexOf('then', closedAt)) : ''
+ok('...only money received on or after the close, or held as credit',
+  /received_at at time zone 'Africa\/Johannesburg'\)::date >= v_acct\.ended_on/.test(closedTest) && /v_pay\.hold_as_credit/.test(closedTest))
 ok('...before interest is posted or a receipt fee raised', closedAt >= 0 && closedAt < alloc.indexOf('accrue_interest_to')
   && closedAt < alloc.indexOf('insert into public.account_fees'))
 const branch = closedAt >= 0 ? alloc.slice(closedAt, alloc.indexOf('return v_id;', closedAt)) : ''
 ok('...and the whole amount is the credit, every taking nought', /0, 0, 0, v_pay\.amount,/.test(branch) && /'v2-closed-credit'/.test(branch))
 const preview = lastFn('preview_allocation')
-ok('the queue previews it the same way', /excess_credit := greatest\(coalesce\(p_amount, 0\), 0\);/.test(preview)
-  && preview.indexOf("d.ended_as is not null") < preview.indexOf('finance_split('))
+const previewClosed = preview.indexOf('d.ended_as is not null and v_day >= d.ended_on')
+ok('the queue previews it the same way, on the same day test', previewClosed >= 0
+  && /excess_credit := greatest\(coalesce\(p_amount, 0\), 0\);/.test(preview)
+  && previewClosed < preview.indexOf('finance_split('))
+
+/* WITHDRAWING WITH PAYMENTS ON IT: KEEP BY DEFAULT, OR REFUND (prompt 11; the firm, 12 Oct: "by
+   default, keep it on the account"). The refund is the existing machinery in one transaction. */
+const wr = lastFn('withdraw_account_refunding')
+ok('withdraw_account_refunding exists', wr.length > 0)
+const wrAt = (needle) => wr.indexOf(needle)
+ok('...checks every receipt before anything is withdrawn',
+  wrAt('That payment is not on this account.') >= 0 && wrAt('That payment is not on this account.') < wrAt('public.withdraw_account('))
+ok('...refuses a PTC, which never reached the trust', /if v_pay\.paid_to_client then/.test(wr) && wrAt('if v_pay.paid_to_client') < wrAt('public.withdraw_account('))
+ok('...withdraws first, so the charge is the one the box showed', wrAt('public.withdraw_account(') >= 0 && wrAt('public.withdraw_account(') < wrAt('public.reverse_payment('))
+const hold = wrAt('set hold_as_credit = true')
+ok('...holds the copy as credit BEFORE approving it, or it would be split again',
+  hold >= 0 && hold > wrAt('public.reverse_payment(') && hold < wrAt('public.approve_payment('))
+ok('...and refunds that credit through the one refund path', wrAt("public.dispose_excess_credit(v_alloc, 'refund'") > wrAt('public.approve_payment('))
+ok('...gated to signed-in users only', /revoke execute on function public\.withdraw_account_refunding\([^)]*\) from public, anon;/.test(sql))
+const modal = read('src/components/accounts/EndAccountModal.tsx')
+ok('the withdrawal box keeps the payments by default', /useState<'keep' \| 'refund'>\('keep'\)/.test(modal))
+ok('...shows the effect before confirming', /data-testid="withdraw-effect"/.test(modal))
+ok('...and only refunds when something is ticked', /chosen\.length > 0[\s\S]{0,200}withdrawAccountRefunding/.test(modal))
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payment-search: ${pass} passed, ${failures.length} failed`)

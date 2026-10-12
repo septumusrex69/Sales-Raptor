@@ -1,5 +1,6 @@
 import type { StatusChange } from './accountTimeline'
 import { supabase } from './supabase'
+import { firmDay } from './dateLabels'
 import type { WithdrawalCharge } from './accountEnding'
 
 /**
@@ -94,4 +95,67 @@ export async function fetchStatusChanges(accountId: string): Promise<StatusChang
       charge: charge ? { total: Math.round((Number(charge.amount) + Number(charge.vat)) * 100) / 100, settlement: charge.settlement } : null,
     }
   })
+}
+
+/* ------------------------------ payments on a withdrawn account ------------------------------ */
+
+/**
+ * THE PAYMENTS ALREADY ON AN ACCOUNT BEING WITHDRAWN (prompt 11; the firm: "it should ask what to do
+ * with the payment ... by default, keep it on the account"). Each with the run that carried it and
+ * what the client was paid from it, so the box can say what a refund would cost the client.
+ */
+export interface ReceiptOnFile {
+  id: string
+  receivedOn: string
+  amount: number
+  paidToClient: boolean
+  swordfish: boolean
+  runInvoice: string | null
+  runStatus: string | null
+  /** What the client was paid from it: owed back if refunded after its run went out. */
+  toClient: number
+}
+
+export async function fetchReceiptsOnFile(accountId: string): Promise<ReceiptOnFile[]> {
+  const { data, error } = await supabase.from('account_payments')
+    .select('id, received_at, amount, paid_to_client, paid_over_in_swordfish, approved_at, reversed_at, rejected_at, is_demo')
+    .eq('account_id', accountId).not('approved_at', 'is', null).is('reversed_at', null).is('rejected_at', null)
+    .order('received_at')
+  if (error) throw new Error(error.message)
+  const rows = ((data ?? []) as { id: string; received_at: string; amount: number; paid_to_client: boolean; paid_over_in_swordfish: boolean; is_demo: boolean }[])
+    .filter((r) => !r.is_demo)
+  if (rows.length === 0) return []
+  const { data: al } = await supabase.from('payment_allocations')
+    .select('payment_id, to_client, payover_run_id').in('payment_id', rows.map((r) => r.id)).neq('status', 'reversed')
+  const alloc = new Map(((al ?? []) as { payment_id: string; to_client: number | null; payover_run_id: string | null }[]).map((a) => [a.payment_id, a]))
+  const runIds = [...new Set([...alloc.values()].map((a) => a.payover_run_id).filter(Boolean))] as string[]
+  const { data: rs } = runIds.length ? await supabase.from('payover_runs').select('id, invoice_number, status').in('id', runIds) : { data: [] }
+  const run = new Map(((rs ?? []) as { id: string; invoice_number: string; status: string }[]).map((r) => [r.id, r]))
+  return rows.map((r) => {
+    const a = alloc.get(r.id)
+    const ru = a?.payover_run_id ? run.get(a.payover_run_id) : undefined
+    return {
+      id: r.id, receivedOn: firmDay(r.received_at), amount: Number(r.amount), paidToClient: !!r.paid_to_client,
+      swordfish: !!r.paid_over_in_swordfish, runInvoice: ru?.invoice_number ?? null, runStatus: ru?.status ?? null,
+      toClient: Number(a?.to_client ?? 0),
+    }
+  })
+}
+
+/**
+ * WITHDRAW, REFUNDING THE CHOSEN RECEIPTS TO THE DEBTOR, in one transaction: reversed, held as the
+ * debtor's credit and decided as a refund -- see withdraw_account_refunding.
+ */
+export async function withdrawAccountRefunding(
+  accountId: string, reason: string, charge: WithdrawalCharge, note: string | undefined,
+  refund: string[], payableTo: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.rpc('withdraw_account_refunding', {
+    p_account: accountId, p_reason: reason,
+    p_fees: charge.fees, p_interest: charge.interest, p_commission: charge.commission,
+    p_amount: charge.amount ?? null, p_note: note ?? null,
+    p_refund: refund, p_payable_to: payableTo,
+  })
+  if (error) throw new Error(error.message)
+  return (data as string | null) ?? null
 }

@@ -4,7 +4,7 @@
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **11 October 2026, evening**, sixth session, on `claude/payout-day` (branched from
+Last updated: **12 October 2026, afternoon**, sixth session, on `claude/payout-day` (branched from
 `claude/staging-clock` at `52ee490`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
@@ -157,9 +157,29 @@ Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, cloc
 - `build_payover_run` pending SQL: tried a fourth time, cancelled again. The user asked to be
   reminded when back at a desktop (saved to memory).
 
-**Proposed to the firm, waiting for a yes (§4):** settlement acceptance must carry proof -- pin the
-client's email from the account's Emails tab or upload the document to the account's Documents --
-linked from the settlement, the statement line and the client file; the account holds the one copy.
+**12 Oct, afternoon (prompt 11 v3, URGENT first):**
+- **A reversed or rejected payment counted on the account (KLR/1006).** The statement, Collected and
+  To settle today read the reversed R1 100 AND its rejected copy. The ledger fetches in
+  `accountBook.ts` now drop `rejected_at` rows, `totals.paid` and `balanceInput` count live money
+  only, and a reversed receipt is drawn struck through with its fate ("Reversed 10 Jul — Wrong ref
+  → placed on MPG/3003", `reversalFates`). Every date on the account is the Johannesburg day
+  (`firmDay`): 22:00Z on 2 Jul is 3 Jul. `check-live-money` (15) holds it.
+- **The timeline says the account was closed** -- every `account_status_events` change (withdrawn,
+  settled, paid up, written off, hold, re-open) with who, reason and the charge (`fetchStatusChanges`,
+  kind `status`).
+- **The closed-credit rule was narrowed.** As first built it tested `ended_as` alone, so when a
+  reversal re-split the account's LATER payments, a payment KEPT through the withdrawal came back as
+  a credit. It now applies only to money received on or after `ended_on` (Johannesburg day), or a
+  payment marked `account_payments.hold_as_credit`. Written-off/closed-status accounts unchanged.
+- **Withdrawing with payments on it asks: keep (default) or refund** (the firm: "by default, keep it
+  on the account"). `EndAccountModal` lists the approved receipts with their run; Keep is
+  `withdraw_account` unchanged; Refund (ticked receipts, payable-to name) shows the effect first --
+  "R1 100.00 refunded to the debtor; the client owes back R847.50 on its next payover" -- and calls
+  `withdraw_account_refunding`: validate all, withdraw, then per receipt reverse_payment -> copy
+  `hold_as_credit` -> approve (whole credit) -> `dispose_excess_credit('refund')`. One transaction.
+  A PTC and Swordfish history are not offered for refund. Proved rolled back on KLR/1004: kept
+  payments stay split, a -R900 reversal line on PO-KLR-2607, one refund to make, trust difference
+  unchanged. `check-payment-search` (40), `e2e/withdraw-payments` (13), both break-tested.
 
 **Fifth session (10 October, evening), on `claude/staging-clock`** (started from `1848079`):
 
