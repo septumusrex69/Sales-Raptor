@@ -55,7 +55,12 @@ function handlers(me) {
     [(u) => /\/rest\/v1\/firm_settings/.test(u), () => ({ body: [{ firm_name: 'Bredell Ferreira', vat_rate: 0.15 }] })],
     [(u) => /\/rest\/v1\/debtor_accounts/.test(u), () => ({ body: [ACCOUNT] })],
     [(u) => /\/rpc\/account_settlement\b/.test(u), () => ({ body: current ? [current] : [] })],
-    [(u) => /\/rpc\/(propose_settlement|approve_settlement|close_settlement_offer|close_as_settled)/.test(u),
+    /* The account's emails a liaison may pin as the client's acceptance (12 Oct). */
+    [(u) => /\/rest\/v1\/account_emails\?/.test(u), () => ({ body: [
+      { id: 'em-1', subject: 'RE: Settlement offer KIS0012', occurred_at: '2026-10-07T09:00:00Z', direction: 'in', correspondent: 'client', debtor_address: 'accounts@client.example' },
+    ] })],
+    [(u) => /\/rest\/v1\/account_settlements\?/.test(u), () => ({ body: { evidence_email_id: null, evidence_document_id: null } })],
+    [(u) => /\/rpc\/(propose_settlement|approve_settlement_with_proof|approve_settlement|close_settlement_offer|close_as_settled)/.test(u),
       (url, req) => {
         sent.push({ fn: /\/rpc\/(\w+)/.exec(url)[1], body: req.postDataJSON() })
         return { body: 'set-1' }
@@ -114,16 +119,18 @@ try {
     t.ok('...and that it is not to be quoted', await page.getByText(/Not to be quoted until the client approves it/).first().isVisible())
     await page.getByRole('button', { name: 'The client approved it' }).click()
     const go = page.getByRole('button', { name: 'Record approval' })
-    t.ok('approval is refused without an expiry or how the client said yes', await go.isDisabled())
+    t.ok('approval is refused without an expiry or the client\u2019s acceptance', await go.isDisabled())
     await page.getByLabel(/Must be paid by/).fill('2099-10-31')
-    await page.getByLabel(/How the client approved it/).fill('Email from the client, 7 Oct')
+    /* IN WRITING, AND THE WRITING ITSELF (the firm, 11 Oct): an expiry alone is not enough. */
+    t.ok('...an expiry alone is not enough', await go.isDisabled())
+    await page.getByLabel("The client's email").selectOption('em-1')
     await go.click()
     await page.waitForTimeout(300)
-    const a = sent.find((x) => x.fn === 'approve_settlement')
-    t.ok('recording it calls approve_settlement', !!a)
+    const a = sent.find((x) => x.fn === 'approve_settlement_with_proof')
+    t.ok('recording it calls approve_settlement_with_proof', !!a)
     t.check('...for this offer', a?.body?.p_id, 'set-1')
     t.check('...with the expiry', a?.body?.p_expires_on, '2099-10-31')
-    t.check('...and the evidence', a?.body?.p_evidence, 'Email from the client, 7 Oct')
+    t.check('...and the pinned email as the proof', a?.body?.p_email, 'em-1')
     t.check('...and the figure', a?.body?.p_amount, 18000)
     await t.shot(page, 'settlement-proposed-liaison')
     await context.close()

@@ -134,7 +134,8 @@ const liveFn = (name) => {
   const end = sql.indexOf('\n$$;', at)
   return strip(sql.slice(at, end))
 }
-const approve = liveFn('approve_settlement')
+/* WITH PROOF since 12 Oct: the old function now only refuses (reload the page). */
+const approve = liveFn('approve_settlement_with_proof')
 const closeOffer = liveFn('close_settlement_offer')
 const settle = liveFn('close_as_settled')
 const reader = liveFn('account_settlement')
@@ -149,7 +150,9 @@ ok('...and it is for reading', /for select/.test(policies[0] ?? ''))
 
 ok('approving asks settlement.approve', /has_capability\('settlement\.approve'\)/.test(approve ?? ''))
 ok('...and refuses an expiry already past', /p_expires_on < public\.settlement_today\(\)/.test(approve ?? ''))
-ok('...and refuses without saying how the client approved', /v_why is null/.test(approve ?? ''))
+ok('...and refuses without the client\u2019s email or document', /if v_email is null and v_doc is null then/.test(approve ?? ''))
+ok('...which must be on the same account', /e\.id = v_email and e\.account_id = v_s\.account_id/.test(approve ?? '')
+  && /d\.id = v_doc and d\.account_id = v_s\.account_id/.test(approve ?? ''))
 /* A SETTLEMENT IS LESS THAN THE BALANCE. A figure at or over it is a payment in full. */
 ok('...and refuses a figure at or over the balance', /v_amount >= v_s\.balance_at_offer/.test(approve ?? ''))
 ok('declining asks the same tick', /has_capability\('settlement\.approve'\)/.test(closeOffer ?? ''))

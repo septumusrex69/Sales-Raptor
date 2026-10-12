@@ -39779,3 +39779,106 @@ begin
 end $$;
 revoke execute on function public.reverse_payment_switching_side(uuid, text, boolean) from public, anon;
 grant execute on function public.reverse_payment_switching_side(uuid, text, boolean) to authenticated;
+
+
+-- ============================================================================================
+-- A SETTLEMENT THE CLIENT ACCEPTED CARRIES THE PROOF, NOT A SENTENCE ABOUT IT (the firm, 11 Oct).
+--
+-- "When a client accepts a settlement, it should ask you to upload it or to pin an email to it ...
+-- so that there's a record of it and it lives in the account." The approval kept a line of free
+-- text ("Email from the client, 7 Oct") -- the firm's rule was "in writing, or it did not happen",
+-- and the writing itself was nowhere. Now the approval points at the writing: an email already on
+-- the account's Emails tab, or a document on its Documents tab. ONE COPY, ON THE ACCOUNT, because
+-- the account is where anybody looks when the debtor pays, disputes or asks for a paid-up letter;
+-- the client's file lists its accepted settlements with a link to the same row.
+--
+-- BELONGS TO THE SAME ACCOUNT, checked here: a link to another debtor's email would be proof of
+-- somebody else's deal.
+-- ============================================================================================
+alter table public.account_settlements
+  add column if not exists evidence_email_id uuid references public.account_emails(id),
+  add column if not exists evidence_document_id uuid references public.account_documents(id);
+
+create or replace function public.approve_settlement_with_proof(
+  p_id uuid, p_expires_on date, p_amount numeric,
+  p_email uuid default null, p_document uuid default null, p_note text default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare v_s public.account_settlements%rowtype;
+        v_amount numeric := round(coalesce(p_amount, 0), 2);
+        v_email uuid := p_email;
+        v_doc uuid := p_document;
+        v_what text;
+begin
+  if not public.has_capability('settlement.approve') then
+    raise exception 'Recording a client''s approval is not yours to do.' using errcode = '42501';
+  end if;
+  select * into v_s from public.account_settlements where id = p_id for update;
+  if not found then raise exception 'That offer no longer exists.' using errcode = 'P0002'; end if;
+  if v_s.status not in ('proposed', 'approved') then
+    raise exception 'That offer was % and cannot be approved now. Put a new one up.', v_s.status
+      using errcode = '22023';
+  end if;
+  if p_expires_on is null or p_expires_on < public.settlement_today() then
+    raise exception 'An approved settlement needs an expiry that has not passed.' using errcode = '22023';
+  end if;
+
+  /* EXTENDING ONE ALREADY PROVEN KEEPS ITS PROOF; a first approval must bring some. */
+  v_email := coalesce(v_email, case when v_doc is null then v_s.evidence_email_id end);
+  v_doc := coalesce(v_doc, case when p_email is null then v_s.evidence_document_id end);
+  if v_email is null and v_doc is null then
+    raise exception 'Attach the client''s acceptance: pin their email or upload the document. In writing, or it did not happen.'
+      using errcode = '22023';
+  end if;
+  if v_email is not null and not exists (
+       select 1 from public.account_emails e where e.id = v_email and e.account_id = v_s.account_id) then
+    raise exception 'That email is not on this account.' using errcode = '22023';
+  end if;
+  if v_doc is not null and not exists (
+       select 1 from public.account_documents d where d.id = v_doc and d.account_id = v_s.account_id) then
+    raise exception 'That document is not on this account.' using errcode = '22023';
+  end if;
+
+  if v_amount = 0 then v_amount := v_s.amount; end if;
+  if v_amount < 0 or v_amount >= v_s.balance_at_offer then
+    raise exception 'A settlement is less than the balance and more than nothing.' using errcode = '22023';
+  end if;
+
+  /* The sentence still says what it is, for every screen that already reads approval_evidence. */
+  select coalesce(
+           (select 'Email: ' || coalesce(nullif(btrim(e.subject), ''), '(no subject)') || ', '
+                   || to_char(e.occurred_at at time zone 'Africa/Johannesburg', 'FMDD Mon YYYY')
+              from public.account_emails e where e.id = v_email),
+           (select 'Document: ' || d.name from public.account_documents d where d.id = v_doc))
+    into v_what;
+  if nullif(btrim(coalesce(p_note, '')), '') is not null then
+    v_what := v_what || ' -- ' || btrim(p_note);
+  end if;
+
+  update public.account_settlements
+     set status = 'approved', amount = v_amount, expires_on = p_expires_on,
+         approved_by = auth.uid(), approved_at = public.raptor_now(), approval_evidence = v_what,
+         evidence_email_id = v_email, evidence_document_id = v_doc
+   where id = p_id;
+end
+$$;
+revoke execute on function public.approve_settlement_with_proof(uuid, date, numeric, uuid, uuid, text) from public, anon;
+grant execute on function public.approve_settlement_with_proof(uuid, date, numeric, uuid, uuid, text) to authenticated;
+
+/* THE OLD DOOR, WHICH TOOK A SENTENCE, NOW REFUSES. Kept as a function so a stale browser gets a
+   reason rather than "function not found". */
+create or replace function public.approve_settlement(
+  p_id uuid, p_expires_on date, p_evidence text, p_amount numeric default null)
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  raise exception 'Reload the page: approving a settlement now needs the client''s email pinned or the document uploaded.'
+    using errcode = '22023';
+end
+$$;

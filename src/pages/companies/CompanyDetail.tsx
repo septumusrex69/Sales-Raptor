@@ -53,6 +53,7 @@ import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
 import { canBeClientLiaison, canEditOwned, canViewTrust } from '../../lib/permissions'
 import { ClientAccountPanel } from '../../components/companies/ClientAccountPanel'
+import { ClientSettlements } from '../../components/companies/ClientSettlements'
 import { ClientPayoversPanel } from '../../components/companies/ClientPayoversPanel'
 import { moveClientTicketsToLiaison } from '../../lib/accountQueries'
 import { summaryLine } from '../../lib/summaryLine'
@@ -844,7 +845,11 @@ export function CompanyDetail() {
       />
 
       {tab === 'Account' && company && (
-        <ClientAccountPanel companyId={company.id} />
+        <div className="space-y-4">
+          <ClientAccountPanel companyId={company.id} />
+          {/* The client's accepted settlements, each a link to the account holding its proof. */}
+          <ClientSettlements companyId={company.id} />
+        </div>
       )}
       {tab === 'Payovers' && company && (
         <ClientPayoversPanel companyId={company.id} />

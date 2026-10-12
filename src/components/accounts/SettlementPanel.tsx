@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { FileText, Loader2, Mail, Paperclip } from 'lucide-react'
 import { Card } from '../ui/Card'
 import { Modal, FormField, inputClass } from '../ui/Modal'
 import { rand } from '../../lib/money'
@@ -9,8 +9,10 @@ import {
   SETTLEMENT_STATE_LABEL, isPaidInFull, type Settlement,
 } from '../../lib/settlement'
 import {
-  approveSettlement, closeAsSettled, closeSettlementOffer, proposeSettlement,
+  approveSettlement, closeAsSettled, closeSettlementOffer, fetchPinnableEmails, fetchSettlementProof,
+  proposeSettlement, type PinnableEmail, type SettlementProof,
 } from '../../lib/settlementApi'
+import { documentUrl, uploadDocument } from '../../lib/accountWorkspace'
 
 /**
  * THE SETTLEMENT ON AN ACCOUNT: the debtor's offer, the client's answer, and whether it was paid.
@@ -111,6 +113,7 @@ export function SettlementPanel({
               One payment, in full, into the trust account. A part payment does not settle it.
             </p>
           )}
+          {(s.state === 'approved' || s.state === 'lapsed' || s.status === 'paid') && <ProofLine settlementId={s.id} />}
           {s.state === 'lapsed' && (
             <p className="text-[11px] text-[var(--c-rust-deep)]">
               The full balance is owing again. Only the client can revive it.
@@ -151,7 +154,8 @@ export function SettlementPanel({
         <ProposeModal accountId={accountId} balance={balance} onClose={() => setDialog(null)} onDone={done} />
       )}
       {dialog === 'approve' && s && (
-        <ApproveModal settlement={s} onClose={() => setDialog(null)} onDone={done} />
+        <ApproveModal settlement={s} onClose={() => setDialog(null)} onDone={done}
+          userId={userId} userName={nameOf(userId)} />
       )}
       {(dialog === 'declined' || dialog === 'withdrawn') && s && (
         <CloseOfferModal settlement={s} as={dialog} onClose={() => setDialog(null)} onDone={done} />
@@ -246,16 +250,73 @@ function ProposeModal({ accountId, balance, onClose, onDone }: {
   )
 }
 
-function ApproveModal({ settlement, onClose, onDone }: {
+/**
+ * THE PROOF, ON THE PANEL: the client's email (opened in place) or the document (downloaded). Read by
+ * the settlement, so it is the writing the approval was recorded against and nothing else.
+ */
+function ProofLine({ settlementId }: { settlementId: string }) {
+  const [proof, setProof] = useState<SettlementProof | null>(null)
+  const [showEmail, setShowEmail] = useState(false)
+  useEffect(() => {
+    let live = true
+    void fetchSettlementProof(settlementId).then((p) => { if (live) setProof(p) }).catch(() => {})
+    return () => { live = false }
+  }, [settlementId])
+  if (!proof || (!proof.email && !proof.document)) {
+    return proof ? <p className="text-[11px] text-amber-700" data-testid="settlement-no-proof">No acceptance on file: approved before Raptor asked for one.</p> : null
+  }
+  return (
+    <div className="text-[11.5px]" data-testid="settlement-proof">
+      {proof.email && (
+        <>
+          <button type="button" onClick={() => setShowEmail((v) => !v)}
+            className="inline-flex items-center gap-1 font-medium text-[var(--c-steel)] hover:underline">
+            <Mail size={12} /> The client&rsquo;s acceptance: {proof.email.subject ?? '(no subject)'}, {formatDate(proof.email.occurredAt)}
+          </button>
+          {showEmail && (
+            <div className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-slate-50 p-2 text-[12px] text-slate-700">
+              {proof.email.from ? `From ${proof.email.from}\n\n` : ''}{proof.email.body ?? ''}
+            </div>
+          )}
+        </>
+      )}
+      {proof.document && (
+        <button type="button"
+          onClick={() => { void documentUrl(proof.document!.storagePath, proof.document!.name).then((u) => { window.location.href = u }) }}
+          className="inline-flex items-center gap-1 font-medium text-[var(--c-steel)] hover:underline">
+          <FileText size={12} /> The client&rsquo;s acceptance: {proof.document.name}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ApproveModal({ settlement, onClose, onDone, userId, userName }: {
   settlement: Settlement; onClose: () => void; onDone: () => void
+  userId: string | null; userName: string | null
 }) {
   const [amount, setAmount] = useState(String(settlement.amount))
   const [expires, setExpires] = useState(settlement.state === 'approved' && settlement.expiresOn ? settlement.expiresOn : '')
-  const [evidence, setEvidence] = useState('')
+  const [note, setNote] = useState('')
+  /*
+   * THE PROOF IS REQUIRED, AND IT IS THE WRITING ITSELF (the firm, 11 Oct): pin the client's email
+   * from this account's Emails, or upload the document to its Documents. Extending one already
+   * proven may leave both empty -- it keeps what it has.
+   */
+  const [how, setHow] = useState<'email' | 'upload'>('email')
+  const [emails, setEmails] = useState<PinnableEmail[] | null>(null)
+  const [emailId, setEmailId] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [existing, setExisting] = useState(false)
+  useEffect(() => {
+    void fetchPinnableEmails(settlement.accountId).then(setEmails).catch(() => setEmails([]))
+    void fetchSettlementProof(settlement.id).then((p) => setExisting(!!p.email || !!p.document)).catch(() => {})
+  }, [settlement.accountId, settlement.id])
   const { busy, error, run } = useCall(onDone)
   const n = parseAmount(amount)
   const today = firmToday()
-  const valid = n > 0 && n < settlement.balanceAtOffer && expires >= today && evidence.trim().length > 0
+  const hasProof = (how === 'email' && !!emailId) || (how === 'upload' && !!file) || existing
+  const valid = n > 0 && n < settlement.balanceAtOffer && expires >= today && hasProof
   return (
     <Modal title="Record the client’s approval" subtitle="The figure becomes one collectors may quote, until the expiry." onClose={onClose}>
       <div className="space-y-3">
@@ -269,13 +330,58 @@ function ApproveModal({ settlement, onClose, onDone }: {
         <FormField label="Must be paid by" required>
           <input type="date" className={inputClass} min={today} value={expires} onChange={(e) => setExpires(e.target.value)} />
         </FormField>
-        <FormField label="How the client approved it" required>
-          <input className={inputClass} value={evidence} onChange={(e) => setEvidence(e.target.value)}
-            placeholder="e.g. Email from the client, 7 Oct" />
+        <div className="space-y-2" data-testid="settlement-proof-pick">
+          <div className="text-xs font-medium text-slate-600">
+            The client&rsquo;s acceptance {existing ? <span className="font-normal text-slate-400">(already on file; add another only to replace it)</span> : <span className="text-negative-600">*</span>}
+          </div>
+          <div className="flex gap-2 text-[12.5px]">
+            <button type="button" onClick={() => setHow('email')} aria-pressed={how === 'email'}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 ${how === 'email' ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600'}`}>
+              <Mail size={12} /> Pin their email
+            </button>
+            <button type="button" onClick={() => setHow('upload')} aria-pressed={how === 'upload'}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 ${how === 'upload' ? 'border-navy-900 bg-navy-900 text-white' : 'border-slate-200 text-slate-600'}`}>
+              <Paperclip size={12} /> Upload the document
+            </button>
+          </div>
+          {how === 'email' ? (
+            emails === null ? <Loader2 size={14} className="animate-spin text-slate-400" />
+              : emails.length === 0 ? (
+                <p className="text-[12px] text-slate-500">No email is on this account yet. Upload the document, or file the client&rsquo;s reply to this account from Mail first.</p>
+              ) : (
+                <select aria-label="The client's email" className={inputClass} value={emailId} onChange={(e) => setEmailId(e.target.value)}>
+                  <option value="">Choose the email…</option>
+                  {emails.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {formatDate(e.occurredAt)} · {e.direction === 'in' ? 'from' : 'to'} {e.from ?? (e.correspondent === 'client' ? 'the client' : 'the debtor')} · {e.subject ?? '(no subject)'}
+                    </option>
+                  ))}
+                </select>
+              )
+          ) : (
+            <input type="file" aria-label="The acceptance document" accept=".pdf,image/*,.eml,.msg,.doc,.docx"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="block w-full text-[12.5px]" />
+          )}
+          <p className="text-[11px] text-slate-400">Kept on this account&rsquo;s {how === 'email' ? 'Emails' : 'Documents'} and linked from the settlement and the client&rsquo;s file. In writing, or it did not happen.</p>
+        </div>
+        <FormField label="Note (optional)">
+          <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Agreed by phone first, confirmed in writing" />
         </FormField>
-        <p className="text-[11px] text-slate-400">In writing, or it did not happen — the firm’s rule.</p>
         <Footer busy={busy} error={error} ready={valid} label="Record approval" onClose={onClose}
-          onGo={() => run(() => approveSettlement(settlement.id, expires, evidence, n))} />
+          onGo={() => run(async () => {
+            let documentId: string | null = null
+            if (how === 'upload' && file) {
+              /* THE CLIENT'S PAPER, NOT THE DEBTOR'S: no perusal fee, the PTC-confirmation rule. */
+              const up = await uploadDocument({
+                accountId: settlement.accountId, file, kind: 'Correspondence', chargePerusalFee: false,
+                uploadedBy: userId, uploadedByName: userName,
+              })
+              documentId = up.document.id
+            }
+            await approveSettlement(settlement.id, expires, n, {
+              emailId: how === 'email' && emailId ? emailId : null, documentId, note: note.trim() || null,
+            })
+          })} />
       </div>
     </Modal>
   )
