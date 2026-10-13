@@ -42374,3 +42374,142 @@ as $$
 $$;
 revoke all on function public.business_income_months(date, date) from public, anon;
 grant execute on function public.business_income_months(date, date) to authenticated;
+
+-- ============================================================================================
+-- PROMPT 12 C: A RUN BELOW NIL THAT IS SETTLED IS FINISHED -- NEVER OVERDUE, NOTHING TO PAY OVER.
+--
+-- Staging, 11 Sep: "Payover overdue: 11 Jun - 10 Jul 2026, R 1 253.13 for clients", and "Clients ·
+-- to be paid over" R356.25 and R748.12. All three were Marula: PO-MPG-2606 (-R1 253.13) carried into
+-- PO-MPG-2607 (-R3 515.66), which Marula paid into the business account. Both runs stay `sent`
+-- because a run below nil cannot be marked paid, so the cycle readers -- which asked "paid?" -- saw
+-- client money on unpaid runs past their day. firm_trust_split already asked the right question
+-- (firm_run_settled: paid, or approved/sent with nothing to pay), which is why the firm's recovered
+-- share was drawable while the overview called the same money the client's. Both readers now ask it.
+-- The money is regrouped, not recalculated: every cycle's total is unchanged.
+-- ============================================================================================
+create or replace function public.trust_by_cycle()
+returns table (
+  period_start date, period_end date, pays_on date, is_open boolean,
+  to_clients numeric, firm_earned numeric, firm_moved numeric,
+  to_debtors numeric, unplaced numeric, held numeric,
+  runs integer, runs_paid integer, runs_to_do integer)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with today as (select public.raptor_today() as d),
+  placed as (
+    select
+      coalesce(
+        r.period_start,
+        public.payover_cycle_start(coalesce(p.allocated_on::timestamptz, p.created_at)),
+        public.payover_cycle_start(coalesce(ap.allocated_on::timestamptz, ap.created_at)),
+        public.payover_cycle_start(e.entry_at)) as cyc,
+      e.party,
+      e.amount,
+      -- A FIRM ENTRY WITH A RECEIPT BEHIND IT WAS EARNED. One without is a drawing, a correction
+      -- or a parked credit taken over, and none of those is a month's earnings.
+      (e.payment_id is not null or e.allocation_id is not null) as from_receipt
+      from public.trust_creditor_entries e
+      left join public.account_payments p on p.id = e.payment_id
+      left join public.payment_allocations a on a.id = e.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.payover_runs r on r.id = e.payover_run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client'), 0) as to_clients,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt), 0) as firm_moved,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as to_debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unplaced,
+      coalesce(sum(amount), 0) as held
+      from placed
+     group by cyc
+  )
+  select a.cyc,
+         public.payover_cycle_end(a.cyc),
+         public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         t.d <= public.payover_cycle_end(a.cyc),
+         round(a.to_clients, 2), round(a.firm_earned, 2), round(a.firm_moved, 2),
+         round(a.to_debtors, 2), round(a.unplaced, 2), round(a.held, 2),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status <> 'void'), 0),
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc and r.status = 'paid'), 0),
+         -- WHAT IS LEFT TO DO ON IT, which is the actionable half: a closed cycle with money in it
+         -- and nothing built is a different problem from one where four runs are sitting approved.
+         coalesce((select count(*)::integer from public.payover_runs r
+                    where r.period_start = a.cyc
+                      and r.status in ('draft', 'approved', 'sent')
+                      -- A RUN BELOW NIL THAT IS APPROVED OR SENT IS FINISHED (prompt 12 C): it has
+                      -- nothing to pay the client, and what they owe is on Clients owe us. The same
+                      -- test firm_trust_split uses, so "nothing left to do" and "the firm may draw"
+                      -- cannot disagree about one run.
+                      and not public.firm_run_settled(r.id)), 0)
+    from agg a, today t
+   where public.has_capability('finance.view')
+     -- A CYCLE THAT NETS TO NOTHING IS A CYCLE THAT HAS BEEN PAID, and drawing it as a row of
+     -- zeroes would bury the two that have not under a year of settled months.
+     and (round(a.held, 2) <> 0 or round(a.to_clients, 2) <> 0
+          or round(a.firm_earned, 2) <> 0 or round(a.to_debtors, 2) <> 0)
+   -- OLDEST FIRST: THE ONE THAT LEAVES SOONEST IS THE ONE AT THE TOP. Newest first put the cycle
+   -- still being collected above the one going out in five days, which is backwards twice over --
+   -- it is the wrong end of the firm's own sentence ("what is for this month's payover? And what is
+   -- for next month's payover?"), and a cycle that has gone PAST its day is the one thing on this
+   -- table somebody has to act on, which newest-first buries at the bottom.
+   order by a.cyc asc
+$$;
+
+create or replace function public.trust_cash_by_cycle()
+returns table(period_start date, period_end date, pays_on date, is_open boolean,
+              for_clients numeric, for_firm numeric, firm_set_off numeric, firm_other numeric,
+              for_debtors numeric, unplaced numeric, total numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.party, x.amount, x.payment_id, x.allocation_id, x.reason,
+           coalesce(x.payover_run_id,
+             case when x.reason like 'Payment reversed:%' then a.reversal_carried_run_id
+                  else a.payover_run_id end) as run_id,
+           coalesce(a.paid_to_client, false) or x.reason like 'Paid to the business account%' as ptc,
+           coalesce(ap.allocated_on, p.allocated_on,
+                    (x.entry_at at time zone 'Africa/Johannesburg')::date) as on_day
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+      left join public.account_payments ap on ap.id = a.payment_id
+      left join public.account_payments p on p.id = x.payment_id
+  ),
+  placed as (
+    select coalesce(r.period_start, public.payover_cycle_start(e.on_day::timestamptz)) as cyc,
+           e.party, e.amount, e.ptc, e.reason,
+           (e.payment_id is not null or e.allocation_id is not null) as from_receipt,
+           -- SETTLED, NOT ONLY PAID (prompt 12 C): a run below nil cannot be marked paid, so the
+           -- client money set off inside it read as "to be paid over" for ever. It is the firm's
+           -- once the run is settled -- firm_run_settled, the test the drawable figure already uses.
+           coalesce(public.firm_run_settled(r.id), false) as run_paid
+      from e left join public.payover_runs r on r.id = e.run_id
+  ),
+  agg as (
+    select cyc,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and not run_paid), 0) as clients_open,
+      coalesce(sum(amount) filter (where party = 'client' and not ptc and run_paid), 0) as kept_back,
+      coalesce(sum(amount) filter (where party = 'firm' and from_receipt), 0) as firm_earned,
+      coalesce(sum(amount) filter (where party = 'firm' and not from_receipt
+                                    and coalesce(reason, '') not like 'PTC share recovered%'), 0) as firm_other,
+      coalesce(sum(amount) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(amount) filter (where party = 'unidentified'), 0) as unknown
+      from placed group by cyc
+  )
+  select a.cyc, public.payover_cycle_end(a.cyc), public.payover_pays_on(public.payover_cycle_end(a.cyc)),
+         public.raptor_today() <= public.payover_cycle_end(a.cyc),
+         round(a.clients_open, 2), round(a.firm_earned + a.kept_back, 2), round(a.kept_back, 2),
+         round(a.firm_other, 2), round(a.debtors, 2), round(a.unknown, 2),
+         round(a.clients_open + a.kept_back + a.firm_earned + a.firm_other + a.debtors + a.unknown, 2)
+    from agg a
+   where public.has_capability('finance.view')
+     and (round(a.clients_open, 2) <> 0 or round(a.kept_back + a.firm_earned, 2) <> 0
+          or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
+   order by a.cyc
+$$;

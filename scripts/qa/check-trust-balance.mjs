@@ -201,6 +201,12 @@ check('an open cycle is never late', overdueCycles([cyc({ isOpen: true })], '202
 /* A cycle owing clients nothing has nothing to be late with. */
 check('a cycle with no client money is not late',
   overdueCycles([cyc({ toClients: 0 })], '2026-10-12').length, 0)
+/* PROMPT 12 C, staging 11 Sep: Marula's 2606 cycle held +R1 253.13 carried in, its four runs paid or
+   settled below nil. Nothing to pay anybody, so not overdue -- but a run still to pay is. */
+check('a past cycle whose runs are all finished is not overdue, whatever it carries',
+  overdueCycles([cyc({ toClients: 1253.13, runs: 4, runsPaid: 3, runsToDo: 0 })], '2026-10-12').length, 0)
+check('...one with a run still to pay out is', overdueCycles([cyc({ runs: 4, runsPaid: 3, runsToDo: 1 })], '2026-10-12').length, 1)
+check('...and one with no run built at all is', overdueCycles([cyc({ runs: 0 })], '2026-10-12').length, 1)
 
 console.log(`check-trust-balance: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

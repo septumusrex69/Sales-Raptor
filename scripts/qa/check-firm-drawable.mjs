@@ -9,6 +9,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-firm-drawable.mjs
  */
 import { readFileSync } from 'node:fs'
+import { drawingStep } from '../../src/lib/paymentsOut.ts'
 
 let pass = 0
 const failures = []
@@ -38,6 +39,39 @@ const sql = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 
 const fn = sql.slice(sql.lastIndexOf('create or replace function public.firm_trust_split('))
 check('schema.sql caps what may be drawn at nil', /round\(greatest\(free \+ least\(pend, 0\), 0\), 2\)/.test(fn), true)
 check('...and what waits at what is held', /round\(least\(greatest\(pend, 0\), greatest\(held, 0\)\), 2\)/.test(fn), true)
+
+/* PROMPT 12 C: the drawable figure and the overview judge a run by ONE test. firm_trust_split asked
+   firm_run_settled while the cycle readers asked "paid?", so Marula's settled runs below nil were the
+   firm's to draw and the clients' to be paid over at once, and "Payover overdue" fired on them. */
+const body = (name) => {
+  const at = sql.lastIndexOf(`create or replace function public.${name}(`)
+  return at < 0 ? '' : sql.slice(at, sql.indexOf('\n$$;', at))
+}
+check('firm_trust_split asks firm_run_settled', /firm_run_settled\(/.test(body('firm_trust_split')), true)
+check('...the trust in cash counts a settled run\'s client money as kept back, by the same test',
+  /coalesce\(public\.firm_run_settled\(r\.id\), false\) as run_paid/.test(body('trust_cash_by_cycle')), true)
+check('...and no longer by "paid" alone', /r\.paid_at is not null as run_paid/.test(body('trust_cash_by_cycle')), false)
+check('runs still to do leave out a settled run below nil', /and not public\.firm_run_settled\(r\.id\)\), 0\)/.test(body('trust_by_cycle')), true)
+
+/* PROMPT 12 B2: the payout day's last line. Done only once the statement has the drawing. */
+const bfOut = (o) => ({ kind: 'business_transfer', id: 'd1', payee: 'Bredell Ferreira', amount: 12543.05, reference: null,
+  paidAt: '2026-09-11T09:00:00Z', paidReference: 'BF FEES-2609', confirmed: false, statementDate: null, accountId: null, caseNumber: null, ...o })
+const day = '2026-09-11'
+check('drawable and nothing recorded: draw it, on BF FEES of the payout month',
+  drawingStep({ payDay: day, drawable: 12543.05, waiting: 0, paidOut: [] }), { state: 'draw', amount: 12543.05, reference: 'BF FEES-2609' })
+check('...recorded but not on the statement is not done',
+  drawingStep({ payDay: day, drawable: 0, waiting: 0, paidOut: [bfOut()] }).state, 'recorded')
+check('...matched on the statement is done, with the day',
+  drawingStep({ payDay: day, drawable: 0, waiting: 0, paidOut: [bfOut({ confirmed: true, statementDate: '2026-09-12' })] }),
+  { state: 'done', amount: 12543.05, reference: 'BF FEES-2609', statementDate: '2026-09-12' })
+check('...last month\'s drawing does not tick off this month',
+  drawingStep({ payDay: day, drawable: 500, waiting: 0, paidOut: [bfOut({ paidReference: 'BF FEES-2608', confirmed: true })] }).state, 'draw')
+check('...nor does a refund on the same words', drawingStep({ payDay: day, drawable: 0, waiting: 0, paidOut: [bfOut({ kind: 'refund' })] }).state, 'none')
+check('...half the drawings on the statement is not done',
+  drawingStep({ payDay: day, drawable: 0, waiting: 0, paidOut: [bfOut({ confirmed: true }), bfOut({ id: 'd2', amount: 100 })] }).state, 'recorded')
+check('...and with nothing drawable yet, it waits for its clients', drawingStep({ payDay: day, drawable: 0, waiting: 11061.83, paidOut: [] }).state, 'waits')
+const queue = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
+check('the Approve tab draws the line', /data-testid="firm-drawing-step"/.test(queue) && /drawingStep\(\{ payDay: approveDay/.test(queue), true)
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-firm-drawable: ${pass} passed, ${failures.length} failed`)

@@ -63,6 +63,17 @@ check('the business account paying IN is a transfer from it',
 check("a debtor's payment is not suggested as anything", suggestAllocation(line(300, 'CAPITEC T NGUBANE'), []), null)
 check('a credit is never a bank charge, whatever it says', suggestAllocation(line(57.5, '##BANK CHARGE REVERSAL'), [])?.kind ?? null, null)
 
+/* PROMPT 12 B3: an unrecorded BF FEES debit is offered as a new drawing; a recorded one is matched. */
+const bf = line(-12543.05, 'INTERNET TRF TO BREDELL FERREIRA BUSINESS BF FEES-2609')
+check('a BF FEES debit nobody recorded is suggested as a new drawing',
+  [suggestAllocation(bf, [])?.kind, suggestAllocation(bf, [])?.targetId], ['business_transfer', null])
+check('...but one recorded at that amount is matched to it, not recorded twice',
+  suggestAllocation(bf, [{ id: 'd1', kind: 'business_transfer', amount: 12543.05, reference: 'BF FEES-2609', label: 'BF FEES-2609' }])?.targetId, 'd1')
+check('...and "fees" in a bank\'s own wording is still a bank charge, not a drawing',
+  suggestAllocation(line(-57.5, '#MONTHLY ACCOUNT FEE'), [])?.kind, 'bank_charge')
+const linesUi = readFileSync(new URL('../../src/components/finance/BankLinesToAllocate.tsx', import.meta.url), 'utf8')
+check('the button says it records BF\'s drawing', /'Record it as BF’s drawing'/.test(linesUi), true)
+
 check('money out may be five things', kindsFor('debit'), ['payover', 'refund', 'business_transfer', 'bank_charge', 'other'])
 check('money in, three -- a debtor is placed, not allocated', kindsFor('credit'), ['bank_interest', 'business_transfer_in', 'other'])
 ok('a payover and a refund need choosing', needsTarget('payover') && needsTarget('refund') && !needsTarget('bank_charge'))

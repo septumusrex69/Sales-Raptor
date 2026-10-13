@@ -41,6 +41,8 @@ import { clockNow } from '../../lib/clock.ts'
  * bar already titles. The space goes to the firm's line instead.
  */
 export interface HeroFigures {
+  /** False where the period has no target at all (all time, year to date, custom dates). */
+  measured?: boolean
   /** What came in on the day being read, and what to call that day. */
   today: number
   todayLabel: string
@@ -187,7 +189,7 @@ export function CollectionsHero({ figures, filters, action, progress }: {
           <Tile icon={<BarChart3 size={17} />} label="Collected this period"
             value={money(figures.collected)}>
             {figures.target === null ? (
-              <span className="text-white/45">No target set for this period</span>
+              <span className="text-white/45">{figures.measured === false ? 'Targets are monthly; none for this period' : 'No target set for this period'}</span>
             ) : (
               <>
                 <span className="flex items-center gap-2.5">
@@ -211,14 +213,14 @@ export function CollectionsHero({ figures, filters, action, progress }: {
             value={figures.againstPace === null ? '—' : money(Math.abs(figures.againstPace))}
             tone={figures.againstPace === null ? undefined : ahead ? 'good' : 'bad'}>
             {figures.expectedByNow === null
-              ? <span className="text-white/45">Nothing to measure against yet</span>
+              ? <span className="text-white/45">{figures.measured === false ? 'No pace over a period like this' : 'Nothing to measure against yet'}</span>
               : <>Expected by now <span className="text-white/85">{money(figures.expectedByNow)}</span></>}
           </Tile>
 
           <Tile icon={<CalendarDays size={17} />} label="Needed per working day"
             value={figures.neededADay === null ? '—' : money(figures.neededADay)}>
             {figures.stillNeeded === null
-              ? <span className="text-white/45">No target set for this period</span>
+              ? <span className="text-white/45">{figures.measured === false ? 'Targets are monthly; none for this period' : 'No target set for this period'}</span>
               : <>{money(figures.stillNeeded)} remaining</>}
           </Tile>
         </div>

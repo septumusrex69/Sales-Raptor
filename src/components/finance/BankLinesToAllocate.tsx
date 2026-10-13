@@ -189,7 +189,9 @@ function LineRow({ line, candidates, business, onDone }: {
         )}
         {kind !== 'returned' && <button type="button" disabled={!ready || busy} onClick={go}
           className="px-3 py-1.5 rounded-lg text-sm font-medium bg-navy-950 text-white disabled:opacity-50 inline-flex items-center gap-1.5">
-          {busy && <Loader2 size={13} className="animate-spin" />} Allocate
+          {busy && <Loader2 size={13} className="animate-spin" />}
+          {/* Says what it will do: a new drawing is a record of the firm's money leaving, not a tick. */}
+          {realKind === 'business_transfer' && !target ? 'Record it as BF’s drawing' : 'Allocate'}
         </button>}
         {/* PLACE IT ON AN ACCOUNT -- the way back for a receipt rejected off a closed file (prompt
             11). Placed on SBB/2006 and approved, it is held whole as the debtor's credit and refunded

@@ -16,10 +16,16 @@ export const pctText = (v: number | null): string => (v === null ? '—' : `${(v
  * good; the line at 30% says it is ahead, on the day it is being read. It is the same comparison
  * the status pills make, drawn once for the whole floor.
  */
-export function MonthProgress({ pace, line, note, tone = 'light' }: {
+export function MonthProgress({ pace, line, note, tone = 'light', measured = true }: {
   pace: MonthPace
   line: PaceLine | null
   note?: string
+  /**
+   * False for all time, year to date and custom dates (targetMonthsOf): targets are set month by
+   * month, so there is no progress to draw. The firm saw "All time" read 101.4% of ONE month's
+   * target over 275 working days -- a bar that measured nothing, drawn as if it did.
+   */
+  measured?: boolean
   /**
    * 'dark' renders it inside the company dashboard's hero, in the glass panel, rather than as a
    * card of its own — which is how the collections floor draws it now that the photograph has
@@ -36,7 +42,12 @@ export function MonthProgress({ pace, line, note, tone = 'light' }: {
   const marker = Math.min(100, Math.round(pace.expected * 100))
   const dark = tone === 'dark'
 
-  const body = (
+  const body = !measured ? (
+    <p className={`px-4 py-3 text-sm ${dark ? 'text-white/60' : 'text-slate-500'}`} data-testid="progress-unmeasured">
+      <span className={`font-semibold ${dark ? 'text-white' : 'text-slate-800'}`}>No progress for this period.</span>{' '}
+      Targets are set month by month. Choose a month, or the last 3, 6 or 12 months, to see progress against them.
+    </p>
+  ) : (
     <>
       <div className={`px-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 ${dark ? 'pt-2' : 'pt-3'}`}>
         <p className={dark ? 'text-sm text-white/60' : 'text-sm text-slate-500'}>

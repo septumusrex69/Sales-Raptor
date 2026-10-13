@@ -187,6 +187,28 @@ Commits `0f4cf73` onwards; each message carries the reasoning.
   - `check-income-trend` has 24 checks. Break-testing caught a vacuous one: `JSON.stringify(NaN)`
     is `"null"`.
 
+### S7 · Clean Break (13 Oct, evening): prompt 12's last three, and All time
+
+- **Prompt 12 C, the false "Payover overdue"**: Marula's settled runs below nil (PO-MPG-2606 carried
+  into -2607, which Marula paid into the business account) stay `sent`. The cycle readers asked
+  "paid?", so the overview said R1 253.13 was overdue and listed R356.25 + R748.12 as "to be paid
+  over". `trust_by_cycle`'s runs-to-do and `trust_cash_by_cycle`'s kept-back now ask
+  `firm_run_settled`, the same test `firm_trust_split` uses. On staging the overview's firm line now
+  equals `firm_trust_split`'s held to the cent (R11 061.83; it was R1 104.37 short), and every
+  cycle total is unchanged. `overdueCycles` also requires a run still to pay, or none built.
+  Checks: `check-trust-balance`, `check-firm-drawable`.
+- **Prompt 12 B2**: the firm's drawing is the last line on Payover runs → Approve (`drawingStep`,
+  paymentsOut.ts). It shows "Can be drawn", then "Drawn · waiting for the statement", then
+  "Drawn · on the statement". It is found by BF FEES-YYMM of the payout month, never by amount.
+- **Prompt 12 B3, second half**: a BF FEES debit with no recorded drawing is suggested as a new
+  drawing, and the button says "Record it as BF's drawing". A recorded one is still matched first.
+- **All time on the dashboards** (the firm: "it calculates it against the progress for one month").
+  The target was looked up by the period's key, so every period that wasn't a month fell back to one
+  month's target (R121 650 of all time read as 101.4% of R120 000). `targetMonthsOf` (salesMonth.ts)
+  now decides: a month uses its target; last 3, 6 or 12 months use each month's own target, summed;
+  all time, year to date and custom dates have none. For those the bar says "No progress for this
+  period", and the pace tiles say why. `check-period-target`.
+
 ### Sixth session (11 Oct) — the payout day, the spinners, and a withdrawal that read as Active
 
 Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, clock at 10 Jul.

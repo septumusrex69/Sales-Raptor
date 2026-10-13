@@ -16,11 +16,13 @@ import {
   queueTabOf, runPill, type PillTone, type QueueTab,
 } from '../../lib/payoverGroups'
 import { firmDay } from '../../lib/dateLabels'
+import { clockNow } from '../../lib/clock.ts'
 import { supabase } from '../../lib/supabase'
 import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
 import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
-import { transferReference } from '../../lib/paymentsOut'
+import { drawingStep, transferReference, type PaidOut } from '../../lib/paymentsOut'
+import { fetchPaymentsOutPaid } from '../../lib/bankAllocationApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
 import { MarkPaidModal, type PayableRun } from './MarkPaidModal'
@@ -153,6 +155,8 @@ export function FinanceWorkQueue() {
      is drawable and this screen says so, one press from Record a transfer. */
   const { currentUser } = useAuth()
   const [firm, setFirm] = useState<FirmTrustSplit | null>(null)
+  /* The firm's drawings and whether the statement has them: the payout day's last line (prompt 12 B2). */
+  const [paidOut, setPaidOut] = useState<PaidOut[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -178,6 +182,9 @@ export function FinanceWorkQueue() {
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
       setFirm(await fetchFirmTrustSplit().catch(() => null))
+      /* A quarter back is enough to find this payout day's BF FEES drawing, wherever it was recorded. */
+      const since = new Date(Date.parse(`${c?.today ?? firmDay(clockNow().toISOString())}T00:00:00Z`) - 92 * 86400000).toISOString().slice(0, 10)
+      setPaidOut(await fetchPaymentsOutPaid(since).catch(() => []))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the payover queue.')
     } finally {
@@ -294,6 +301,13 @@ export function FinanceWorkQueue() {
   /* "Approve", not "To pay" (the firm, 13 Oct: "to pay could mean pay to anyone"): this screen decides
      what each client gets; paying is Payments out. */
   const TAB_LABEL: Record<QueueTab, string> = { collecting: 'Collecting', waiting: 'Waiting', topay: 'Approve', history: 'History' }
+  /* THE PAYOUT DAY'S LAST LINE (prompt 12 B2): the firm's drawing, under the clients' payovers on
+     Approve -- the earliest payout day on the tab, which is the one being worked. Not under a search or
+     a status filter, where it would read as one of the rows found. */
+  const approveDay = byTab.topay.map((r) => paysOnFor(r.periodEnd, lag)).sort()[0] ?? null
+  const drawing = tabShown === 'topay' && approveDay && !q && !statusFilter && firm
+    ? drawingStep({ payDay: approveDay, drawable: firm.drawable, waiting: firm.waiting, paidOut })
+    : null
   const pickedRows = rows.filter((r) => picked.has(r.runId))
     /* THE PAYOUT DAY (11 Oct): an approved run's advice and payment wait for payover_pays_on unless it
      was released early. A sent run went out already, so it is not held again. The database refuses
@@ -714,6 +728,37 @@ export function FinanceWorkQueue() {
                 ))}
                 </Fragment>
               ))}
+              {!loading && drawing && drawing.state !== 'none' && (
+                <tr className="border-t-2 border-slate-200 bg-gold-50/40" data-testid="firm-drawing-step">
+                  <td className="px-3 py-2" />
+                  <td className="px-2 py-2">
+                    <span className="font-medium text-slate-800">Bredell Ferreira</span>
+                    <span className="block text-[11px] text-slate-500">Last, once the clients above are paid</span>
+                  </td>
+                  <td className="px-2 py-2 font-mono text-[12px] text-slate-600">{drawing.reference}</td>
+                  <td colSpan={3} className="px-2 py-2 text-[12px] text-slate-500">The firm&rsquo;s share, to the business account</td>
+                  <td className="px-2 py-2 text-right tabular-nums font-medium text-slate-800">{rand(drawing.amount)}</td>
+                  <td className="px-2 py-2">
+                    <span className={clsx('inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium',
+                      drawing.state === 'done' ? 'bg-emerald-100 text-emerald-800'
+                        : drawing.state === 'recorded' ? 'bg-sky-100 text-sky-800'
+                          : drawing.state === 'draw' ? 'bg-gold-100 text-gold-800' : 'bg-slate-100 text-slate-600')}>
+                      {drawing.state === 'done' ? 'Drawn · on the statement'
+                        : drawing.state === 'recorded' ? 'Drawn · waiting for the statement'
+                          : drawing.state === 'draw' ? 'Can be drawn' : 'Waits for its clients'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {drawing.state === 'draw' && canDrawFromTrust(currentUser) ? (
+                      <Link to="/trust/payments-out?draw=1" className="whitespace-nowrap rounded-md bg-navy-900 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-navy-800">
+                        Record the transfer
+                      </Link>
+                    ) : drawing.state === 'done' && drawing.statementDate ? (
+                      <span className="text-[12px] text-slate-500">Matched {fmtDay(drawing.statementDate)}</span>
+                    ) : null}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

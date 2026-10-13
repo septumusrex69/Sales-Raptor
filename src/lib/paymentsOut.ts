@@ -116,3 +116,44 @@ export function toPaidOut(r: Record<string, unknown>): PaidOut {
 export function transferReference(todayIso: string): string {
   return `BF FEES-${todayIso.slice(2, 4)}${todayIso.slice(5, 7)}`
 }
+
+/**
+ * THE FIRM'S DRAWING, THE LAST LINE OF THE PAYOUT DAY (prompt 12 B2). The firm: "The moment that a
+ * client needs to be paid, the Bredell Ferreira account needs to be paid as well." So under the
+ * clients' payovers on Approve, one more line -- the firm's -- and it reads as done only once the
+ * bank says so, the same as a payover: recorded is not done until its statement line is matched.
+ *
+ * THE DRAWING IS FOUND BY ITS REFERENCE, BF FEES-YYMM of the payout day's month (transferReference),
+ * which is what Record the transfer writes and what the import matches on. Nothing else ties a
+ * drawing to a payout day, and guessing by amount would tick off the wrong month's drawing.
+ */
+export type DrawingStep =
+  | { state: 'done'; amount: number; reference: string; statementDate: string | null }
+  | { state: 'recorded'; amount: number; reference: string }
+  | { state: 'draw'; amount: number; reference: string }
+  | { state: 'waits'; amount: number; reference: string }
+  | { state: 'none'; reference: string }
+
+export function drawingStep(input: {
+  payDay: string
+  drawable: number
+  waiting: number
+  paidOut: PaidOut[]
+}): DrawingStep {
+  const reference = transferReference(input.payDay)
+  const norm = (v: string | null) => (v ?? '').toUpperCase().replace(/\s+/g, ' ')
+  const mine = input.paidOut.filter((p) => p.kind === 'business_transfer'
+    && (norm(p.paidReference).includes(reference) || norm(p.reference).includes(reference)))
+  if (mine.length > 0) {
+    const amount = Math.round(mine.reduce((t, p) => t + p.amount, 0) * 100) / 100
+    /* Every drawing on the reference matched, or it is not done: half on the statement is half checked. */
+    if (mine.every((p) => p.confirmed)) {
+      const statementDate = mine.map((p) => p.statementDate).filter((d): d is string => !!d).sort().at(-1) ?? null
+      return { state: 'done', amount, reference, statementDate }
+    }
+    return { state: 'recorded', amount, reference }
+  }
+  if (input.drawable > 0.004) return { state: 'draw', amount: Math.round(input.drawable * 100) / 100, reference }
+  if (input.waiting > 0.004) return { state: 'waits', amount: Math.round(input.waiting * 100) / 100, reference }
+  return { state: 'none', reference }
+}

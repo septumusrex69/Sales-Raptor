@@ -93,7 +93,7 @@ export function CompanyDashboard() {
             Go to my dashboard <ArrowRight size={14} />
           </Link>
         }
-        progress={<MonthProgress pace={month.pace} line={month.line} tone="dark"
+        progress={<MonthProgress pace={month.pace} line={month.line} tone="dark" measured={month.measured}
           note={month.floor.withTarget < month.floor.members
             ? `${month.floor.members - month.floor.withTarget} of ${month.floor.members} have no target, so the total is short by their share.`
             : undefined} />}

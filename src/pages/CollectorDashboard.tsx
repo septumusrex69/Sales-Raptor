@@ -69,7 +69,7 @@ export function CollectorDashboard() {
   const {
     period, asAt, teamId, rows, error,
     shownRows, shownToday, score, priorScore, mine,
-    pace, floor, line, myLine, targetFor, teamOf,
+    pace, floor, line, myLine, targetFor, teamOf, measured,
   } = month
 
   const myPlace = useMemo(
@@ -377,7 +377,7 @@ export function CollectorDashboard() {
             one implementation, because a second "how far through the month are we" is a second
             answer to that question.
           */}
-          <MonthProgress pace={pace} line={line}
+          <MonthProgress pace={pace} line={line} measured={measured}
             note={floor.withTarget < floor.members
               ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
               : undefined} />

@@ -4,7 +4,7 @@ import { useAuth } from '../store/AuthContext'
 import { fetchCollectionsPeriod } from '../lib/collectorStats.ts'
 import { scoreCollector, totalStats, type CollectorScore, type CollectorStats, type Uncredited } from '../lib/collectorScore.ts'
 import { monthTargetFor } from '../lib/collectorGrade.ts'
-import { getCurrentSalesMonth, getPreviousSalesMonth, type SalesMonthPeriod } from '../lib/salesMonth'
+import { getCurrentSalesMonth, getPreviousSalesMonth, targetMonthsOf, type SalesMonthPeriod } from '../lib/salesMonth'
 import { resolveTarget } from '../lib/targets'
 import {
   dayKey, monthPace, paceLine, previousWorkingDay, teamTotal,
@@ -70,6 +70,8 @@ export interface CollectionsMonth {
   targetFor: (userId: ID, collects: boolean) => ResolvedTarget
   teamOf: (userId: ID) => string
 
+  /** False for a period with no target (all time, year to date, custom dates): no progress to draw. */
+  measured: boolean
   /** The four figures the hero is drawn from, assembled once. */
   figures: HeroFigures
   /** What to call the day being read, for anything else that needs to say it. */
@@ -167,11 +169,25 @@ export function useCollectionsMonth(): CollectionsMonth {
   const pace = useMemo(() => monthPace(period.start, period.end, asAt), [period, asAt])
 
   /** What a person was set, or what their grade says before anybody sets anything. */
+  /* The months this period's target is made of; null for all time, year to date and custom dates,
+     which have no target at all (targetMonthsOf says why). */
+  const targetMonths = useMemo(() => targetMonthsOf(period), [period])
   const targetFor = useCallback((userId: ID, collects: boolean): ResolvedTarget => {
-    const set = resolveTarget(targets, 'user', userId, 'collected', period.key)?.targetValue ?? null
+    if (!targetMonths) return { target: null, origin: 'grade' }
     const grade = users.find((u) => u.id === userId)?.collectorGrade ?? null
-    return monthTargetFor({ set, grade, collects })
-  }, [targets, users, period.key])
+    /* EACH MONTH'S OWN TARGET, ADDED: last three months is three targets, as set for each of them --
+       not this month's times three. */
+    let total = 0
+    let any = false
+    let origin: ResolvedTarget['origin'] = 'grade'
+    for (const m of targetMonths) {
+      const set = resolveTarget(targets, 'user', userId, 'collected', m.key)?.targetValue ?? null
+      const t = monthTargetFor({ set, grade, collects })
+      if (t.target != null) { total += t.target; any = true }
+      if (t.origin === 'set') origin = 'set'
+    }
+    return { target: any ? total : null, origin }
+  }, [targets, users, targetMonths])
 
   /* A collector's own team, for the filter and for the team roll-up. */
   const teamOf = useCallback(
@@ -245,6 +261,7 @@ export function useCollectionsMonth(): CollectionsMonth {
   const asAtLabel = isToday(asAt) ? 'Collected today' : `Collected on ${shortDay(asAt)}`
 
   const figures: HeroFigures = {
+    measured: targetMonths !== null,
     today: collectedToday,
     todayLabel: asAtLabel,
     /* Null rather than a fabricated percentage where the day before brought in nothing — every
@@ -268,7 +285,7 @@ export function useCollectionsMonth(): CollectionsMonth {
   return {
     period, setPeriod, asAt, asAtKey, setAsAtKey, teamId, setTeamId, teamOptions,
     rows, error, shownRows, shownToday, score, priorScore, mine,
-    pace, floor, line, myLine, collectedToday, targetFor, teamOf,
+    pace, floor, line, myLine, collectedToday, targetFor, teamOf, measured: targetMonths !== null,
     figures, asAtLabel,
     /** Of the period's total, what no desk held -- shown where the firm's total is. */
     uncredited: unheldOf(0),

@@ -272,7 +272,13 @@ export function cycleTotals(cycles: TrustCycle[]): CycleTotals {
  * the symptom would be the overview's own panel disagreeing with the band drawn beside it.
  */
 export function overdueCycles(cycles: TrustCycle[], today: string): TrustCycle[] {
-  return cycles.filter((c) => c.toClients > 0 && cycleState(c, today).tone === 'late')
+  return cycles.filter((c) => c.toClients > 0 && cycleState(c, today).tone === 'late'
+    /* AND SOMETHING IS STILL TO PAY (prompt 12 C). "Payover overdue: 11 Jun - 10 Jul, R 1 253.13" was
+       Marula's shortfall carried into a run below nil that Marula then paid into the business
+       account: client money on paper, no payover anybody could make. Overdue means a run still to
+       pay out (runsToDo, which leaves out a settled run below nil -- trust_by_cycle asks
+       firm_run_settled), or no run built at all. */
+    && (c.runsToDo > 0 || c.runs === 0))
 }
 
 export function cycleTodo(c: TrustCycle): string | null {

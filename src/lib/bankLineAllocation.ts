@@ -84,6 +84,8 @@ export function needsReason(kind: AllocationKind): boolean {
  * because the bank said so, not because bank charges tend to be small.
  */
 const CHARGE = /\bBANK\s*CHARGES?\b|\bSERVICE\s*FEE\b|\bMONTHLY\s*(ACC(OUNT)?\s*)?FEE\b|\bADMIN(ISTRATION)?\s*FEE\b|\bCASH\s*DEP(OSIT)?\s*FEE\b|\bTRANSACTION\s*FEE\b|#\s*[A-Z ]*FEE\b/i
+/* THE FIRM'S DRAWING REFERENCE (prompt 12 B3): what paymentsOut.ts writes on a drawing, BF FEES-YYMM. */
+const BF_FEES = /\bBF\s*FEES\b/i
 const INTEREST = /\bINTEREST\b|\bCR\.?\s*INT\b|\bINT\.?\s*CAP/i
 
 /*
@@ -174,6 +176,12 @@ export function suggestAllocation(
     if (same.length === 1) {
       return { kind, targetId: same[0].id, why: `The only ${KIND_LABEL[kind].toLowerCase()} of exactly this amount: ${same[0].label}.` }
     }
+  }
+  /* A BF FEES DEBIT NOBODY RECORDED (prompt 12 B3: "If no transfer was recorded, offer 'Record it as
+     BF's drawing'"). After the matches above, so a drawing already recorded at this amount is matched
+     rather than recorded twice; this is only what is left. */
+  if (BF_FEES.test(text)) {
+    return { kind: 'business_transfer', targetId: null, why: 'It carries the firm’s drawing reference, and no drawing of this amount was recorded, so it records one.' }
   }
   if (mentionsBusiness) {
     return { kind: 'business_transfer', targetId: null, why: 'It names the business account.' }
