@@ -382,8 +382,9 @@ ok('...and what is owed TO it separately',
  * company. Netting per account showed a client owed R100 on one file and owing R50 on another as a
  * R100 creditor AND a R50 debtor, when the firm will hand them R50: both sides overstated.
  */
-ok('a client nets across their whole book, a debtor per account',
-  /case when party = 'client' then company_id::text else coalesce\(account_id::text, party\) end/.test(position ?? ''))
+/* And the firm as ONE party (13 Oct): per account, its drawings read as owed back to the trust. */
+ok('a client nets across their whole book, a debtor per account, the firm as one',
+  /case party when 'client' then company_id::text\s*when 'debtor' then coalesce\(account_id::text, party\)\s*else party end/.test(position ?? ''))
 /* AN UNPLACED RECEIPT IS A CREDITOR WITH NO NAME ON IT YET -- counted, because the bank has the
    money whether or not anybody has said whose it is. */
 ok('receipts nobody has placed are still owed to somebody',

@@ -79,6 +79,23 @@ check('trust_position groups the firm as one party, like trust_balances',
   /when 'debtor' then coalesce\(account_id::text, party\)\s*else party end as who/.test(body('trust_position')), true)
 check('...and no longer splits it by account', /else coalesce\(account_id::text, party\) end as who/.test(body('trust_position')), false)
 
+/* THE UNRECOVERED PTC SHARE IS THE FIRM'S, WAITING (the firm chose it, 13 Oct): the R1 287.50 that
+   sat in the bank with nobody's name on it between a PTC and the approval of its run. */
+const tp = body('trust_position')
+check('Against the bank derives the firm\'s unrecovered PTC share', /ptc_pending as/.test(tp)
+  && /reason like '%Paid straight to the client%' then -amount/.test(tp)
+  && /reason like 'PTC share recovered%' then -amount/.test(tp)
+  && /reason like 'Paid to the business account against PO-%' then -amount/.test(tp), true)
+check('...never below nil per client', /sum\(greatest\(owed, 0\)\)/.test(tp), true)
+check('...and counts it as the firm\'s', /select 'firm', 'firm', bal from ptc_pending/.test(tp), true)
+check('...derived, not written: firm_trust_split (what may be drawn) never reads it', /ptc_pending|Paid straight to the client/.test(body('firm_trust_split')), false)
+const tcc = body('trust_cash_by_cycle')
+check('the overview takes a PTC\'s fees off the client on a run not yet settled', /\+ coalesce\(sum\(amount\) filter \(where ptc_fee and not run_paid\), 0\) as clients_open/.test(tcc), true)
+check('...and puts the same amount on the firm, so the cycle total does not move',
+  /coalesce\(-sum\(amount\) filter \(where ptc_fee and not run_paid\), 0\) as ptc_waiting/.test(tcc)
+  && /round\(a\.firm_earned \+ a\.kept_back \+ a\.ptc_waiting, 2\)/.test(tcc)
+  && /a\.clients_open \+ a\.kept_back \+ a\.ptc_waiting \+/.test(tcc), true)
+
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-firm-drawable: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

@@ -222,13 +222,18 @@ Commits `0f4cf73` onwards; each message carries the reasoning.
   charges made a −R39 877.68 "firm" bucket beside a firm line already net of them. It now treats the
   firm as one party, as `trust_balances` (the tabs) always did. Owed back → R0; the difference didn't
   move.
-- **The remaining R1 287.50 difference** is Marula's PTC fee on PO-MPG-2609 (ready, not approved).
-  The fee is debited from Marula when the PTC is recorded, but credited to the firm only when the run
-  is approved, so in between it has no owner. It clears on approval. **Asked the user** whether the
-  firm should be credited at the moment of the debit instead (as "waiting"), which would keep the
-  difference at nil throughout. That changes ledger behaviour, so it's the firm's call.
-- **The profit graphs are on Business → Income, behind `business.income`, which Stephan's own
-  profile doesn't have**, so he couldn't see them. Asked him whether to grant it or move them.
+- **The R1 287.50 difference was Marula's PTC fee on PO-MPG-2609** (ready, not approved): debited
+  from Marula when the PTC is recorded, credited to the firm only at approval. **The firm chose to
+  credit it straight away as waiting.** It's done by DERIVING it, not writing it (the ledger is
+  immutable, and a written credit would be credited again at approval). `trust_position` adds
+  `ptc_pending` per client (fees debited − recovered − paid to the business account, never below
+  nil). `trust_cash_by_cycle` moves a PTC's fees on a run not yet settled from the client's line to
+  the firm's. Neither touches `firm_trust_split`, so it's not drawable. Staging: difference nil;
+  Marula's line R276.06 (its payover); firm R12 349.33; cycles total the bank's R24 750.00.
+- **Profit graphs: the firm kept them in Business → Income and Stephan was given
+  `business.income`** on staging (he had no grant, so he couldn't see them). **Production needs the
+  same grant** when it goes live; it was set as Stephan through the admin path, never by
+  bypassing the trigger.
 
 ### Sixth session (11 Oct) — the payout day, the spinners, and a withdrawal that read as Active
 
