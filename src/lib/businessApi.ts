@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import type { BusinessExpense, BusinessMonth, ExpenseCategory, TrustBankCosts } from './businessMonth'
 import { toIncomeRow, type IncomeRow } from './businessIncome'
+import { toIncomeMonth, type IncomeMonth } from './incomeTrend'
 import { clockNow } from './clock.ts'
 
 /** The firm's own books, read and written. Split from businessMonth.ts so a check can import that. */
@@ -87,6 +88,17 @@ export async function fetchIncome(from: string, to: string): Promise<IncomeRow[]
   const { data, error } = await supabase.rpc('business_income', { p_from: from, p_to: to })
   if (error) throw new Error(error.message)
   return ((data ?? []) as Record<string, unknown>[]).map(toIncomeRow)
+}
+
+/**
+ * WHAT THE FIRM EARNED EACH MONTH, BESIDE WHAT IT COLLECTED (S7). One row per calendar month from
+ * `from` to `to`; business_income_months runs business_income once a month, so these are the Income
+ * page's own figures. No rows without business.income.
+ */
+export async function fetchIncomeMonths(from: string, to: string): Promise<IncomeMonth[]> {
+  const { data, error } = await supabase.rpc('business_income_months', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map(toIncomeMonth)
 }
 
 export interface Drawing { id: string; at: string; amount: number; reference: string; drawnBy: string | null }

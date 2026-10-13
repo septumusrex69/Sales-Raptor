@@ -42325,3 +42325,52 @@ as $function$
 $function$;
 revoke all on function public.trust_bank_statement(date, date) from public, anon;
 grant execute on function public.trust_bank_statement(date, date) to authenticated;
+
+-- ============================================================================================
+-- S7 · CLEAN BREAK: WHAT THE FIRM EARNED, MONTH BY MONTH, BESIDE WHAT IT COLLECTED.
+--
+-- The firm, 13 Oct: "line graphs are good for profit made from interest, profit made from fees,
+-- profit made from commission, and then obviously total profit ... the correlation between how much
+-- have we collected and what is our profit", which they put at 40 to 50%.
+--
+-- ONE CALCULATION, CALLED ONCE A MONTH. Each month is business_income over that month, summed --
+-- not a second copy of its split -- so the graph and the Income page's month cannot disagree about
+-- what was earned. `collected` is every debtor receipt that month (paid to the trust or straight to
+-- the client, since commission is earned on both), less the reversed, rejected and returned-unpaid.
+-- DATED BY APPROVAL, NOT RECEIPT, because that is when the ledger books what was earned on it: dated
+-- by receipt, a month's collections and the earnings on them land in different months, and staging's
+-- September read 177% beside 39% once both were dated alike.
+-- BEHIND business.income like the rest: the earnings come back empty without it already, and the
+-- `where` here keeps `collected` from answering on its own either.
+-- ============================================================================================
+create or replace function public.business_income_months(p_from date, p_to date)
+returns table(month date, interest numeric, costs numeric, commission numeric, commission_vat numeric,
+              credit_taken numeric, charges_raised numeric, bank_interest numeric, other numeric,
+              total numeric, collected numeric)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with months as (
+    select m::date as m_start, (m + interval '1 month' - interval '1 day')::date as m_end
+      from generate_series(date_trunc('month', p_from), date_trunc('month', p_to), interval '1 month') m
+  )
+  select mo.m_start,
+         coalesce(sum(b.interest), 0), coalesce(sum(b.costs), 0), coalesce(sum(b.commission), 0),
+         coalesce(sum(b.commission_vat), 0), coalesce(sum(b.credit_taken), 0),
+         coalesce(sum(b.charges_raised), 0), coalesce(sum(b.bank_interest), 0),
+         coalesce(sum(b.other), 0), coalesce(sum(b.total), 0),
+         (select coalesce(sum(p.amount), 0)
+            from public.account_payments p
+           where (coalesce(p.approved_at, p.received_at) at time zone 'Africa/Johannesburg')::date between mo.m_start and mo.m_end
+             and p.reversed_at is null and p.rejected_at is null and p.returned_unpaid_on is null
+             and p.account_id is not null)
+    from months mo
+    left join lateral public.business_income(mo.m_start, mo.m_end) b on true
+   where public.has_capability('business.income')
+   group by mo.m_start, mo.m_end
+   order by mo.m_start
+$$;
+revoke all on function public.business_income_months(date, date) from public, anon;
+grant execute on function public.business_income_months(date, date) to authenticated;

@@ -24,6 +24,15 @@ const INCOME = [
   { company_id: null, company_name: null, interest: 0, costs: 0, commission: 0,
     commission_vat: 0, credit_taken: 0, charges_raised: 0, bank_interest: 12.34, other: 0, total: 12.34 },
 ]
+/* Staging's months, 13 Oct (check-income-trend holds the arithmetic): an empty April first, to be dropped. */
+const MONTHS = [
+  { month: '2026-04-01', interest: 0, costs: 0, commission: 0, commission_vat: 0, credit_taken: 0, charges_raised: 0, bank_interest: 0, other: 0, total: 0, collected: 0 },
+  { month: '2026-06-01', interest: 4147.49, costs: 4445.27, commission: 2798.72, commission_vat: 419.81, credit_taken: 0, charges_raised: 0, bank_interest: 0, other: 356.25, total: 12167.54, collected: 24100 },
+  { month: '2026-07-01', interest: 4809.13, costs: 5684.60, commission: 4296.95, commission_vat: 644.56, credit_taken: 0, charges_raised: 1871.12, bank_interest: 42.18, other: 0, total: 17348.54, collected: 36450 },
+  { month: '2026-08-01', interest: 2874.74, costs: 4510.63, commission: 4561.53, commission_vat: 684.25, credit_taken: 0, charges_raised: 136.88, bank_interest: 47.65, other: 748.12, total: 13563.80, collected: 27750 },
+  { month: '2026-09-01', interest: 3160.04, costs: 2959.69, commission: 4655.17, commission_vat: 698.31, credit_taken: 0, charges_raised: 0, bank_interest: 38.40, other: 0, total: 11511.61, collected: 27750 },
+]
+let monthsAsked = []
 const MONTH = [{ earned: 338.55, drawn: 20, still_in_trust: 358.55, invoiced: 115, invoices_paid: 0,
   owed_by_clients: 115, expenses: 0, expenses_vat: 0, made: 453.55 }]
 
@@ -36,6 +45,8 @@ let expenses = []
 function handlers(me) {
   return [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [me] })],
+    /* BEFORE business_income, whose pattern also matches this one. */
+    [(u) => /\/rpc\/business_income_months/.test(u), (u, req) => { monthsAsked.push(req.postDataJSON()); return { body: MONTHS } }],
     [(u) => /\/rpc\/business_income/.test(u), () => ({ body: INCOME })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: MONTH })],
     [(u) => /\/rpc\/trust_bank_costs/.test(u), () => ({ body: [BANK] })],
@@ -117,6 +128,24 @@ try {
     t.ok('...with the bank\'s interest on its own line', await page.getByText('Bank interest on the trust account').first().isVisible())
     t.ok('...naming each client', await page.getByText('Kestrel Insurance').first().isVisible())
     t.ok('...and says VAT on commission is not kept', await page.getByText('Collected for SARS, not kept').first().isVisible())
+
+    /* THE TREND (S7): four lines and the share of collections, each a real chart, not an empty frame. */
+    await page.getByTestId('trend-earned').locator('.recharts-line-curve').first().waitFor({ timeout: 15000 })
+    const drawn = []
+    for (const id of ['trend-interest', 'trend-fees', 'trend-commission', 'trend-earned', 'trend-ratio']) {
+      drawn.push(await page.getByTestId(id).locator('.recharts-line-curve').count())
+    }
+    t.check('interest, fees, commission, total earned and the share each draw a line', JSON.stringify(drawn), '[1,1,1,1,1]')
+    t.ok('...and collected draws bars', await page.getByTestId('trend-collected').locator('.recharts-bar-rectangle').count() >= 4)
+    const plainText = async (id) => (await page.getByTestId(id).innerText()).split(String.fromCharCode(0xa0)).join(' ')
+    t.ok('total earned leads with the last month, less commission VAT', /R 10 813\.30/.test(await plainText('trend-earned')))
+    t.ok('...and the share reads 39.0% for it', /39\.0%/.test(await plainText('trend-ratio')))
+    t.ok('the overall share is said in words', /52 144\.56 on R 116 050\.00 collected: 44\.9%/.test((await page.getByTestId('income-trend').innerText()).split(String.fromCharCode(0xa0)).join(' ')))
+    t.ok('the empty month before the first is not drawn', !/Apr '26/.test(await page.getByTestId('trend-earned').innerText()))
+    t.ok('it asks for twelve months ending this month', monthsAsked[0]?.p_from?.endsWith('-01') && monthsAsked[0]?.p_to?.length === 10)
+    await page.getByRole('button', { name: 'Since the start' }).click()
+    await page.waitForTimeout(300)
+    t.check('...and "since the start" asks from 2015', monthsAsked.at(-1)?.p_from, '2015-01-01')
     await t.shot(page, 'business-income')
     await context.close()
   }

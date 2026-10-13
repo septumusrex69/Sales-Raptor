@@ -7,6 +7,7 @@ import { monthBounds, monthLabel, thisMonth } from '../../lib/businessMonth'
 import { fetchIncome } from '../../lib/businessApi'
 import { INCOME_PARTS, incomeTotals, type IncomeRow } from '../../lib/businessIncome'
 import { clockNow } from '../../lib/clock.ts'
+import { IncomeTrend } from '../../components/business/IncomeTrend'
 
 /**
  * WHAT THE FIRM EARNED.
@@ -53,6 +54,11 @@ export function BusinessIncome() {
         <span className="text-xs text-slate-400">What the firm earned, by calendar month</span>
       </div>
 
+      {/* THE TREND FIRST (S7), then one month in detail: the firm asked for the graphs to see the
+          business at a glance, and a month's table is where somebody goes to find one client. */}
+      <IncomeTrend />
+
+      <h2 className="text-lg font-semibold tracking-tight text-slate-800 pt-2">One month</h2>
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => step(-1)} className={controlClass}>Earlier</button>
         <div className="text-sm font-medium text-slate-700 min-w-[10rem] text-center">{monthLabel(year, month)}</div>
