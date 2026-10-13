@@ -112,6 +112,12 @@ Newest first. Each commit message carries the full reasoning; this is the index.
   the five items sum to R14 258.64, remainder nil.
 - **`e2e/workspace-split` is green again** (100/100): the scroll assertion now uses a short viewport
   rather than depending on how much the overview happens to hold.
+- **Full `npm run qa` at the end of S7: 324 of 327 green.** The three red fail IDENTICALLY on
+  `37d4b09`, the commit S7 started from, so they predate it: `e2e/performance` (date-dependent, see
+  "Start here" item 7); `e2e/account-templates` (the balance merges as "R 180,128.02", with a comma
+  where the test expects en-ZA's grouping -- look at which formatter the template preview uses);
+  `e2e/excess-credit` (a click times out at 30 s). `e2e/overpayments` was S7's and is fixed: the rail
+  says To sort now.
 
 ### S7 · Clean Break (13 Oct): the trust, regrouped around what the firm does with it
 

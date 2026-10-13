@@ -42,7 +42,8 @@ try {
   const { page } = await signedInPage(browser, ADMIN, handlers, [])
   await page.goto(`http://127.0.0.1:${PORT}/trust/overpayments`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('overpayments').waitFor({ timeout: 15000 })
-  t.ok('the Trust rail has Overpayments', (await page.getByRole('link', { name: 'Overpayments' }).count()) > 0)
+  /* S7: overpayments live on To sort now, so the rail names that, and the old address still opens them. */
+  t.ok('the Trust rail sends overpayments to To sort', (await page.getByRole('link', { name: 'To sort' }).count()) > 0)
 
   await page.getByTestId('overpay-undecided').first().waitFor({ timeout: 10000 })
   t.ok('To decide lists the undecided overpayment', /Johan Pretorius/.test(await page.getByTestId('overpay-undecided').first().innerText()))
