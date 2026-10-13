@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { toPaidOut, toPaymentToMake, type PaidOut, type PaymentToMake } from './paymentsOut.ts'
+import { referenceIn, toPaidOut, toPaymentToMake, type PaidOut, type PaymentToMake } from './paymentsOut.ts'
 import { lineNature, toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
 
 /**
@@ -77,18 +77,37 @@ export async function matchPayoversByReference(): Promise<ReferenceMatch> {
  * allocate_bank_line, the one thing that writes an allocation, so it is the same entry a person
  * pressing the button would have made. One that fails is left for Exceptions.
  */
-export async function bookObviousLines(): Promise<{ interest: number; charges: number }> {
+export async function bookObviousLines(): Promise<{ interest: number; charges: number; drawings: number }> {
   const lines = await fetchLinesToAllocate()
-  let interest = 0; let charges = 0
+  let interest = 0; let charges = 0; let drawings = 0
+  /*
+   * AND THE FIRM'S DRAWING BY ITS REFERENCE (prompt 12 B3): a debit naming BF FEES-YYMM at exactly the
+   * amount of a transfer already recorded is that transfer, the same way BF PO- references match
+   * payovers. Exactly one candidate, or it is left for Exceptions ("Already recorded: ...").
+   */
+  const drawingsOpen = (await fetchAllocationCandidates().catch(() => [] as Candidate[])).filter((c) => c.kind === 'business_transfer')
+  const usedDrawings = new Set<string>()
   for (const l of lines) {
     const n = lineNature(l.description, l.direction)
-    if (n !== 'bank_interest' && n !== 'bank_charge') continue
     try {
-      await allocateBankLine(l.id, n, null, null)
-      if (n === 'bank_interest') interest += 1; else charges += 1
+      if (n === 'bank_interest' || n === 'bank_charge') {
+        await allocateBankLine(l.id, n, null, null)
+        if (n === 'bank_interest') interest += 1; else charges += 1
+        continue
+      }
+      if (l.direction === 'debit' && /BF\s*FEES/i.test(l.description ?? '')) {
+        const cents = Math.round(-l.amount * 100)
+        const match = drawingsOpen.filter((c) => !usedDrawings.has(c.id) && Math.round(c.amount * 100) === cents
+          && (!c.reference || referenceIn(l.description, c.reference)))
+        if (match.length === 1) {
+          await allocateBankLine(l.id, 'business_transfer', null, match[0].id)
+          usedDrawings.add(match[0].id)
+          drawings += 1
+        }
+      }
     } catch { /* left for a person */ }
   }
-  return { interest, charges }
+  return { interest, charges, drawings }
 }
 
 /** A receipt that may be the one a returned debit took back (bounced_receipt_candidates). */
@@ -117,5 +136,26 @@ export async function fetchBouncedCandidates(lineId: string): Promise<BouncedCan
  */
 export async function returnBouncedReceipt(lineId: string, paymentId: string): Promise<void> {
   const { error } = await supabase.rpc('return_bounced_receipt', { p_line: lineId, p_payment: paymentId })
+  if (error) throw new Error(error.message)
+}
+
+/** Every payment waiting to leave trust, with the banking the bank file needs (payments_out_list). */
+export async function fetchPaymentsOutList(): Promise<import('./bankFile').OutgoingPayment[]> {
+  const { data, error } = await supabase.rpc('payments_out_list')
+  if (error) throw new Error(error.message)
+  const s = (v: unknown) => (v === null || v === undefined ? null : String(v))
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    kind: r.kind as 'payover' | 'refund' | 'drawing', id: String(r.id), payee: String(r.payee ?? ''),
+    amount: Number(r.amount ?? 0), reference: s(r.reference), status: String(r.status ?? ''), dueOn: s(r.due_on),
+    holder: s(r.holder), bank: s(r.bank), branch: s(r.branch), accountNo: s(r.account_no),
+    companyId: s(r.company_id), accountId: s(r.account_id), caseNumber: s(r.case_number),
+  }))
+}
+
+/** The banking a payover (on the client) or a refund (on the refund) is paid to. */
+export async function setPaymentBanking(kind: 'payover' | 'refund', id: string, holder: string, bank: string, branch: string, account: string): Promise<void> {
+  const { error } = await supabase.rpc('set_payment_banking', {
+    p_kind: kind, p_id: id, p_holder: holder, p_bank: bank, p_branch: branch, p_account: account,
+  })
   if (error) throw new Error(error.message)
 }

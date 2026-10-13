@@ -42137,3 +42137,108 @@ as $$
     from t
    where public.has_capability('finance.view') or public.has_capability('business.view')
 $$;
+
+
+-- ============================================================================================
+-- S7: PAYMENTS OUT, AND THE BANK FILE (the firm, 13 Oct: "we're gonna need like an export sheet to pay
+-- all of the different people ... making payments to all of the clients once a month", and "for a
+-- refund, if you don't have the debtor's banking details yet ... it stays in a pending state").
+--
+-- A bank file needs the account in parts -- holder, bank, branch code, account number -- and
+-- companies.banking_details is free text the firm types for a remittance advice. So the parts are
+-- kept beside it: on the CLIENT for a payover (next month's payover is paid to the same account) and
+-- on the REFUND for a debtor (a debtor is paid once). set_payment_banking checks the shape (six-digit
+-- branch, 6-16 digit account). payments_out_list is payments_to_make plus those parts, plus the firm's
+-- recorded transfer to its business account while no statement line has confirmed it -- the one place
+-- money leaves trust, as the firm put it. A new function rather than a changed one: a function's
+-- result columns cannot be changed in place.
+-- ============================================================================================
+alter table public.companies
+  add column if not exists bank_account_holder text,
+  add column if not exists bank_name text,
+  add column if not exists bank_branch_code text,
+  add column if not exists bank_account_number text;
+alter table public.trust_payments_out
+  add column if not exists bank_account_holder text,
+  add column if not exists bank_name text,
+  add column if not exists bank_branch_code text,
+  add column if not exists bank_account_number text;
+
+create or replace function public.set_payment_banking(
+  p_kind text, p_id uuid, p_holder text, p_bank text, p_branch text, p_account text)
+returns void
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_holder text := nullif(btrim(coalesce(p_holder, '')), '');
+  v_bank text := nullif(btrim(coalesce(p_bank, '')), '');
+  v_branch text := regexp_replace(coalesce(p_branch, ''), '\s', '', 'g');
+  v_account text := regexp_replace(coalesce(p_account, ''), '\s', '', 'g');
+begin
+  if not public.has_capability('finance.view') then
+    raise exception 'Banking details for a payment out of trust need the trust tick.' using errcode = '42501';
+  end if;
+  if v_holder is null or v_bank is null then
+    raise exception 'Say whose account it is and at which bank.' using errcode = '22023';
+  end if;
+  if v_branch !~ '^[0-9]{6}$' then
+    raise exception 'A branch code is six digits.' using errcode = '22023';
+  end if;
+  if v_account !~ '^[0-9]{6,16}$' then
+    raise exception 'An account number is digits only, 6 to 16 of them.' using errcode = '22023';
+  end if;
+  if p_kind = 'payover' then
+    update public.companies set bank_account_holder = v_holder, bank_name = v_bank,
+           bank_branch_code = v_branch, bank_account_number = v_account
+     where id = (select company_id from public.payover_runs where id = p_id);
+  elsif p_kind = 'refund' then
+    update public.trust_payments_out set bank_account_holder = v_holder, bank_name = v_bank,
+           bank_branch_code = v_branch, bank_account_number = v_account
+     where id = p_id and paid_at is null and cancelled_at is null;
+  else
+    raise exception 'Banking details are kept for a client''s payover or a debtor''s refund.' using errcode = '22023';
+  end if;
+  if not found then raise exception 'That payment is not waiting to be paid.' using errcode = 'P0002'; end if;
+end $$;
+revoke all on function public.set_payment_banking(text, uuid, text, text, text, text) from public, anon;
+grant execute on function public.set_payment_banking(text, uuid, text, text, text, text) to authenticated;
+
+create or replace function public.payments_out_list()
+returns table(kind text, id uuid, payee text, amount numeric, reference text, status text, due_on date,
+              holder text, bank text, branch text, account_no text, company_id uuid, account_id uuid, case_number text)
+language sql stable security definer set search_path to 'public'
+as $$
+  select 'payover', r.id, coalesce(c.name, 'Client'), r.net_payover,
+         public.payment_out_reference('payover', r.invoice_number),
+         case when r.status = 'approved' and r.released_at is null
+                   and public.raptor_today() < public.payover_pays_on(r.period_end)
+              then 'scheduled' else r.status end,
+         public.payover_pays_on(r.period_end),
+         c.bank_account_holder, c.bank_name, c.bank_branch_code, c.bank_account_number,
+         r.company_id, null::uuid, r.invoice_number
+    from public.payover_runs r
+    left join public.companies c on c.id = r.company_id
+   where public.has_capability('finance.view') and r.status in ('approved', 'sent') and r.net_payover > 0
+  union all
+  select 'refund', o.id, o.payable_to, o.amount,
+         public.payment_out_reference('refund', coalesce(d.case_number, d.account_number)), 'due', null::date,
+         o.bank_account_holder, o.bank_name, o.bank_branch_code, o.bank_account_number,
+         d.company_id, o.account_id, d.case_number
+    from public.trust_payments_out o
+    left join public.debtor_accounts d on d.id = o.account_id
+   where public.has_capability('finance.view') and o.paid_at is null and o.cancelled_at is null
+  union all
+  select 'drawing', e.id, 'Bredell Ferreira (business account)', -e.amount,
+         substring(e.reason from length('Drawn to the business account - ') + 1), 'recorded',
+         (e.entry_at at time zone 'Africa/Johannesburg')::date,
+         f.business_account_name, f.business_bank, f.business_branch_code, f.business_account_number,
+         null::uuid, null::uuid, null::text
+    from public.trust_creditor_entries e
+    left join public.firm_settings f on true
+   where public.has_capability('finance.view')
+     and e.party = 'firm' and public.firm_entry_kind(e.reason) = 'drawing'
+     and e.bank_line_id is null
+     and not exists (select 1 from public.bank_statement_lines x where x.trust_entry_id = e.id)
+   order by 7 nulls last, 3
+$$;
+revoke all on function public.payments_out_list() from public, anon;
+grant execute on function public.payments_out_list() to authenticated;

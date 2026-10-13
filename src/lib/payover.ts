@@ -805,7 +805,7 @@ export interface ImportOutcome {
   /** Debits that named a run and were NOT matched -- a different amount, or a run not open to it. */
   payoverNotes?: string[]
   /** Interest and bank charges booked straight after the import, by the bank's own words. */
-  booked?: { interest: number; charges: number }
+  booked?: { interest: number; charges: number; drawings?: number }
 }
 
 /** A receipt in the trust account that nobody has placed against a debtor yet. */

@@ -34,7 +34,7 @@ const TITLES: { test: RegExp; title: string }[] = [
    * "where am I", and the reason the rail keeps the workspace's name even when it is folded.
    */
   /* payments-out BEFORE payments: /^\/trust\/payments/ matches it too, and headed it "Payments in". */
-  { test: /^\/trust\/payments-out/, title: 'Payments to make' },
+  { test: /^\/trust\/payments-out/, title: 'Payments out' },
   { test: /^\/trust\/payments/, title: 'Payments in' },
   { test: /^\/trust\/check/, title: 'Payment history' },
   { test: /^\/trust\/payover/, title: 'Payover runs' },

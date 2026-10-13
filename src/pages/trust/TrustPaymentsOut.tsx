@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { Check, Copy, Loader2 } from 'lucide-react'
+import { Check, Copy, Download, Loader2 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Modal, FormField, inputClass, controlClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
-import { fetchPaymentsOutPaid, fetchPaymentsToMake, markRefundPaid } from '../../lib/bankAllocationApi'
+import { fetchPaymentsOutList, fetchPaymentsOutPaid, markRefundPaid, setPaymentBanking } from '../../lib/bankAllocationApi'
+import { bankFileCsv, canPay, defaultTicked, fileTotal, keyOf, needsBanking, pendingWords, whatIsMissing, type OutgoingPayment } from '../../lib/bankFile'
 import { markRunPaid } from '../../lib/payover'
 import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
 import { drawFromTrust } from '../../lib/businessApi'
 import { canDrawFromTrust } from '../../lib/permissions'
 import { useAuth } from '../../store/AuthContext'
-import { totalToPay, transferReference, type PaidOut, type PaymentToMake } from '../../lib/paymentsOut'
+import { transferReference, type PaidOut } from '../../lib/paymentsOut'
 import { shortDate } from '../../lib/trustCycles'
 import { clockNowMs, clockToday } from '../../lib/clock.ts'
 
@@ -35,12 +36,17 @@ export type Paying = { kind: 'payover' | 'refund'; id: string; payee: string; am
 export function TrustPaymentsOut() {
   const { currentUser } = useAuth()
   const [tab, setTab] = useState<Tab>('pay')
-  const [rows, setRows] = useState<PaymentToMake[] | null>(null)
+  const [rows, setRows] = useState<OutgoingPayment[] | null>(null)
+  /* WHAT GOES IN THE BANK FILE (the firm, 13 Oct: "choose which you will be able to include and exclude"). */
+  const [ticked, setTicked] = useState<Set<string>>(new Set())
+  const [banking, setBanking] = useState<OutgoingPayment | null>(null)
+  const [params, setParams] = useSearchParams()
   const [paid, setPaid] = useState<PaidOut[] | null>(null)
   const [firm, setFirm] = useState<FirmTrustSplit | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [paying, setPaying] = useState<Paying | null>(null)
+  /* ?draw=1 opens Record a transfer straight away -- the prompt on Payover runs links here (prompt 12 B). */
   const [drawing, setDrawing] = useState(false)
   /* Payments out confirmed from the statement only (Trust settings): then there is no Mark paid. */
   const [statementOnly, setStatementOnly] = useState(false)
@@ -51,19 +57,34 @@ export function TrustPaymentsOut() {
   const load = useCallback(async () => {
     try {
       const [due, gone, pos, only] = await Promise.all([
-        fetchPaymentsToMake(), fetchPaymentsOutPaid(since),
+        fetchPaymentsOutList(), fetchPaymentsOutPaid(since),
         /* The firm's share is shown to say what MAY be drawn -- only what its clients have been paid
            for (the firm, 10 Oct) -- and the list stands without it. */
         fetchFirmTrustSplit().catch(() => null),
         fetchPayoutsStatementOnly().catch(() => false),
       ])
       setRows(due); setPaid(gone); setFirm(pos); setStatementOnly(only)
+      /* Everything payable is ticked; a tick somebody took off stays off across a reload. */
+      setTicked((t) => (t.size === 0 ? defaultTicked(due) : new Set([...t].filter((k) => due.some((d) => keyOf(d) === k && canPay(d))))))
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [since])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (params.get('draw') === '1' && firm && firm.drawable > 0.004) { setDrawing(true); setParams({}, { replace: true }) }
+  }, [params, firm, setParams])
+
+  function download() {
+    if (!rows) return
+    const csv = bankFileCsv(rows, ticked)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    a.download = `trust-payments-${clockToday()}.csv`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
 
   async function copy(ref: string) {
     try {
@@ -88,16 +109,23 @@ export function TrustPaymentsOut() {
     )
   }
 
-  const runs = rows.filter((r) => r.kind === 'payover')
-  const refunds = rows.filter((r) => r.kind === 'refund')
   const waiting = paid.filter((p) => !p.confirmed)
   const mayDraw = canDrawFromTrust(currentUser)
+  const payable = rows.filter(canPay)
+  const pending = rows.filter((r) => !canPay(r))
+  const inFile = rows.filter((r) => ticked.has(keyOf(r)) && canPay(r))
+  const toggle = (k: string) => setTicked((t) => { const n = new Set(t); if (n.has(k)) n.delete(k); else n.add(k); return n })
+  const what = (p: OutgoingPayment) => p.kind === 'payover'
+    ? <Link to={`/trust/runs/${p.id}`} className="text-gold-700 hover:text-gold-800">Payover {p.caseNumber ?? ''}</Link>
+    : p.kind === 'refund'
+      ? <Link to={`/accounts/${p.accountId}`} className="text-gold-700 hover:text-gold-800">Refund · {p.caseNumber ?? 'the debtor'}</Link>
+      : <span className="text-slate-600">The firm&rsquo;s share, transferred</span>
 
   return (
     <div className="space-y-5">
       <div className="flex items-baseline gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Payments to make</h1>
-        <span className="text-xs text-slate-400">Out of the trust account, each with the reference to pay it on</span>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Payments out</h1>
+        <span className="text-xs text-slate-400">The one place money leaves the trust account: clients, refunds and the firm&rsquo;s own transfer</span>
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-slate-100 pb-2">
@@ -113,27 +141,34 @@ export function TrustPaymentsOut() {
 
       {tab === 'pay' ? (
         <>
+          {/*
+            THE BANK FILE (the firm, 13 Oct): every payment ticked and payable, in one upload. A payment
+            the bank could not pay -- no account details yet, or not yet due -- is PENDING, says what is
+            missing, and cannot be ticked.
+          */}
           <Card className="px-6 py-5">
-            <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2" data-testid="to-pay-total">
-              <div>
-                <div className="text-[12px] text-slate-500">Still to pay</div>
-                <div className="text-2xl font-semibold tabular-nums text-slate-800">{rand(totalToPay(rows))}</div>
+            <div className="flex flex-wrap items-center justify-between gap-4" data-testid="bank-file-bar">
+              <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+                <div>
+                  <div className="text-[12px] text-slate-500">In the bank file</div>
+                  <div className="text-2xl font-semibold tabular-nums text-slate-800" data-testid="file-total">{rand(fileTotal(rows, ticked))}</div>
+                </div>
+                <div className="text-[13px] text-slate-500">
+                  {inFile.length} of {payable.length} ready to pay
+                  {pending.length > 0 && <> · <span className="text-amber-700">{pending.length} pending</span></>}
+                </div>
               </div>
-              <div className="text-[13px] text-slate-500">
-                {runs.length} {runs.length === 1 ? 'payover' : 'payovers'} · {refunds.length} {refunds.length === 1 ? 'refund' : 'refunds'}
-              </div>
+              <button type="button" onClick={download} disabled={inFile.length === 0} data-testid="download-bank-file"
+                className="inline-flex items-center gap-2 rounded-lg bg-navy-900 px-4 py-2 text-[13px] font-semibold text-white hover:bg-navy-800 disabled:opacity-40">
+                <Download size={15} /> Download bank file
+              </button>
             </div>
             <p className="mt-3 max-w-3xl text-[12.5px] leading-relaxed text-slate-500">
-              Pay each one at the bank <strong className="font-medium text-slate-700">with the reference shown</strong>
-              {statementOnly ? '. ' : ', then mark it paid here or on its run. '}
-              When it appears on the trust statement, allocate the line under Exceptions — Raptor suggests the
-              match from the reference — and it reads as confirmed under Paid.
+              Upload it to the bank once and every payment goes on its BF reference. When the statement is imported each one
+              matches itself and moves to Paid{statementOnly ? '' : ' (or mark one paid by hand)'}.
             </p>
           </Card>
 
-          {/* THE FIRM'S OWN SHARE: not owed out like the rest, but drawn when the firm chooses -- and
-              only once the clients it came from have been paid (the firm, 10 Oct). The figure is what
-              may go now; what is still waiting is said beside it, not hidden. */}
           {firm !== null && firm.held > 0.004 && (
             <Card className="px-6 py-4" >
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2" data-testid="firm-to-draw">
@@ -141,6 +176,7 @@ export function TrustPaymentsOut() {
                   <div className="font-medium text-slate-800">Bredell Ferreira (business account)</div>
                   <div className="text-[12.5px] text-slate-500">
                     Earned, and its clients paid — the most that may be transferred now. Reference {transferReference(today)}.
+                    Recorded, it joins the bank file below.
                   </div>
                   {firm.waiting > 0.004 && (
                     <div className="text-[12.5px] text-slate-500" data-testid="firm-waiting">
@@ -163,45 +199,42 @@ export function TrustPaymentsOut() {
 
           {rows.length === 0 ? (
             <Card className="p-6 text-sm text-slate-500 text-center">
-              Nothing is waiting to be paid. Approved payover runs and decided refunds appear here until they are paid.
+              Nothing is waiting to be paid. Approved payover runs, decided refunds and a recorded transfer to the business account appear here until they are paid.
             </Card>
           ) : (
             <Card padded={false} className="overflow-x-auto">
               <table className="w-full list-table whitespace-nowrap">
                 <thead>
                   <tr className="text-slate-400 border-b border-slate-100">
-                    <th className="font-medium text-left px-3 py-2">Pay to</th>
-                    <th className="font-medium text-left px-2 py-2">Bank details</th>
+                    <th className="w-8 pl-4 py-2">
+                      <input type="checkbox" aria-label="Tick every payment that can be paid"
+                        checked={payable.length > 0 && payable.every((p) => ticked.has(keyOf(p)))}
+                        onChange={(e) => setTicked(e.target.checked ? defaultTicked(rows) : new Set())} />
+                    </th>
+                    <th className="font-medium text-left px-2 py-2">Pay to</th>
                     <th className="font-medium text-left px-3 py-2">What</th>
                     <th className="font-medium text-left px-3 py-2">Reference</th>
-                    <th className="font-medium text-left px-3 py-2">When</th>
                     <th className="font-medium text-right px-3 py-2">Amount</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((p) => (
-                    <tr key={`${p.kind}-${p.id}`} className="border-b border-slate-50 last:border-b-0 hover:bg-slate-50" data-testid="payment-to-make">
-                      <td className="px-3 py-1.5 font-medium text-slate-800 max-w-[14rem] truncate" title={p.payee}>{p.payee}</td>
-                      {/* One line: the banking details' own line breaks become dots. */}
-                      <td className="px-2 py-1.5 text-slate-500 max-w-[18rem] truncate"
-                        title={p.detail ?? undefined}>
-                        {p.detail
-                          ? (p.kind === 'payover' ? p.detail : `Why: ${p.detail}`).split(/\s*\n\s*/).join(' \u00b7 ')
-                          : p.kind === 'payover' ? <span className="text-amber-700">No banking details on the client</span> : ''}
+                  {[...payable, ...pending].map((p) => {
+                    const missing = whatIsMissing(p)
+                    return (
+                    <tr key={keyOf(p)} className={clsx('border-b border-slate-50 last:border-b-0 hover:bg-slate-50', missing.length > 0 && 'bg-amber-50/40')} data-testid="payment-to-make">
+                      <td className="w-8 pl-4 py-1.5">
+                        <input type="checkbox" aria-label={`Pay ${p.payee}`} disabled={missing.length > 0}
+                          checked={ticked.has(keyOf(p)) && missing.length === 0} onChange={() => toggle(keyOf(p))} />
                       </td>
-                      <td className="px-3 py-1.5 text-slate-600">
-                        {p.kind === 'payover' ? (
-                          <Link to={`/trust/runs/${p.id}`} className="text-gold-700 hover:text-gold-800">Payover {p.caseNumber ?? ''}</Link>
-                        ) : (
-                          <Link to={`/accounts/${p.accountId}`} className="text-gold-700 hover:text-gold-800">Refund · {p.caseNumber ?? 'the debtor'}</Link>
-                        )}
-                        <span className="text-slate-400">
-                          {' \u00b7 '}{p.kind === 'payover'
-                            ? (p.status === 'sent' ? 'Advice sent' : p.status === 'scheduled' ? 'Approved, waiting for its day' : 'Approved')
-                            : 'Overpayment refunded'}
-                        </span>
+                      <td className="px-2 py-1.5 max-w-[16rem]">
+                        <div className="font-medium text-slate-800 truncate" title={p.payee}>{p.payee}</div>
+                        {/* WHY IT IS PENDING, under the name: at the row's end it ran off an iPad. */}
+                        {missing.length > 0
+                          ? <div className="text-[11.5px] text-amber-800 whitespace-normal" data-testid="pending">Pending · {pendingWords(missing)}</div>
+                          : <div className="text-[11.5px] text-slate-400" title={`${p.holder ?? ''} · ${p.bank ?? ''} · ${p.branch ?? ''}`}>{p.bank} ···{(p.accountNo ?? '').slice(-4)}</div>}
                       </td>
+                      <td className="px-3 py-1.5">{what(p)}</td>
                       <td className="px-3 py-1.5">
                         {p.reference ? (
                           <button type="button" onClick={() => copy(p.reference!)} title="Copy the reference"
@@ -211,29 +244,30 @@ export function TrustPaymentsOut() {
                           </button>
                         ) : <span className="text-slate-400">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{p.dueOn ? `Due ${shortDate(p.dueOn)}` : 'As soon as paid'}</td>
                       <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-slate-800 whitespace-nowrap">{rand(p.amount)}</td>
                       <td className="px-3 py-1.5 text-right">
-                        {statementOnly ? (
+                        {missing.length > 0 ? (
+                          needsBanking(p) && p.kind !== 'drawing' ? (
+                            <button type="button" onClick={() => setBanking(p)} data-testid="add-banking"
+                              className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-[12px] font-medium text-amber-800 hover:bg-amber-50 whitespace-nowrap">
+                              Add banking details
+                            </button>
+                          ) : needsBanking(p) ? (
+                            <Link to="/library/firm" className="text-[12px] text-amber-800 underline whitespace-nowrap">Business account</Link>
+                          ) : null
+                        ) : statementOnly || p.kind === 'drawing' ? (
                           <span className="text-[11.5px] text-slate-400 whitespace-nowrap">Paid from the statement</span>
-                        ) : p.status === 'scheduled' ? (
-                          /* NOT BEFORE ITS DAY (11 Oct): mark_payover_run_paid refuses it, so nothing
-                             is offered here; releasing early is on the run, with a reason. */
-                          <Link to={`/trust/runs/${p.id}`} data-testid="scheduled-payout"
-                            className="text-[11.5px] text-slate-400 whitespace-nowrap hover:text-slate-600"
-                            title="Paid on its payout day. Release it early from the run, with a reason.">
-                            Not yet due
-                          </Link>
                         ) : (
-                        <button type="button"
-                          onClick={() => setPaying({ kind: p.kind, id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}
-                          className="rounded-md border border-slate-200 px-2 py-0.5 text-[12px] font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap">
-                          Mark paid
-                        </button>
+                          <button type="button"
+                            onClick={() => setPaying({ kind: p.kind as 'payover' | 'refund', id: p.id, payee: p.payee, amount: p.amount, reference: p.reference ?? '' })}
+                            className="rounded-md border border-slate-200 px-2 py-0.5 text-[12px] font-medium text-slate-700 hover:bg-slate-100 whitespace-nowrap">
+                            Mark paid
+                          </button>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </Card>
@@ -255,6 +289,15 @@ export function TrustPaymentsOut() {
             await load()
           }}
         />
+      )}
+      {banking && (
+        <BankingBox payment={banking} onClose={() => setBanking(null)}
+          onSave={async (h, b, br, a) => {
+            await setPaymentBanking(banking.kind as 'payover' | 'refund', banking.id, h, b, br, a)
+            setBanking(null)
+            await load()
+            setTicked((t) => new Set([...t, keyOf(banking)]))
+          }} />
       )}
       {drawing && firm !== null && (
         <TransferBox
@@ -384,6 +427,51 @@ function TransferBox({ available, reference, onClose, onSave }: {
           <input className={inputClass} value={ref} onChange={(e) => setRef(e.target.value)} />
         </FormField>
         <p className="text-[12px] text-slate-500">Recorded as drawn now; it reads as confirmed when its debit on the trust statement is allocated as a transfer to the business account.</p>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * THE BANKING A PAYMENT GOES TO, captured where it is missing (the firm, 13 Oct: a refund with no
+ * debtor banking details "stays in a pending state"). A payover's is kept on the CLIENT, so the next
+ * month's payover has it; a refund's on the refund. The database checks the shape: six-digit branch
+ * code, 6 to 16 digits of account number.
+ */
+function BankingBox({ payment, onClose, onSave }: {
+  payment: OutgoingPayment; onClose: () => void; onSave: (holder: string, bank: string, branch: string, account: string) => Promise<void>
+}) {
+  const [holder, setHolder] = useState(payment.holder ?? payment.payee)
+  const [bank, setBank] = useState(payment.bank ?? '')
+  const [branch, setBranch] = useState(payment.branch ?? '')
+  const [account, setAccount] = useState(payment.accountNo ?? '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const okBranch = /^\d{6}$/.test(branch.replace(/\s/g, ''))
+  const okAccount = /^\d{6,16}$/.test(account.replace(/\s/g, ''))
+  return (
+    <Modal title={`Banking details: ${payment.payee}`} onClose={onClose} width={460}
+      footer={(
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[12.5px] text-negative-700">{err}</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className={controlClass}>Cancel</button>
+            <button type="button" disabled={busy || !holder.trim() || !bank.trim() || !okBranch || !okAccount}
+              onClick={async () => { setBusy(true); setErr(null); try { await onSave(holder.trim(), bank.trim(), branch, account) } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false) } }}
+              className="rounded-lg bg-navy-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
+              {busy ? <Loader2 size={15} className="animate-spin" /> : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}>
+      <div className="space-y-3">
+        <FormField label="Account holder" required><input className={inputClass} value={holder} onChange={(e) => setHolder(e.target.value)} aria-label="Account holder" /></FormField>
+        <FormField label="Bank" required><input className={inputClass} value={bank} onChange={(e) => setBank(e.target.value)} aria-label="Bank" placeholder="FNB, ABSA, Standard Bank, Nedbank, Capitec…" /></FormField>
+        <FormField label="Branch code" required><input className={inputClass} inputMode="numeric" value={branch} onChange={(e) => setBranch(e.target.value)} aria-label="Branch code" /></FormField>
+        <FormField label="Account number" required><input className={inputClass} inputMode="numeric" value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Account number" /></FormField>
+        <p className="text-[12px] text-slate-500">
+          {payment.kind === 'payover' ? 'Kept on the client, so their next payover is paid to it too.' : 'Kept on this refund.'}
+        </p>
       </div>
     </Modal>
   )

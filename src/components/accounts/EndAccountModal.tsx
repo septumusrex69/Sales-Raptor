@@ -247,7 +247,7 @@ export function EndAccountModal({ accountId, caseNumber, debtorName, balance, ca
                 </FormField>
                 <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" data-testid="withdraw-effect">
                   {chosen.length === 0 ? 'Tick the payments to refund.'
-                    : `${rand(refundTotal)} refunded to the debtor${owedBack > 0 ? `; the client owes back ${rand(owedBack)} on its next payover` : ''}. It appears under Payments to make with its reference.`}
+                    : `${rand(refundTotal)} refunded to the debtor${owedBack > 0 ? `; the client owes back ${rand(owedBack)} on its next payover` : ''}. It appears under Payments out with its reference.`}
                 </p>
               </>
             )}

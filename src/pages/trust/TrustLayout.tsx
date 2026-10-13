@@ -34,7 +34,7 @@ const ITEMS: RailItem[] = [
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
   /* What still has to go out, and on which reference (the firm, 8 Oct). After the runs, because an
      approved run is what lands here. */
-  { to: '/trust/payments-out', label: 'Payments to make', icon: Send },
+  { to: '/trust/payments-out', label: 'Payments out', icon: Send },
   /* A debtor's overpayment, start to finish (the firm, 11 Oct: "a separate section for like
      overpayments") -- decided, refunded, parked -- instead of across three screens. */
   { to: '/trust/overpayments', label: 'Overpayments', icon: Coins },

@@ -191,7 +191,7 @@ function App() {
                 <Route path="check" element={<Navigate to="/trust/payments?tab=history" replace />} />
                 <Route path="payover" element={<FinanceWorkQueue />} handle={{ title: 'Payover runs' }} />
                 <Route path="runs/:id" element={<RunDetail />} handle={{ title: 'Payover run' }} />
-                <Route path="payments-out" element={<TrustPaymentsOut />} handle={{ title: 'Payments to make' }} />
+                <Route path="payments-out" element={<TrustPaymentsOut />} handle={{ title: 'Payments out' }} />
                 <Route path="overpayments" element={<TrustOverpayments />} handle={{ title: 'Overpayments' }} />
                 {/* Every item behind the overview's "Not accounted for" (S7), opened from that figure. */}
                 <Route path="unaccounted" element={<TrustUnaccounted />} handle={{ title: 'Not accounted for' }} />

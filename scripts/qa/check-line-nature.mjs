@@ -37,8 +37,10 @@ check('...none where none is named', accountNumberIn('RETURNED DEBIT ZULU'), nul
 
 const api = readFileSync(new URL('../../src/lib/bankAllocationApi.ts', import.meta.url), 'utf8')
 const body = api.slice(api.indexOf('export async function bookObviousLines'))
-check('the import books only interest and charges', body.length > 0 && /if \(n !== 'bank_interest' && n !== 'bank_charge'\) continue/.test(body), true)
-check('...through allocate_bank_line', /await allocateBankLine\(l\.id, n, null, null\)/.test(body), true)
+check('the import books interest and charges by the bank\'s words', body.length > 0 && /if \(n === 'bank_interest' \|\| n === 'bank_charge'\) \{\s+await allocateBankLine\(l\.id, n, null, null\)/.test(body), true)
+check('...and a BF FEES debit to the ONE recorded transfer of exactly its amount (prompt 12 B3)',
+  /if \(match\.length === 1\) \{\s+await allocateBankLine\(l\.id, 'business_transfer', null, match\[0\]\.id\)/.test(body)
+  && /Math\.round\(c\.amount \* 100\) === cents/.test(body), true)
 const card = readFileSync(new URL('../../src/pages/finance/BankImportCard.tsx', import.meta.url), 'utf8')
 check('...straight after the import', /result\.booked = await bookObviousLines\(\)/.test(card), true)
 

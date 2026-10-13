@@ -13,16 +13,20 @@ import { PROFILE } from './fixtures.mjs'
 
 const t = makeRunner('payments-out')
 const ADMIN = { ...PROFILE, name: 'Stephan', role: 'Administrator', team_id: null }
+/* THE BANK FILE (S7): one payable payover, one with no banking details, a refund with none (pending,
+   the firm's own example), a payover not yet due, and the firm's recorded transfer. */
+const bankOf = (holder) => ({ holder, bank: 'FNB', branch: '250655', account_no: '62000000001' })
 const DUE = [
   { kind: 'payover', id: 'run-smt', payee: 'Summit Fitness (Pty) Ltd', amount: 8426.07, reference: 'BF PO-SMT-2610',
-    status: 'approved', due_on: '2026-11-11', since: '2026-10-08T08:00:00Z', detail: 'FNB 62000000000', company_id: 'c1',
-    account_id: null, case_number: 'PO-SMT-2610' },
+    status: 'approved', due_on: '2026-11-11', ...bankOf('Summit Fitness'), company_id: 'c1', account_id: null, case_number: 'PO-SMT-2610' },
   { kind: 'payover', id: 'run-bpm', payee: 'Baobab Property Managers (Pty) Ltd', amount: 9699.53, reference: 'BF PO-BPM-2610',
-    status: 'sent', due_on: '2026-11-11', since: '2026-10-08T08:00:00Z', detail: null, company_id: 'c2',
-    account_id: null, case_number: 'PO-BPM-2610' },
+    status: 'sent', due_on: '2026-11-11', holder: null, bank: null, branch: null, account_no: null, company_id: 'c2', account_id: null, case_number: 'PO-BPM-2610' },
   { kind: 'refund', id: 'ref-1', payee: 'Sizwe Dlamini', amount: 490.42, reference: 'BF RAP-124059',
-    status: 'due', due_on: null, since: '2026-10-08T08:00:00Z', detail: 'The debtor asked for it back', company_id: 'c3',
-    account_id: 'acc-1', case_number: 'RAP-124059' },
+    status: 'due', due_on: null, holder: null, bank: null, branch: null, account_no: null, company_id: 'c3', account_id: 'acc-1', case_number: 'RAP-124059' },
+  { kind: 'payover', id: 'run-klr', payee: 'Karoo Linen Rentals (Pty) Ltd', amount: 4511.22, reference: 'BF PO-KLR-2611',
+    status: 'scheduled', due_on: '2026-12-11', ...bankOf('Karoo Linen'), company_id: 'c5', account_id: null, case_number: 'PO-KLR-2611' },
+  { kind: 'drawing', id: 'draw-2', payee: 'Bredell Ferreira (business account)', amount: 5000, reference: 'BF FEES-2610',
+    status: 'recorded', due_on: '2026-10-12', ...bankOf('Bredell Ferreira (Pty) Ltd'), company_id: null, account_id: null, case_number: null },
 ]
 let answer = DUE
 const PAID = [
@@ -40,12 +44,12 @@ let statementOnly = false
 const handlers = [
   [(u) => /\/rest\/v1\/firm_settings\?.*payouts_statement_only/.test(u), () => ({ body: { payouts_statement_only: statementOnly } })],
   [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
-  [(u) => /\/rpc\/payments_to_make/.test(u), () => ({ body: answer })],
+  [(u) => /\/rpc\/payments_out_list/.test(u), () => ({ body: answer })],
   [(u) => /\/rpc\/payments_out_paid/.test(u), () => ({ body: PAID })],
   [(u) => /\/rpc\/trust_position/.test(u), () => ({ body: [POSITION] })],
   /* THE FIRM DRAWS ONCE ITS CLIENTS ARE PAID (10 Oct): R3 000 of its share waits on a payover. */
   [(u) => /\/rpc\/firm_trust_split/.test(u), () => ({ body: [{ held: 27055.36, drawable: 24055.36, waiting: 3000 }] })],
-  [(u) => /\/rpc\/(mark_payover_run_paid|mark_refund_paid|draw_from_trust)/.test(u),
+  [(u) => /\/rpc\/(mark_payover_run_paid|mark_refund_paid|draw_from_trust|set_payment_banking)/.test(u),
     (u, req) => { sent.push({ fn: /\/rpc\/(\w+)/.exec(u)[1], ...req.postDataJSON() }); return { body: null } }],
   [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
   [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
@@ -56,40 +60,59 @@ const browser = await chromium.launch()
 try {
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [])
   await page.goto(`http://127.0.0.1:${PORT}/trust`, { waitUntil: 'domcontentloaded' })
-  const link = page.getByRole('link', { name: 'Payments to make' }).first()
+  const link = page.getByRole('link', { name: 'Payments out' }).first()
   await link.waitFor({ timeout: 20000 })
-  t.ok('Payments to make is in the Trust menu', await link.isVisible())
+  t.ok('Payments out is in the Trust menu', await link.isVisible())
   await link.click()
   await page.waitForURL(/\/trust\/payments-out/, { timeout: 10000 })
   const rows = page.getByTestId('payment-to-make')
   await rows.first().waitFor({ timeout: 15000 })
-  t.check('every payment still to make is listed', await rows.count(), 3)
-  t.check('the top bar names this screen, not Payments in', await page.getByRole('banner').getByText('Payments to make', { exact: true }).count().catch(() => 0) > 0
-    || (await page.locator('header').first().innerText().catch(() => '')).includes('Payments to make'), true)
+  t.check('every payment waiting to leave trust is listed, the firm\'s transfer included', await rows.count(), 5)
+  t.check('the top bar names this screen, not Payments in', await page.getByRole('banner').getByText('Payments out', { exact: true }).count().catch(() => 0) > 0
+    || (await page.locator('header').first().innerText().catch(() => '')).includes('Payments out'), true)
   const body = await page.locator('main').innerText().catch(async () => page.locator('body').innerText())
-  for (const ref of ['BF PO-SMT-2610', 'BF PO-BPM-2610', 'BF RAP-124059']) t.ok(`...with its reference ${ref}`, body.includes(ref))
-  t.ok('a run says when it is due', /Due 11 Nov 2026/.test(body))
-  t.ok('...and whether its advice has gone', /Advice sent/.test(body))
-  t.ok('a client with no banking details is said to have none', /No banking details on the client/.test(body))
-  t.ok('a refund says why', /Why: The debtor asked for it back/.test(body))
-  t.ok('the total is the sum', /18[\s,.]?616[.,]02/.test(await page.getByTestId('to-pay-total').innerText()))
-  t.ok('it says how a payment is confirmed', /allocate the line under\s+Exceptions/.test(body))
+  for (const ref of ['BF PO-SMT-2610', 'BF PO-BPM-2610', 'BF RAP-124059', 'BF FEES-2610']) t.ok(`...with its reference ${ref}`, body.includes(ref))
+  /* WHAT CAN BE PAID IS TICKED; WHAT CANNOT IS PENDING AND SAYS WHY (the firm, 13 Oct). */
+  const row = (name) => rows.filter({ hasText: name })
+  t.ok('a payable payover is ticked', await row('Summit Fitness').getByRole('checkbox').isChecked())
+  t.ok('...and so is the firm\'s recorded transfer', await row('business account').getByRole('checkbox').isChecked())
+  t.ok('a refund with no banking details is pending, and cannot be ticked',
+    /Pending · no banking details/.test(await row('Sizwe Dlamini').innerText())
+    && await row('Sizwe Dlamini').getByRole('checkbox').isDisabled())
+  t.ok('...as is a client with none', await row('Baobab').getByRole('checkbox').isDisabled() && /Add banking details/.test(await row('Baobab').innerText()))
+  t.ok('a payover before its day is pending as not yet due, with nothing to add', /Pending · not yet due/.test(await row('Karoo').innerText())
+    && (await row('Karoo').getByTestId('add-banking').count()) === 0)
+  const total = async () => (await page.getByTestId('file-total').innerText()).split(String.fromCharCode(0xa0)).join(' ')
+  t.check('the file total is what is ticked', await total(), 'R 13 426.07')
+  await row('business account').getByRole('checkbox').uncheck()
+  t.check('...and leaving one out takes it off', await total(), 'R 8 426.07')
   await t.shot(page, 'payments-out')
 
-  /* ---- MARK PAID FROM HERE (the firm, 8 Oct: completed "from two places") ---- */
-  await rows.filter({ hasText: 'Sizwe Dlamini' }).getByRole('button', { name: 'Mark paid' }).click()
-  const refBox = page.getByLabel(/Reference it was paid with/)
-  await refBox.waitFor({ timeout: 10000 })
-  t.check('the box starts from the payment\'s own reference', await refBox.inputValue(), 'BF RAP-124059')
-  await page.getByRole('button', { name: 'Mark paid' }).last().click()
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.getByTestId('download-bank-file').click()])
+  const csv = await (await import('node:fs/promises')).readFile(await dl.path(), 'utf8')
+  t.check('the bank file carries only what is ticked and payable, on its BF reference', JSON.stringify(csv.trim().split(/\r?\n/)),
+    JSON.stringify(['Beneficiary name,Bank,Branch code,Account number,Amount,Own reference,Beneficiary reference',
+      'Summit Fitness,FNB,250655,62000000001,8426.07,BF PO-SMT-2610,BF PO-SMT-2610']))
+
+  /* ---- BANKING DETAILS WHERE THEY ARE MISSING ---- */
+  await row('Sizwe Dlamini').getByTestId('add-banking').click()
+  await page.getByLabel('Bank', { exact: true }).fill('Capitec')
+  await page.getByLabel('Branch code').fill('470010')
+  await page.getByLabel('Account number').fill('1234567890')
+  await page.getByRole('button', { name: 'Save' }).click()
   await page.waitForTimeout(500)
-  t.check('a refund is marked paid with its reference', JSON.stringify({ fn: sent[0]?.fn, id: sent[0]?.p_refund, ref: sent[0]?.p_reference }),
-    JSON.stringify({ fn: 'mark_refund_paid', id: 'ref-1', ref: 'BF RAP-124059' }))
-  await rows.filter({ hasText: 'Summit Fitness' }).getByRole('button', { name: 'Mark paid' }).click()
+  const bk = sent.find((x) => x.fn === 'set_payment_banking')
+  t.check('a refund\'s banking is saved on the refund', JSON.stringify(bk ? [bk.p_kind, bk.p_id, bk.p_holder, bk.p_bank, bk.p_branch, bk.p_account] : null),
+    JSON.stringify(['refund', 'ref-1', 'Sizwe Dlamini', 'Capitec', '470010', '1234567890']))
+
+  /* ---- MARK PAID FROM HERE STILL WORKS (the firm, 8 Oct: completed "from two places") ---- */
+  await row('Summit Fitness').getByRole('button', { name: 'Mark paid' }).click()
   await page.getByLabel(/Reference it was paid with/).waitFor({ timeout: 10000 })
+  t.check('the box starts from the payment\'s own reference', await page.getByLabel(/Reference it was paid with/).inputValue(), 'BF PO-SMT-2610')
   await page.getByRole('button', { name: 'Mark paid' }).last().click()
   await page.waitForTimeout(500)
-  t.check('a run is marked paid with the run\'s own call', JSON.stringify({ fn: sent[1]?.fn, id: sent[1]?.p_run, ref: sent[1]?.p_reference }),
+  const mp = sent.find((x) => x.fn === 'mark_payover_run_paid')
+  t.check('a run is marked paid with the run\'s own call', JSON.stringify({ fn: mp?.fn, id: mp?.p_run, ref: mp?.p_reference }),
     JSON.stringify({ fn: 'mark_payover_run_paid', id: 'run-smt', ref: 'BF PO-SMT-2610' }))
 
   /* ---- THE FIRM'S OWN TRANSFER ---- */
@@ -101,7 +124,8 @@ try {
   await page.getByRole('button', { name: 'Record transfer' }).waitFor({ timeout: 10000 })
   await page.getByRole('button', { name: 'Record transfer' }).click()
   await page.waitForTimeout(500)
-  t.check('a transfer records the whole drawable share by default, with the reference', JSON.stringify({ fn: sent[2]?.fn, amount: sent[2]?.p_amount, ok: /^BF FEES-\d{4}$/.test(sent[2]?.p_reference ?? '') }),
+  const dr = sent.find((x) => x.fn === 'draw_from_trust')
+  t.check('a transfer records the whole drawable share by default, with the reference', JSON.stringify({ fn: dr?.fn, amount: dr?.p_amount, ok: /^BF FEES-\d{4}$/.test(dr?.p_reference ?? '') }),
     JSON.stringify({ fn: 'draw_from_trust', amount: 24055.36, ok: true }))
 
   /* ---- WHAT HAS GONE OUT ---- */
@@ -121,7 +145,7 @@ try {
   await rows.first().waitFor({ timeout: 15000 })
   await page.getByText('Paid from the statement').first().waitFor({ timeout: 10000 }).catch(() => {})
   t.check('with the switch on there is no Mark paid', await page.getByRole('button', { name: 'Mark paid' }).count(), 0)
-  t.ok('...each row says it is paid from the statement', (await page.getByText('Paid from the statement').count()) === 3)
+  t.ok('...each payable row says it is paid from the statement', (await page.getByText('Paid from the statement').count()) === 2)
   t.ok('...and recording the firm\'s transfer still works', await page.getByRole('button', { name: 'Record a transfer' }).isVisible())
   statementOnly = false
 

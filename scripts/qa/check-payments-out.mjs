@@ -84,7 +84,7 @@ const rows = [toPaymentToMake({ kind: 'payover', id: 'a', payee: 'X', amount: '8
 check('the total is the sum, to the cent', totalToPay(rows), 8916.49)
 
 /* ---- 4. where it shows ---- */
-ok('Payments to make is in the Trust rail', /to: '\/trust\/payments-out', label: 'Payments to make'/.test(read('src/pages/trust/TrustLayout.tsx')))
+ok('Payments out is in the Trust rail (renamed from Payments to make, S7)', /to: '\/trust\/payments-out', label: 'Payments out'/.test(read('src/pages/trust/TrustLayout.tsx')))
 ok('...and routed', /path="payments-out" element=\{<TrustPaymentsOut \/>\}/.test(read('src/App.tsx')))
 const run = strip(read('src/pages/finance/RunDetail.tsx'))
 ok('the run says which reference to pay it on', /Pay with reference/.test(run) && /paymentReference\(run\.invoice_number\)/.test(run))
@@ -135,7 +135,7 @@ for (const fn of ['mark_payover_run_paid', 'mark_refund_paid']) {
 const runPage = strip(read('src/pages/finance/RunDetail.tsx'))
 ok('the run offers Mark paid only while the switch is off (and the run is not below nil, and is due)', /\(run\.status === 'approved' \|\| run\.status === 'sent'\) && !scheduled && !statementOnly && run\.net_payover >= 0 && \(/.test(runPage))
 ok('...and says how it will be paid when it is on', /Paid when its line on the bank statement is allocated/.test(runPage))
-ok('Payments to make offers Mark paid only while the switch is off', /\{statementOnly \? \(\s*<span[^>]*>Paid from the statement<\/span>/.test(strip(read('src/pages/trust/TrustPaymentsOut.tsx'))))
+ok('Payments out offers Mark paid only while the switch is off', /\) : statementOnly \|\| p\.kind === 'drawing' \? \(\s*<span[^>]*>Paid from the statement<\/span>/.test(strip(read('src/pages/trust/TrustPaymentsOut.tsx'))))
 ok('Trust settings carries the switch', /saveStatementOnly\(e\.target\.checked\)/.test(strip(read('src/pages/finance/FinanceSettings.tsx'))))
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))

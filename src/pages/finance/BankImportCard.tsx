@@ -92,7 +92,7 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
       try {
         result.booked = await bookObviousLines()
         result.unallocated = Math.max(0, result.unallocated - result.booked.interest)
-        result.debits = Math.max(0, result.debits - result.booked.charges)
+        result.debits = Math.max(0, result.debits - result.booked.charges - (result.booked.drawings ?? 0))
       } catch { /* left for Exceptions */ }
       setOutcome(result)
       setStatement(null)
@@ -193,10 +193,11 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
             <Check size={14} /> {outcome.allocated.toLocaleString('en-ZA')} payments recorded and split.
           </p>
           <ul className="mt-1.5 space-y-0.5 text-[12px] text-slate-600">
-            {outcome.booked && outcome.booked.interest + outcome.booked.charges > 0 && (
+            {outcome.booked && outcome.booked.interest + outcome.booked.charges + (outcome.booked.drawings ?? 0) > 0 && (
               <li data-testid="booked-obvious">
-                {[outcome.booked.interest ? `${outcome.booked.interest} interest` : '', outcome.booked.charges ? `${outcome.booked.charges} bank charge${outcome.booked.charges === 1 ? '' : 's'}` : '']
-                  .filter(Boolean).join(' and ')} booked by the bank&rsquo;s own words.
+                {[outcome.booked.interest ? `${outcome.booked.interest} interest` : '', outcome.booked.charges ? `${outcome.booked.charges} bank charge${outcome.booked.charges === 1 ? '' : 's'}` : '',
+                  outcome.booked.drawings ? `${outcome.booked.drawings} transfer${outcome.booked.drawings === 1 ? '' : 's'} to the business account` : '']
+                  .filter(Boolean).join(', ')} matched by the bank&rsquo;s own words and references.
               </li>
             )}
             {outcome.unallocated > 0 && (

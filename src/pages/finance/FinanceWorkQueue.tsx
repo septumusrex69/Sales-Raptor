@@ -19,7 +19,10 @@ import { firmDay } from '../../lib/dateLabels'
 import { supabase } from '../../lib/supabase'
 import { fetchSettledRunIds } from '../../lib/clientBusinessReceipts'
 import { sendAdviceForRuns } from '../../lib/remittanceEmail'
-import { fetchPayoutsStatementOnly } from '../../lib/trust'
+import { fetchFirmTrustSplit, fetchPayoutsStatementOnly, type FirmTrustSplit } from '../../lib/trust'
+import { transferReference } from '../../lib/paymentsOut'
+import { canDrawFromTrust } from '../../lib/permissions'
+import { useAuth } from '../../store/AuthContext'
 import { MarkPaidModal, type PayableRun } from './MarkPaidModal'
 import { rand as randAmount } from '../../lib/money'
 
@@ -145,6 +148,11 @@ export function FinanceWorkQueue() {
   const [paying, setPaying] = useState<PayableRun[] | null>(null)
   const [statementOnly, setStatementOnly] = useState(false)
   useEffect(() => { fetchPayoutsStatementOnly().then(setStatementOnly).catch(() => {}) }, [])
+  /* WHAT THE FIRM MAY DRAW NOW (prompt 12 B, the firm: "The moment that a client needs to be paid, the
+     Bredell Ferreira account needs to be paid as well"). Once its clients are paid, the firm's share
+     is drawable and this screen says so, one press from Record a transfer. */
+  const { currentUser } = useAuth()
+  const [firm, setFirm] = useState<FirmTrustSplit | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -169,6 +177,7 @@ export function FinanceWorkQueue() {
         .catch(() => null))
       setPicked((p) => new Set([...p].filter((id) => q.some((r) => r.runId === id))))
       setTiles(t)
+      setFirm(await fetchFirmTrustSplit().catch(() => null))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the payover queue.')
     } finally {
@@ -282,7 +291,9 @@ export function FinanceWorkQueue() {
      why"). On the first day of a cycle nothing has been processed yet; a bare 0 read as broken. */
   const emptyCollecting = tabShown === 'collecting' && groups.length === 0 && !q && !statusFilter && !!cycle
   const isHistory = tabShown === 'history'
-  const TAB_LABEL: Record<QueueTab, string> = { collecting: 'Collecting', waiting: 'Waiting', topay: 'To pay', history: 'History' }
+  /* "Approve", not "To pay" (the firm, 13 Oct: "to pay could mean pay to anyone"): this screen decides
+     what each client gets; paying is Payments out. */
+  const TAB_LABEL: Record<QueueTab, string> = { collecting: 'Collecting', waiting: 'Waiting', topay: 'Approve', history: 'History' }
   const pickedRows = rows.filter((r) => picked.has(r.runId))
     /* THE PAYOUT DAY (11 Oct): an approved run's advice and payment wait for payover_pays_on unless it
      was released early. A sent run went out already, so it is not held again. The database refuses
@@ -370,6 +381,17 @@ export function FinanceWorkQueue() {
             </button>
           )} />
       </div>
+
+      {firm && firm.drawable > 0.004 && canDrawFromTrust(currentUser) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold-200 bg-gold-50 px-4 py-3" data-testid="firm-drawable">
+          <span className="text-[13.5px] text-slate-800">
+            Its clients have been paid: <b>{rand(firm.drawable)}</b> of Bredell Ferreira&rsquo;s share can now be drawn, on <span className="font-mono">{transferReference(cycle?.today ?? '')}</span>.
+          </span>
+          <Link to="/trust/payments-out?draw=1" className="rounded-lg bg-navy-900 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-navy-800">
+            Record the transfer
+          </Link>
+        </div>
+      )}
 
       <Card padded={false}>
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-100 px-4 pt-3">

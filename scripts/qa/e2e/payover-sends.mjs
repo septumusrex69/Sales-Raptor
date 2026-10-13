@@ -118,9 +118,9 @@ try {
     await page.locator(`[data-testid="cycle-group"][data-tone="${tone}"]`).first().waitFor({ timeout: 10000 })
   }
   await groups.first().waitFor({ timeout: 15000 })
-  t.ok('the tabs are Collecting, Waiting, To pay, History, each counting its runs',
+  t.ok('the tabs are Collecting, Waiting, Approve, History, each counting its runs',
     /Collecting\s*\(?\s*1\s*\)?/.test(await queueTab('collecting').innerText()) && /Waiting\s*\(?\s*3\s*\)?/.test(await queueTab('waiting').innerText())
-      && /To pay\s*\(?\s*2\s*\)?/.test(await queueTab('topay').innerText()) && /History\s*\(?\s*2\s*\)?/.test(await queueTab('history').innerText()))
+      && /Approve\s*\(?\s*2\s*\)?/.test(await queueTab('topay').innerText()) && /History\s*\(?\s*2\s*\)?/.test(await queueTab('history').innerText()))
   let h = await heads()
   t.check('it opens on To pay, which holds ONE cycle', h.length, 1)
   t.ok('...the overdue one, saying it was due', /^Overdue[\s\S]*2 clients[\s\S]*was due 11 Sep and is not yet paid/i.test(h[0] ?? ''))
