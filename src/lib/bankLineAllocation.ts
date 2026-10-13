@@ -86,6 +86,30 @@ export function needsReason(kind: AllocationKind): boolean {
 const CHARGE = /\bBANK\s*CHARGES?\b|\bSERVICE\s*FEE\b|\bMONTHLY\s*(ACC(OUNT)?\s*)?FEE\b|\bADMIN(ISTRATION)?\s*FEE\b|\bCASH\s*DEP(OSIT)?\s*FEE\b|\bTRANSACTION\s*FEE\b|#\s*[A-Z ]*FEE\b/i
 const INTEREST = /\bINTEREST\b|\bCR\.?\s*INT\b|\bINT\.?\s*CAP/i
 
+/*
+ * A DEBIT ORDER THAT CAME BACK. FNB: "RETURNED DEBIT SBB/2003 ZULU INSUFFICIENT FUNDS"; others write
+ * "UNPAID", "R/D" or "DEBIT ORDER REVERSAL". It is not a payment out of the firm to anybody: it is a
+ * debtor's receipt that was never money, and the job is to reverse that payment on its account.
+ */
+const RETURNED = /\bRETURNED\s*(DEBIT|D\/?O)\b|\bUNPAID\b|\bR\/D\b|\bINSUFFICIENT\s*FUNDS\b|\bDEBIT\s*ORDER\s*(REVERSAL|RETURN)/i
+/* Our own account numbers look like SBB/2003 -- a client code, a slash, a number. */
+const ACCOUNT_NO = /\b([A-Z]{2,5}\/\d{2,6})\b/
+
+/** What a bank line plainly is from the bank's own words, or null. Never a decision: a hint for which button to show. */
+export type LineNature = 'bank_charge' | 'bank_interest' | 'returned_debit'
+export function lineNature(description: string | null, direction: StatementLine['direction']): LineNature | null {
+  const d = description ?? ''
+  if (direction === 'credit') return INTEREST.test(d) ? 'bank_interest' : null
+  if (RETURNED.test(d)) return 'returned_debit'
+  if (CHARGE.test(d)) return 'bank_charge'
+  return null
+}
+
+/** The account a returned debit names ("SBB/2003"), so the screen can open it. */
+export function accountNumberIn(description: string | null): string | null {
+  return ACCOUNT_NO.exec(description ?? '')?.[1] ?? null
+}
+
 export interface Suggestion {
   kind: AllocationKind
   targetId: string | null

@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { toPaidOut, toPaymentToMake, type PaidOut, type PaymentToMake } from './paymentsOut.ts'
-import { toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
+import { lineNature, toStatementLine, type AllocationKind, type Candidate, type StatementLine } from './bankLineAllocation'
 
 /**
  * ALLOCATING TRUST STATEMENT LINES, THE CALLS (prompt 12). The rules are in bankLineAllocation.ts
@@ -68,4 +68,25 @@ export async function matchPayoversByReference(): Promise<ReferenceMatch> {
   if (error) throw new Error(error.message)
   const r = ((Array.isArray(data) ? data[0] : data) ?? {}) as { matched?: number; differs?: number; notes?: string[] }
   return { matched: Number(r.matched ?? 0), differs: Number(r.differs ?? 0), notes: r.notes ?? [] }
+}
+
+/**
+ * INTEREST AND BANK CHARGES BOOK THEMSELVES ON IMPORT (the firm, 13 Oct: "By default credit interest
+ * is interest. Should be allocated as interest"). Only where the bank's own words say so
+ * (`lineNature`): CREDIT INTEREST in, ##BANK CHARGE / ##SERVICE FEE out. Each still goes through
+ * allocate_bank_line, the one thing that writes an allocation, so it is the same entry a person
+ * pressing the button would have made. One that fails is left for Exceptions.
+ */
+export async function bookObviousLines(): Promise<{ interest: number; charges: number }> {
+  const lines = await fetchLinesToAllocate()
+  let interest = 0; let charges = 0
+  for (const l of lines) {
+    const n = lineNature(l.description, l.direction)
+    if (n !== 'bank_interest' && n !== 'bank_charge') continue
+    try {
+      await allocateBankLine(l.id, n, null, null)
+      if (n === 'bank_interest') interest += 1; else charges += 1
+    } catch { /* left for a person */ }
+  }
+  return { interest, charges }
 }

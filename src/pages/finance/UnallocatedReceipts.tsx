@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, Check, Loader2, Search } from 'lucide-react'
-import { Card, CardHeader } from '../../components/ui/Card'
+import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { SplitReceiptModal } from './SplitReceiptModal'
+import { accountNumberIn, lineNature } from '../../lib/bankLineAllocation.ts'
+import { allocateBankLine } from '../../lib/bankAllocationApi'
 import {
   fetchUnallocatedReceipts, placeBankLine,
   fetchUnreconciledPayouts, reconcileBankDebit,
@@ -79,10 +82,28 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
     } finally { setTying(null) }
   }
 
+  /*
+   * BOOKED IN ONE PRESS WHERE THE BANK'S OWN WORDS SAY WHAT IT IS (the firm, 13 Oct, at CREDIT
+   * INTEREST under "Needs an account" and two bank charges reading "No run of this amount"). Interest
+   * is the firm's and is never placed on a debtor; a bank charge is the firm's cost. Both go through
+   * allocate_bank_line, the one thing that writes an allocation.
+   */
+  async function book(lineId: string, kind: 'bank_interest' | 'bank_charge') {
+    setTying(lineId); setError(null)
+    try {
+      await allocateBankLine(lineId, kind, null, null)
+      await load(); onPlaced()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That line could not be booked.')
+    } finally { setTying(null) }
+  }
+
   const waiting = rows.reduce((n, r) => n + r.amount, 0)
 
   return (
-    <>
+    /* ONE COLUMN WITH ITS OWN GAPS: a fragment left the cards' spacing to whoever drew it, and the
+       Payments out card sat jammed under this one (the firm, 13 Oct: "looks weird"). */
+    <div className="space-y-4">
       <Card padded={false} className="border-t-[3px] border-t-gold-400">
         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-5 py-4">
           <div>
@@ -156,6 +177,15 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">
+                    {lineNature(r.description, 'credit') === 'bank_interest' ? (
+                      <button type="button" disabled={tying === r.id} onClick={() => void book(r.id, 'bank_interest')}
+                        data-testid="book-interest"
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
+                          text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
+                        {tying === r.id ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                        Book as bank interest
+                      </button>
+                    ) : (
                     <span className="inline-flex gap-1.5">
                       <button type="button" onClick={() => setPlacing(r)}
                         className="text-xs font-medium px-2.5 py-1 rounded-md border border-slate-200
@@ -169,6 +199,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
                         Split it
                       </button>
                     </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -187,8 +218,13 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
       */}
       {parked.length > 0 && (
         <Card padded={false}>
-          <CardHeader title="Parked off the approval queue"
-            subtitle="Somebody had these in front of them and would not approve them where they sat. They are still recorded against that account until they are placed." />
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h3 className="text-[16px] font-semibold text-slate-800">Parked off the approval queue</h3>
+            <p className="text-[12.5px] text-slate-500">
+              Somebody had these in front of them and would not approve them where they sat. They are still recorded
+              against that account until they are placed.
+            </p>
+          </div>
           <table className="w-full list-table whitespace-nowrap">
             <thead className="text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-100">
@@ -253,15 +289,22 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
       {/* ---------------- money out, waiting to be tied to a run ---------------- */}
       {payouts.length > 0 && (
         <Card padded={false}>
-          <CardHeader title="Payments out, not yet tied to a run"
-            subtitle="Confirming one against the run it settles marks that run paid — witnessed by the bank rather than asserted." />
+          {/* The same padded header as Needs an account: CardHeader assumes a padded card, and on an
+              unpadded one it drew flush against the edge. */}
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h3 className="text-[16px] font-semibold text-slate-800">Payments out to allocate</h3>
+            <p className="text-[12.5px] text-slate-500">
+              Money that left the trust account with nothing recorded against it yet. A payover is tied to its run, a
+              bank charge is booked to the firm, and a debit order that came back is reversed on the debtor&rsquo;s account.
+            </p>
+          </div>
           <table className="w-full list-table whitespace-nowrap">
             <tbody>
               {payouts.map((p) => (
                 <tr key={p.id} className="border-t border-slate-50">
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{formatDate(p.txnDate)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-800">{rand(Math.abs(p.amount))}</td>
-                  <td className="px-3 py-2 text-slate-600 wrap-anywhere">{p.description}</td>
+                  <td className="px-3 py-2 text-slate-600 whitespace-normal wrap-anywhere">{p.description}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     {/*
                       A RUN IS OFFERED ONLY WHERE THE AMOUNTS ALREADY AGREE EXACTLY -- the database
@@ -276,8 +319,27 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
                         {tying === p.id ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
                         {p.candidateInvoice} · {p.candidateClient}
                       </button>
+                    ) : lineNature(p.description, 'debit') === 'bank_charge' ? (
+                      <button type="button" disabled={tying === p.id} onClick={() => void book(p.id, 'bank_charge')}
+                        data-testid="book-charge"
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md
+                          border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-40">
+                        {tying === p.id ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                        Book as a bank charge
+                      </button>
+                    ) : lineNature(p.description, 'debit') === 'returned_debit' ? (
+                      /* A BOUNCED DEBIT ORDER IS A RECEIPT THAT WAS NEVER MONEY: the job is reversing that
+                         payment on its account, which is where Reverse already lives. */
+                      <Link to={accountNumberIn(p.description) ? `/accounts?q=${encodeURIComponent(accountNumberIn(p.description) as string)}` : '/accounts'}
+                        data-testid="returned-debit"
+                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md
+                          border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100">
+                        Reverse it on {accountNumberIn(p.description) ?? 'the account'}
+                      </Link>
                     ) : (
-                      <span className="text-[11px] text-slate-400">No run of this amount</span>
+                      <Link to="/trust/exceptions" className="text-xs font-medium text-gold-700 hover:text-gold-800">
+                        Allocate it on Exceptions
+                      </Link>
                     )}
                   </td>
                 </tr>
@@ -318,7 +380,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
         <SplitReceiptModal receipt={splitting} onClose={() => setSplitting(null)}
           onDone={async () => { setSplitting(null); await load(); onPlaced() }} />
       )}
-    </>
+    </div>
   )
 }
 

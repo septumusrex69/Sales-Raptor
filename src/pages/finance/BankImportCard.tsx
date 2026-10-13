@@ -3,7 +3,7 @@ import { AlertTriangle, Banknote, Check, ChevronRight, FileUp, Loader2, Upload }
 import { Card, CardHeader } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { parseBankStatement, summarise, type BankStatement } from '../../lib/bankStatement'
-import { matchPayoversByReference } from '../../lib/bankAllocationApi'
+import { bookObviousLines, matchPayoversByReference } from '../../lib/bankAllocationApi'
 import {
   importBankLines, fetchBankImportHistory,
   type ImportOutcome, type BankImportHistory,
@@ -89,6 +89,11 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
           result.payoverNotes = m.notes
         } catch { /* left for Exceptions */ }
       }
+      try {
+        result.booked = await bookObviousLines()
+        result.unallocated = Math.max(0, result.unallocated - result.booked.interest)
+        result.debits = Math.max(0, result.debits - result.booked.charges)
+      } catch { /* left for Exceptions */ }
       setOutcome(result)
       setStatement(null)
       if (fileRef.current) fileRef.current.value = ''
@@ -188,6 +193,12 @@ export function BankImportCard({ onImported, compact = false, leading, trailing 
             <Check size={14} /> {outcome.allocated.toLocaleString('en-ZA')} payments recorded and split.
           </p>
           <ul className="mt-1.5 space-y-0.5 text-[12px] text-slate-600">
+            {outcome.booked && outcome.booked.interest + outcome.booked.charges > 0 && (
+              <li data-testid="booked-obvious">
+                {[outcome.booked.interest ? `${outcome.booked.interest} interest` : '', outcome.booked.charges ? `${outcome.booked.charges} bank charge${outcome.booked.charges === 1 ? '' : 's'}` : '']
+                  .filter(Boolean).join(' and ')} booked by the bank&rsquo;s own words.
+              </li>
+            )}
             {outcome.unallocated > 0 && (
               <li>{outcome.unallocated.toLocaleString('en-ZA')} receipts need an account.</li>
             )}
@@ -309,8 +320,10 @@ export function LatestStatement({ refreshKey }: { refreshKey: number }) {
         <ChevronRight size={14} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
         Latest statement · {latest.lines.toLocaleString('en-ZA')} lines
         {latest.unallocated > 0
-          ? ` · ${latest.unallocated} receipt${latest.unallocated === 1 ? '' : 's'} need${latest.unallocated === 1 ? 's' : ''} an account`
-          : ' · every receipt placed'}
+          /* LINES, NOT RECEIPTS: the count is money in AND out not yet placed, so "5 receipts" beside a
+             list of 2 receipts and 3 payments out read as a contradiction (the firm, 13 Oct). */
+          ? ` · ${latest.unallocated} line${latest.unallocated === 1 ? '' : 's'} still to place or allocate`
+          : ' · every line placed'}
       </button>
       {open && (
         <div className="mt-2 space-y-1 pl-5">
