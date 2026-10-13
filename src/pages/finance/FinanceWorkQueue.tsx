@@ -13,7 +13,7 @@ import {
 import { Modal } from '../../components/ui/Modal'
 import {
   collectingState, defaultQueueTab, groupRunsByCycle, historyPayouts, parseQueueTab, payoutLabel, paysOnFor, periodLabel,
-  queueTabOf, type QueueTab,
+  queueTabOf, runPill, type PillTone, type QueueTab,
 } from '../../lib/payoverGroups'
 import { firmDay } from '../../lib/dateLabels'
 import { supabase } from '../../lib/supabase'
@@ -49,19 +49,23 @@ import { rand as randAmount } from '../../lib/money'
  * a queue that keeps showing it is a queue people learn to scroll past.
  */
 
-const STATUS_TONE: Record<RunStatus, string> = {
-  needs_review: 'bg-amber-100 text-amber-800',
+const PILL_TONE: Record<PillTone, string> = {
+  collecting: 'bg-negative-100 text-negative-700',
+  waiting: 'bg-amber-100 text-amber-800',
   ready: 'bg-sky-100 text-sky-800',
+  review: 'bg-orange-100 text-orange-800',
   approved: 'bg-slate-200 text-slate-700',
   sent: 'bg-gold-100 text-gold-800',
   paid: 'bg-emerald-100 text-emerald-700',
   void: 'bg-slate-100 text-slate-400',
 }
 
-function Pill({ status }: { status: RunStatus }) {
+/* The word and colour come from the TAB as well as the status (runPill): see payoverGroups.ts. */
+function Pill({ status, tab }: { status: RunStatus; tab: QueueTab }) {
+  const p = runPill(status, tab)
   return (
-    <span className={clsx('inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap', STATUS_TONE[status])}>
-      {RUN_STATUS_LABEL[status]}
+    <span data-testid="run-pill" className={clsx('inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap', PILL_TONE[p.tone])}>
+      {p.label}
     </span>
   )
 }
@@ -626,7 +630,7 @@ export function FinanceWorkQueue() {
                       </td>
                     </>
                   )}
-                  <td className="px-2 py-1.5"><Pill status={r.status} /></td>
+                  <td className="px-2 py-1.5"><Pill status={r.status} tab={tabOf(r)} /></td>
                   <td className="px-3 py-1.5">
                     {r.nextStep === 'approve' && stillOpen(r) ? (
                       /* ONE HEIGHT FOR EVERY RUN (the firm, 10 Oct: "make them all as big as the email

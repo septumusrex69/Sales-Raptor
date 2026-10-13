@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs'
 import {
-  defaultQueueTab, groupRunsByCycle, historyPayouts, parseQueueTab, payoutLabel, paysOnFor, queueTabOf,
+  defaultQueueTab, groupRunsByCycle, historyPayouts, parseQueueTab, payoutLabel, paysOnFor, queueTabOf, runPill,
 } from '../../src/lib/payoverGroups.ts'
 
 let pass = 0
@@ -79,11 +79,20 @@ check('History\'s months are the payout days, newest first, once each',
   historyPayouts([{ periodEnd: '2026-07-10' }, { periodEnd: '2026-08-10' }, { periodEnd: '2026-07-10' }], 1), ['2026-09-11', '2026-08-11'])
 check('...said as payouts', payoutLabel('2026-09-11'), 'Payout 11 Sep 2026')
 
+/* THE PILL SAYS WHERE A READY RUN STANDS (the firm, 13 Oct: "it looks like it's ready to pay over"). */
+check('a ready run collecting is red and says so', runPill('ready', 'collecting'), { label: 'Collecting', tone: 'collecting' })
+check('...waiting for its day is yellow, checked', runPill('ready', 'waiting'), { label: 'Checked · waiting', tone: 'waiting' })
+check('...and only in To pay is it ready to approve', runPill('ready', 'topay'), { label: 'Ready to approve', tone: 'ready' })
+check('every other status keeps its word whatever the tab', ['needs_review', 'approved', 'sent', 'paid'].map((x) => runPill(x, 'waiting').label),
+  ['Needs review', 'Approved', 'Sent', 'Paid'])
+
 const page = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
 check('the queue draws the groups', /groupRunsByCycle\(shown, cycle\?\.periodStart \?\? null, tabShown === 'history' \? 'paid' : 'open', lag, cycle\?\.today \?\? null\)/.test(page) && /groups\.map\(\(g\) =>/.test(page), true)
 check('...sorts every run with queueTabOf, once', (page.match(/queueTabOf\(/g) ?? []).length, 1)
 check('...in the four tabs, in order', /\['collecting', 'waiting', 'topay', 'history'\] as const/.test(page), true)
 check('...and draws the open cycle even with nothing in it', /emptyCollecting && cycle/.test(page) && /collectingState\(cycle\.periodEnd, lag\)/.test(page), true)
+
+check('...and the queue draws it from the tab', /<Pill status=\{r\.status\} tab=\{tabOf\(r\)\} \/>/.test(page), true)
 
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-payover-groups: ${pass} passed, ${failures.length} failed`)

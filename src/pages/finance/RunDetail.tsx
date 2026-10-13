@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Loader2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
-import { Modal, inputClass } from '../../components/ui/Modal'
+import { Modal, controlClass, inputClass } from '../../components/ui/Modal'
 import { rand, ratePercent } from '../../lib/money'
 import { supabase } from '../../lib/supabase'
 import {
@@ -18,7 +18,7 @@ import { fetchPayoutsStatementOnly } from '../../lib/trust'
 import { MarkPaidModal } from './MarkPaidModal'
 import { useBackLink, useRecordName } from '../../lib/backLink'
 import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
-import { fetchReceiptForRun, recordClientPayment, type ClientBusinessReceipt } from '../../lib/clientBusinessReceipts'
+import { fetchClientPaymentsForRun, recordClientPayment } from '../../lib/clientStatement'
 import { canReversePayment, canViewBusiness, canViewFinance } from '../../lib/permissions'
 import { ReversePaymentModal } from '../../components/finance/ReversePaymentModal'
 import { useAuth } from '../../store/AuthContext'
@@ -111,7 +111,7 @@ export function RunDetail() {
   const [lag, setLag] = useState(1)
   const [emailModal, setEmailModal] = useState(false)
   const [sends, setSends] = useState<AdviceSend[]>([])
-  const [receipt, setReceipt] = useState<ClientBusinessReceipt | null>(null)
+  const [paidAgainst, setPaidAgainst] = useState<{ amount: number; receivedOn: string; reference: string }[]>([])
   const [firm, setFirm] = useState<{ name: string; address: string | null; phone: string | null; email: string | null; vatNumber: string | null } | null>(null)
 
   const load = useCallback(async () => {
@@ -147,7 +147,7 @@ export function RunDetail() {
       } : null)
       setRows(await fetchRunPayments(id))
       setSends(await fetchAdviceSends({ runId: id }).catch(() => []))
-      setReceipt(await fetchReceiptForRun(id).catch(() => null))
+      setPaidAgainst(await fetchClientPaymentsForRun(id).catch(() => []))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load that run.')
     } finally {
@@ -357,7 +357,7 @@ export function RunDetail() {
         </table>
 
         {run.net_payover < 0 && (
-          <ClientPaidUs run={run} receipt={receipt} onRecorded={load} onError={setError} />
+          <ClientPaidUs run={run} payments={paidAgainst} onRecorded={load} onError={setError} />
         )}
 
         {run.ptc_received > 0 && (
@@ -791,16 +791,18 @@ function fmtStamp(iso: string): string {
 }
 
 /**
- * A RUN BELOW NIL: THE CLIENT'S PAYMENT INTO THE BUSINESS ACCOUNT (the firm, 10 Oct: "that's paid to
- * our business account, not to the trust account. So we would have to match it").
+ * A RUN BELOW NIL: WHAT THE CLIENT HAS PAID AGAINST IT, AND A PAYMENT RECORDED FROM HERE (S7).
  *
- * Recorded, it settles the shortfall: not carried into the next payover, off "What clients owe us",
- * on the client's ledger. Offered only on an approved run (the client owes what an approved run says)
- * and only to somebody with both the trust and the business ticks -- the database asks the same.
- * The amount is the shortfall and is not typed: a part payment is not recorded yet.
+ * The firm, 12 Oct: "what if the client pays partially? ... shouldn't we just have a statement?" The
+ * run says what was owed, what has been paid and what is still owed, read off the payments applied to
+ * it (client_payment_applications). A payment recorded here is the CLIENT's -- any amount up to what
+ * they owe -- and record_client_payment applies it oldest first, so an older debt is cleared before
+ * this one; the client's statement is where the whole picture is. Offered on an approved run only,
+ * and to somebody with both the trust and the business ticks -- the database asks the same.
  */
-function ClientPaidUs({ run, receipt, onRecorded, onError }: {
-  run: RunRow; receipt: ClientBusinessReceipt | null; onRecorded: () => void; onError: (e: string | null) => void
+function ClientPaidUs({ run, payments, onRecorded, onError }: {
+  run: RunRow; payments: { amount: number; receivedOn: string; reference: string }[]
+  onRecorded: () => void; onError: (e: string | null) => void
 }) {
   const { currentUser } = useAuth()
   const [open, setOpen] = useState(false)
@@ -809,27 +811,40 @@ function ClientPaidUs({ run, receipt, onRecorded, onError }: {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const owed = Math.abs(run.net_payover)
+  const paid = Math.round(payments.reduce((t, p) => t + p.amount, 0) * 100) / 100
+  const left = Math.max(0, Math.round((owed - paid) * 100) / 100)
+  const [amount, setAmount] = useState(() => left.toFixed(2))
 
-  if (receipt) {
+  const lines = payments.length > 0 && (
+    <ul className="mt-1 space-y-0.5 text-xs text-emerald-700" data-testid="client-paid-us">
+      {payments.map((p, i) => (
+        <li key={i}>Paid by the client into the business account: {rand(p.amount)} on {fmtDay(p.receivedOn)}, reference {p.reference}.</li>
+      ))}
+    </ul>
+  )
+  if (left === 0 && payments.length > 0) {
     return (
-      <p className="mt-2 max-w-lg text-xs text-emerald-700" data-testid="client-paid-us">
-        Paid by the client into the business account: {rand(receipt.amount)} on {fmtDay(receipt.receivedOn)}, reference {receipt.reference}.
-        It is settled and is not taken off a later payover.
-      </p>
+      <div className="mt-2 max-w-lg">
+        {lines}
+        <p className="text-xs text-emerald-700">It is settled and is not taken off a later payover.</p>
+      </div>
     )
   }
   const may = canViewFinance(currentUser) && canViewBusiness(currentUser)
   if (!may || !['approved', 'sent', 'paid'].includes(run.status)) {
     return (
-      <p className="mt-2 max-w-lg text-xs text-slate-400">
-        It comes off the client{"'"}s next payover, unless they pay it into the business account first.
-      </p>
+      <div className="mt-2 max-w-lg">
+        {lines}
+        <p className="text-xs text-slate-400">
+          {paid > 0 ? `${rand(left)} still owed: it` : 'It'} comes off the client{"'"}s next payover, unless they pay it into the business account first.
+        </p>
+      </div>
     )
   }
   async function save() {
     setBusy(true); onError(null)
     try {
-      await recordClientPayment({ runId: run.id, amount: owed, receivedOn: on, reference, note })
+      await recordClientPayment({ companyId: run.company_id, amount: Number(amount), receivedOn: on, reference, note })
       setOpen(false)
       onRecorded()
     } catch (e) {
@@ -838,18 +853,26 @@ function ClientPaidUs({ run, receipt, onRecorded, onError }: {
   }
   return (
     <div className="mt-3 max-w-lg rounded-lg border border-slate-200 px-3 py-2 text-[12.5px]" data-testid="client-paid-form">
+      {lines}
+      {paid > 0 && (
+        <p className="mb-1 text-slate-700" data-testid="still-owed">
+          {rand(owed)} owed · {rand(paid)} paid · <b>{rand(left)} still owed</b>
+        </p>
+      )}
       {!open ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-slate-600">It comes off their next payover, unless they pay it into the business account.</span>
+          <span className="text-slate-600">What is still owed comes off their next payover, unless they pay it into the business account.</span>
           <button type="button" onClick={() => setOpen(true)}
             className="rounded-md border border-slate-200 px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50">
-            Record their payment
+            Record a payment
           </button>
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="font-medium text-slate-800">The client paid {rand(owed)} into the business account</div>
           <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-slate-600">Amount
+              <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Amount paid" className={`${controlClass} w-28`} />
+            </label>
             <label className="flex items-center gap-1.5 text-slate-600">On
               <input type="date" value={on} max={clockToday()} onChange={(e) => setOn(e.target.value)} className={inputClass} />
             </label>
@@ -857,9 +880,12 @@ function ClientPaidUs({ run, receipt, onRecorded, onError }: {
               <input value={reference} onChange={(e) => setReference(e.target.value)} className={inputClass} />
             </label>
           </div>
+          {Number(amount) > 0 && Number(amount) < left && (
+            <p className="text-slate-500">A part payment: {rand(Math.round((left - Number(amount)) * 100) / 100)} stays owed and comes off their next payover.</p>
+          )}
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={inputClass} />
           <div className="flex gap-2">
-            <button type="button" disabled={busy || !on || !reference.trim()} onClick={() => void save()}
+            <button type="button" disabled={busy || !on || !reference.trim() || !(Number(amount) > 0)} onClick={() => void save()}
               className="rounded-md bg-navy-900 px-3 py-1 font-medium text-white hover:bg-navy-800 disabled:opacity-50">
               {busy ? 'Recording…' : 'Record it'}
             </button>

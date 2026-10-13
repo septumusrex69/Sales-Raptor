@@ -165,3 +165,26 @@ export function periodLabel(start: string, end: string): string {
   const f = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}` }
   return `${f(start)} – ${f(end)}`
 }
+
+/*
+ * WHAT A RUN'S PILL SAYS DEPENDS ON THE TAB IT IS IN (S7, the firm, 13 Oct: "where it says ready,
+ * it's a little bit confusing because it looks like it's ready to pay over ... it should still be
+ * like in a yellow state ... Collecting is red, like busy collecting ... ready would be in the to pay
+ * section"). The stored status 'ready' means "nothing wrong on it" -- true of a run still collecting,
+ * of one waiting for its day and of one due today, and only the last is ready for anything. So the
+ * word comes from where the run stands, and the colour with it: red still collecting, yellow checked
+ * and waiting, blue ready to approve. Every other status keeps its own word.
+ */
+export type PillTone = 'collecting' | 'waiting' | 'ready' | 'review' | 'approved' | 'sent' | 'paid' | 'void'
+export function runPill(status: string, tab: QueueTab): { label: string; tone: PillTone } {
+  if (status === 'ready') {
+    if (tab === 'collecting') return { label: 'Collecting', tone: 'collecting' }
+    if (tab === 'waiting') return { label: 'Checked · waiting', tone: 'waiting' }
+    return { label: 'Ready to approve', tone: 'ready' }
+  }
+  if (status === 'needs_review') return { label: 'Needs review', tone: 'review' }
+  if (status === 'approved') return { label: 'Approved', tone: 'approved' }
+  if (status === 'sent') return { label: 'Sent', tone: 'sent' }
+  if (status === 'paid') return { label: 'Paid', tone: 'paid' }
+  return { label: 'Void', tone: 'void' }
+}

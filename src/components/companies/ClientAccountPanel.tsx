@@ -6,6 +6,7 @@ import { Card } from '../ui/Card'
 import { rand } from '../../lib/money'
 import { fetchClientAccount, fetchLedgerRuns, type ClientEntry, type ClientEntryKind } from '../../lib/business'
 import { ledgerByPayover, type LedgerRun } from '../../lib/clientLedger'
+import { ClientOwesPanel } from './ClientOwesPanel'
 
 /**
  * WHAT PASSES BETWEEN THE FIRM AND THIS CLIENT, AS ONE RUNNING BALANCE.
@@ -61,6 +62,8 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
   const [open, setOpen] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  /* Bumped when a payment is recorded in the box above, so the ledger shows the line it wrote. */
+  const [version, setVersion] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -70,7 +73,7 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : String(e)) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [companyId])
+  }, [companyId, version])
 
   const rows = useMemo(() => ledgerByPayover(entries, runs), [entries, runs])
 
@@ -108,6 +111,7 @@ export function ClientAccountPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-3">
+      <ClientOwesPanel companyId={companyId} onChanged={() => setVersion((v) => v + 1)} />
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
           The client&rsquo;s ledger
