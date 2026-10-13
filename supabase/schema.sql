@@ -41971,3 +41971,131 @@ begin
 
   return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
 end $$;
+
+
+-- ============================================================================================
+-- S7 / PROMPT 12: A PAYMENT THAT BOUNCES -- "RETURNED / UNPAID RECEIPT".
+--
+-- Found in the staging-clock simulation (13 Oct): +R1 000 FNB APP PAYMENT FROM SBB/2003 ZULU on 15
+-- Aug, -R1 000 RETURNED DEBIT SBB/2003 ZULU INSUFFICIENT FUNDS on 20 Aug. Raptor had no way to say
+-- so: the debit could only be a payover, refund, transfer, charge or "other"; reversing the receipt
+-- to the queue left R1 000 waiting to be approved again with the money gone, and reversing it to Needs
+-- an account left a credit nobody could place. Both lines stayed open for ever.
+--
+-- return_bounced_receipt(debit line, receipt) does it in one transaction:
+--   * the receipt is reversed through reverse_payment, reason "Returned unpaid - <bank's words>", so
+--     everything a reversal already does happens -- the receipt fee is cancelled (Annexure B is never
+--     charged on money that never arrived), the capital goes back on the account, and if the receipt
+--     was already on an approved run the existing rule carries a negative line into the next one;
+--   * the copy reverse_payment writes for the approval queue is rejected at once: there is nothing to
+--     approve again, the money is gone;
+--   * BOTH STATEMENT LINES ARE CLOSED AGAINST EACH OTHER: the receipt's line stays allocated to the
+--     (now reversed) payment, and the debit is allocated naming it (returned_payment_id -- not
+--     payment_id, which is unique per line and already the receipt line's).
+-- No trust entry is written for the debit: the reversal's own entries take back what the receipt put
+-- in, and the bank's +1 000 and -1 000 net to nothing, so the trust difference stays nil.
+--
+-- THE KIND. The allocation_kind check cannot be widened from this connection (it refuses a
+-- statement that removes a constraint), so a returned receipt is allocation_kind 'other' WITH returned_payment_id
+-- set -- that column, not the kind, is what says "returned unpaid", and the screens read it.
+--
+-- NEVER PAIRED SILENTLY (prompt 12, item 3): bounced_receipt_candidates only OFFERS -- receipts of
+-- exactly the amount, received on or before the debit, within 60 days, the one whose account number
+-- the bank quotes first. A person confirms.
+-- ============================================================================================
+
+alter table public.bank_statement_lines
+  add column if not exists returned_payment_id uuid references public.account_payments(id);
+comment on column public.bank_statement_lines.returned_payment_id is
+  'A debit that is a receipt coming back unpaid (a returned debit order, a bounced cheque): the receipt it '
+  'returned. Set only by return_bounced_receipt, which reverses that receipt in the same transaction.';
+
+alter table public.account_payments
+  add column if not exists returned_unpaid_on date;
+comment on column public.account_payments.returned_unpaid_on is
+  'The day the bank returned this receipt unpaid (the debit''s date). Shown on the account as "Returned '
+  'unpaid"; the payment is also reversed, so it counts as never having arrived.';
+
+create or replace function public.bounced_receipt_candidates(p_line uuid)
+returns table(payment_id uuid, account_id uuid, account_number text, case_number text, debtor text,
+              received_on date, amount numeric, reference text, named boolean)
+language sql stable security definer set search_path to 'public'
+as $$
+  with l as (select * from public.bank_statement_lines where id = p_line and direction = 'debit')
+  select p.id, d.id, d.account_number, d.case_number,
+         nullif(btrim(coalesce(d.debtor_first_name, '') || ' ' || coalesce(d.debtor_surname, '')), ''),
+         (p.received_at at time zone 'Africa/Johannesburg')::date, p.amount, p.reference,
+         position(upper(d.account_number) in upper(coalesce(l.description, '') || ' ' || coalesce(l.reference, ''))) > 0
+    from l
+    join public.account_payments p on round(p.amount, 2) = round(-l.amount, 2)
+    join public.debtor_accounts d on d.id = p.account_id
+   where public.has_capability('finance.view')
+     and p.approved_at is not null and p.reversed_at is null and p.rejected_at is null
+     and not p.paid_to_client and not p.paid_over_in_swordfish and not p.is_demo
+     and (p.received_at at time zone 'Africa/Johannesburg')::date <= l.txn_date
+     and (p.received_at at time zone 'Africa/Johannesburg')::date >= l.txn_date - 60
+   order by 9 desc, (p.received_at at time zone 'Africa/Johannesburg')::date desc
+   limit 20
+$$;
+revoke all on function public.bounced_receipt_candidates(uuid) from public, anon;
+grant execute on function public.bounced_receipt_candidates(uuid) to authenticated;
+
+create or replace function public.return_bounced_receipt(p_line uuid, p_payment uuid)
+returns void
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_line public.bank_statement_lines%rowtype;
+  v_pay public.account_payments%rowtype;
+  v_receipt_line uuid;
+  v_copy uuid;
+  v_reason text;
+begin
+  if not (public.has_capability('finance.view') and public.has_capability('payment.reverse')) then
+    raise exception 'Returning a receipt unpaid needs the trust tick and the right to reverse a payment.' using errcode = '42501';
+  end if;
+  select * into v_line from public.bank_statement_lines where id = p_line for update;
+  if not found or v_line.direction <> 'debit' then
+    raise exception 'That is not a payment out on the statement.' using errcode = '22023';
+  end if;
+  if v_line.status in ('allocated', 'reconciled') or v_line.allocation_kind is not null then
+    raise exception 'That statement line is already allocated.' using errcode = '22023';
+  end if;
+  select * into v_pay from public.account_payments where id = p_payment for update;
+  if not found then raise exception 'That receipt no longer exists.' using errcode = 'P0002'; end if;
+  if v_pay.approved_at is null or v_pay.reversed_at is not null or v_pay.rejected_at is not null then
+    raise exception 'Only a receipt that was approved and is still standing can come back unpaid.' using errcode = '22023';
+  end if;
+  if round(v_pay.amount, 2) <> round(-v_line.amount, 2) then
+    raise exception 'The receipt is R % and the debit R %: a returned receipt comes back whole.',
+      to_char(v_pay.amount, 'FM999999990.00'), to_char(-v_line.amount, 'FM999999990.00') using errcode = '22023';
+  end if;
+  if (v_pay.received_at at time zone 'Africa/Johannesburg')::date > v_line.txn_date then
+    raise exception 'That receipt arrived after the debit, so it cannot be what came back.' using errcode = '22023';
+  end if;
+
+  v_reason := 'Returned unpaid - ' || coalesce(nullif(btrim(v_line.description), ''), 'returned by the bank');
+  v_receipt_line := coalesce(v_pay.bank_line_id, (select x.id from public.bank_statement_lines x where x.payment_id = v_pay.id limit 1));
+
+  v_copy := public.reverse_payment(p_payment, v_reason);
+  if v_copy is not null then
+    perform public.reject_payment(v_copy, v_reason, false);
+  end if;
+  update public.account_payments set returned_unpaid_on = v_line.txn_date where id = p_payment;
+
+  if v_receipt_line is not null then
+    update public.bank_statement_lines
+       set status = 'allocated', payment_id = p_payment, account_id = v_pay.account_id,
+           allocation_reason = 'Returned unpaid on ' || to_char(v_line.txn_date, 'DD Mon YYYY')
+     where id = v_receipt_line;
+  end if;
+  update public.bank_statement_lines
+     set status = 'allocated', allocation_kind = 'other', returned_payment_id = p_payment,
+         account_id = v_pay.account_id,
+         allocation_reason = 'Receipt of ' || to_char((v_pay.received_at at time zone 'Africa/Johannesburg')::date, 'DD Mon YYYY')
+           || ' returned unpaid',
+         allocated_at = public.raptor_now(), allocated_by = auth.uid()
+   where id = p_line;
+end $$;
+revoke all on function public.return_bounced_receipt(uuid, uuid) from public, anon;
+grant execute on function public.return_bounced_receipt(uuid, uuid) to authenticated;
+

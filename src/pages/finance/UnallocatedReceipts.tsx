@@ -7,7 +7,8 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchAccounts, type DebtorAccount } from '../../lib/accountBook'
 import { SplitReceiptModal } from './SplitReceiptModal'
-import { accountNumberIn, lineNature } from '../../lib/bankLineAllocation.ts'
+import { lineNature } from '../../lib/bankLineAllocation.ts'
+import { ReturnedReceiptPicker } from '../../components/finance/ReturnedReceiptPicker'
 import { allocateBankLine } from '../../lib/bankAllocationApi'
 import {
   fetchUnallocatedReceipts, placeBankLine,
@@ -328,14 +329,10 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
                         Book as a bank charge
                       </button>
                     ) : lineNature(p.description, 'debit') === 'returned_debit' ? (
-                      /* A BOUNCED DEBIT ORDER IS A RECEIPT THAT WAS NEVER MONEY: the job is reversing that
-                         payment on its account, which is where Reverse already lives. */
-                      <Link to={accountNumberIn(p.description) ? `/accounts?q=${encodeURIComponent(accountNumberIn(p.description) as string)}` : '/accounts'}
-                        data-testid="returned-debit"
-                        className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md
-                          border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100">
-                        Reverse it on {accountNumberIn(p.description) ?? 'the account'}
-                      </Link>
+                      /* A BOUNCED DEBIT ORDER IS A RECEIPT THAT WAS NEVER MONEY (prompt 12): the pair is
+                         suggested here and a person confirms it -- the receipt is reversed and both lines
+                         close against each other. */
+                      <span data-testid="returned-debit"><ReturnedReceiptPicker lineId={p.id} compact onDone={() => { void load(); onPlaced() }} /></span>
                     ) : (
                       <Link to="/trust/exceptions" className="text-xs font-medium text-gold-700 hover:text-gold-800">
                         Allocate it on Exceptions

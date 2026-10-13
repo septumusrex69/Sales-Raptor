@@ -366,7 +366,10 @@ export function buildTimeline(
       title: 'Payment received',
       detail: [
         p.reversedAt
-          ? `Reversed ${displayDay(firmDay(p.reversedAt))}${p.reversalReason ? ` — ${p.reversalReason}` : ''}${p.reversedTo ? ` → ${p.reversedTo}` : ''}`
+          ? (/^Returned unpaid - /.test(p.reversalReason ?? '')
+            /* A RECEIPT THE BANK RETURNED (prompt 12) says so: it never arrived. */
+            ? `Returned unpaid ${displayDay(firmDay(p.reversedAt))} — ${(p.reversalReason ?? '').replace(/^Returned unpaid - /, '')}`
+            : `Reversed ${displayDay(firmDay(p.reversedAt))}${p.reversalReason ? ` — ${p.reversalReason}` : ''}${p.reversedTo ? ` → ${p.reversedTo}` : ''}`)
           : null,
         p.method, p.reference, p.details, p.paidToClient ? 'Paid direct to client' : null]
         .filter(Boolean)

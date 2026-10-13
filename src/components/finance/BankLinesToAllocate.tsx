@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ReturnedReceiptPicker } from './ReturnedReceiptPicker'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { Card } from '../ui/Card'
@@ -7,7 +8,7 @@ import { rand } from '../../lib/money'
 import { formatDate } from '../../data/mockData'
 import { fetchFirmSettings } from '../../lib/firmSettings'
 import {
-  KIND_LABEL, KIND_NOTE, candidatesFor, kindsFor, needsReason, needsTarget, suggestAllocation,
+  KIND_LABEL, KIND_NOTE, candidatesFor, kindsFor, lineNature, needsReason, needsTarget, suggestAllocation,
   type AllocationKind, type Candidate, type StatementLine,
 } from '../../lib/bankLineAllocation'
 import {
@@ -123,19 +124,23 @@ function LineRow({ line, candidates, business, onDone }: {
   line: StatementLine; candidates: Candidate[]; business: string | null; onDone: () => void
 }) {
   const suggestion = useMemo(() => suggestAllocation(line, candidates, business), [line, candidates, business])
-  const [kind, setKind] = useState<AllocationKind | ''>(suggestion?.kind ?? '')
+  /* 'returned' is not an allocation kind in the database: it is a receipt coming back unpaid, done by
+     return_bounced_receipt (prompt 12). Chosen for the line when the bank's own words say so. */
+  const [kind, setKind] = useState<AllocationKind | 'returned' | ''>(
+    lineNature(line.description, line.direction) === 'returned_debit' ? 'returned' : suggestion?.kind ?? '')
   const [target, setTarget] = useState<string>(suggestion?.targetId ?? '')
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const options = kind ? candidatesFor(line, kind, candidates) : []
-  const ready = !!kind && (!needsTarget(kind) || !!target) && (!needsReason(kind) || reason.trim().length > 0)
+  const realKind = kind === 'returned' ? '' : kind
+  const options = realKind ? candidatesFor(line, realKind, candidates) : []
+  const ready = !!realKind && (!needsTarget(realKind) || !!target) && (!needsReason(realKind) || reason.trim().length > 0)
 
   async function go() {
-    if (!kind) return
+    if (!realKind) return
     setBusy(true); setError(null)
-    try { await allocateBankLine(line.id, kind, reason.trim() || null, target || null); onDone() }
+    try { await allocateBankLine(line.id, realKind, reason.trim() || null, target || null); onDone() }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
@@ -157,12 +162,14 @@ function LineRow({ line, candidates, business, onDone }: {
 
       <div className="flex flex-wrap items-center gap-2">
         <select aria-label="What this line was" value={kind}
-          onChange={(e) => { const k = e.target.value as AllocationKind | ''; setKind(k); setTarget(k && k === suggestion?.kind ? suggestion.targetId ?? '' : '') }}
+          onChange={(e) => { const k = e.target.value as AllocationKind | 'returned' | ''; setKind(k); setTarget(k && k === suggestion?.kind ? suggestion.targetId ?? '' : '') }}
           className="text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
           <option value="">{line.direction === 'credit' ? 'Not a debtor’s payment? Choose…' : 'Choose what it was…'}</option>
           {kindsFor(line.direction).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+          {line.direction === 'debit' && <option value="returned">Returned / unpaid receipt</option>}
         </select>
-        {kind && needsTarget(kind) && (
+        {kind === 'returned' && <ReturnedReceiptPicker lineId={line.id} onDone={onDone} />}
+        {realKind && needsTarget(realKind) && (
           <select aria-label="Which one it settles" value={target} onChange={(e) => setTarget(e.target.value)}
             className="text-sm rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
             <option value="">{options.length ? 'Which one…' : 'Nothing open of exactly this amount'}</option>
@@ -176,14 +183,14 @@ function LineRow({ line, candidates, business, onDone }: {
             {candidatesFor(line, kind, candidates).map((c) => <option key={c.id} value={c.id}>Already recorded: {c.label}</option>)}
           </select>
         )}
-        {kind && (needsReason(kind) || kind === 'business_transfer' || kind === 'business_transfer_in') && (
+        {realKind && (needsReason(realKind) || realKind === 'business_transfer' || realKind === 'business_transfer_in') && (
           <input className={`${controlClass} w-64`} value={reason} onChange={(e) => setReason(e.target.value)}
-            aria-label="Reason" placeholder={needsReason(kind) ? 'What was it? (required)' : 'Reference (optional)'} />
+            aria-label="Reason" placeholder={needsReason(realKind) ? 'What was it? (required)' : 'Reference (optional)'} />
         )}
-        <button type="button" disabled={!ready || busy} onClick={go}
+        {kind !== 'returned' && <button type="button" disabled={!ready || busy} onClick={go}
           className="px-3 py-1.5 rounded-lg text-sm font-medium bg-navy-950 text-white disabled:opacity-50 inline-flex items-center gap-1.5">
           {busy && <Loader2 size={13} className="animate-spin" />} Allocate
-        </button>
+        </button>}
         {/* PLACE IT ON AN ACCOUNT -- the way back for a receipt rejected off a closed file (prompt
             11). Placed on SBB/2006 and approved, it is held whole as the debtor's credit and refunded
             from there; a credit line is never refunded directly, so the money always has an owner
@@ -196,7 +203,10 @@ function LineRow({ line, candidates, business, onDone }: {
           </Link>
         )}
       </div>
-      {kind && <p className="text-[11px] text-slate-400">{KIND_NOTE[kind]}</p>}
+      {realKind && <p className="text-[11px] text-slate-400">{KIND_NOTE[realKind]}</p>}
+      {kind === 'returned' && (
+        <p className="text-[11px] text-slate-400">A debtor&rsquo;s payment the bank took back. The receipt is reversed (no receipt fee, the capital goes back on the account) and both statement lines close against each other.</p>
+      )}
       {suggestion && kind === suggestion.kind && (
         <p className="text-[11px] text-slate-500">Suggested: {suggestion.why}</p>
       )}

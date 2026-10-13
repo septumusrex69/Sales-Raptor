@@ -66,6 +66,22 @@ check('accounted for adds clients, firm, firm\'s other and debtors', accountedFr
   { forClients: 14118.85, forFirm: 12631.15, firmOther: -78.85, forDebtors: 1000 },
 ]), 39838.69)
 
+/* THE FIRM'S SCREEN, 13 OCT: a BF FEES transfer recorded AND on the statement, plus a bounced debit order.
+   The overview said -R1 000; the list must say the same, with the transfer as a tick that moves nothing. */
+const bf = { ...out('business_transfer', 'd1', 12543.05), payee: 'Bredell Ferreira (business account)', paidReference: 'BF FEES-2609', caseNumber: null }
+const u = unaccountedItems({ notAccounted: -1000, openingSet: true, awaiting: null, paidOut: [bf],
+  lines: [line('t1', -12543.05, 'INTERNET TRF TO BREDELL FERREIRA BUSINESS BF FEES-2609'), line('t2', -1000, 'RETURNED DEBIT SBB/2003 ZULU INSUFFICIENT FUNDS')] })
+check('a recorded payment and its statement debit are one line that moves nothing', u.items.map((i) => [i.group, i.amount]),
+  [['statement', -1000], ['to_match', 0]])
+check('...and the -R1 000 is fully explained', u.remainder, 0)
+check('...the tick says where to match it', u.items[1].action, { label: 'Match it', to: '/trust/exceptions' })
+check('the bounced debit order says what it is', u.items[0].detail.startsWith('A debtor’s payment the bank returned unpaid'), true)
+check('...and where to return it', u.items[0].action.label, 'Find the receipt that bounced')
+const twoSame = unaccountedItems({ notAccounted: 0, openingSet: true, awaiting: null,
+  paidOut: [{ ...out('refund', 'x1', 500), paidReference: 'BF RAP-1' }],
+  lines: [line('a', -500, 'TRF OTHER'), line('b', -500, 'TRF BF RAP-1')] })
+check('of two debits of the amount, the one quoting the reference is the pair', twoSame.items.find((i) => i.group === 'statement')?.title, 'TRF OTHER')
+
 const ov = readFileSync(new URL('../../src/pages/trust/TrustOverview.tsx', import.meta.url), 'utf8')
 check('the overview\'s figure opens the list', /to="\/trust\/unaccounted" data-testid="open-unaccounted"/.test(ov), true)
 check('...and reads accounted for from the same function', /const accounted = accountedFromCash\(cash\)/.test(ov), true)

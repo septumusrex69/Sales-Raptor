@@ -67,8 +67,9 @@ export function AccountPaymentsList({ accountId, mayReverse, onReversed }: {
                   <td className="px-2 py-1.5 text-slate-500">
                     {p.reversedOn ? (
                       <span className="inline-flex items-center gap-1" title={p.reversalReason ?? ''}>
-                        <RotateCcw size={11} /> Reversed {formatDate(firmDay(p.reversedOn))}
-                        {p.reversalReason ? ` — ${p.reversalReason}` : ''}{p.reversedTo ? ` → ${p.reversedTo}` : ''}
+                        {/* A RECEIPT THE BANK RETURNED says so in the firm's words (prompt 12), not "Reversed". */}
+                        <RotateCcw size={11} /> {returnedUnpaid(p.reversalReason) ? 'Returned unpaid' : 'Reversed'} {formatDate(firmDay(p.reversedOn))}
+                        {p.reversalReason ? ` — ${returnedUnpaid(p.reversalReason) ?? p.reversalReason}` : ''}{p.reversedTo ? ` → ${p.reversedTo}` : ''}
                       </span>
                     ) : p.swordfish ? 'Swordfish history'
                       : p.approved ? 'Processed' : 'Waiting for approval'}
@@ -94,4 +95,10 @@ export function AccountPaymentsList({ accountId, mayReverse, onReversed }: {
       )}
     </div>
   )
+}
+
+/** "Returned unpaid - RETURNED DEBIT SBB/2003 ..." -> the bank's words, or null for any other reversal. */
+function returnedUnpaid(reason: string | null | undefined): string | null {
+  const m = /^Returned unpaid - (.*)$/.exec(reason ?? '')
+  return m ? m[1] : null
 }

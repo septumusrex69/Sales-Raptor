@@ -59,7 +59,7 @@ export function TrustUnaccounted() {
   }
 
   const total = Math.round((data.inTrust - data.accounted) * 100) / 100
-  const groups = (['paid_out', 'statement', 'awaiting', 'unexplained'] as UnaccountedGroup[])
+  const groups = (['statement', 'paid_out', 'awaiting', 'unexplained', 'to_match'] as UnaccountedGroup[])
     .map((g) => ({ g, items: data.list.items.filter((i) => i.group === g) }))
     .filter((x) => x.items.length > 0)
 
@@ -82,8 +82,9 @@ export function TrustUnaccounted() {
         <Sum label="Not accounted for" value={total} strong />
         <span className="text-[13px] text-slate-500">
           {total === 0 ? 'Every rand has an owner.'
-            : data.list.remainder === 0 ? `Fully explained by the ${data.list.items.length} ${data.list.items.length === 1 ? 'item' : 'items'} below.`
+            : data.list.remainder === 0 ? (() => { const n = data.list.items.filter((i) => i.group !== 'to_match').length; return `Fully explained by the ${n} ${n === 1 ? 'item' : 'items'} below.` })()
               : `${rand(data.list.explained)} explained below; ${rand(data.list.remainder)} is not.`}
+          {data.list.items.some((i) => i.group === 'to_match') && ' Lines that only need matching move nothing and are listed last.'}
         </span>
         </div>
       </Card>
@@ -107,7 +108,7 @@ export function TrustUnaccounted() {
                   <tr className="border-b border-slate-100" data-testid="unaccounted-group" data-group={g}>
                     <td colSpan={4} className="p-0">
                       <div className={clsx('flex items-start justify-between gap-x-4 whitespace-normal border-l-4 px-4 py-1.5',
-                        g === 'unexplained' ? 'border-l-negative-500 bg-negative-50' : 'border-l-gold-500 bg-gold-50')}>
+                        g === 'unexplained' ? 'border-l-negative-500 bg-negative-50' : g === 'to_match' ? 'border-l-slate-300 bg-slate-50' : 'border-l-gold-500 bg-gold-50')}>
                         {/* The explanation WRAPS under the title: on one line it set the table's
                             width and pushed every action off an iPad's screen. */}
                         <span className="min-w-0 text-[13px] font-semibold text-slate-800">

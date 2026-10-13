@@ -23,11 +23,11 @@
  * trust_awaiting_approval, payments_out_paid); nothing here decides anything about money.
  */
 import type { StatementLine } from './bankLineAllocation'
-import { unexplainedDebitAction } from './bankLineAllocation.ts'
+import { lineNature, unexplainedDebitAction } from './bankLineAllocation.ts'
 import type { PaidOut } from './paymentsOut'
 import type { TrustCashCycle } from './trust'
 
-export type UnaccountedGroup = 'paid_out' | 'statement' | 'awaiting' | 'unexplained'
+export type UnaccountedGroup = 'to_match' | 'paid_out' | 'statement' | 'awaiting' | 'unexplained'
 
 export interface UnaccountedItem {
   key: string
@@ -49,6 +49,7 @@ export interface Unaccounted {
 }
 
 export const GROUP_TITLE: Record<UnaccountedGroup, string> = {
+  to_match: 'On the statement, just needs matching',
   paid_out: 'Marked paid, not yet on a statement',
   statement: 'Statement lines to place or allocate',
   awaiting: 'In the bank, waiting for approval',
@@ -56,6 +57,7 @@ export const GROUP_TITLE: Record<UnaccountedGroup, string> = {
 }
 
 export const GROUP_HELP: Record<UnaccountedGroup, string> = {
+  to_match: 'Recorded here AND on the imported statement, so no money is missing: the statement line only has to be ticked off against it.',
   paid_out: 'Paid at the bank and recorded here, but the statement it went out on has not been imported. Import it and each one matches itself.',
   statement: 'On an imported statement with no owner yet: a receipt to place on an account, or money out to say what it was.',
   awaiting: 'Placed on a debtor’s account and waiting on Payments in to be approved and split.',
@@ -63,6 +65,8 @@ export const GROUP_HELP: Record<UnaccountedGroup, string> = {
 }
 
 const r2 = (v: number): number => Math.round(v * 100) / 100
+/* Plain, so this file stays importable by a check (money.ts formats with Intl the same way). */
+const rand2 = (v: number): string => `R ${Math.abs(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`
 
 export function unaccountedItems(input: {
   notAccounted: number
@@ -74,8 +78,36 @@ export function unaccountedItems(input: {
 }): Unaccounted {
   const items: UnaccountedItem[] = []
 
+  /*
+   * RECORDED AND ON THE STATEMENT, NOT YET TICKED OFF (the firm, 13 Oct, at R12 543.05 under "Statement
+   * lines not yet allocated" while the overview showed only -R1 000: "it shows that it's matched ...
+   * it doesn't show ... 12,000 Rand not allocated"). A payment marked paid here and a debit of exactly
+   * that amount on an imported statement are the SAME money, seen twice: +R12 543.05 still "in the
+   * bank" one way and -R12 543.05 "unexplained" the other. Listed apart they cancel and look like a
+   * puzzle; paired they are one line that moves nothing and says the only job left is the tick. The
+   * pair is found by amount, the line that quotes the reference first; a debit is used once.
+   */
+  const used = new Set<string>()
+  const paired = new Set<string>()
   for (const p of input.paidOut) {
     if (p.confirmed || p.amount === 0) continue
+    const cents = Math.round(p.amount * 100)
+    const same = input.lines.filter((l) => !used.has(l.id) && l.amount < 0 && Math.round(-l.amount * 100) === cents)
+    const ref = (p.paidReference ?? p.reference ?? '').toUpperCase()
+    const line = same.find((l) => ref && (l.description ?? '').toUpperCase().includes(ref.replace(/^BF\s+/, ''))) ?? (same.length === 1 ? same[0] : undefined)
+    if (!line) continue
+    used.add(line.id); paired.add(`${p.kind}-${p.id}`)
+    items.push({
+      key: `match-${p.id}`, group: 'to_match', date: line.txnDate,
+      title: p.kind === 'payover' && p.caseNumber ? `${p.payee} · ${p.caseNumber}` : p.payee,
+      detail: `${rand2(p.amount)} recorded here, and on the statement as "${line.description ?? ''}"`,
+      amount: 0,
+      action: { label: 'Match it', to: '/trust/exceptions' },
+    })
+  }
+
+  for (const p of input.paidOut) {
+    if (p.confirmed || p.amount === 0 || paired.has(`${p.kind}-${p.id}`)) continue
     const what = p.kind === 'payover' ? 'Payover' : p.kind === 'refund' ? 'Refund to a debtor' : 'Transfer to the business account'
     items.push({
       key: `out-${p.kind}-${p.id}`, group: 'paid_out', /* the stamp as stored; the page shows it on the firm's day */ date: p.paidAt,
@@ -89,16 +121,19 @@ export function unaccountedItems(input: {
   }
 
   for (const l of input.lines) {
-    if (l.amount === 0) continue
+    if (l.amount === 0 || used.has(l.id)) continue
     const debit = l.amount < 0
+    const returned = debit && lineNature(l.description, 'debit') === 'returned_debit'
     items.push({
       key: `line-${l.id}`, group: 'statement', date: l.txnDate,
       title: l.description || (debit ? 'Money out, no description' : 'Money in, no description'),
-      detail: debit ? 'Money out on the statement, not yet said what it was'
-        : 'Money in on the statement, not yet placed on an account',
+      detail: returned ? 'A debtor\u2019s payment the bank returned unpaid: reverse the receipt it took back'
+        : debit ? 'Money out on the statement, not yet said what it was'
+          : 'Money in on the statement, not yet placed on an account',
       /* A receipt nobody owns raises the figure; a debit nobody explains lowers it. */
       amount: r2(l.amount),
-      action: debit ? unexplainedDebitAction(l.description, null) : { label: 'Place it', to: '/trust/exceptions' },
+      action: returned ? { label: 'Find the receipt that bounced', to: '/trust/payments' }
+        : debit ? unexplainedDebitAction(l.description, null) : { label: 'Place it', to: '/trust/exceptions' },
     })
   }
 
@@ -127,9 +162,9 @@ export function unaccountedItems(input: {
     })
   }
 
-  /* In the order the work is done: what an import will clear, then lines to place, then approvals,
-     then what is left. Inside a group, the biggest first. */
-  const order: UnaccountedGroup[] = ['paid_out', 'statement', 'awaiting', 'unexplained']
+  /* What is really missing first -- lines to place, payments not yet on a statement, approvals, the
+     rest -- and last the ticks that move nothing. Inside a group, the biggest first. */
+  const order: UnaccountedGroup[] = ['statement', 'paid_out', 'awaiting', 'unexplained', 'to_match']
   items.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group) || Math.abs(b.amount) - Math.abs(a.amount))
   return { items, explained, remainder }
 }

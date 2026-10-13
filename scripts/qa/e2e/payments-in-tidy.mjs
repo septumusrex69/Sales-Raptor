@@ -14,6 +14,7 @@ import { OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer 
 import { PROFILE } from './fixtures.mjs'
 
 const t = makeRunner('payments-in-tidy')
+const plain = (x) => x.split(String.fromCharCode(0xa0)).join(' ')
 const ADMIN = { ...PROFILE, name: 'Stephan', role: 'Administrator', team_id: null }
 const RECEIPTS = [
   { id: 'r-int', txn_date: '2026-08-31', amount: 38.4, description: 'CREDIT INTEREST', reference: null, bank_account: '627', imported_at: '2026-10-13T06:50:39Z', had_reference: false },
@@ -33,6 +34,11 @@ const handlers = [
   [(u) => /\/rpc\/unallocated_receipts/.test(u), () => ({ body: receipts })],
   [(u) => /\/rpc\/unreconciled_payouts/.test(u), () => ({ body: OUTS })],
   [(u) => /\/rpc\/bank_import_history/.test(u), () => ({ body: HISTORY })],
+  [(u) => /\/rpc\/bounced_receipt_candidates/.test(u), () => ({ body: [
+    { payment_id: 'p-sbb', account_id: 'a1', account_number: 'SBB/2003', case_number: 'RAP-124300', debtor: 'T Zulu', received_on: '2026-08-15', amount: 1000, reference: 'SBB/2003', named: true },
+    { payment_id: 'p-mpg', account_id: 'a2', account_number: 'MPG/3002', case_number: 'RAP-1', debtor: null, received_on: '2026-07-22', amount: 1000, reference: null, named: false },
+  ] })],
+  [(u) => /\/rpc\/return_bounced_receipt/.test(u), (_u, req) => { calls.push({ returned: req.postDataJSON() }); return { body: null } }],
   [(u) => /\/rpc\/allocate_bank_line/.test(u), (_u, req) => {
     const b = req.postDataJSON(); calls.push(b)
     if (b.p_line === 'r-int') receipts = RECEIPTS.filter((r) => r.id !== 'r-int')
@@ -53,8 +59,10 @@ try {
   t.ok('...while a debtor\'s receipt still offers Place it', await page.getByRole('row', { name: /CAPITEC P NAIDOO/ }).getByRole('button', { name: 'Place it' }).isVisible())
   t.check('both bank charges offer Book as a bank charge', await page.getByTestId('book-charge').count(), 2)
   const ret = page.getByTestId('returned-debit')
-  t.ok('the returned debit says to reverse it on its account', /Reverse it on SBB\/2003/.test(await ret.innerText()))
-  t.ok('...and opens that account\'s search', /\/accounts\?q=SBB%2F2003$/.test(await ret.getAttribute('href') ?? ''))
+  await page.getByTestId('bounced-suggestion').waitFor({ timeout: 10000 })
+  t.ok('the returned debit suggests the receipt it took back, by the account it names',
+    /Looks like the 15 Aug R 1 000\.00 from SBB\/2003 \(T Zulu\) bounced/.test(plain(await ret.innerText())))
+  t.check('...and has not paired it on its own', calls.filter((c) => c.returned).length, 0)
   t.check('nothing says "No run of this amount" any more', await page.getByText('No run of this amount').count(), 0)
   /* The cards stand apart: the bottom of one is above the top of the next. */
   const gap = await page.evaluate(() => {
@@ -77,12 +85,16 @@ try {
 
   await interest.click()
   await page.waitForTimeout(600)
-  t.check('Book as bank interest allocates that line as interest', JSON.stringify(calls[0] ?? null),
+  t.check('Book as bank interest allocates that line as interest', JSON.stringify(calls.filter((c) => c.p_kind)[0] ?? null),
     JSON.stringify({ p_line: 'r-int', p_kind: 'bank_interest', p_reason: null, p_target: null }))
   t.check('...and it leaves Needs an account', await page.getByTestId('book-interest').count(), 0)
+  await page.getByTestId('confirm-returned').click()
+  await page.waitForTimeout(600)
+  t.check('Confirm returns that receipt against that debit, in one call', JSON.stringify(calls.find((c) => c.returned)?.returned ?? null),
+    JSON.stringify({ p_line: 'd-ret', p_payment: 'p-sbb' }))
   await page.getByTestId('book-charge').first().click()
   await page.waitForTimeout(600)
-  t.check('Book as a bank charge allocates as a charge', JSON.stringify(calls[1] ?? null),
+  t.check('Book as a bank charge allocates as a charge', JSON.stringify(calls.filter((c) => c.p_kind)[1] ?? null),
     JSON.stringify({ p_line: 'd-fee', p_kind: 'bank_charge', p_reason: null, p_target: null }))
   await context.close()
 } catch (e) {

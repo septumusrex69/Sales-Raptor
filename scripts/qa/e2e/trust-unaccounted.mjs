@@ -69,16 +69,16 @@ try {
   t.check('one line for each payment marked paid and the receipt, nothing for what is on a statement',
     await page.getByTestId('unaccounted-item').count(), 6)
   t.check('in the order the work is done', JSON.stringify(await page.getByTestId('unaccounted-group').evaluateAll((els) => els.map((e) => e.getAttribute('data-group')))),
-    '["paid_out","statement"]')
-  const first = flat(await page.getByTestId('unaccounted-item').first().innerText())
-  t.ok('the biggest first, with how it was paid and what to do',
+    '["statement","paid_out"]')
+  const first = flat(await page.getByTestId('unaccounted-item').nth(1).innerText())
+  t.ok('the lines to place first, then the biggest payment marked paid, with what to do',
     /Highveld Tool Hire CC · PO-HTH-2607[\s\S]*Payover, marked paid on BF PO-HTH-2607[\s\S]*R 4 538\.60[\s\S]*Open the run/.test(first))
   t.ok('the receipt nobody placed is listed with Place it',
-    /CAPITEC T NGUBANE[\s\S]*not yet placed on an account[\s\S]*R 500\.00[\s\S]*Place it/.test(flat(await page.getByTestId('unaccounted-item').last().innerText())))
+    /CAPITEC T NGUBANE[\s\S]*not yet placed on an account[\s\S]*R 500\.00[\s\S]*Place it/.test(flat(await page.getByTestId('unaccounted-item').first().innerText())))
   t.check('nothing is left unexplained', await page.locator('[data-group="unexplained"]').count(), 0)
   await t.shot(page, 'trust-unaccounted')
 
-  await page.getByTestId('unaccounted-item').first().getByRole('link', { name: /Open the run/ }).click()
+  await page.getByTestId('unaccounted-item').nth(1).getByRole('link', { name: /Open the run/ }).click()
   await page.waitForURL(/\/trust\/runs\/r-hth/, { timeout: 10000 }).catch(() => {})
   t.ok('an item opens where its job is done', /\/trust\/runs\/r-hth/.test(page.url()))
   await context.close()

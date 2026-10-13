@@ -90,3 +90,32 @@ export async function bookObviousLines(): Promise<{ interest: number; charges: n
   }
   return { interest, charges }
 }
+
+/** A receipt that may be the one a returned debit took back (bounced_receipt_candidates). */
+export interface BouncedCandidate {
+  paymentId: string; accountId: string; accountNumber: string; caseNumber: string | null; debtor: string | null
+  receivedOn: string; amount: number; reference: string | null
+  /** The bank's description quotes this account's number: the likely one, offered first. */
+  named: boolean
+}
+
+export async function fetchBouncedCandidates(lineId: string): Promise<BouncedCandidate[]> {
+  const { data, error } = await supabase.rpc('bounced_receipt_candidates', { p_line: lineId })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    paymentId: String(r.payment_id), accountId: String(r.account_id), accountNumber: String(r.account_number ?? ''),
+    caseNumber: (r.case_number as string | null) ?? null, debtor: (r.debtor as string | null) ?? null,
+    receivedOn: String(r.received_on), amount: Number(r.amount), reference: (r.reference as string | null) ?? null,
+    named: !!r.named,
+  }))
+}
+
+/**
+ * A RECEIPT THE BANK RETURNED UNPAID (prompt 12): reverses it and closes both statement lines against
+ * each other, in one transaction (return_bounced_receipt). Never called without a person choosing
+ * the receipt -- the pair is suggested, never made silently.
+ */
+export async function returnBouncedReceipt(lineId: string, paymentId: string): Promise<void> {
+  const { error } = await supabase.rpc('return_bounced_receipt', { p_line: lineId, p_payment: paymentId })
+  if (error) throw new Error(error.message)
+}
