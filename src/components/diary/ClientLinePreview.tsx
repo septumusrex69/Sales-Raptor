@@ -1,4 +1,5 @@
 import { CLIENT_FLAGS, CLIENT_POSITIONS, positionReport } from '../../lib/clientPosition.ts'
+import { accountEnded } from '../../lib/accountStatus.ts'
 import { clientLine } from '../../lib/accountNarrative.ts'
 import type { DiaryKind } from '../../lib/diaryPriority.ts'
 import { CALL_OUTCOMES, type CallOutcome } from '../../lib/callOutcome.ts'
@@ -23,6 +24,7 @@ export function ClientLinePreview({ account, next, chosen, promise, className = 
     status: string
     subStatus: string | null
     clientActionAsk: string | null
+    endedAs?: string | null
   }
   /**
    * What the agent has just said happened, before any of it is saved.
@@ -45,6 +47,7 @@ export function ClientLinePreview({ account, next, chosen, promise, className = 
 }) {
   const meta = chosen ? CALL_OUTCOMES[chosen] : null
   const report = positionReport({
+    closed: accountEnded(account),
     status: account.status,
     subStatus: meta ? meta.subStatus : account.subStatus,
     openQueryWithClient: account.clientActionAsk !== null,

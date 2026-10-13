@@ -18,7 +18,7 @@ import { clockNow } from '../../lib/clock.ts'
    `balances` below. */
 import { computeBalance, type BalanceBreakdown } from '../../lib/accountBalance.ts'
 import { balanceInputFor } from '../../lib/balanceInput.ts'
-import { isWrittenOff } from '../../lib/accountStatus.ts'
+import { accountEnded, isWrittenOff } from '../../lib/accountStatus.ts'
 import { firmToday } from '../../lib/dateLabels.ts'
 import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountFilters'
 import {
@@ -1004,7 +1004,12 @@ export function PositionPill({ account }: { account: DebtorAccount }) {
    * firm keeps to itself. A never-worked account reads "New" here and "In progress" on the report
    * a client gets — see the note on DeskPosition.
    */
+  /* ENDED BEATS EVERYTHING (the firm, 13 Oct: "it shows that these are still new accounts, but it's
+     in the closed thing"). Ending an account sets ended_as and moves it to the closed book; it leaves
+     status as it was, so reading status alone called a closed, never-worked account New. The account
+     page already passed this; the list did not. */
   const position = deskPosition({
+    closed: accountEnded(account),
     status: account.status,
     subStatus: account.subStatus,
     bucket: account.bucket,

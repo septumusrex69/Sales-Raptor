@@ -209,6 +209,27 @@ Commits `0f4cf73` onwards; each message carries the reasoning.
   all time, year to date and custom dates have none. For those the bar says "No progress for this
   period", and the pace tiles say why. `check-period-target`.
 
+### S7 · Clean Break (13 Oct, late)
+
+- **Closed accounts read "New"** (the firm: "these are still new accounts, but it's in the closed
+  thing"). Ending an account sets `ended_as` and `book = 'closed'` but leaves `status` alone ('Active'
+  on all 24 on staging). The account page passed `closed: accountEnded(account)`; the list, the diary,
+  the finish-box preview, the planner (`handOutData`) and the import's linked-account summary didn't.
+  All of them do now; the diary and the import's existing-accounts read `ended_as` for it.
+  `check-position-closed` walks `src/` and fails on any position call without `closed:`.
+- **"Owed back to the trust R39 877.68" on Trust ledger → Against the bank was the firm's own
+  drawings, counted twice.** `trust_position` grouped firm entries per account, so drawings and
+  charges made a −R39 877.68 "firm" bucket beside a firm line already net of them. It now treats the
+  firm as one party, as `trust_balances` (the tabs) always did. Owed back → R0; the difference didn't
+  move.
+- **The remaining R1 287.50 difference** is Marula's PTC fee on PO-MPG-2609 (ready, not approved).
+  The fee is debited from Marula when the PTC is recorded, but credited to the firm only when the run
+  is approved, so in between it has no owner. It clears on approval. **Asked the user** whether the
+  firm should be credited at the moment of the debit instead (as "waiting"), which would keep the
+  difference at nil throughout. That changes ledger behaviour, so it's the firm's call.
+- **The profit graphs are on Business → Income, behind `business.income`, which Stephan's own
+  profile doesn't have**, so he couldn't see them. Asked him whether to grant it or move them.
+
 ### Sixth session (11 Oct) — the payout day, the spinners, and a withdrawal that read as Active
 
 Asked for while running the three-cycle simulation (HANDOFF 7) on the iPad, clock at 10 Jul.

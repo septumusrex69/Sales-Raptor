@@ -72,6 +72,8 @@ export interface DiaryRow extends DiaryEntry {
     mainCommentAt: string | null
     /* Whether it has ever been worked, which is the whole of the internal "New" rung. */
     lastActionAt: string | null
+    /* Set when the account was ended (closed, withdrawn, written off): the position's `closed`. */
+    endedAs: string | null
   }
 }
 
@@ -136,6 +138,7 @@ const toRow = (r: any): DiaryRow => ({
     mainComment: r.debtor_accounts?.main_comment ?? null,
     mainCommentAt: r.debtor_accounts?.main_comment_at ?? null,
     lastActionAt: r.debtor_accounts?.last_action_at ?? null,
+    endedAs: r.debtor_accounts?.ended_as ?? null,
   },
 })
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -153,7 +156,7 @@ const ROW_SELECT = `
   promises_to_pay!diary_entries_promise_id_fkey ( id, amount, due_on, status ),
   debtor_accounts!diary_entries_account_id_fkey (
     id, company_id, account_number, debtor_first_name, debtor_surname,
-    capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at,
+    capital_outstanding, status, sub_status, bucket, client_action_ask, last_action_at, ended_as,
     prescription_date, main_comment, main_comment_at
   )
 `

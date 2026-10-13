@@ -73,6 +73,12 @@ check('...and with nothing drawable yet, it waits for its clients', drawingStep(
 const queue = readFileSync(new URL('../../src/pages/finance/FinanceWorkQueue.tsx', import.meta.url), 'utf8')
 check('the Approve tab draws the line', /data-testid="firm-drawing-step"/.test(queue) && /drawingStep\(\{ payDay: approveDay/.test(queue), true)
 
+/* THE FIRM IS ONE PARTY ON "AGAINST THE BANK" (13 Oct): grouped per account, its drawings read as
+   R39 877.68 owed back to the trust beside a firm line already net of them. */
+check('trust_position groups the firm as one party, like trust_balances',
+  /when 'debtor' then coalesce\(account_id::text, party\)\s*else party end as who/.test(body('trust_position')), true)
+check('...and no longer splits it by account', /else coalesce\(account_id::text, party\) end as who/.test(body('trust_position')), false)
+
 if (failures.length) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))
 console.log(`check-firm-drawable: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)

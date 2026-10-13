@@ -42513,3 +42513,65 @@ as $$
           or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
    order by a.cyc
 $$;
+
+-- ============================================================================================
+-- S7: THE "AGAINST THE BANK" CARD COUNTED THE FIRM'S DRAWINGS TWICE. See the comment inside.
+-- Staging after: creditors R23 462.50, owed back R0, difference R1 287.50 (unchanged) -- which is
+-- Marula's PTC fee on PO-MPG-2609: debited from Marula when recorded, credited to the firm only when
+-- the run is approved, so until then it is in the bank with nobody's name on it.
+-- ============================================================================================
+create or replace function public.trust_position()
+returns table(trust_cash numeric, creditors numeric, debtors numeric, net_owed numeric,
+              difference numeric, owed_to_clients numeric, owed_to_debtors numeric,
+              owed_to_firm numeric, unidentified numeric, owed_by_clients numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with cash as (
+    select coalesce(max(f.trust_opening_balance), 0) + coalesce(sum(l.amount), 0) as bal
+      from public.firm_settings f
+      left join public.bank_statement_lines l
+        on l.bank_account = f.trust_account_number
+       and (f.trust_opening_date is null or l.txn_date > f.trust_opening_date)
+  ),
+  by_party as (
+    select party,
+           -- THE FIRM IS ONE PARTY, as trust_balances already has it. Grouped per account, its
+           -- earnings sat in one bucket per account and every drawing and bank charge in a separate
+           -- "firm" bucket of -R39 877.68, which this card then listed as "Owed back to the trust"
+           -- beside a firm line that was already net of it -- the same money twice (the firm, 13 Oct:
+           -- "something here doesn't make sense to me"). The difference does not move: both sides
+           -- of the card fall by the same amount.
+           case party when 'client' then company_id::text
+                      when 'debtor' then coalesce(account_id::text, party)
+                      else party end as who,
+           sum(amount) as bal
+      from public.trust_creditor_entries
+     group by 1, 2
+  ),
+  held as (
+    select
+      coalesce(sum(bal) filter (where party = 'client'), 0) as clients,
+      coalesce(sum(bal) filter (where party = 'debtor'), 0) as debtors,
+      coalesce(sum(bal) filter (where party = 'firm'), 0) as firm,
+      coalesce(sum(bal) filter (where party = 'unidentified'), 0) as unknown,
+      coalesce(sum(bal) filter (where bal > 0), 0) as owed_out,
+      coalesce(-sum(bal) filter (where bal < 0), 0) as owed_in,
+      coalesce(sum(bal) filter (where party = 'client' and bal < 0), 0) as clients_owing
+      from by_party
+  ),
+  unplaced as (
+    select coalesce(sum(l.amount), 0) as bal
+      from public.bank_statement_lines l
+      join public.firm_settings f on true
+     where l.bank_account = f.trust_account_number
+       and l.direction = 'credit' and l.status = 'unallocated'
+  )
+  select c.bal,
+         h.owed_out + u.bal,
+         h.owed_in,
+         (h.owed_out + u.bal) - h.owed_in,
+         c.bal - ((h.owed_out + u.bal) - h.owed_in),
+         h.clients, h.debtors, h.firm, u.bal + h.unknown, -h.clients_owing
+    from cash c, held h, unplaced u
+   where public.has_capability('finance.view')
+$$;

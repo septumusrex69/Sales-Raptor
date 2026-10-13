@@ -290,6 +290,8 @@ export interface ExistingAccount {
   clientReference?: string | null
   status?: string | null
   subStatus?: string | null
+  /** Set once the account was ended (closed, withdrawn, written off): "it's been withdrawn". */
+  endedAs?: string | null
   heldBy?: string | null
   heldByName?: string | null
 }
@@ -704,6 +706,7 @@ export function planHandover(input: {
       capital: a.capital,
       status: a.status ?? null,
       subStatus: a.subStatus ?? null,
+      endedAs: a.endedAs ?? null,
       heldBy: a.heldBy ?? null,
       heldByName: a.heldByName ?? null,
     }

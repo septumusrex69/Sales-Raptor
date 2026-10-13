@@ -27,6 +27,7 @@
  */
 
 import { CLIENT_POSITIONS, clientPosition } from './clientPosition.ts'
+import { accountEnded } from './accountStatus.ts'
 
 /** An account already on the client's book, as much of it as a decision needs. */
 export interface BookAccount {
@@ -39,6 +40,8 @@ export interface BookAccount {
   capital: number | null
   status: string | null
   subStatus: string | null
+  /** Set once the account was ended; status alone still reads Active after an account is closed. */
+  endedAs?: string | null
   /** Whose desk it is on, as a profiles.id. Null is the unallocated pile. */
   heldBy: string | null
   heldByName: string | null
@@ -73,7 +76,7 @@ export interface LinkedMatch {
  */
 export function linkedSummary(account: BookAccount): string {
   const position = CLIENT_POSITIONS[clientPosition({
-    status: account.status, subStatus: account.subStatus,
+    closed: accountEnded(account), status: account.status, subStatus: account.subStatus,
   })].label
   return [
     account.reference ?? 'no reference',

@@ -1,3 +1,4 @@
+import { accountEnded } from '../../lib/accountStatus'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
@@ -648,6 +649,7 @@ const COL_HEAD = 'text-[12.5px] font-medium text-slate-400'
  */
 function positionOfRow(row: DiaryRow) {
   return deskPosition({
+    closed: accountEnded(row.account),
     status: row.account.status,
     subStatus: row.account.subStatus,
     bucket: row.account.bucket,

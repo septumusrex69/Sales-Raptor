@@ -1040,6 +1040,7 @@ export async function fetchExistingAccounts(companyId: string): Promise<Existing
     capital_handed_over: number | string | null
     status: string | null
     sub_status: string | null
+    ended_as: string | null
     assigned_to: string | null
     assigned?: { name: string | null } | { name: string | null }[] | null
   }>(
@@ -1047,7 +1048,7 @@ export async function fetchExistingAccounts(companyId: string): Promise<Existing
       .from('debtor_accounts')
       /* One literal, not a concatenation: supabase-js infers the row type FROM the select string,
          and a joined one infers nothing and lands on GenericStringError. */
-      .select('account_number, client_reference, debtor_id_number, debtor_surname, capital_handed_over, status, sub_status, assigned_to, assigned:profiles!debtor_accounts_assigned_to_fkey(name)')
+      .select('account_number, client_reference, debtor_id_number, debtor_surname, capital_handed_over, status, sub_status, ended_as, assigned_to, assigned:profiles!debtor_accounts_assigned_to_fkey(name)')
       .eq('company_id', companyId)
       .order('id'),
     { table: 'the client\u2019s accounts' },
@@ -1060,6 +1061,7 @@ export async function fetchExistingAccounts(companyId: string): Promise<Existing
     capital_handed_over: number | string | null
     status: string | null
     sub_status: string | null
+    ended_as: string | null
     assigned_to: string | null
     assigned?: { name: string | null } | { name: string | null }[] | null
   }) => ({
@@ -1070,6 +1072,7 @@ export async function fetchExistingAccounts(companyId: string): Promise<Existing
     capital: r.capital_handed_over === null ? null : Number(r.capital_handed_over),
     status: r.status,
     subStatus: r.sub_status,
+    endedAs: r.ended_as,
     heldBy: r.assigned_to,
     /* PostgREST gives an embedded row as an object or a one-element array depending on how it
        reads the relationship. Both, because the difference is invisible until a name is blank. */

@@ -5,6 +5,7 @@
  * the seam: it reads the accounts, the people and the diaries, derives the two things an account
  * cannot tell you about itself — its band and what kind of work it is — and hands over plain data.
  */
+import { accountEnded } from './accountStatus.ts'
 import { supabase } from './supabase'
 import { idChunks } from './accountAllocation.ts'
 import { applyAccountFilters, type AccountQuery, type DebtorAccount } from './accountBook'
@@ -53,7 +54,7 @@ export function diaryKindFor(a: DebtorAccount): DiaryKind {
 export function toPlannable(
   a: DebtorAccount, alreadyBooked: boolean, currentKind?: DiaryKind,
 ): PlannableAccount {
-  const position = clientPosition({ status: a.status, subStatus: a.subStatus, bucket: a.bucket })
+  const position = clientPosition({ closed: accountEnded(a), status: a.status, subStatus: a.subStatus, bucket: a.bucket })
   return {
     id: a.id,
     label: [a.accountNumber, [a.debtorFirstName, a.debtorSurname].filter(Boolean).join(' ')]
