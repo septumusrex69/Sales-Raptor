@@ -512,7 +512,10 @@ ok('...and it is drawn once, by the row', (checkScreen.match(/data-check-panel/g
    figures -- the same rules, one call away. */
 ok('the approval queue checks every row against the rules',
   queueScreen.includes('checkedRow(r, awaitingAllocation(r)')
-  && /const problems = checkAllocation\(a\)/.test(read('lib/paymentsQueue.ts')))
+  /* Every row but one shape: a closed-account receipt held whole as credit, which the formulas
+     describe a split for that deliberately does not happen (prompt 12 part C). */
+  && /const problems = heldWhole \? \[\] : checkAllocation\(a\)/.test(read('lib/paymentsQueue.ts'))
+  && /const heldWhole = !!closed && !r\.paidToClient && near\(f\.credit, r\.amount\) && near\(f\.clientShare, 0\) && near\(f\.bfShare, 0\)/.test(read('lib/paymentsQueue.ts')))
 ok('the check screen checks every posted row against the rules',
   checkScreen.includes('checkAllocation(a)') && checkScreen.includes('postedAllocation(r)'))
 /*

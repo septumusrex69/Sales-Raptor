@@ -127,6 +127,21 @@ check('A: nothing unusual', keys(A), [])
 check('B: credit and capital paid off', keys(B), ['capital_paid_off', 'credit'])
 check('PTC-A: marked PTC, and no mismatch', keys(PTC_A), ['ptc'])
 
+/* A RECEIPT ON A CLOSED ACCOUNT, HELD WHOLE AS CREDIT (prompt 12 part C: RAP-124303 on SBB/2006 showed
+   "Allocation mismatch" though it was exactly right). R0 to the client, R0 to the firm, R1 000 credit. */
+const CLOSED_CREDIT = { ...base, paymentId: 'CC', client: 'Seabreeze', receivedOn: '2026-08-12', amount: 1000, paidToClient: false,
+  toInterest: 0, toReceiptFees: 0, toFees: 0, toCosts: 0, receiptFee: 0, receiptFeeVat: 0,
+  toCapital: 0, capitalBefore: 8800, capitalAfter: 8800, excess: 1000, commission: 0, commissionVat: 0, commissionRate: 0.25,
+  toClient: 0, dueToBf: 0 }
+const closedAs = { as: 'withdrawn', on: '2026-07-31' }  // SBB/2006: withdrawn with R8 800 capital still standing
+const cc = checkedRow(CLOSED_CREDIT, alloc(CLOSED_CREDIT), null, closedAs)
+check('a closed-account receipt held whole as credit breaks no formula', cc.problems.map((v) => v.rule), [])
+check('...and is not called an allocation mismatch', cc.exceptions.some((e) => e.key === 'allocation_mismatch'), false)
+check('...but still says it is on a closed account', cc.exceptions.some((e) => e.key === 'closed_account'), true)
+const OPEN_CREDIT_WRONG = { ...CLOSED_CREDIT, paymentId: 'OW', toClient: 100, excess: 900 }
+check('a split that is not the whole-credit shape is still checked on a closed file',
+  checkedRow(OPEN_CREDIT_WRONG, alloc(OPEN_CREDIT_WRONG), null, closedAs).exceptions.some((e) => e.key === 'allocation_mismatch'), true)
+
 /* ---------------- the badges ---------------- */
 
 const paidOff = exceptionsOf(B, []).find((e) => e.key === 'capital_paid_off')

@@ -42099,3 +42099,41 @@ end $$;
 revoke all on function public.return_bounced_receipt(uuid, uuid) from public, anon;
 grant execute on function public.return_bounced_receipt(uuid, uuid) to authenticated;
 
+
+
+-- ============================================================================================
+-- PROMPT 12 PART B4: WHAT MAY BE DRAWN NEVER GOES BELOW NIL, AND WHAT WAITS NEVER EXCEEDS WHAT IS HELD.
+--
+-- On 11 Sep (staging clock), before the 2608 runs were paid, this returned held R24 016.26, waiting
+-- R24 104.36, drawable -R88.10. The R88.10 is the bank charges booked since the last drawing (R57.50 +
+-- R69.00) less the interest (R38.40): negative firm entries that "count at once", taken from a firm
+-- balance whose positive part was all still waiting for its clients' payovers. The firm's share had
+-- in effect paid the charges out of money it could not yet draw -- so nothing may be drawn (nil, not
+-- minus), and what is waiting is what is actually held (it cannot exceed it). held = drawable + waiting
+-- whenever held is not below nil.
+-- ============================================================================================
+create or replace function public.firm_trust_split(p_company uuid default null)
+returns table(held numeric, drawable numeric, waiting numeric)
+language sql stable security definer set search_path to 'public'
+as $$
+  with e as (
+    select x.amount,
+           case when public.firm_entry_kind(x.reason) in ('credit', 'bank_interest', 'transfer_in') then false
+                when x.allocation_id is not null then not public.firm_run_settled(a.payover_run_id)
+                when x.payover_run_id is not null then not public.firm_run_settled(x.payover_run_id)
+                else false end as waits
+      from public.trust_creditor_entries x
+      left join public.payment_allocations a on a.id = x.allocation_id
+     where x.party = 'firm' and (p_company is null or x.company_id = p_company)
+  ), t as (
+    select coalesce(sum(amount), 0) as held,
+           coalesce(sum(amount) filter (where not waits), 0) as free,
+           coalesce(sum(amount) filter (where waits), 0) as pend
+      from e
+  )
+  select round(held, 2),
+         round(greatest(free + least(pend, 0), 0), 2),
+         round(least(greatest(pend, 0), greatest(held, 0)), 2)
+    from t
+   where public.has_capability('finance.view') or public.has_capability('business.view')
+$$;

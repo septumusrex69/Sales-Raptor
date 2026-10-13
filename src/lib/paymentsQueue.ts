@@ -301,8 +301,17 @@ export function checkedRow<T extends QueueInput>(
   r: T, a: Allocation, handoverDate: string | null = null, closed: ClosedAs | null = null,
   settlement: LiveSettlement | null = null,
 ): { row: T; a: Allocation; f: QueueFigures; problems: Violation[]; exceptions: QueueException[] } {
-  const problems = checkAllocation(a)
-  return { row: r, a, f: queueFigures(r), problems, exceptions: exceptionsOf(r, problems, handoverDate, closed, settlement) }
+  const f = queueFigures(r)
+  /*
+   * A RECEIPT ON A CLOSED ACCOUNT IS HELD WHOLE AS THE DEBTOR'S CREDIT (prompt 11): nothing to the
+   * client, nothing to the firm, the full amount as credit. The 50/50 formulas describe a split that
+   * deliberately does not happen, so read against it they reported "Allocation mismatch" on a row that
+   * was exactly right (prompt 12 part C, RAP-124303 on SBB/2006). Exactly that shape passes; anything
+   * else on a closed file is still checked.
+   */
+  const heldWhole = !!closed && !r.paidToClient && near(f.credit, r.amount) && near(f.clientShare, 0) && near(f.bfShare, 0)
+  const problems = heldWhole ? [] : checkAllocation(a)
+  return { row: r, a, f, problems, exceptions: exceptionsOf(r, problems, handoverDate, closed, settlement) }
 }
 
 /* ============================================================================================== */
