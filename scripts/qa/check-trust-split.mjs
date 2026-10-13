@@ -77,10 +77,12 @@ for (const fn of ['trust_cash_by_cycle', 'ptc_by_run', 'ptc_ageing', 'collection
 /* ---- the page ---- */
 const page = read('src/pages/trust/TrustOverview.tsx')
 ok('the overview reads the bank money by cycle', /fetchTrustCashByCycle\(\)/.test(page))
-const order = ['What is in the trust account', 'Paid straight to clients (PTCs)', 'What clients owe us, by age', 'Each payover, checked']
-const at = order.map((h) => page.indexOf(h))
-ok('the four sections are all there', at.every((i) => i > 0))
-ok('...in the order the firm reads them: the bank, the PTCs, the ages, the check', at.every((i, k) => k === 0 || at[k - 1] < i))
+/* S7: the overview is money in the account now and what needs doing. The PTCs and their ages moved to
+   Clients owe us, the payover check to the Trust ledger -- each still drawn, in the firm's order. */
+const owe = read('src/pages/trust/ClientsOweUs.tsx')
+ok('the overview keeps the bank list and Needs doing', page.indexOf('What is in the trust account') > 0 && page.indexOf('Needs doing') > page.indexOf('What is in the trust account'))
+ok('...the ages and the PTCs are on Clients owe us, in that order', owe.indexOf('How old it is') > 0 && owe.indexOf('Paid straight to clients (PTCs)') > owe.indexOf('How old it is'))
+ok('...and the payover check on the Trust ledger', /Each payover, checked/.test(read('src/pages/trust/TrustLedger.tsx')))
 ok('the old "owed back by clients" line is gone from the bank list', !/Less: owed back by clients/.test(page))
 
 if (failures.length > 0) console.error(failures.map((f) => `  ✗ ${f}`).join('\n'))

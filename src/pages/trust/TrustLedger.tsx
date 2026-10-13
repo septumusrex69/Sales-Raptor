@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Card } from '../../components/ui/Card'
+import { PayoverCheck } from './TrustPtc'
 import { rand } from '../../lib/money'
 import {
+  fetchCollectionsByPayover, type PayoverTie,
   fetchTrustBalances, fetchTrustEntries, fetchTrustPosition,
   type TrustBalance, type TrustEntry, type TrustParty, type TrustPosition,
 } from '../../lib/trust'
@@ -130,8 +132,29 @@ export function TrustLedger() {
       )}
 
       {tab === 'reconciliation' && position && <Reconciliation position={position} rows={rows} />}
+
+      {/* EACH PAYOVER, CHECKED -- moved here from the Trust overview (S7), which now shows only
+          money in the account today. A check of past payovers against their payments is history. */}
+      <section>
+        <h2 className="text-lg font-semibold tracking-tight text-slate-800">Each payover, checked</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          What came into trust plus what was paid straight to clients is what was collected for the payover &mdash; counted from the payments, and held against the runs.
+        </p>
+        <PayoverChecked />
+      </section>
     </div>
   )
+}
+
+function PayoverChecked() {
+  const [rows, setRows] = useState<PayoverTie[] | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchCollectionsByPayover().then((r) => { if (live) setRows(r) }).catch(() => { if (live) setRows([]) })
+    return () => { live = false }
+  }, [])
+  if (!rows) return <Loader2 size={16} className="mt-3 animate-spin text-slate-400" />
+  return <PayoverCheck rows={rows} />
 }
 
 function Balances({ rows, empty, note }: { rows: TrustBalance[]; empty: string; note?: string }) {

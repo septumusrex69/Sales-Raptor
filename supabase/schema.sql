@@ -42242,3 +42242,86 @@ as $$
 $$;
 revoke all on function public.payments_out_list() from public, anon;
 grant execute on function public.payments_out_list() to authenticated;
+
+-- ============================================================================================
+-- S7 · CLEAN BREAK: CLIENTS OWE US, AND THE TRUST ACCOUNT'S OWN STATEMENT, IN RAPTOR.
+--
+-- clients_owing: the firm, 13 Oct, "the moment you owe the trust, you owe the business ... we don't
+-- distinguish". So one list per client of everything still unpaid to the firm: a payover that went
+-- negative (the client was paid direct and owes the fees back) and an invoice raised to be settled
+-- by invoice rather than off a payover. What is still owed is read through client_run_paid and
+-- client_charge_paid, so a part payment on the client's statement shows here at once.
+--
+-- trust_bank_statement: "a historical statement of the trust on Raptor ... every single
+-- transaction", so nobody has to open the bank to answer what a line was. Every imported line, with
+-- what it was in the firm's words and the account or run it belongs to. Read-only: placing and
+-- allocating stay where they are (To sort), because one place that changes a line is enough.
+-- ============================================================================================
+create or replace function public.clients_owing()
+ returns table(company_id uuid, client text, code text, from_payovers numeric, from_invoices numeric, total numeric, oldest_due date, items integer)
+ language sql
+ stable security definer
+ set search_path to 'public'
+as $function$
+  with items as (
+    select r.company_id, 'shortfall'::text as kind, public.payover_pays_on(r.period_end) as due_on,
+           round(-r.net_payover - public.client_run_paid(r.id), 2) as remaining
+      from public.payover_runs r
+      left join public.payover_runs n on n.id = r.carried_out_run_id
+     where r.status in ('approved', 'sent', 'paid')
+       and r.net_payover < 0
+       and r.settled_direct_receipt_id is null
+       and (r.carried_out_run_id is null or public.payover_run_is_open(n.status))
+    union all
+    select c.company_id, 'invoice', c.raised_on, round(c.amount + c.vat - public.client_charge_paid(c.id), 2)
+      from public.client_charges c
+     where c.settlement = 'invoice' and c.cancelled_at is null and c.paid_at is null
+  )
+  select i.company_id, co.name, co.code,
+         coalesce(sum(i.remaining) filter (where i.kind = 'shortfall'), 0),
+         coalesce(sum(i.remaining) filter (where i.kind = 'invoice'), 0),
+         sum(i.remaining), min(i.due_on), count(*)::integer
+    from items i
+    join public.companies co on co.id = i.company_id
+   where i.remaining > 0
+     and (public.has_capability('finance.view') or public.has_capability('business.view'))
+   group by i.company_id, co.name, co.code
+   order by min(i.due_on), co.name
+$function$;
+revoke all on function public.clients_owing() from public, anon;
+grant execute on function public.clients_owing() to authenticated;
+
+create or replace function public.trust_bank_statement(p_from date default null, p_to date default null)
+ returns table(id uuid, txn_date date, amount numeric, balance numeric, description text, direction text,
+               reference text, status text, what text, case_number text, account_id uuid, run_id uuid, run_invoice text)
+ language sql
+ stable security definer
+ set search_path to 'public'
+as $function$
+  select l.id, l.txn_date, l.amount, l.balance, l.description, l.direction, l.reference, l.status,
+         case
+           when l.returned_payment_id is not null then 'Returned unpaid'
+           when l.allocation_kind = 'payover' or l.payover_run_id is not null then 'Payover to the client'
+           when l.allocation_kind = 'refund' then 'Refund'
+           when l.allocation_kind = 'business_transfer' then 'Transfer to the business account'
+           when l.allocation_kind = 'business_transfer_in' then 'From the business account'
+           when l.allocation_kind = 'bank_charge' then 'Bank charge'
+           when l.allocation_kind = 'bank_interest' then 'Bank interest'
+           when l.allocation_kind = 'other' then coalesce(nullif(l.allocation_reason, ''), 'Other')
+           when l.payment_id is not null or (l.account_id is not null and l.direction = 'credit') then 'Debtor’s payment'
+           when l.status = 'excluded' then 'Bank note, no money moved'
+           when l.direction = 'credit' then 'Needs an account'
+           else 'Not yet allocated'
+         end,
+         a.case_number, a.id, r.id, r.invoice_number
+    from public.bank_statement_lines l
+    left join public.account_payments rp on rp.id = l.returned_payment_id
+    left join public.debtor_accounts a on a.id = coalesce(l.account_id, rp.account_id)
+    left join public.payover_runs r on r.id = l.payover_run_id
+   where public.has_capability('finance.view')
+     and (p_from is null or l.txn_date >= p_from)
+     and (p_to is null or l.txn_date <= p_to)
+   order by l.txn_date desc, l.imported_at desc, l.line_key desc
+$function$;
+revoke all on function public.trust_bank_statement(date, date) from public, anon;
+grant execute on function public.trust_bank_statement(date, date) to authenticated;

@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import {
-  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Coins, Users, Scale, Send, Settings, TriangleAlert,
+  ArrowDownToLine, ArrowUpRight, Briefcase, CircleGauge, Landmark, Users, Scale, Send, Settings, TriangleAlert,
 } from 'lucide-react'
 import { WorkspaceRail, type RailItem } from '../../components/layout/WorkspaceRail'
 
@@ -32,17 +32,16 @@ const ITEMS: RailItem[] = [
   { to: '/trust', label: 'Overview', icon: CircleGauge, end: true },
   { to: '/trust/payments', label: 'Payments in', icon: ArrowDownToLine },
   { to: '/trust/payover', label: 'Payover runs', icon: ArrowUpRight },
-  /* What still has to go out, and on which reference (the firm, 8 Oct). After the runs, because an
-     approved run is what lands here. */
+  /* The one place money leaves trust (S7): clients, refunds, the firm's transfer, and the bank file. */
   { to: '/trust/payments-out', label: 'Payments out', icon: Send },
-  /* A debtor's overpayment, start to finish (the firm, 11 Oct: "a separate section for like
-     overpayments") -- decided, refunded, parked -- instead of across three screens. */
-  { to: '/trust/overpayments', label: 'Overpayments', icon: Coins },
+  /* TO SORT (S7, the firm, 13 Oct: "there's a tab for overpayments and then there's another tab for
+     exceptions ... I don't know where we can see the suspense account"): one page for all three. */
+  { to: '/trust/exceptions', label: 'To sort', icon: TriangleAlert },
+  /* "A dedicated tab ... the clients that owe us money" (13 Oct). */
+  { to: '/trust/clients', label: 'Clients owe us', icon: Users },
+  /* "Every single transaction somewhere ... so we don't need to go into the bank" (13 Oct). */
+  { to: '/trust/statement', label: 'Bank statement', icon: Landmark },
   { to: '/trust/ledger', label: 'Trust ledger', icon: Scale },
-  /* Every client: what we hold for them, what they owe us (the firm, 10 Oct: "a ledger for clients.
-     Who owes us and who we paid"). */
-  { to: '/trust/clients', label: 'Client balances', icon: Users },
-  { to: '/trust/exceptions', label: 'Exceptions', icon: TriangleAlert },
 ]
 
 export function TrustLayout() {

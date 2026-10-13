@@ -288,11 +288,11 @@ ok('...and still reads the position', /fetchTrustPosition\(\)/.test(page))
  * accounted for, not accounted for. Asserted in that order, presence first.
  */
 const from = page.indexOf('What is in the trust account')
-const control = from < 0 ? '' : page.slice(from, page.indexOf('Paid straight to clients (PTCs)', from))
+/* S7: the reconciliation card became Needs doing; the owners still end on the three totals, in order. */
+const control = from < 0 ? '' : page.slice(from)
 ok('the ownership block was found', control.length > 500 && control.length < 14000)
 let at = -1
-for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"',
-  'Ownership reconciliation', 'Less: accounted for', 'Not accounted for {head.notAccounted']) {
+for (const line of ['Total accounted for', 'Total not accounted for', 'label="In the trust account"', 'Needs doing']) {
   const found = control.indexOf(line)
   ok(`the ownership block carries "${line}"`, found >= 0)
   ok(`...and it comes after the line above it`, found > at)
@@ -316,8 +316,11 @@ ok('...and what is not accounted for is the BANK less that sum, through trustHea
  * AND IT ONLY SAYS "MATCH" WHEN NOTHING IS OPEN. A reconciliation that read R 0.00 and "totals
  * match" over a bank shortfall is the failure this whole screen exists to prevent.
  */
-ok('"totals match" is said only when no check is open',
-  /open\.length === 0 \? \(\s*<p[^>]*>Bank, ledger and ownership totals match\.<\/p>/.test(page))
+ok('"bank and books agree" is said only when there is nothing to do',
+  /todo\.length === 0 \? \(\s*<p[^>]*>Nothing\. Bank and books agree, and nothing is waiting\.<\/p>/.test(page))
+ok('...and a bank shortfall is a red item that says "Does not balance"',
+  /tone: input\.notAccounted < 0 \? 'bad' : 'warn'/.test(readFileSync(new URL('../../src/lib/trustOverview.ts', import.meta.url), 'utf8'))
+  && /'Does not balance'/.test(page))
 
 /*
  * TODAY IS READ ON THE FIRM'S CLOCK. "How many days until the 11th" against a browser in another

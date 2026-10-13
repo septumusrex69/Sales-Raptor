@@ -39,7 +39,7 @@ const KIND_LABEL: Record<string, string> = {
   closed_account: 'Closed or written off',
 }
 
-export function FinanceExceptions() {
+export function FinanceExceptions({ embedded = false }: { embedded?: boolean } = {}) {
   const [jobs, setJobs] = useState<ExceptionJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +55,8 @@ export function FinanceExceptions() {
 
   useEffect(() => { void load() }, [load])
 
-  const grouped = ['needs_rate', 'excess_credit', 'closed_account']
+  /* On To sort the overpaid accounts are in the Overpayments section, so they are not listed twice. */
+  const grouped = (embedded ? ['needs_rate', 'closed_account'] : ['needs_rate', 'excess_credit', 'closed_account'])
     .map((k) => ({ kind: k, rows: jobs.filter((j) => j.kind === k) }))
     .filter((g) => g.rows.length > 0)
 
@@ -69,7 +70,11 @@ export function FinanceExceptions() {
 
       {loading && <div className="py-16 text-center text-slate-400"><Loader2 className="mx-auto w-5 h-5 animate-spin" /></div>}
 
-      {!loading && jobs.length === 0 && (
+      {!loading && grouped.length === 0 && embedded && (
+        <p className="text-[13px] text-slate-500">Nothing else: every allocation has a commission rate and no money has landed on a closed file.</p>
+      )}
+
+      {!loading && grouped.length === 0 && !embedded && (
         <Card><p className="py-8 text-center text-sm text-slate-400">
           Nothing is holding a payover up. Every allocation has a rate, no account is overpaid, and
           no money has landed on a closed file.
@@ -142,7 +147,7 @@ export function FinanceExceptions() {
         is where somebody comes to deal with overpayments, and a credit parked six months ago has
         nowhere else to surface. It draws nothing at all when nothing is parked.
       */}
-      <ParkedCredits />
+      {!embedded && <ParkedCredits />}
 
       {/*
         EVERY STATEMENT LINE NOT YET ACCOUNTED FOR (prompt 12): money out that is not tied to a
@@ -150,7 +155,7 @@ export function FinanceExceptions() {
         yet said to be anything. Until this list is empty the trust ledger does not balance against
         the bank, and the trust overview says so.
       */}
-      <BankLinesToAllocate />
+      {!embedded && <BankLinesToAllocate />}
 
       {disposing?.allocationId && (
         <DisposeExcessModal

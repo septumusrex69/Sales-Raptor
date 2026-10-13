@@ -34,7 +34,9 @@ import {
  * a person deciding. A wrong placement credits the wrong debtor AND remits the wrong client, and
  * a payment is immutable once processed -- reversal leaves both rows on the ledger for ever.
  */
-export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
+export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals, hidePayouts = false }: {
+  /* On To sort the money out is under Statement lines to allocate, so it is not listed twice. */
+  hidePayouts?: boolean
   refreshKey: number
   onPlaced: () => void
   /** What is unmatched or in suspense, for the overview tile on Payments in -- read once here. */
@@ -288,7 +290,7 @@ export function UnallocatedReceipts({ refreshKey, onPlaced, onTotals }: {
       )}
 
       {/* ---------------- money out, waiting to be tied to a run ---------------- */}
-      {payouts.length > 0 && (
+      {payouts.length > 0 && !hidePayouts && (
         <Card padded={false}>
           {/* The same padded header as Needs an account: CardHeader assumes a padded card, and on an
               unpadded one it drew flush against the edge. */}

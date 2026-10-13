@@ -439,3 +439,59 @@ export async function fetchCollectionsByPayover(): Promise<PayoverTie[]> {
     runsPaidDirect: n(r.runs_paid_direct),
   }))
 }
+
+/* ============================================================================================
+ * S7: CLIENTS OWE US, AND THE BANK STATEMENT KEPT IN RAPTOR.
+ * ============================================================================================ */
+
+/** A client that owes the firm: the payover shortfall still standing and unpaid invoices (clients_owing). */
+export interface ClientOwing {
+  companyId: string
+  client: string
+  code: string | null
+  fromPayovers: number
+  fromInvoices: number
+  total: number
+  oldestDue: string | null
+  items: number
+}
+
+export async function fetchClientsOwing(): Promise<ClientOwing[]> {
+  const { data, error } = await supabase.rpc('clients_owing')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    companyId: String(r.company_id), client: String(r.client ?? ''), code: (r.code as string | null) ?? null,
+    fromPayovers: n(r.from_payovers), fromInvoices: n(r.from_invoices), total: n(r.total),
+    oldestDue: (r.oldest_due as string | null) ?? null, items: n(r.items),
+  }))
+}
+
+/** One line of the trust account's statement, and what Raptor knows it was (trust_bank_statement). */
+export interface StatementEntry {
+  id: string
+  txnDate: string
+  amount: number
+  balance: number | null
+  description: string | null
+  direction: string
+  reference: string | null
+  status: string
+  what: string
+  caseNumber: string | null
+  accountId: string | null
+  runId: string | null
+  runInvoice: string | null
+}
+
+export async function fetchTrustBankStatement(from: string | null, to: string | null): Promise<StatementEntry[]> {
+  const { data, error } = await supabase.rpc('trust_bank_statement', { p_from: from, p_to: to })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id), txnDate: String(r.txn_date), amount: n(r.amount),
+    balance: r.balance === null || r.balance === undefined ? null : n(r.balance),
+    description: (r.description as string | null) ?? null, direction: String(r.direction ?? ''),
+    reference: (r.reference as string | null) ?? null, status: String(r.status ?? ''), what: String(r.what ?? ''),
+    caseNumber: (r.case_number as string | null) ?? null, accountId: (r.account_id as string | null) ?? null,
+    runId: (r.run_id as string | null) ?? null, runInvoice: (r.run_invoice as string | null) ?? null,
+  }))
+}

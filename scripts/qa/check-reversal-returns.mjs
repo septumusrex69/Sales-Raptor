@@ -281,7 +281,9 @@ ok('the ledger no longer refuses the removal through a foreign key', fkGone > 0 
     && /p\.approved_at is null and p\.reversed_at is null and p\.rejected_at is null/.test(aw)
     && /having public\.has_capability\('finance\.view'\)/.test(aw))
   const page = stripC(read('src/pages/trust/TrustOverview.tsx'))
-  ok('the overview names it under Not accounted for', /who="Waiting for approval"/.test(page) && /awaiting: awaiting\?\.amount \?\? 0/.test(page))
+  /* S7: named on the Not accounted for list the overview's figure opens, one line of its own. */
+  const list = read('src/lib/trustUnaccounted.ts')
+  ok('the overview names it under Not accounted for', /group: 'awaiting'/.test(list) && /fetchTrustAwaiting\(\)/.test(read('src/pages/trust/TrustUnaccounted.tsx')) && /to="\/trust\/unaccounted"/.test(page))
   const box = read('src/components/finance/ReversePaymentModal.tsx')
   ok('Reverse asks where the money goes', /Back to the approval queue/.test(box) && /Back to Needs an account/.test(box)
     && /reversePaymentToUnplaced\(row\.paymentId, why\)/.test(box))

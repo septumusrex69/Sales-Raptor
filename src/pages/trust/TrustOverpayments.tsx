@@ -42,7 +42,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'refunded', label: 'Refunded' },
 ]
 
-export function TrustOverpayments() {
+export function TrustOverpayments({ embedded = false }: { embedded?: boolean } = {}) {
   const [params, setParams] = useSearchParams()
   const tab: Tab = (TABS.find((t) => t.id === params.get('tab'))?.id) ?? 'decide'
   const [undecided, setUndecided] = useState<ExceptionJob[]>([])
@@ -78,9 +78,11 @@ export function TrustOverpayments() {
   }
 
   return (
-    <div className="space-y-4" data-testid="overpayments">
+    <div className="space-y-4" data-testid="overpayments" id="overpayments">
       <div className="flex items-baseline gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-800">Overpayments</h1>
+        {embedded
+          ? <h2 className="text-lg font-semibold tracking-tight text-slate-800">Overpayments</h2>
+          : <h1 className="text-xl font-semibold tracking-tight text-slate-800">Overpayments</h1>}
         <span className="text-xs text-slate-400">A debtor&rsquo;s money in trust, from the day it is overpaid to the day it is returned or kept</span>
       </div>
 

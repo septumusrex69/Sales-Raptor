@@ -209,6 +209,16 @@ function handlersFor(profile) {
         net: 2557.9, last_paid_on: null, last_paid: null },
     ] })],
     [(u) => /\/rpc\/business_month/.test(u), () => ({ body: [MONTH] })],
+    /* S7: what Needs doing and Clients owe us read. */
+    [(u) => /\/rpc\/clients_owing/.test(u), () => ({ body: [
+      { company_id: 'c1', client: 'Rinda Roo Company', code: 'RRC', from_payovers: 0, from_invoices: 1955, total: 1955, oldest_due: '2026-09-02', items: 1 },
+      { company_id: 'c2', client: 'Mielie Meal Co', code: 'MMC', from_payovers: 320, from_invoices: 0, total: 320, oldest_due: '2026-11-11', items: 1 },
+    ] })],
+    [(u) => /\/rpc\/bank_lines_to_allocate/.test(u), () => ({ body: [
+      { id: 'l1', txn_date: '2026-10-02', amount: 485, description: 'CAPITEC UNKNOWN', direction: 'credit', reference: null, bank_account: '1', bank_account_label: null, status: 'unallocated' },
+      { id: 'l2', txn_date: '2026-10-03', amount: -962.5, description: 'TRF PO RRC', direction: 'debit', reference: null, bank_account: '1', bank_account_label: null, status: 'unallocated' },
+      { id: 'l3', txn_date: '2026-10-03', amount: -1, description: '##BANK CHARGE', direction: 'debit', reference: null, bank_account: '1', bank_account_label: null, status: 'unallocated' },
+    ] })],
     [(u) => /\/rest\/v1\//.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\//.test(u), () => ({ body: [] })],
   ]
@@ -231,7 +241,7 @@ try {
     /* THE RAIL DREW, with its name and the line saying whose money this is. */
     const rail = page.locator('nav').filter({ hasText: 'Money held for other people' }).first()
     t.ok('the trust rail is on the page', (await rail.count()) > 0)
-    for (const item of ['Overview', 'Payments in', 'Payover runs', 'Exceptions']) {
+    for (const item of ['Overview', 'Payments in', 'Payover runs', 'To sort', 'Clients owe us', 'Bank statement']) {
       t.ok(`...listing ${item}`, (await rail.getByRole('link', { name: item }).count()) > 0)
     }
     t.ok('...and its settings', (await rail.getByRole('link', { name: 'Trust settings' }).count()) > 0)
@@ -271,111 +281,44 @@ try {
      * THE DIFFERENCE IS STATED IN WORDS, not only drawn as a red number. A figure with no sentence
      * under it tells somebody they have a problem and nothing about where to start.
      */
-    t.ok('and the shortfall is said out loud',
-      /bank holds R 963\.50 less than is owed/.test(body))
-
-    /* ---- the reconciliation, read down from the bank ---- */
-    t.ok('the reconciliation reads down from the bank',
-      /Ownership reconciliation/.test(body) && /Less: accounted for/.test(body))
-    t.ok('...and it does not claim a match over a shortfall',
-      !/Bank, ledger and ownership totals match/.test(body))
-    t.ok('not accounted for is split into what it is made of',
-      /Unallocated receipts[\s\S]{0,80}R 485\.00/.test(body)
-        && /Bank \/ ledger difference[\s\S]{0,120}-R 963\.50/.test(body)
-        && /TOTAL NOT ACCOUNTED FOR\s*-R 478\.50/i.test(body)
-        && /IN THE TRUST ACCOUNT\s*R 6 910\.10/i.test(body))
-    t.ok('...it says what is outstanding: the unplaced receipt', /R 485\.00 is in the account with nobody/.test(body))
-    /*
-     * A TRUST DEBTOR IS NOT A SHORTFALL, and the words have to keep them apart: the cash is all
-     * there, so sending somebody to the bank over a collection job is the failure here.
-     */
-    t.ok('a client in debit would not be called a shortfall',
-      !/owes the trust[\s\S]{0,120}shortfall/.test(body) || /not a shortfall/.test(body))
-
-    /* ---- who owns it, whose first and what the money is beside it ---- */
-    t.ok('the bank question is asked', /What is in the trust account/i.test(body))
-    for (const owner of [
-      'Last month\u2019s collections', 'This month\u2019s collections',
-      'To refund to debtors', 'Owner not yet identified',
-    ]) {
-      t.ok(`...and ${owner.toLowerCase()} is one of the answers`, body.includes(owner))
-    }
-    t.ok('...summing to a total accounted for', /Total accounted for/i.test(body))
-    /* THE FIRM, 8 Oct: overpayments kept "under the suspense account ... just to say overpayments
-       kept". A split of the debtors' money, so the total accounted for does not move. */
-    t.ok('overpayments kept have their own line', /Overpayments kept[\s\S]{0,120}R[\s\u00a0]100\.00/.test(body))
-    t.ok('...taken out of the debtors\' line', /To refund to debtors[\s\S]{0,40}R[\s\u00a0]310\.63/.test(body))
-    t.ok('...and the total is unchanged', /TOTAL ACCOUNTED FOR[\s\S]{0,40}R[\s\u00a0]7[\s\u00a0]388\.60/i.test(body))
-
-    /* ---- the firm's share, by what it is: "BF funds held: Commission + Fees + VAT" ---- */
-    const held = page.getByTestId('firm-held')
-    await held.waitFor({ timeout: 10000 }).catch(() => {})
-    const heldText = (await held.isVisible()) ? await held.innerText() : ''
-    t.ok('the firm\'s share is split as the firm drew it',
-      /Commission/.test(heldText) && /Fees and costs/.test(heldText) && /VAT on commission/.test(heldText))
-    t.ok('...a drawing is its own line, not shared out', /Less: drawn to the business account/.test(heldText))
-    t.ok('...and a part with nothing in it is not drawn', !/Bank interest/.test(heldText))
-    t.ok('...adding up to the firm\'s row above',
-      /4[\s,.]?420[.,]07/.test(await page.getByTestId('firm-held-total').innerText().catch(() => '')))
-    t.ok('...without a warning that it does not', !/does not match/.test(heldText))
-
-    /* ---- and it is EXPLAINED: both debits named, with the right action on each ---- */
-    t.ok('the unmatched payout is named', /R 962\.50/.test(body))
-    t.ok('...with the run it probably belongs to', /Match to PO-RRC-2610/.test(body))
-    /* A bank charge has no run to match: it is the firm's cost, booked as one (the firm, 8 Oct:
-       "I can't match this with anything ... that means the company owes the trust"). */
-    t.ok('the bank charge is named', /Bank charge/.test(body))
-    t.ok('...and is offered to be booked as a bank charge, not matched to a run',
-      /Book as a bank charge/.test(body) && !/Find its run/.test(body))
-
-    /* ---- the two cycles in the account at once, as lines of what is in the bank (10 Oct) ---- */
-    t.ok('last month\'s collections name their cycle, their payover and both shares',
-      /11 Aug – 10 Sep 2026 · pays 11 October 2026 · clients R 1 920\.40, Bredell Ferreira R 3 310\.07/.test(body))
-    t.ok('...and this month\'s, still collecting', /11 Sep – 10 Oct 2026 · pays 11 November 2026 · clients R 637\.50, Bredell Ferreira R 1 110\.00/.test(body))
-    t.ok('the closed cycle comes first', body.indexOf('11 Aug – 10 Sep 2026') >= 0
-      && body.indexOf('11 Aug – 10 Sep 2026') < body.indexOf('11 Sep – 10 Oct 2026'))
-    /* THE PTC IS NOT IN THE BANK LIST (the firm: "We should report on that separately"). */
-    t.ok('no "owed back by clients" line among the bank money', !/owed back by clients/i.test(body))
-
-    /* ---- the PTCs, on their own ---- */
-    const ptcText = plain(await page.getByTestId('ptc-by-payover').innerText().catch(() => ''))
-    t.ok('the PTCs are their own section', /Paid straight to clients \(PTCs\)/.test(body) && ptcText.length > 0)
-    t.ok('...grouped by the payover that carries them', /Payover of 11 Nov 2026/.test(ptcText))
-    t.ok('...one with no trust money says it will not be set off', /Mielie Meal Co[\s\S]*Won\u2019t be set off/.test(ptcText))
-    t.ok('...one covered says it will be', /Karoo Fleet Hire[\s\S]*Will be set off/.test(ptcText))
-    const ageText = plain(await page.getByTestId('ptc-ageing').innerText().catch(() => ''))
-    t.ok('the age analysis has its columns', /Not yet invoiced/.test(ageText) && /90\+ days/.test(ageText))
-    t.ok('...and totals what clients owe', /R 2 275\.00/.test(plain(await page.getByTestId('age-total').innerText().catch(() => ''))))
-    const tieRows = page.getByTestId('payover-check-row')
-    t.check('each payover is checked', await tieRows.count(), 2)
-    t.ok('...one agrees with its runs', /Agrees/.test(await tieRows.nth(0).innerText().catch(() => '')))
-    t.ok('...and one says what no run has picked up', /Trust R 500\.00 not on a run/.test(plain(await tieRows.nth(1).innerText().catch(() => ''))))
-
-    /* AND THE SCREEN SAYS WHERE THE DATE IT QUOTES COMES FROM, because Raptor guessed it. */
-    t.ok('the guessed payover date points at its setting', body.includes('a trust setting'))
-
-    for (const who of ['Bredell Ferreira', 'Overpayments', 'Unallocated receipts']) {
-      t.ok(`${who} has a line`, body.includes(who))
-    }
-    /* THE ORDER THE FIRM READS IT: the bank, then the PTCs. */
-    t.check('the bank comes before the PTCs',
-      body.indexOf('What is in the trust account') >= 0
-        && body.indexOf('What is in the trust account') < body.indexOf('Paid straight to clients (PTCs)'), true)
+    /* ---- S7: ONLY THE MONEY IN THE ACCOUNT NOW, AND WHAT NEEDS DOING ---- */
+    const holdings = plain(await page.getByTestId('holdings').innerText())
+    t.ok('the closed cycle\'s clients are a line, with when they are paid', /Clients · to be paid over[\s\S]*11 Aug – 10 Sep 2026 · paid over 11 October 2026[\s\S]*R 1 920\.40/.test(holdings))
+    t.ok('...this month\'s clients too', /Clients · this month[\s\S]*R 637\.50/.test(holdings))
+    t.ok('the firm is ONE line, its share still in the account', /Bredell Ferreira[\s\S]*R 4 420\.07/.test(holdings))
+    t.ok('no cycle is listed by its gross firm share any more', !/Earlier collections|Last month\u2019s collections/.test(body))
+    t.ok('debtors\' overpayments, with the kept ones apart', /Debtors[\s\S]*R 310\.63/.test(holdings) && /overpayments kept[\s\S]*R 100\.00/i.test(holdings))
+    t.ok('...summing to the total accounted for', /TOTAL ACCOUNTED FOR\s*R 7 388\.60/i.test(holdings))
+    t.ok('...what is not accounted for, and the account\'s balance last',
+      /TOTAL NOT ACCOUNTED FOR\s*-R 478\.50/i.test(holdings) && /IN THE TRUST ACCOUNT\s*R 6 910\.10/i.test(holdings))
+    t.check('there is no reconciliation card any more', /Ownership reconciliation/.test(body), false)
+    const todo = page.getByTestId('todo-item')
+    const todoText = plain((await todo.allInnerTexts()).join(' | '))
+    t.ok('Needs doing leads with the shortfall', /^R 478\.50 not accounted for/.test(todoText))
+    t.ok('...names the receipt in suspense and the lines to allocate', /1 receipt in suspense[\s\S]*R 485\.00/.test(todoText) && /2 statement lines to allocate/.test(todoText))
+    t.ok('...and what clients owe us', /Clients owe us R 2 275\.00/.test(todoText))
+    t.ok('...each opening where it is done', (await page.getByTestId('needs-doing').locator('a[href="/trust/exceptions#suspense"]').count()) === 1
+      && (await page.getByTestId('needs-doing').locator('a[href="/trust/clients"]').count()) === 1)
+    t.ok('...and it says it does not balance', /Does not balance/.test(plain(await page.getByTestId('needs-doing').innerText())))
+    t.ok('with no opening balance captured it says where to capture it', /Capture it in Trust settings/.test(body))
     await t.shot(page, 'trust-overview')
-    await page.getByTestId('ptc-by-payover').evaluate((el) => el.scrollIntoView({ block: 'start' })).catch(() => {})
-    await t.shot(page, 'trust-overview-periods')
-    t.ok('the firm knows what it may draw', /R 4 420\.07/.test(body))
 
     /* ---- THE RAIL STAYS PUT WHILE THE PAGE SCROLLS (the firm, 10 Oct: "When I scroll down ... that
        thing disappears. It should stay") ---- */
+    /* The overview is short since S7 (money in the account now, and Needs doing), so a short window
+       is what makes it scroll. */
+    const vp = page.viewportSize()
+    await page.setViewportSize({ width: vp?.width ?? 1440, height: 520 })
+    await page.waitForTimeout(150)
     await page.locator('main').evaluate((m) => { m.scrollTop = m.scrollHeight })
     await page.waitForTimeout(200)
     const scrolled = await page.locator('main').evaluate((m) => m.scrollTop)
     const railTop = await page.getByRole('navigation', { name: 'Trust menu' }).first()
       .evaluate((el) => Math.round(el.getBoundingClientRect().top)).catch(() => -9999)
-    t.ok(`the overview did scroll (${scrolled}px)`, scrolled > 300)
+    t.ok(`the overview did scroll (${scrolled}px)`, scrolled > 150)
     t.ok(`...and the trust menu is still on screen at the top (${railTop}px)`, railTop >= 0 && railTop < 160)
     await page.locator('main').evaluate((m) => { m.scrollTop = 0 })
+    if (vp) await page.setViewportSize(vp)
 
     /* ---- the rail folds, and folded it STILL says which book you are in ---- */
     await page.getByRole('button', { name: /Narrow this menu/ }).click()
@@ -401,7 +344,7 @@ try {
      * name alone; now the name heads a rail of icons, the way the main menu folds.
      */
     const folded = page.getByRole('navigation', { name: 'Trust menu' })
-    for (const label of ['Overview', 'Payments in', 'Payover runs', 'Trust ledger', 'Exceptions', 'Trust settings']) {
+    for (const label of ['Overview', 'Payments in', 'Payover runs', 'Trust ledger', 'To sort', 'Trust settings']) {
       t.ok(`folded, ${label} is still an icon on screen`, await folded.getByRole('link', { name: label, exact: true }).isVisible())
     }
     const foldedBox = await folded.boundingBox()
@@ -545,7 +488,18 @@ try {
 
   /* ------------------------------------------- every client's balance (the firm, 10 Oct) ------- */
   {
-    const { context, page } = await open(browser, ADMIN, '/trust/clients')
+    /* CLIENTS OWE US (S7) is the dedicated list now; every balance both ways is one level down. */
+    {
+      const { context: c2, page: p2 } = await open(browser, ADMIN, '/trust/clients')
+      await p2.getByTestId('client-owing').first().waitFor({ timeout: 15000 })
+      const owe = plain(await p2.locator('main').innerText())
+      t.ok('Clients owe us lists each client with one figure, oldest first', /Rinda Roo Company[\s\S]*R 1 955\.00[\s\S]*Mielie Meal Co[\s\S]*R 320\.00/.test(owe))
+      t.ok('...totalled', /R 2 275\.00/.test(plain(await p2.getByTestId('clients-owe-total').innerText())))
+      t.ok('...with the ages and the PTCs under it', /How old it is/.test(owe) && /Paid straight to clients \(PTCs\)/.test(owe))
+      await t.shot(p2, 'trust-clients-owe-us')
+      await c2.close()
+    }
+    const { context, page } = await open(browser, ADMIN, '/trust/clients/all')
     const rows = page.getByTestId('client-balance')
     await rows.first().waitFor({ timeout: 15000 })
     t.check('every client with a balance is listed', await rows.count(), 3)

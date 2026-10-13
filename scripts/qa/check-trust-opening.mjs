@@ -119,8 +119,10 @@ ok('the overview reads where the bank figure starts', /fetchTrustOpening\(\)/.te
 
 /* The firm, 10 Oct: the reconciliation was "a weird pink thing". A white card; the state is a rule and a pill. */
 const recon = page.slice(page.indexOf('Ownership reconciliation</div>') - 700, page.indexOf('Ownership reconciliation</div>'))
-ok('the reconciliation is a card with a coloured rule, not a tinted panel',
-  /<Card className=\{clsx\('lg:col-span-5[^']*border-t-4'/.test(recon) && !/'bg-negative-50' : 'bg-positive-50'/.test(page))
+/* S7: the reconciliation card became Needs doing (the firm, 13 Oct: "is that really necessary ... isn't
+   there anything better"). Still not a tinted panel: the state is a pill, the card stays white. */
+ok('Needs doing is a plain card, its state a pill, not a tinted panel',
+  /data-testid="needs-doing"/.test(page) && !/'bg-negative-50' : 'bg-positive-50'/.test(page))
 
 const settings = strip(read('src/pages/finance/FinanceSettings.tsx'))
 ok('Trust settings captures it through the one function', /await setTrustOpening\(amount, asAt, reason\)/.test(settings))

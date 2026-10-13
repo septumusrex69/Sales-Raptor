@@ -98,9 +98,14 @@ ok('...and says so', /share as a whole/.test(FIRM_HELD_LINES.find((l) => l.key =
 /* ---------------- the page ---------------- */
 
 const page = strip(read('src/pages/trust/TrustOverview.tsx'))
-ok('the overview draws the split', /<FirmHeldCard held=\{firmHeld\} owedToFirm=\{position\.owedToFirm\} \/>/.test(page))
-ok('...and says so when it does not tie to the firm\'s row', /\{!ties && \(/.test(page))
-ok('...and a failed read leaves the rest of the page standing', /fetchFirmHeld\(\)\.catch\(\(\) => null\)/.test(page))
+/* S7: the overview shows only money in the account now; the firm's share is ONE line, net of what it
+   drew, with what may be drawn beside it (currentHoldings). The earned-by-kind split is profit, and
+   lives with the profit graphs on the Business side. */
+const ov = read('src/lib/trustOverview.ts')
+ok('the overview\'s firm line is the share still in trust, net of drawings and charges',
+  /const firm = r2\(input\.cash\.reduce\(\(t, c\) => t \+ c\.forFirm \+ c\.firmOther, 0\)\)/.test(ov))
+ok('...with what may be drawn now beside it', /may be drawn now/.test(ov))
+ok('...and a failed read of the split leaves the rest of the page standing', /fetchFirmTrustSplit\(\)\.catch\(\(\) => null\)/.test(page))
 
 /* ---- overpayments kept (the firm, 8 Oct: "just to say overpayments kept") ---- */
 const kept = liveFn('overpayments_kept')
@@ -109,9 +114,9 @@ ok('...not reversed', /a\.status <> 'reversed'/.test(kept))
 ok('...and not yet taken by the firm (one given back counts again)', /a\.excess_taken_at is null/.test(kept))
 ok('...behind the trust tick, as no row rather than nought', /having public\.has_capability\('finance\.view'\)/.test(kept))
 ok('...revoked from public and anon', sql.includes('revoke all on function public.overpayments_kept() from public, anon;'))
-ok('the overview takes them out of the debtors\' line', /amount=\{r2\(forDebtors - \(kept\?\.amount \?\? 0\)\)\}/.test(page))
+ok('the overview takes them out of the debtors\' line', /amount: r2\(debtors - input\.kept\)/.test(ov))
 ok('...and draws them as their own line, among the owners (before the total accounted for)',
-  page.indexOf('who="Overpayments kept"') > 0 && page.indexOf('who="Overpayments kept"') < page.indexOf('label="Total accounted for"'))
+  /who: 'Debtors · overpayments kept'/.test(ov) && page.indexOf('holdings.map') > 0 && page.indexOf('holdings.map') < page.indexOf('label="Total accounted for"'))
 ok('...while the total accounted for is still the debtors\' whole balance',
   /* S7: read through accountedFromCash, shared with the Not accounted for list. */
   (/const accounted = accountedFromCash\(cash\)/.test(page)
