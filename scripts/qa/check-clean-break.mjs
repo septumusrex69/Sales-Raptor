@@ -125,4 +125,4 @@ if (failures.length) {
   console.error(`check-clean-break: ${failures.length} failed, ${pass} passed\n  ${failures.join('\n  ')}`)
   process.exit(1)
 }
-console.log(`check-clean-break: all ${pass} checks passed`)
+console.log(`check-clean-break: ${pass} passed, 0 failed`)
