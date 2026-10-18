@@ -131,6 +131,15 @@ Commits `7f81d32` onwards; each message carries the reasoning.
   12 functions" note is out of date). Spend Management is the user's to set in the dashboard. Supabase's
   and Vercel's DPAs form part of their terms; nothing to sign.
 
+**STAGING CARRIES FAKE SALES AND COMMUNICATIONS DATA (18 Oct, the user asked, to see the dashboards).**
+Every row is marked: companies `bf_reference = 'seed-s8'` (30 clients), leads `legacy_key like 'seed-s8%'`
+(270), deals / activities `notes = 'seed-s8'`, debtor_accounts `legacy_reference = 'seed-s8'` (874,
+`source = 'swordfish'`, unassigned, so no workflow starts), account_payments `reference = 'seed-s8'`
+(791, `paid_over_in_swordfish`, so nothing was split into trust). Teams "Client Care" (Communications)
+and "Closers" (Sales); ten users `seed.*@raptor.invalid` (5 liaisons incl. Bonita Mahlangu as Liaison
+Manager, 5 sales incl. Dean Fourie as Sales Manager) -- auth users BANNED for 100 years, so nobody can
+sign in as them. Nicole Loder moved onto Client Care. Remove it all before any real parallel run.
+
 **"Held for Swordfish payovers" -- the design, not yet built** (read before building): a one-row table
 `swordfish_holding` (amount, reason, set by, at) rather than firm_settings columns (five hand-kept
 lists); set by `set_swordfish_holding(amount, reason)`, Administrator + finance.view, logged in
