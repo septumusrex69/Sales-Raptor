@@ -42,6 +42,10 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    - **Patterns.** Late against their own rhythm, and a typical month (Communications).
    - **The staging clock.** `TODAY` now follows it.
 
+   **Tests at the end of S8:** full `npm run qa` **340 of 343 files green**. The three reds are the
+   same three that predate S7: `e2e/account-templates` (the merged balance's format), `e2e/excess-credit`
+   (a click timeout) and `e2e/performance` (date-dependent). Fast suite all green.
+
    **Open, in order:**
    1. **Code by email when an Administrator signs in from a new device.** Agreed, not started (the
       authenticator-app version was removed at the firm's request; do not put it back).
