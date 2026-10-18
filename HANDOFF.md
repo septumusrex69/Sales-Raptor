@@ -18,11 +18,38 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
-00. **S8 · Cut-over is IN PROGRESS** (18 Oct). Done: the clean-break import, the company dashboard in the
-   firm's layout (and new vs existing clients), Communications' "signed, nothing handed over", the
-   Library's pinned template, the To-field focus, and the security audit's code findings. **NOT started
-   and next: "Held for Swordfish payovers"** (§3a item 2) -- the design is under S8 in §2. Fast suite
-   all green (18 085). The bank bulk-payment template still waits on FNB's file spec (§3 item 3).
+00. **S8 · Cut-over, end of 18 Oct.** The afternoon was the firm testing on the preview and asking,
+   one screenshot at a time. All of it is built, checked and pushed (each item is in §2 under S8):
+   - **The mandate, end to end.** On a lead or deal, Send / **Resend mandate** emails a PDF plus a
+     sign-online link. Flat rate is the default, with the sliding scale as the option; company or
+     individual comes from the lead (`leads.party`). Signing creates the client, files the signed
+     PDF, writes Notes, and tells the closer.
+   - **The welcome flow.** Assign a liaison, then the welcome email goes from her; she gets a
+     pop-up, a bell notification and a task; checklist steps tick off as they happen.
+   - **The signing page.** The letterhead's head and foot only, so the footer no longer prints
+     over a clause. The signature pad takes every stroke. Initials moved off the letterhead footer.
+   - **Sales dashboard.** Mandates, then Deals (side by side on iPad), then the track record, then
+     mandate-to-first-handover per closer and lead sources. "Reps" are now **closers**.
+   - **Company dashboard.** Work coming in shows a bar per month over a span. The tiles filter
+     existing / new, with Bars / Both / Line.
+   - **Client page.** Two rings: outcomes with the recovery rate, withdrawn left out; and the
+     active accounts by position. Handovers month by month, with All time; it slides sideways and
+     the axis stays put.
+   - **Clients list.** A Recovery column.
+   - **Accounts.** Sort in the database. Fees & interest are one column. "To settle" includes the
+     receipt fee.
+   - **Deals.** Tick several stages.
+   - **Patterns.** Late against their own rhythm, and a typical month (Communications).
+   - **The staging clock.** `TODAY` now follows it.
+
+   **Open, in order:**
+   1. **Code by email when an Administrator signs in from a new device.** Agreed, not started (the
+      authenticator-app version was removed at the firm's request; do not put it back).
+   2. **Sort Accounts by balance.** It needs a stored balance that agrees with computeBalance to the
+      cent; the SQL one does not (RRC00005: R817,01 vs R760,00).
+   3. **"Held for Swordfish payovers"** (§3a item 2; the design is under S8 in §2).
+   4. The FNB bulk-payment template, which waits on FNB's file spec.
+   5. **Production has NONE of S8's migrations** (see the S8 list in §5). Staging only.
 0. **S7 · Clean Break is finished** (last commit `c0936c2`, 13 Oct). **The next session is S8**: name it
    here first (`S8 · Theme`, branch `claude/s08-theme`). Read §2's three S7 sections first: the trust
    was regrouped (overview, To sort, Clients owe us, Bank statement, Payments out), clients pay against
@@ -817,6 +844,21 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 ---
 
 ## 5. Known gaps and things still outstanding
+
+- **S8's migrations, for production when the firm says go** (all on staging, all in schema.sql in
+  this order):
+  - `company_intake_by_day`, `clients_awaiting_first_handover`, `client_book_summary`;
+  - the public signature and letterhead buckets limited to images;
+  - `signing_requests.lead_id / deal_id / company_id / mandate`;
+  - `mandate_on_signed` (LAST definition: notes, raptor_now, liaison_needed);
+  - `companies.liaison_needed / liaison_assigned_at / welcome_sent_at`;
+  - `leads.party`;
+  - `client_intake_by_day`, `client_account_outcomes`, `client_handover_days`.
+
+  The `welcome` email route needs the deployed site's host to build the banner URL; it uses the
+  request's host.
+- **Seed data on staging** (S8) is marked and listed under S8 in §2. Remove it before the firm
+  trusts staging figures again.
 
 - **FIFTH SESSION, STAGING ONLY** (all at the end of `schema.sql`, in order): the staging clock
   (`staging_clock`, its trigger, `raptor_today`, `raptor_now`, `raptor_clock`, `staging_clock_guard`,
