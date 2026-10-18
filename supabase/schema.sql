@@ -42721,3 +42721,28 @@ as $$
           or round(a.firm_other, 2) <> 0 or round(a.debtors, 2) <> 0 or round(a.unknown, 2) <> 0)
    order by a.cyc
 $$;
+
+-- ============================================================================================
+-- S8 · Cut-over: WORK COMING IN, DAY BY DAY (the firm's company dashboard mock-up, 18 Oct).
+--
+-- The dashboard's "Work coming in" became a bar a day for the period. The same rule as
+-- company_snapshot's intake (handover_date inside the period), grouped by the day, so the bars add
+-- up to the "accounts handed over" figure by construction. Counted here, never in the browser: a
+-- list that loads the book to count it stops working the month it matters. Security INVOKER for the
+-- reason company_snapshot is: a count of rows its reader may not open would be a quiet disclosure.
+-- ============================================================================================
+create or replace function public.company_intake_by_day(p_from date, p_to date)
+returns table (day date, accounts integer, capital numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select handover_date, count(*)::integer, coalesce(sum(capital_handed_over), 0)
+    from public.debtor_accounts
+   where handover_date between p_from and p_to
+   group by handover_date
+   order by handover_date;
+$$;
+revoke all on function public.company_intake_by_day(date, date) from public, anon;
+grant execute on function public.company_intake_by_day(date, date) to authenticated;

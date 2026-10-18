@@ -42,6 +42,21 @@ export async function fetchBookSnapshot(
   }
 }
 
+/**
+ * WORK COMING IN, A DAY AT A TIME (the firm's layout, 18 Oct). Only days that had a handover come
+ * back; intakeBars (companySnapshot.ts) lays them on every day of the period.
+ */
+export async function fetchIntakeByDay(period: SalesMonthPeriod): Promise<{ day: string; accounts: number }[]> {
+  const { data, error } = await supabase.rpc('company_intake_by_day', {
+    p_from: isoDay(period.start),
+    p_to: isoDay(period.end),
+  })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as { day: string; accounts: number | string }[])
+    .map((r) => ({ day: String(r.day).slice(0, 10), accounts: Number(r.accounts) }))
+}
+
+export { isoDay }
 
 /** A date as Postgres wants it, in local time — `toISOString` would shift a SAST evening back a day. */
 function isoDay(d: Date): string {

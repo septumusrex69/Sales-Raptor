@@ -95,3 +95,78 @@ export function salesSnapshot(leads: Lead[], deals: Deal[], period: SalesMonthPe
     dealsWonValue: won.filter((d) => dealKind(d) === 'Service').reduce((t, d) => t + (d.value ?? 0), 0),
   }
 }
+
+/* ---------------------------------------------------------------- the firm's layout, 18 Oct */
+
+/** One day's bar on "Work coming in". */
+export interface IntakeBar {
+  /** 'YYYY-MM-DD' */
+  day: string
+  /** The day of the month, as the axis prints it. */
+  label: string
+  accounts: number
+  /** Saturday or Sunday: drawn grey, because a handover is a working-day event and a weekend bar
+      that is short reads as a slow day when it is simply a closed one. */
+  weekend: boolean
+  /** After the as-at day: drawn as an empty slot, never as nought -- a day that has not happened
+      did not bring nothing in. */
+  future: boolean
+}
+
+/**
+ * EVERY DAY OF THE PERIOD, IN ORDER, with the database's counts placed on it.
+ *
+ * THE DATABASE RETURNS ONLY DAYS THAT HAD A HANDOVER (company_intake_by_day groups by the date), so
+ * the gaps are filled here: a chart that skipped empty days would put 11 Sep beside 14 Sep and read as
+ * three busy days in a row. UTC arithmetic on 'YYYY-MM-DD' strings only, so no local clock moves a
+ * day. A day the database counted outside the period is ignored rather than tacked on.
+ */
+export function intakeBars(fromIso: string, toIso: string, rows: { day: string; accounts: number }[], todayIso: string): IntakeBar[] {
+  const counts = new Map(rows.map((r) => [r.day.slice(0, 10), r.accounts]))
+  const out: IntakeBar[] = []
+  const [y, m, d] = fromIso.split('-').map(Number)
+  for (let i = 0; i < 400; i++) {
+    const at = new Date(Date.UTC(y, m - 1, d + i))
+    const iso = at.toISOString().slice(0, 10)
+    if (iso > toIso) break
+    const dow = at.getUTCDay()
+    out.push({
+      day: iso, label: String(at.getUTCDate()), accounts: counts.get(iso) ?? 0,
+      weekend: dow === 0 || dow === 6, future: iso > todayIso,
+    })
+  }
+  return out
+}
+
+/** A slice of "The book" ring, and the line in its legend. */
+export interface BookSlice {
+  key: 'worked' | 'unallocated' | 'not_worked'
+  label: string
+  value: number
+}
+
+/**
+ * THE BOOK AS A RING THAT ADDS UP.
+ *
+ * The firm's mock-up put four things round one ring -- being worked, not yet allocated, clients with
+ * live accounts, gone quiet. Only some of those are parts of the book: "clients" counts companies,
+ * not accounts, and "gone quiet" is a SUBSET of being worked, so a ring drawn from all four would
+ * add clients to accounts and count the quiet ones twice, and the arc lengths would mean nothing.
+ *
+ * So the ring is a partition of the accounts on the book -- every account in exactly one slice:
+ *   - being worked: live, on somebody's desk;
+ *   - not yet allocated: live, on nobody's desk;
+ *   - not being worked: everything else on the book (closed, on hold, written off, frozen).
+ * They sum to the centre figure by construction. Clients and gone quiet stay in the legend, as
+ * plain lines under the slices, because they are worth seeing and are not slices of anything.
+ */
+export function bookSlices(b: Pick<BookSnapshot, 'bookAccounts' | 'activeAccounts' | 'unallocatedActive'>): BookSlice[] {
+  const unallocated = Math.max(0, Math.min(b.unallocatedActive, b.activeAccounts))
+  const worked = Math.max(0, b.activeAccounts - unallocated)
+  const notWorked = Math.max(0, b.bookAccounts - b.activeAccounts)
+  return [
+    { key: 'worked', label: 'Being worked', value: worked },
+    { key: 'unallocated', label: 'Not yet allocated', value: unallocated },
+    { key: 'not_worked', label: 'Not being worked', value: notWorked },
+  ]
+}

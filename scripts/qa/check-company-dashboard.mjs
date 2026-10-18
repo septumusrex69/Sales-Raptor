@@ -19,7 +19,7 @@
  * Run: node scripts/qa/check-company-dashboard.mjs
  */
 import { readFileSync } from 'node:fs'
-import { salesSnapshot } from '../../src/lib/companySnapshot.ts'
+import { bookSlices, intakeBars, salesSnapshot } from '../../src/lib/companySnapshot.ts'
 import { getSalesMonthForKey } from '../../src/lib/salesMonth.ts'
 
 let pass = 0
@@ -200,6 +200,40 @@ ok('...and a span of months is not called sales months either',
 
 /* ------------------------------------------------------------------ */
 
+/* ---------- the firm's layout, 18 Oct: a bar a day, and a ring that adds up ---------- */
+
+{
+  /* This file's check() is Object.is (see HANDOFF §6), so arrays are compared as JSON. */
+  const same = (name, actual, expected) => check(name, JSON.stringify(actual), JSON.stringify(expected))
+  const bars = intakeBars('2026-10-11', '2026-11-10', [
+    { day: '2026-10-12', accounts: 4 }, { day: '2026-10-17', accounts: 3 }, { day: '2026-12-01', accounts: 99 },
+  ], '2026-10-18')
+  check('a bar for every day of the period, not only the days with work', bars.length, 31)
+  same('...in order, first and last', [bars[0].day, bars[30].day], ['2026-10-11', '2026-11-10'])
+  same('...the database\'s counts on their days', bars.filter((b) => b.accounts > 0).map((b) => [b.day, b.accounts]),
+    [['2026-10-12', 4], ['2026-10-17', 3]])
+  ok('...a day outside the period is ignored, not tacked on', !bars.some((b) => b.accounts === 99))
+  same('a Saturday and a Sunday are weekends', bars.filter((b) => b.weekend).slice(0, 2).map((b) => b.day), ['2026-10-11', '2026-10-17'])
+  check('days after the as-at day are still to come', bars.filter((b) => b.future).length, 23)
+  ok('...the as-at day itself is not', bars.find((b) => b.day === '2026-10-18')?.future === false)
+  check('across a year end', intakeBars('2026-12-11', '2027-01-10', [], '2027-01-10').length, 31)
+
+  const ring = bookSlices({ bookAccounts: 30, activeAccounts: 24, unallocatedActive: 3 })
+  same('the ring partitions the book', ring.map((x) => x.value), [21, 3, 6])
+  check('...so its slices add up to the centre', ring.reduce((t, x) => t + x.value, 0), 30)
+  same('...and never go below nought on odd figures', bookSlices({ bookAccounts: 2, activeAccounts: 3, unallocatedActive: 5 }).map((x) => x.value), [0, 3, 0])
+  ok('clients and gone quiet are not slices (they are not parts of the book)', !ring.some((x) => /client|quiet/i.test(x.label)))
+
+  const intakeFn = sql.slice(sql.lastIndexOf('create or replace function public.company_intake_by_day('))
+  ok('the days are counted in the database', /count\(\*\)::integer/.test(intakeFn.slice(0, 600)) && /group by handover_date/.test(intakeFn.slice(0, 600)))
+  ok('...on the same rule as the snapshot\'s intake', /handover_date between p_from and p_to/.test(intakeFn.slice(0, 600)))
+  ok('...as the caller', /security invoker/.test(intakeFn.slice(0, 400)))
+  ok('...and the browser only calls it', /supabase\.rpc\('company_intake_by_day'/.test(data))
+  ok('the screen draws the bars and the ring', /<IntakeChart/.test(page) && /bookSlices\(book\)/.test(page))
+}
+
+
 for (const f of failures) console.error(`  ✗ ${f}`)
+
 console.log(`check-company-dashboard: ${pass} passed, ${failures.length} failed`)
 process.exit(failures.length ? 1 : 0)
