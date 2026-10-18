@@ -21,11 +21,12 @@ import { OUTCOME_WON, OUTCOME_REJECTED, OUTCOME_VALUE } from '../lib/colors'
 import type { Company, ID, Task, Team, User } from '../types'
 import { clockNow, clockToday } from '../lib/clock.ts'
 import { awaitingFirstHandover, type AwaitingClient } from '../lib/companySnapshot'
-import { fetchAwaitingFirstHandover, fetchClientBook, fetchIntakeByDay } from '../lib/companySnapshotData'
+import { fetchAwaitingFirstHandover, fetchClientBook, fetchIntakeByDay, isoDay } from '../lib/companySnapshotData'
 import type { IntakeRow } from '../lib/companySnapshot'
 import { clientsTouched, monthTrack, type ClientBook } from '../lib/clientBook'
 import { MonthTrackCard } from '../components/dashboard/MonthTrackCard'
 import { GoneQuietCard, TopClientsCard } from '../components/dashboard/ClientBookCards'
+import { LatePatternCard, TypicalMonthCard } from '../components/dashboard/HandoverPatternCards'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -127,6 +128,7 @@ export function CommunicationsDashboard() {
     fetchClientBook(period).then((r) => { if (live) setBooks(r) }).catch(() => { if (live) setBooks([]) })
     return () => { live = false }
   }, [period])
+  const intakeFrom = useMemo(() => { let first = period; for (let i = 1; i < 12; i++) first = getPreviousSalesMonth(first); return isoDay(first.start) }, [period])
   const myBooks = useMemo(() => (books ?? []).filter((b) => scope === 'all' || (b.ownerId !== null && scopedIdSet.has(b.ownerId))), [books, scope, scopedIdSet])
   /* The month-by-month intake is the firm's (handovers are not filed by clerk); the client lists are the clerk's. */
   const track = useMemo(() => monthTrack({ current: period, months, leads: [], deals: [], intake: intake ?? [] }), [period, months, intake])
@@ -361,6 +363,13 @@ export function CommunicationsDashboard() {
       <div className="grid gap-4 xl:grid-cols-2">
         {books !== null && <TopClientsCard books={myBooks} periodLabel={period.label} />}
         {books !== null && <GoneQuietCard books={myBooks} todayIso={clockToday()} />}
+      </div>
+
+      {/* PATTERNS IN WHEN WORK ARRIVES (the firm, 18 Oct: "3 then 1"): who is late against their own
+          rhythm, and when in the month existing clients hand over. */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LatePatternCard todayIso={clockToday()} owners={scope === 'all' ? null : scopedIdSet} />
+        <TypicalMonthCard intake={intake} fromIso={intakeFrom} toIso={clockToday()} />
       </div>
 
       {awaiting !== null && myAwaiting.length > 0 && (

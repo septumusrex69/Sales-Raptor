@@ -43411,3 +43411,25 @@ as $$
 $$;
 revoke all on function public.client_account_outcomes(uuid) from public, anon;
 grant execute on function public.client_account_outcomes(uuid) to authenticated;
+
+-- S8: each client's handover days, for the rhythm read in the browser (clientRhythm.ts).
+create or replace function public.client_handover_days(p_from date)
+returns table (company_id uuid, name text, account_owner_id uuid, day date, accounts integer)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  -- EACH CLIENT'S HANDOVER DAYS SINCE p_from (S8, 18 Oct: "patterns in terms of dates we receive
+  -- handovers ... especially from existing clients"). The top-level client, its sub-accounts rolled
+  -- in; one row a day it handed over. The rhythm is read in the browser (clientRhythm.ts).
+  select coalesce(c.parent_company_id, c.id), max(p.name), max(p.account_owner_id::text)::uuid, a.handover_date, count(*)::integer
+    from public.debtor_accounts a
+    join public.companies c on c.id = a.company_id
+    join public.companies p on p.id = coalesce(c.parent_company_id, c.id)
+   where a.handover_date >= p_from
+   group by coalesce(c.parent_company_id, c.id), a.handover_date
+   order by 1, 4;
+$$;
+revoke all on function public.client_handover_days(date) from public, anon;
+grant execute on function public.client_handover_days(date) to authenticated;

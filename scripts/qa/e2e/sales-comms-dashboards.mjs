@@ -50,6 +50,12 @@ try {
     [(u) => /\/rpc\/company_intake_by_day/.test(u), () => ({ body: INTAKE })],
     [(u) => /\/rpc\/client_book_summary/.test(u), () => ({ body: BOOKS })],
     [(u) => /\/rpc\/clients_awaiting_first_handover/.test(u), () => ({ body: [] })],
+    [(u) => /\/rpc\/client_handover_days/.test(u), () => ({ body: [
+      /* Monthly on the 25th, last on 25 Aug: due 25 Sep, late by 18 Oct. */
+      ...['2026-05-25', '2026-06-25', '2026-07-25', '2026-08-25'].map((day) => ({ company_id: 'c-late', name: 'Late Larry Ltd', account_owner_id: ADMIN.id, day, accounts: 3 })),
+      /* Monthly on the 10th, last on 10 Oct: keeping to it. */
+      ...['2026-07-10', '2026-08-10', '2026-09-10', '2026-10-10'].map((day) => ({ company_id: 'c-ok', name: 'On Time Ltd', account_owner_id: ADMIN.id, day, accounts: 2 })),
+    ] })],
     [(u) => /\/rest\/v1\/leads/.test(u), () => ({ body: LEADS })],
     [(u) => /\/rest\/v1\/deals/.test(u), () => ({ body: DEALS })],
   ]
@@ -141,6 +147,11 @@ try {
   t.ok('...ranked by recovery rate on the switch', /50%/.test(await page.getByTestId('top-clients').innerText()))
   const quiet = await page.getByTestId('gone-quiet').innerText()
   t.ok('gone quiet: nothing for 60 days', /Quiet Holdings/.test(quiet) && !/Big Book/.test(quiet))
+  /* PATTERNS (the firm's "3 then 1"): late against their own rhythm, and a typical month. */
+  const late = (await page.getByTestId('late-pattern').innerText()).replace(/\s+/g, ' ')
+  t.ok('late against their pattern: the monthly client past the 25th, by how much', /Late Larry Ltd/.test(late) && /about once a month, usually around the 25th/.test(late) && /\d+ days late/.test(late))
+  t.ok('...and not the client keeping to theirs', !/On Time Ltd/.test(late) && /1 more are keeping to theirs/.test(late))
+  t.ok('a typical month: a bar a day of the month', (await page.getByTestId('typical-month').locator('.recharts-xAxis-tick-labels text').count()) === 31)
   await t.shot(page, 'communications-dashboard')
   await context.close()
 
