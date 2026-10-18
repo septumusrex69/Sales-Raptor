@@ -43373,3 +43373,41 @@ revoke all on function public.mandate_on_signed() from public, anon;
 -- S8: a lead is a company or an individual, said when it is added; the mandate opens on it.
 alter table public.leads add column if not exists party text not null default 'company' check (party in ('company', 'individual'));
 comment on column public.leads.party is 'A company or an individual, said when the lead is added (S8). The mandate opens on it.';
+
+-- S8: what became of a client's accounts, withdrawn left out (the client page's first ring).
+create or replace function public.client_account_outcomes(p_client uuid)
+returns table (outcome text, accounts integer, capital numeric, collected numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  -- WHAT BECAME OF A CLIENT'S ACCOUNTS (the firm, 18 Oct: "recovered, active, and closed ... I don't
+  -- think withdrawn accounts should be shown and taken into account"). Recovered is paid up or
+  -- settled; active is the live book, on hold included; closed is everything else that ended. A
+  -- withdrawn account is the client taking it back, not an outcome of our work, so it is left out of
+  -- the counts AND the recovery rate. Collected is what came in on each, reversals and rejections
+  -- out, as client_book_summary counts it.
+  with acct as (
+    select a.id, a.capital_handed_over,
+           case when a.ended_as in ('paid_up', 'settled') then 'recovered'
+                when a.book in ('active', 'on_hold') then 'active'
+                else 'closed' end as outcome
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+     where coalesce(c.parent_company_id, c.id) = p_client
+       and a.ended_as is distinct from 'withdrawn'
+  ),
+  paid as (
+    select p.account_id, sum(p.amount) as amount
+      from public.account_payments p
+     where p.account_id in (select id from acct)
+       and p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+     group by p.account_id
+  )
+  select a.outcome, count(*)::integer, coalesce(sum(a.capital_handed_over), 0), coalesce(sum(p.amount), 0)
+    from acct a left join paid p on p.account_id = a.id
+   group by a.outcome;
+$$;
+revoke all on function public.client_account_outcomes(uuid) from public, anon;
+grant execute on function public.client_account_outcomes(uuid) to authenticated;

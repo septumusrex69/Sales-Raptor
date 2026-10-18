@@ -92,6 +92,8 @@ export function CompaniesList() {
                 <th className="font-medium px-2 py-1.5 text-right">Accounts</th>
                 <th className="font-medium px-2 py-1.5 text-right">Capital handed over</th>
                 <th className="font-medium px-2 py-1.5 text-right">Paid to date</th>
+                {/* THE RECOVERY RATE, where the clients are listed (the firm, 18 Oct). */}
+                <th className="font-medium px-2 py-1.5 text-right" title="Paid to date against the capital handed over">Recovery</th>
                 <th className="font-medium px-2 py-1.5 text-center">Active Deals</th>
               </tr>
             </thead>
@@ -175,6 +177,7 @@ export function CompaniesList() {
                       </td>
                       <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{formatCurrency(book.capital)}</td>
                       <td className="px-2 py-1.5 text-right text-slate-600 tabular-nums whitespace-nowrap">{formatCurrency(book.paid)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap font-semibold text-slate-800" data-testid="client-recovery">{recovery(book.paid, book.capital)}</td>
                       <td className="px-2 py-1.5 text-center tabular-nums text-slate-600 font-medium">{activeDealsFor(c.id).length}</td>
                     </tr>
                     {isExpanded &&
@@ -194,6 +197,7 @@ export function CompaniesList() {
                           </td>
                           <td className="px-2 py-1.5 text-right text-slate-500 tabular-nums whitespace-nowrap">{formatCurrency(totals.get(k.id)?.capital ?? 0)}</td>
                           <td className="px-2 py-1.5 text-right text-slate-500 tabular-nums whitespace-nowrap">{formatCurrency(totals.get(k.id)?.paid ?? 0)}</td>
+                          <td className="px-2 py-1.5 text-right text-slate-500 tabular-nums whitespace-nowrap">{recovery(totals.get(k.id)?.paid ?? 0, totals.get(k.id)?.capital ?? 0)}</td>
                           <td className="px-2 py-1.5"></td>
                         </tr>
                       ))}
@@ -208,7 +212,7 @@ export function CompaniesList() {
                     client that came across from Swordfish is here on that half. The firm added a
                     company by hand, could not find it, and reasonably read a rule as a bug.
                   */}
-                  <td colSpan={7} className="text-center text-slate-400 text-sm py-10">
+                  <td colSpan={8} className="text-center text-slate-400 text-sm py-10">
                     {search
                       ? 'No client matches that.'
                       : 'No clients yet. A company lands here once it has a client code — which '
@@ -276,4 +280,9 @@ function LiaisonCell({ name, users, small }: {
       <span className="text-slate-500">{trimmed}</span>
     </div>
   )
+}
+
+/** Paid against capital handed over, a whole percent; a dash with nothing handed over. */
+function recovery(paid: number, capital: number): string {
+  return capital > 0 ? `${Math.round((paid / capital) * 100)}%` : '\u2014'
 }

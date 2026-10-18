@@ -98,6 +98,8 @@ export function ClientHandoverChart({ clientId }: { clientId: string }) {
               <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth} domain={[0, top]} tickFormatter={fmt}
                 tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
               <XAxis dataKey="label" tick={false} tickLine={false} axisLine={false} height={30} />
+              {/* Invisible, and the reason the axis draws at all: recharts leaves an axis with no series blank. */}
+              <Bar yAxisId={0} dataKey="value" fill="transparent" isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>

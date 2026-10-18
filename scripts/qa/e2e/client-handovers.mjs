@@ -18,6 +18,19 @@ try {
   const { page } = await signedInPage(browser, ADMIN, [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
     [(u) => /\/rest\/v1\/companies/.test(u), () => ({ body: [COMPANY] })],
+    [(u) => /\/rpc\/client_account_outcomes/.test(u), () => ({ body: [
+      { outcome: 'recovered', accounts: 2, capital: 10000, collected: 10000 },
+      { outcome: 'active', accounts: 6, capital: 30000, collected: 2000 },
+      { outcome: 'closed', accounts: 2, capital: 10000, collected: 0 },
+    ] })],
+    [(u) => /\/rest\/v1\/debtor_accounts/.test(u), () => ({ body: [
+      { status: 'Active', sub_status: 'Promise To Pay', bucket: null },
+      { status: 'Active', sub_status: 'Promise To Pay', bucket: null },
+      { status: 'Active', sub_status: 'Tracing', bucket: null },
+      { status: 'Active', sub_status: null, bucket: null },
+      { status: 'Active', sub_status: null, bucket: null },
+      { status: 'Active', sub_status: null, bucket: null },
+    ] })],
     [(u) => /\/rpc\/client_intake_by_day/.test(u), (u, req) => {
       asked.push(req.postDataJSON())
       return { body: [
@@ -38,6 +51,7 @@ try {
   t.check('asked for this client, sub-accounts included in the database', asked[0]?.p_client, COMPANY_ID)
   const ticks = await card.locator('.recharts-xAxis-tick-labels text').allTextContents()
   t.check('twelve months, a bar each', ticks.length, 12)
+  t.ok('the pinned axis prints its amounts', (await card.locator('.recharts-yAxis-tick-labels text').allTextContents()).filter((x) => x.trim()).length >= 3)
   t.ok('...ending on the month in progress', /Nov/.test(ticks[ticks.length - 1] ?? ''))
   t.ok('the total and the monthly average said in words', /24 accounts over 12 months/.test(await card.innerText()))
   t.ok('each month\'s number printed on its bar', (await card.locator('.recharts-label-list text').allTextContents()).includes('12'))
@@ -48,6 +62,17 @@ try {
   t.ok('Rand switches the figures to capital', /R 440 000 over 12 months|R 440,000 over 12 months|R 440 000 over 12 months/.test(await card.innerText()))
   await page.getByTestId('client-handovers-months-6').click(); await page.waitForTimeout(500)
   t.check('six months on the switch', (await card.locator('.recharts-xAxis-tick-labels text').allTextContents()).length, 6)
+  /* TWO RINGS (the firm, 18 Oct): what became of the accounts with the recovery rate, withdrawn out;
+     and where the active ones stand. */
+  const rings = page.getByTestId('client-rings')
+  await rings.waitFor({ timeout: 15000 })
+  const outcomes = (await page.getByTestId('client-ring-outcomes').innerText()).replace(/\s+/g, ' ')
+  t.ok('recovered, active, closed with their shares', /Recovered 2 20%/.test(outcomes) && /Active 6 60%/.test(outcomes) && /Closed 2 20%/.test(outcomes))
+  t.ok('...and the recovery rate in the ring: R12 000 of R50 000', /24%/.test(outcomes) && /RECOVERY RATE/.test(outcomes))
+  const positions = (await page.getByTestId('client-ring-positions').innerText()).replace(/\s+/g, ' ')
+  t.ok('the active accounts by where they stand, busiest first', /^6 ACTIVE/.test(positions) && positions.indexOf('In progress') < positions.indexOf('Arranged') && /Tracing 1 17%/.test(positions))
+  await rings.scrollIntoViewIfNeeded()
+  await t.shot(page, 'client-rings')
   /* ALL TIME, AND IT SLIDES ("an option to view the accounts for all time ... slide from left to right.
      Don't try to cram"). From the first handover, every month the same width, opened on the latest. */
   await page.getByTestId('client-handovers-months-all').click(); await page.waitForTimeout(700)

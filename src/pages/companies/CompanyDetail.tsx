@@ -50,6 +50,7 @@ import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newD
 import { HandoverBook } from '../../components/companies/HandoverBook'
 import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
 import { WelcomeCard } from '../../components/companies/WelcomeCard'
+import { ClientBookRings } from '../../components/companies/ClientBookRings'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
@@ -891,6 +892,8 @@ export function CompanyDetail() {
               <WelcomeCard company={company} />
               <HandoverBook company={company}
                 onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
+              {/* What became of their accounts and where the active ones stand (the firm, 18 Oct). */}
+              <ClientBookRings clientId={company.parentCompanyId ?? company.id} />
               {/* Their handovers month by month, under the book they add up to (the firm, 18 Oct). */}
               <ClientHandoverChart clientId={company.parentCompanyId ?? company.id} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
