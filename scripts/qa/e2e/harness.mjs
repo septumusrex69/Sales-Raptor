@@ -58,12 +58,7 @@ const PROJECT_REF = new URL(SUPABASE_URL).hostname.split('.')[0]
  * server-side, and there is no server here. So an unsigned token with the right claims is enough
  * to get past the auth gate and onto the screen under test.
  */
-/*
- * aal2 BY DEFAULT, WITH A VERIFIED AUTHENTICATOR (S8): Administrators must confirm a sign-in with
- * one (AdminTwoStep), and every other file here is about the screen behind that gate. The gate's own
- * file passes `aal: 'aal1'` and `factors: []` / a factor to see it.
- */
-function fakeSession(userId, email, nowMs = Date.now(), { aal = 'aal2', factors = null } = {}) {
+function fakeSession(userId, email, nowMs = Date.now()) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
   /*
    * AN HOUR FROM THE BROWSER'S CLOCK, WHICH IS NOT ALWAYS THE REAL ONE. A test that pins the date
@@ -74,7 +69,7 @@ function fakeSession(userId, email, nowMs = Date.now(), { aal = 'aal2', factors 
   const exp = Math.floor(nowMs / 1000) + 3600
   const token = [
     b64({ alg: 'HS256', typ: 'JWT' }),
-    b64({ sub: userId, email, role: 'authenticated', aud: 'authenticated', exp, iat: exp - 3600, aal }),
+    b64({ sub: userId, email, role: 'authenticated', aud: 'authenticated', exp, iat: exp - 3600 }),
     'not-a-real-signature',
   ].join('.')
   return {
@@ -91,8 +86,6 @@ function fakeSession(userId, email, nowMs = Date.now(), { aal = 'aal2', factors 
       email_confirmed_at: '2026-01-01T00:00:00Z',
       app_metadata: { provider: 'email', providers: ['email'] },
       user_metadata: {},
-      factors: factors ?? [{ id: 'factor-1', friendly_name: 'Raptor', factor_type: 'totp', status: 'verified',
-        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }],
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     },
@@ -181,7 +174,7 @@ export async function stubSupabase(page, handlers, seen) {
  * the day before, for every reader west of Greenwich. Running the container under TZ=... does
  * not reach the page; this does.
  */
-export async function signedInPage(browser, profile, handlers, seen, { now = null, timezone = null, aal = 'aal2', factors = null } = {}) {
+export async function signedInPage(browser, profile, handlers, seen, { now = null, timezone = null } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     ...(timezone ? { timezoneId: timezone } : {}),
@@ -195,7 +188,7 @@ export async function signedInPage(browser, profile, handlers, seen, { now = nul
   // than flashing the login page and redirecting.
   await context.addInitScript(
     ([key, session]) => { try { window.localStorage.setItem(key, session) } catch { /* ignore */ } },
-    [`sb-${PROJECT_REF}-auth-token`, JSON.stringify(fakeSession(profile.id, profile.email, nowMs, { aal, factors }))],
+    [`sb-${PROJECT_REF}-auth-token`, JSON.stringify(fakeSession(profile.id, profile.email, nowMs))],
   )
   return { context, page }
 }

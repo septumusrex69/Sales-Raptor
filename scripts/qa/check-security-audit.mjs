@@ -8,16 +8,12 @@
  *   C-04  the signature image is fetched on the server only from Supabase storage, over https, with
  *         no redirects -- a narrow allow-list rather than a deny-list of private ranges.
  *   C-01  the company mail sync no longer treats an unset CRON_SECRET as "this is the cron".
- *   B-02  Administrators confirm every sign-in with an authenticator app; the server refuses an
- *         Administrator's request below aal2 (callerIsAdmin, delete-user, update-user-email).
  *   E-03..05  every server secret the code reads is named in .env.example.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-security-audit.mjs
  */
 import { readFileSync } from 'node:fs'
 import { isFetchableSignatureUrl } from '../../api/_lib/signature.ts'
-import { tokenAal } from '../../api/_lib/auth.ts'
-import { needsTwoStep } from '../../src/lib/twoStep.ts'
 
 let pass = 0
 const failures = []
@@ -75,27 +71,6 @@ for (const k of ['EMAIL_CREDENTIALS_KEY', 'SMS_WEBHOOK_KEY', 'CONNECT_MOBILE_API
   ok(`.env.example names ${k}`, new RegExp(`^${k}=`, 'm').test(env))
 }
 ok('...and no secret wears VITE_', !/^VITE_[A-Z_]*(SECRET|KEY_SERVICE|SERVICE_ROLE|TOKEN)/m.test(env))
-
-
-/* ---------- B-02 ---------- */
-check('an Administrator not yet confirmed, with an authenticator: the code', needsTwoStep('Administrator', 'aal1', 'aal2'), 'code')
-check('...with none: set one up', needsTwoStep('Administrator', 'aal1', 'aal1'), 'enrol')
-check('...no level at all is not a pass', needsTwoStep('Administrator', null, null), 'enrol')
-check('...confirmed: through', needsTwoStep('Administrator', 'aal2', 'aal2'), 'none')
-check('anybody else: never asked', needsTwoStep('Pre-legal Agent', 'aal1', 'aal1'), 'none')
-const jwt = (o) => ['x', Buffer.from(JSON.stringify(o)).toString('base64url'), 'sig'].join('.')
-check('the server reads aal2 off the token', tokenAal(jwt({ sub: 'u', aal: 'aal2' })), 'aal2')
-check('...aal1 as aal1', tokenAal(jwt({ sub: 'u', aal: 'aal1' })), 'aal1')
-check('...and nonsense as nothing', tokenAal('not.a.jwt'), null)
-const authLib = strip(read('api/_lib/auth.ts'))
-ok('callerIsAdmin refuses an Administrator below aal2 when given the request', /if \(!req\) return true[\s\S]{0,200}return tokenAal\(token\) === 'aal2'/.test(authLib))
-for (const f of ['api/invite-user.ts', 'api/_lib/email/connect.ts', 'api/_lib/email/disconnect.ts', 'api/_lib/email/status.ts', 'api/_lib/buzzbox/connect.ts', 'api/_lib/buzzbox/disconnect.ts']) {
-  ok(`${f} passes the request, so aal2 is checked`, /callerIsAdmin\(admin, caller\.id, req\)/.test(strip(read(f))) && !/callerIsAdmin\(admin, caller\.id\)\)/.test(strip(read(f))))
-}
-for (const f of ['api/delete-user.ts', 'api/update-user-email.ts']) {
-  ok(`${f} needs aal2 too`, /tokenAal\(token\) !== 'aal2'/.test(strip(read(f))))
-}
-ok('the gate sits inside RequireAuth', /<AdminTwoStep>/.test(read('src/components/auth/RequireAuth.tsx')))
 
 if (failures.length) {
   console.error(`check-security-audit: ${failures.length} failed, ${pass} passed\n  ${failures.join('\n  ')}`)

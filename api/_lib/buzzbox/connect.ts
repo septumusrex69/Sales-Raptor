@@ -36,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(401).json({ error: 'Invalid or expired session.' })
     return
   }
-  if (!(await callerIsAdmin(admin, caller.id, req))) {
+  if (!(await callerIsAdmin(admin, caller.id))) {
     res.status(403).json({ error: 'Only administrators can connect BuzzBox.' })
     return
   }

@@ -3,7 +3,6 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../store/AuthContext'
 import { SetPasswordPage } from '../../pages/auth/SetPasswordPage'
 import { IdleTimeout } from './IdleTimeout'
-import { AdminTwoStep } from './AdminTwoStep'
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { session, loading, currentUser, signOut, passwordSetupRequired, profileError, reloadProfile } = useAuth()
@@ -52,11 +51,10 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     )
   }
-  /* Administrators confirm the sign-in with an authenticator app before anything else (S8). */
   return (
-    <AdminTwoStep>
+    <>
       <IdleTimeout />
       {children}
-    </AdminTwoStep>
+    </>
   )
 }

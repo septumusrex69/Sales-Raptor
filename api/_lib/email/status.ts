@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const targetUserId = typeof req.query.targetUserId === 'string' ? req.query.targetUserId : undefined
   let userId = caller.id
   if (targetUserId && targetUserId !== caller.id) {
-    if (!(await callerIsAdmin(admin, caller.id, req))) {
+    if (!(await callerIsAdmin(admin, caller.id))) {
       res.status(403).json({ error: 'Only administrators can view another user’s mailbox status.' })
       return
     }
