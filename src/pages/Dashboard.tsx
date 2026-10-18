@@ -14,9 +14,10 @@ import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { MonthTrackCard } from '../components/dashboard/MonthTrackCard'
+import { MandateOutcomeCard } from '../components/dashboard/MandateOutcomeCard'
 import { ValueBand } from '../components/dashboard/ClientBookCards'
 import { fetchClientBook, fetchIntakeByDay } from '../lib/companySnapshotData'
-import { mandateToHandover, monthTrack, type ClientBook } from '../lib/clientBook'
+import { monthTrack, type ClientBook } from '../lib/clientBook'
 import type { IntakeRow } from '../lib/companySnapshot'
 import { clockNow } from '../lib/clock.ts'
 /*
@@ -126,9 +127,6 @@ export function Dashboard() {
     current: period, months, leads, deals, intake: intake ?? [], owners: scope === 'all' ? undefined : repIdSet,
   }), [period, months, leads, deals, intake, scope, repIdSet])
   const thisMonth = track[track.length - 1]
-  const bookOf = useMemo(() => new Map((books ?? []).map((b) => [b.companyId, b])), [books])
-  /* A rep's clients: the ones they signed a mandate with. Sub-accounts roll up to the client. */
-  const repHandover = useMemo(() => mandateToHandover(deals, (id) => bookOf.get(id)?.firstHandover ?? null), [deals, bookOf])
   const awaiting = useMemo(() => {
     const signedBy = new Map<string, string>()
     for (const d of deals) if (d.stage === 'Won' && d.wonAt && dealKind(d) === 'Handover' && d.companyId) signedBy.set(d.companyId, d.ownerId)
@@ -216,7 +214,9 @@ export function Dashboard() {
   }, [scopedDeals])
 
   /** The deals *opened* in the selected month, followed to wherever they stand today. */
-  const cohort = useMemo(() => scopedDeals.filter((d) => isWithinPeriod(d.createdAt, period)), [scopedDeals, period])
+  // DEALS ONLY. A debt-collection mandate is counted once, on the Mandates card above; counting it
+  // here as well made one signature two wins (the firm: "a mandate is a mandate and a deal is a deal").
+  const cohort = useMemo(() => scopedDeals.filter((d) => dealKind(d) !== 'Handover' && isWithinPeriod(d.createdAt, period)), [scopedDeals, period])
 
   const secondary = useMemo(() => {
     const activeLeads = scopedLeads.filter(isActiveLead)
@@ -456,16 +456,29 @@ export function Dashboard() {
           onChange={(e) => setScope(e.target.value as Scope)}
           className="text-sm border border-white/20 rounded-lg px-3 py-2 bg-white/10 text-white outline-none"
         >
+          {/* CLOSERS, NOT REPS (the firm, 18 Oct). And the liaisons are in here too, on purpose: "the
+              liaisons will also become sellers ... they are also selling deals, like drafting of
+              contracts, executive listings" -- anybody who can be given a deal counts in Deal outcomes
+              and on the leaderboard, so the picker says which department each one sits in. */}
           <option value="all" className="text-slate-700">
-            All Sales Reps
+            All closers and liaisons
           </option>
-          <optgroup label="Representatives">
-            {reps.map((r) => (
+          <optgroup label="Closers">
+            {reps.filter((r) => !r.role.startsWith('Liaison')).map((r) => (
               <option key={r.id} value={`rep:${r.id}`} className="text-slate-700">
                 {r.name}
               </option>
             ))}
           </optgroup>
+          {reps.some((r) => r.role.startsWith('Liaison')) && (
+            <optgroup label="Liaisons">
+              {reps.filter((r) => r.role.startsWith('Liaison')).map((r) => (
+                <option key={r.id} value={`rep:${r.id}`} className="text-slate-700">
+                  {r.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
           <optgroup label="Teams">
             {teams.map((t) => (
               <option key={t.id} value={`team:${t.id}`} className="text-slate-700">
@@ -483,20 +496,29 @@ export function Dashboard() {
         </button>
       </DashboardHero>
 
-      {/* ---------- the debt-collection side, first ---------- */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="sales-collections-row">
-        <StatTile size="secondary" label="Leads" value={thisMonth ? thisMonth.leads.toLocaleString('en-ZA') : '—'}
-          hint="Leads created this month." to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })} />
-        <StatTile size="secondary" label="Mandates signed" value={thisMonth ? thisMonth.mandates.toLocaleString('en-ZA') : '—'}
-          hint="Handover deals won this month." to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })} />
-        <StatTile size="secondary" label="Closing rate" accent="gold"
-          value={thisMonth?.closingRate === null || !thisMonth ? '—' : `${thisMonth.closingRate}%`}
-          hint="Mandates signed as a share of leads created, in the same month." />
-        <StatTile size="secondary" label="Handed over by new clients"
-          value={intake === null || !thisMonth ? '…' : `${thisMonth.newAccounts.toLocaleString('en-ZA')} · ${formatCurrency(thisMonth.newCapital)}`}
-          hint="Accounts and capital from clients in their first three months of handovers -- the work Sales brought in. The firm's whole intake, whichever rep is picked." />
-      </div>
+      {/* THE PAGE IN THE FIRM'S ORDER (18 Oct): "a mandate is a mandate and a deal is a deal. It's two
+          different things ... how many mandates has been signed? Because that's the most important
+          thing, and then deals are secondary ... the line graph as well and the stack graph. So
+          that's the secondary thing that you see." Mandates, deals, the track record, then what
+          to act on, then the detail. */}
+      {/* ---------- 1. MANDATES, first ---------- */}
+      <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
+        newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
+        periodLabel={period.label} periodParam={periodParam} />
 
+      {/* ---------- 2. DEALS, second: the additional services, never a mandate ---------- */}
+      <WinRateCard
+        showLeadPipeline={false}
+        cohort={cohort}
+        newLeads={kpis.curr.newLeads}
+        qualified={kpis.curr.qualified}
+        converted={kpis.curr.converted}
+        periodLabel={period.label}
+        periodParam={periodParam}
+      />
+
+
+      {/* ---------- 3. THE TRACK RECORD: the line and the stacked bars ---------- */}
       <div className="grid gap-4 lg:grid-cols-2">
         <MonthTrackCard kind="pipeline" rows={track} months={months} onMonths={setMonths} testId="sales-track"
           title="Leads and mandates, month by month" subtitle="Each bar is the leads; the navy part was signed. The % is the closing rate." />
@@ -504,40 +526,7 @@ export function Dashboard() {
           title="Handovers from new clients" subtitle="Clients in their first three months of handovers" />
       </div>
 
-      <Card padded={false}>
-        <div className="p-5 pb-3" data-testid="sales-reps-brought-in">
-          <CardHeader title="What each rep brought in" subtitle={`Mandates signed in ${period.label}, and how soon their clients send work`} />
-        </div>
-        <div className="overflow-x-auto px-5 pb-4">
-          <table className="list-table w-full">
-            <thead>
-              <tr className="text-left text-[11px] text-slate-400">
-                <th className="py-1.5 pr-2 font-medium">Rep</th>
-                <th className="py-1.5 px-2 text-right font-medium">Mandates this month</th>
-                <th className="py-1.5 px-2 text-right font-medium">Mandates in all</th>
-                <th className="py-1.5 px-2 text-right font-medium" title="Average days from the mandate to the client's first account">Days to first handover</th>
-                <th className="py-1.5 pl-2 text-right font-medium">Signed, nothing yet</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {reps.filter((r) => scope === 'all' || repIdSet.has(r.id)).map((r) => {
-                const mine = deals.filter((d) => d.ownerId === r.id && d.stage === 'Won' && d.wonAt && dealKind(d) === 'Handover')
-                const h = repHandover.get(r.id)
-                return (
-                  <tr key={r.id} className="whitespace-nowrap">
-                    <td className="py-1.5 pr-2 font-medium text-slate-800">{r.name}</td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">{mine.filter((d) => isWithinPeriod(d.wonAt, period)).length}</td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">{mine.length}</td>
-                    <td className="py-1.5 px-2 text-right tabular-nums">{h?.avgDays === null || h?.avgDays === undefined ? '—' : `${h.avgDays} days`}</td>
-                    <td className={`py-1.5 pl-2 text-right tabular-nums ${h?.waiting ? 'font-semibold text-rose-600' : ''}`}>{h?.waiting ?? 0}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
+      {/* ---------- 4. WHAT TO DO ABOUT IT: chase, who is selling, what is slipping ---------- */}
       {awaiting.length > 0 && (
         <Card className="border-gold-300 bg-gold-50/60">
           <div data-testid="sales-awaiting">
@@ -556,27 +545,63 @@ export function Dashboard() {
         </Card>
       )}
 
-      {/* ---------- then the revenue side, as before ---------- */}
+      <RepLeaderboard rows={leaderboardRows} />
 
-      <WinRateCard
-        cohort={cohort}
-        newLeads={kpis.curr.newLeads}
-        qualified={kpis.curr.qualified}
-        converted={kpis.curr.converted}
-        periodLabel={period.label}
-        periodParam={periodParam}
-      />
+      <NeedsAttention items={attentionItems} />
+
+      <Card padded={false}>
+        <div className="p-5 pb-0">
+          <CardHeader title="Tasks Due" subtitle="Overdue, due today, and this week" action={<Link to="/tasks" className="text-xs font-medium text-brand-600 hover:underline">View all tasks</Link>} />
+        </div>
+        <div className="px-5 pb-5 divide-y divide-slate-50">
+          {tasksDue.map((t) => (
+            /* One line a task, the checking-list look: what it is about trails the title in grey. */
+            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
+              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
+                <Circle size={15} />
+              </button>
+              <p className="min-w-0 flex-1 flex items-center gap-1.5">
+                <span className="min-w-0 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
+                  <span className="font-medium text-slate-700">{t.title}</span>
+                  <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
+                </span>
+                {t.autoRescheduledFrom && (
+                  <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
+                    Auto-moved
+                  </span>
+                )}
+              </p>
+              <PriorityBadge priority={t.priority} />
+              <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
+                {daysAgoLabel(t.dueDate)}
+              </span>
+              <UserAvatar userId={t.ownerId} size={18} />
+              <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
+                Reschedule
+              </button>
+            </div>
+          ))}
+          {tasksDue.length === 0 && (
+            <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
+              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
+              All caught up — no tasks due.
+            </div>
+          )}
+        </div>
+      </Card>
 
       <TargetsCard
         title="Targets"
         subtitle={
           scope.startsWith('rep:')
-            ? `${userById(scope.slice(4))?.name ?? 'This rep'}'s targets for ${period.label} — the marker shows how far through the month we are`
+            ? `${userById(scope.slice(4))?.name ?? 'This closer'}'s targets for ${period.label} — the marker shows how far through the month we are`
             : `Targets for ${period.label} — the marker shows how far through the month we are`
         }
         items={targetProgressItems}
         elapsed={elapsed}
       />
+
+      {/* ---------- 5. THE DETAIL, for whoever wants to dig ---------- */}
 
       {/* The month's results, in secondary size. They sit below the outcome and target cards
           because those answer "how are we doing" — these are the components of that answer,
@@ -637,49 +662,6 @@ export function Dashboard() {
           to={buildDrilldownUrl('/deals', { view: 'table' })}
         />
       </div>
-
-      <NeedsAttention items={attentionItems} />
-
-      <Card padded={false}>
-        <div className="p-5 pb-0">
-          <CardHeader title="Tasks Due" subtitle="Overdue, due today, and this week" action={<Link to="/tasks" className="text-xs font-medium text-brand-600 hover:underline">View all tasks</Link>} />
-        </div>
-        <div className="px-5 pb-5 divide-y divide-slate-50">
-          {tasksDue.map((t) => (
-            /* One line a task, the checking-list look: what it is about trails the title in grey. */
-            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
-                <Circle size={15} />
-              </button>
-              <p className="min-w-0 flex-1 flex items-center gap-1.5">
-                <span className="min-w-0 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
-                  <span className="font-medium text-slate-700">{t.title}</span>
-                  <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
-                </span>
-                {t.autoRescheduledFrom && (
-                  <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
-                    Auto-moved
-                  </span>
-                )}
-              </p>
-              <PriorityBadge priority={t.priority} />
-              <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
-                {daysAgoLabel(t.dueDate)}
-              </span>
-              <UserAvatar userId={t.ownerId} size={18} />
-              <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
-                Reschedule
-              </button>
-            </div>
-          ))}
-          {tasksDue.length === 0 && (
-            <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
-              All caught up — no tasks due.
-            </div>
-          )}
-        </div>
-      </Card>
 
       {/* How the month is being worked, as distinct from what it produced. Secondary size on
           purpose — these are rhythm, not results. */}
@@ -745,8 +727,6 @@ export function Dashboard() {
       <Suspense fallback={<div className="card h-72" aria-hidden />}>
         <SalesTrendCard deals={scopedDeals} leads={scopedLeads} referenceDate={TODAY} />
       </Suspense>
-
-      <RepLeaderboard rows={leaderboardRows} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Card className="lg:col-span-2" padded={false}>

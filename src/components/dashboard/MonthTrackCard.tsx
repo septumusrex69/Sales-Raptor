@@ -15,6 +15,9 @@ import type { MonthTrack } from '../../lib/clientBook'
  *   - 'existing': handovers from EXISTING clients (Communications' work), accounts or rand.
  * The months are handed in; the 6 / 12 switch tells the page how many to work out.
  */
+/** The closing rate printed over each month. */
+const RATE_LABEL = { fontSize: 10, fontWeight: 600, fill: 'var(--color-slate-600)' } as const
+
 export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, testId }: {
   kind: 'pipeline' | 'new' | 'existing'
   rows: MonthTrack[]
@@ -64,7 +67,10 @@ export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, 
             <ComposedChart data={data} accessibilityLayer={false} margin={{ top: 14, right: 4, bottom: 0, left: money ? -4 : -18 }}>
               <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />
               <XAxis dataKey="short" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 11, fill: 'var(--color-slate-400)' }} />
+              {/* HEADROOM over the tallest bar, so the closing rate printed on top of it is never cut or
+                  crowded (the firm circled an 18% sitting on the chart's ceiling, 18 Oct). */}
               <YAxis yAxisId="n" allowDecimals={false} tickLine={false} axisLine={false} width={money ? 52 : 40}
+                domain={[0, (max: number) => (max > 0 ? Math.ceil(max * 1.25) : 4)]}
                 tickFormatter={fmt} tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
               <Tooltip cursor={{ fill: 'var(--color-slate-50)' }}
                 content={({ active, payload }) => {
@@ -85,11 +91,18 @@ export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, 
                 {bars && <Bar yAxisId="n" dataKey="mandates" stackId="m" name="Mandates signed" fill="var(--color-navy-700)" legendType="circle" isAnimationActive={false} />}
                 {bars && (
                   <Bar yAxisId="n" dataKey="unsigned" stackId="m" name="Leads not signed" fill="var(--color-gold-300)" legendType="circle" radius={[3, 3, 0, 0]} isAnimationActive={false}>
-                    {/* The closing rate over each bar: the share of it filled navy. */}
-                    <LabelList dataKey="rateLabel" position="top" style={{ fontSize: 9, fill: 'var(--color-slate-500)' }} />
+                    {/* The closing rate over each bar: the share of it filled navy. Only while no line is
+                        drawn -- the leads line runs exactly along the bar tops, and a label there sat on
+                        it (the firm circled it, 18 Oct). With a line it rides on the line instead. */}
+                    {!lines && <LabelList dataKey="rateLabel" position="top" offset={6} style={RATE_LABEL} />}
                   </Bar>
                 )}
-                {lines && <Line yAxisId="n" dataKey="leads" name="Leads" stroke="var(--color-gold-600)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
+                {lines && (
+                  <Line yAxisId="n" dataKey="leads" name="Leads" stroke="var(--color-gold-600)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false}>
+                    {/* Clear of the dot and the line through it, never on them. */}
+                    <LabelList dataKey="rateLabel" position="top" offset={11} style={RATE_LABEL} />
+                  </Line>
+                )}
                 {lines && <Line yAxisId="n" dataKey="mandates" name="Mandates" stroke="var(--color-navy-900)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
               </> : <>
                 {bars && <Bar yAxisId="n" dataKey="value" name={kind === 'new' ? 'From new clients' : 'From existing clients'}

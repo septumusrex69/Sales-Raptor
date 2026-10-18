@@ -42910,3 +42910,212 @@ as $$
 $$;
 revoke all on function public.client_book_summary(date, date) from public, anon;
 grant execute on function public.client_book_summary(date, date) to authenticated;
+
+-- ============================================================================================
+-- S8 · Cut-over: A MANDATE SENT FOR ONLINE SIGNING, AND WHAT SIGNING IT DOES (the firm, 18 Oct).
+--
+-- "When a lead has been added and ... the mandate needs to be sent ... it should happen from the
+-- system ... sign it online ... It immediately goes to the client, it saves it on the client ... when
+-- it's signed, obviously it automatically becomes a client. It should notify the salesperson."
+--
+-- The signing request is the debtors' own (signing_requests: a frozen body, blanks, a token), tied now
+-- to a LEAD and/or a DEAL rather than an account, and carrying the TERMS it was sent with (`mandate`:
+-- party, client name, commission rate or bands). Signing happens on the public page as anybody holding
+-- the link, so the conversion cannot wait for a person to open Raptor: it is a trigger, BEFORE the
+-- signed row is written, security DEFINER (the signer has no session). In one transaction it:
+--   - finds or creates the client company (the lead's or deal's, else a new one under the lead's owner);
+--   - writes what the client typed (registration / ID, VAT, phone, email, address, banking, contact
+--     person) and the commission exactly as sent, with mandate_signed_at = the moment of signature;
+--   - adds the two contact people as contacts;
+--   - marks the handover deal Won (or creates one) and the lead Converted;
+--   - tells the salesperson, with a link to the new client, to assign a liaison.
+-- The signed PDF is filed on the client by the signed-copy route, which draws it on the server.
+-- ============================================================================================
+alter table public.signing_requests add column if not exists lead_id uuid references public.leads(id) on delete set null;
+alter table public.signing_requests add column if not exists deal_id uuid references public.deals(id) on delete set null;
+alter table public.signing_requests add column if not exists company_id uuid references public.companies(id) on delete set null;
+alter table public.signing_requests add column if not exists mandate jsonb;
+create index if not exists signing_requests_lead_idx on public.signing_requests (lead_id);
+create index if not exists signing_requests_company_idx on public.signing_requests (company_id);
+
+create or replace function public.mandate_on_signed()
+returns trigger language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  f jsonb := coalesce(new.filled, '{}'::jsonb);
+  t jsonb := new.mandate;
+  v_lead public.leads%rowtype;
+  v_deal public.deals%rowtype;
+  v_company uuid;
+  v_owner uuid;
+  v_name text;
+  v_party text;
+  v_rate numeric;
+  v_bands jsonb;
+  v_contact text;
+  v_suffix text;
+  v_first text; v_last text;
+  v_signed timestamptz := coalesce(new.signed_at, now());
+  v_day text;
+  g text := chr(8212);
+begin
+  if t is null or new.state <> 'signed' or coalesce(old.state, '') = 'signed' then return new; end if;
+  if new.lead_id is not null then select * into v_lead from public.leads where id = new.lead_id; end if;
+  if new.deal_id is not null then select * into v_deal from public.deals where id = new.deal_id; end if;
+  v_owner := coalesce(v_deal.owner_id, v_lead.owner_id, new.created_by);
+  v_party := coalesce(t ->> 'party', 'company');
+  v_name := coalesce(nullif(btrim(f ->> 'mandate_client_name'), ''), t ->> 'clientName', v_lead.company_name);
+  v_company := coalesce(v_deal.company_id, v_lead.company_id);
+  if v_company is null then
+    insert into public.companies (name, account_owner_id) values (v_name, v_owner) returning id into v_company;
+  end if;
+  if t -> 'commission' ->> 'kind' = 'scale' then
+    v_bands := t -> 'commission' -> 'bands'; v_rate := null;
+  else
+    v_rate := (t -> 'commission' ->> 'rate')::numeric; v_bands := null;
+  end if;
+  update public.companies set
+    registration_number = coalesce(nullif(nullif(btrim(f ->> case when v_party = 'company' then 'mandate_reg_no' else 'mandate_id_no' end), ''), g), registration_number),
+    vat_number = coalesce(nullif(nullif(btrim(f ->> 'mandate_vat_no'), ''), g), vat_number),
+    phone = coalesce(nullif(nullif(btrim(f ->> 'mandate_tel'), ''), g), phone),
+    email = coalesce(nullif(nullif(btrim(f ->> 'mandate_email'), ''), g), email),
+    address = coalesce(nullif(nullif(btrim(f ->> 'mandate_address'), ''), g), address),
+    bank_name = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_name'), ''), g), bank_name),
+    bank_account_holder = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_holder'), ''), g), bank_account_holder),
+    bank_account_number = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_account'), ''), g), bank_account_number),
+    bank_branch_code = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_branch'), ''), g), bank_branch_code),
+    contact_person = coalesce(nullif(nullif(btrim(f ->> 'mandate_contact_one_name'), ''), g), contact_person),
+    mandate_signed_at = v_signed,
+    commission_rate = v_rate,
+    commission_bands = v_bands,
+    commission_bands_source = case when v_bands is not null then 'Mandate signed online' else commission_bands_source end,
+    commission_bands_dated = case when v_bands is not null then (v_signed at time zone 'Africa/Johannesburg')::date else commission_bands_dated end
+  where id = v_company;
+  foreach v_suffix in array array['one', 'two'] loop
+    v_contact := nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_name')), ''), g);
+    if v_contact is not null then
+      v_first := split_part(v_contact, ' ', 1);
+      v_last := nullif(btrim(substr(v_contact, length(v_first) + 1)), '');
+      insert into public.contacts (first_name, last_name, company_id, email, phone, owner_id, lead_id, notes)
+      values (v_first, coalesce(v_last, g), v_company,
+              nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_email')), ''), g),
+              nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_tel')), ''), g),
+              v_owner, new.lead_id, 'From the signed mandate');
+    end if;
+  end loop;
+  if v_deal.id is not null then
+    update public.deals set stage = 'Won', won_at = v_signed, company_id = v_company where id = v_deal.id and stage <> 'Won';
+  else
+    insert into public.deals (name, company_id, owner_id, stage, value, expected_close_date, service, source, kind, won_at, lead_id, mandate_sent_at)
+    values (v_name || ' - collections mandate', v_company, v_owner, 'Won', 0, v_signed, 'Debt Collection',
+            coalesce(v_lead.source, 'Website'), 'Handover', v_signed, new.lead_id, new.created_at)
+    returning * into v_deal;
+  end if;
+  if v_lead.id is not null then
+    update public.leads set status = 'Converted', company_id = v_company, converted_deal_id = coalesce(converted_deal_id, v_deal.id)
+     where id = v_lead.id;
+  end if;
+  new.company_id := v_company;
+  if v_owner is not null then
+    v_day := to_char(v_signed at time zone 'Africa/Johannesburg', 'DD Mon');
+    insert into public.notifications (user_id, type, message, link)
+    values (v_owner, 'mandate_signed', v_name || ' signed the mandate on ' || v_day || '. Assign them a liaison.', '/companies/' || v_company);
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.mandate_on_signed() from public, anon;
+
+create or replace trigger mandate_on_signed
+  before update on public.signing_requests
+  for each row when (new.mandate is not null and new.state = 'signed' and old.state is distinct from 'signed')
+  execute function public.mandate_on_signed();
+
+-- S8: mandate_on_signed stamps the firm's clock (raptor_now), not the machine's.
+create or replace function public.mandate_on_signed()
+returns trigger language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  f jsonb := coalesce(new.filled, '{}'::jsonb);
+  t jsonb := new.mandate;
+  v_lead public.leads%rowtype;
+  v_deal public.deals%rowtype;
+  v_company uuid;
+  v_owner uuid;
+  v_name text;
+  v_party text;
+  v_rate numeric;
+  v_bands jsonb;
+  v_contact text;
+  v_suffix text;
+  v_first text; v_last text;
+  -- The firm's clock, not the machine's: on staging the client must read as signed on the staging
+  -- day, or it is a client from the future on every dashboard (check-staging-clock).
+  v_signed timestamptz := public.raptor_now();
+  v_day text;
+  g text := chr(8212);
+begin
+  if t is null or new.state <> 'signed' or coalesce(old.state, '') = 'signed' then return new; end if;
+  if new.lead_id is not null then select * into v_lead from public.leads where id = new.lead_id; end if;
+  if new.deal_id is not null then select * into v_deal from public.deals where id = new.deal_id; end if;
+  v_owner := coalesce(v_deal.owner_id, v_lead.owner_id, new.created_by);
+  v_party := coalesce(t ->> 'party', 'company');
+  v_name := coalesce(nullif(btrim(f ->> 'mandate_client_name'), ''), t ->> 'clientName', v_lead.company_name);
+  v_company := coalesce(v_deal.company_id, v_lead.company_id);
+  if v_company is null then
+    insert into public.companies (name, account_owner_id) values (v_name, v_owner) returning id into v_company;
+  end if;
+  if t -> 'commission' ->> 'kind' = 'scale' then
+    v_bands := t -> 'commission' -> 'bands'; v_rate := null;
+  else
+    v_rate := (t -> 'commission' ->> 'rate')::numeric; v_bands := null;
+  end if;
+  update public.companies set
+    registration_number = coalesce(nullif(nullif(btrim(f ->> case when v_party = 'company' then 'mandate_reg_no' else 'mandate_id_no' end), ''), g), registration_number),
+    vat_number = coalesce(nullif(nullif(btrim(f ->> 'mandate_vat_no'), ''), g), vat_number),
+    phone = coalesce(nullif(nullif(btrim(f ->> 'mandate_tel'), ''), g), phone),
+    email = coalesce(nullif(nullif(btrim(f ->> 'mandate_email'), ''), g), email),
+    address = coalesce(nullif(nullif(btrim(f ->> 'mandate_address'), ''), g), address),
+    bank_name = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_name'), ''), g), bank_name),
+    bank_account_holder = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_holder'), ''), g), bank_account_holder),
+    bank_account_number = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_account'), ''), g), bank_account_number),
+    bank_branch_code = coalesce(nullif(nullif(btrim(f ->> 'mandate_bank_branch'), ''), g), bank_branch_code),
+    contact_person = coalesce(nullif(nullif(btrim(f ->> 'mandate_contact_one_name'), ''), g), contact_person),
+    mandate_signed_at = v_signed,
+    commission_rate = v_rate,
+    commission_bands = v_bands,
+    commission_bands_source = case when v_bands is not null then 'Mandate signed online' else commission_bands_source end,
+    commission_bands_dated = case when v_bands is not null then (v_signed at time zone 'Africa/Johannesburg')::date else commission_bands_dated end
+  where id = v_company;
+  foreach v_suffix in array array['one', 'two'] loop
+    v_contact := nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_name')), ''), g);
+    if v_contact is not null then
+      v_first := split_part(v_contact, ' ', 1);
+      v_last := nullif(btrim(substr(v_contact, length(v_first) + 1)), '');
+      insert into public.contacts (first_name, last_name, company_id, email, phone, owner_id, lead_id, notes)
+      values (v_first, coalesce(v_last, g), v_company,
+              nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_email')), ''), g),
+              nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_tel')), ''), g),
+              v_owner, new.lead_id, 'From the signed mandate');
+    end if;
+  end loop;
+  if v_deal.id is not null then
+    update public.deals set stage = 'Won', won_at = v_signed, company_id = v_company where id = v_deal.id and stage <> 'Won';
+  else
+    insert into public.deals (name, company_id, owner_id, stage, value, expected_close_date, service, source, kind, won_at, lead_id, mandate_sent_at)
+    values (v_name || ' - collections mandate', v_company, v_owner, 'Won', 0, v_signed, 'Debt Collection',
+            coalesce(v_lead.source, 'Website'), 'Handover', v_signed, new.lead_id, new.created_at)
+    returning * into v_deal;
+  end if;
+  if v_lead.id is not null then
+    update public.leads set status = 'Converted', company_id = v_company, converted_deal_id = coalesce(converted_deal_id, v_deal.id)
+     where id = v_lead.id;
+  end if;
+  new.company_id := v_company;
+  if v_owner is not null then
+    v_day := to_char(v_signed at time zone 'Africa/Johannesburg', 'DD Mon');
+    insert into public.notifications (user_id, type, message, link)
+    values (v_owner, 'mandate_signed', v_name || ' signed the mandate on ' || v_day || '. Assign them a liaison.', '/companies/' || v_company);
+  end if;
+  return new;
+end;

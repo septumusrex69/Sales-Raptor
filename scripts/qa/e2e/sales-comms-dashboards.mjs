@@ -33,7 +33,13 @@ const DEALS = Array.from({ length: 8 }, (_, i) => ({
   id: `00000000-0000-4000-9000-${String(i).padStart(12, '0')}`, name: `Mandate ${i}`, company_id: 'c1', owner_id: ADMIN.id,
   stage: 'Won', value: 0, kind: 'Handover', service: 'Debt Collection', source: 'Website',
   won_at: `2026-${String(5 + (i % 5)).padStart(2, '0')}-25T09:00:00Z`, expected_close_date: '2026-09-01T00:00:00Z', created_at: '2026-05-01T00:00:00Z',
-}))
+})).concat([
+  /* Opened this sales month: two service deals and one mandate still out for signature. Deal outcomes
+     must count the two and not the mandate. */
+  { id: '00000000-0000-4000-9000-000000000101', name: 'Contract drafting', company_id: 'c1', owner_id: ADMIN.id, stage: 'Won', value: 5000, kind: 'Service', service: 'Contract Drafting', source: 'Website', won_at: '2026-10-15T09:00:00Z', expected_close_date: '2026-10-30T00:00:00Z', created_at: '2026-10-12T09:00:00Z' },
+  { id: '00000000-0000-4000-9000-000000000102', name: 'Executive listing', company_id: 'c1', owner_id: ADMIN.id, stage: 'Proposal', value: 3000, kind: 'Service', service: 'Executive Listing', source: 'Website', won_at: null, expected_close_date: '2026-10-30T00:00:00Z', created_at: '2026-10-13T09:00:00Z' },
+  { id: '00000000-0000-4000-9000-000000000103', name: 'Mandate out', company_id: 'c1', owner_id: ADMIN.id, stage: 'Mandate Sent', value: 0, kind: 'Handover', service: 'Debt Collection', source: 'Website', won_at: null, expected_close_date: '2026-10-30T00:00:00Z', created_at: '2026-10-14T09:00:00Z' },
+])
 
 const server = await startServer()
 let browser
@@ -54,7 +60,7 @@ try {
   }
   await page.getByTestId('sales-track').waitFor({ timeout: 15000 })
   const body = await page.locator('main').innerText()
-  t.ok('the sales page leads with the collections row', await page.getByTestId('sales-collections-row').isVisible())
+  t.ok('the sales page leads with the Mandates card, in the deal-outcomes shape', await page.getByTestId('mandate-outcomes').isVisible())
   t.ok('...and has no Communications block', !/Client servicing over the same period/.test(body))
   t.ok('leads and mandates month by month', /Leads and mandates, month by month/.test(body))
   const monthsShown = async () => (await page.getByTestId('sales-track').locator('.recharts-cartesian-axis-tick-labels text')
@@ -72,10 +78,37 @@ try {
   await page.getByTestId('sales-track-show-both').click()
   await page.waitForTimeout(300)
   t.check('...and Both draws both', JSON.stringify([await page.getByTestId('sales-track').locator('.recharts-bar').count(), await page.getByTestId('sales-track').locator('.recharts-line').count()]), '[2,2]')
+  /* THE % NEVER SITS ON THE LINE (the firm circled one, 18 Oct): with the leads line drawn, every
+     closing-rate label ends above the dot it belongs to. */
+  const clear = await page.getByTestId('sales-track').evaluate((root) => {
+    const dots = root.querySelectorAll('.recharts-line-dots')[0]?.querySelectorAll('circle') ?? []
+    const labels = [...root.querySelectorAll('.recharts-label-list text')].filter((x) => /%$/.test(x.textContent ?? ''))
+    if (!labels.length || !dots.length) return `nothing to compare: ${labels.length} labels, ${dots.length} dots, ${[...root.querySelectorAll('[class*=label]')].map((x) => x.getAttribute('class')).slice(0, 6).join('|')}`
+    return labels.every((l) => {
+      const b = l.getBoundingClientRect()
+      const cx = b.x + b.width / 2
+      const dot = [...dots].map((d) => d.getBoundingClientRect()).sort((p, q) => Math.abs(p.x + p.width / 2 - cx) - Math.abs(q.x + q.width / 2 - cx))[0]
+      return b.bottom <= dot.top - 5
+    }) ? 'clear' : 'on the line'
+  })
+  t.check('with the line drawn, the closing rate sits clear above it', clear, 'clear')
   t.ok('the charts are compact', ((await page.getByTestId('sales-track').locator('.recharts-responsive-container').boundingBox())?.height ?? 999) <= 180)
-  t.ok('new-client handovers this month in the row: 2 accounts', /2 · R\s?40[\s,]000/.test(await page.getByTestId('sales-collections-row').innerText()))
+  t.ok('new-client handovers this month on it: 2 accounts', /2 · R\s?40[\s,]000/.test(await page.getByTestId('mandate-outcomes').innerText()))
+  t.ok('...and the closing rate in its ring', /CLOSING RATE/.test(await page.getByTestId('mandate-outcomes').innerText()))
   t.ok('signed, nothing handed over, for Sales', /Waiting Signee/.test(await page.getByTestId('sales-awaiting').innerText()))
-  t.ok('what each rep brought in', await page.getByTestId('sales-reps-brought-in').isVisible())
+  t.check('the rep table that repeated the leaderboard is gone', await page.getByTestId('sales-reps-brought-in').count(), 0)
+  t.ok('deal outcomes no longer carry the lead pipeline', !/Lead pipeline, same period/.test(await page.locator('main').innerText()))
+  /* MANDATES FIRST, DEALS SECOND, THEN THE GRAPHS (the firm, 18 Oct: "a mandate is a mandate and a deal
+     is a deal"). */
+  // The page scrolls inside <main>, not the window: compare positions with each other, never with zero.
+  const yOf = async (loc) => loc.evaluate((el) => el.getBoundingClientRect().top)
+  const yMandates = await yOf(page.getByTestId('mandate-outcomes'))
+  const yDeals = await yOf(page.getByText('Deal Outcomes', { exact: true }).first())
+  const yTrack = await yOf(page.getByTestId('sales-track'))
+  t.check('the order is mandates, deals, then the track record', JSON.stringify([await page.getByTestId('mandate-outcomes').count(), yMandates < yDeals, yDeals < yTrack]), '[1,true,true]')
+  t.ok('deal outcomes count the 2 service deals and not the mandate out for signature', /The 2 service deals opened/.test(await page.locator('main').innerText()))
+  t.ok('the leaderboard says closers', /Top performing closers/.test(body) || /Top performing closers/.test(await page.locator('main').innerText()))
+  t.ok('...and the picker offers closers and liaisons', (await page.locator('option').allTextContents()).some((x) => /All closers and liaisons/.test(x)))
   await t.shot(page, 'sales-dashboard')
 
   await page.goto(`http://localhost:${PORT}/dashboard/communications`)

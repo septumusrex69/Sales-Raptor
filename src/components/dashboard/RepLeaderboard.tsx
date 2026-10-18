@@ -50,13 +50,13 @@ export function RepLeaderboard({ rows }: { rows: LeaderboardRow[] }) {
   return (
     <Card padded={false}>
       <div className="p-5 pb-0">
-        <CardHeader title="Top Performing Reps" subtitle="Click a column to sort · click a rep for their full performance report" />
+        <CardHeader title="Top performing closers" subtitle="Closers and liaisons, everybody who sold a deal · click a column to sort, a name for the full report" />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full list-table whitespace-nowrap">
           <thead>
             <tr className="text-left border-y border-slate-100 text-slate-400">
-              <th className="font-medium px-3 py-2">Rep</th>
+              <th className="font-medium px-3 py-2">Closer</th>
               {COLUMNS.map((c) => (
                 <th
                   key={c.key}
