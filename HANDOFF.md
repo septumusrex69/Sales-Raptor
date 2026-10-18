@@ -1,22 +1,28 @@
 # Handoff — where Raptor stands
 
-> **This session: S7 · Clean Break** — branch `claude/s07-clean-break`, from `claude/payout-day` at `37d4b09`.
+> **This session: S8 · Cut-over** — branch `claude/s08-cut-over`, from `claude/s07-clean-break` at `cdfa927`.
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
-> S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break.
+> S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
+> S8 Cut-over (`claude/s08-cut-over`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **13 October 2026**, S7 · Clean Break, on `claude/s07-clean-break` (branched from
-`claude/payout-day` at `37d4b09`). Its section is the first under §2.
+Last updated: **18 October 2026**, S8 · Cut-over, on `claude/s08-cut-over` (branched from
+`claude/s07-clean-break` at `cdfa927`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 ### Start here tomorrow
 
+00. **S8 · Cut-over is IN PROGRESS** (18 Oct). Done: the clean-break import, the company dashboard in the
+   firm's layout (and new vs existing clients), Communications' "signed, nothing handed over", the
+   Library's pinned template, the To-field focus, and the security audit's code findings. **NOT started
+   and next: "Held for Swordfish payovers"** (§3a item 2) -- the design is under S8 in §2. Fast suite
+   all green (18 085). The bank bulk-payment template still waits on FNB's file spec (§3 item 3).
 0. **S7 · Clean Break is finished** (last commit `c0936c2`, 13 Oct). **The next session is S8**: name it
    here first (`S8 · Theme`, branch `claude/s08-theme`). Read §2's three S7 sections first: the trust
    was regrouped (overview, To sort, Clients owe us, Bank statement, Payments out), clients pay against
@@ -85,6 +91,50 @@ own and is green: `workspace-split` (124), `payover-sends` (42), `client-stateme
 ---
 
 ## 2. What shipped this session
+
+### S8 · Cut-over (18 Oct)
+
+Commits `7f81d32` onwards; each message carries the reasoning.
+
+- **The import makes a clean break** (§3a item 1). `cleanBreak` (the import screen's default, "Clean
+  break" / "Swordfish has paid up to"): every receipt on or before the cut-over is Swordfish's
+  (`paid_over_in_swordfish`, so never split, never on a run); `cutoverDefault` = end of the last cycle
+  to CLOSE. It estimates what Swordfish has not yet paid over AT THE CUT-OVER (into trust only, after
+  `settledThroughDefault(cutover)`) and points at the holding. "Nothing to approve" is not a warning
+  in a clean break. Parallel run: set the cut-over to 10 Oct by hand. `check-clean-break` (22).
+- **Company dashboard in the firm's own layout** (their mock-up, 18 Oct), under the unchanged hero:
+  Work coming in (a bar a day, Total / Existing clients / New clients, last month faint behind, "up
+  from 2 last month by the same day", Accounts | Rand, a bar opens that day's handovers); The book (a
+  ring that PARTITIONS the book -- being worked / not yet allocated / not being worked -- with clients
+  and gone quiet as legend lines, each linking to the account list's own views; unallocated gold);
+  Departments on the firm's four photographs (`public/brand/departments/*.webp`) with a headline each
+  (call centre collected, sales new-client accounts, communications existing-client accounts,
+  administration accounts loaded -- none of them income). `company_intake_by_day` (staging + schema).
+- **New vs existing clients** (agreed 18 Oct): NEW for the first three months of handovers counted from
+  the client's FIRST account (not the mandate), on the top-level client. `company_intake_by_day` returns
+  `new_accounts`/`new_capital`. If the firm changes the window, it is the one `interval '3 months'`.
+- **Signed, nothing handed over yet** on the Communications dashboard, scoped like every card there,
+  longest waiting first, red past 30 days. `clients_awaiting_first_handover()`.
+- **Library**: the opened template is pinned (sticky, scrolls inside itself); the list scrolls with the
+  page; rows 14px. **New email**: the cursor starts in To.
+- **Security audit of 5 Oct, code findings** (`SECURITY_AUDIT_REPORT.md`, the user's file, not in the
+  repo): headers in `vercel.json` (CSP **Report-Only** -- enforced, it would be inherited by the mail
+  reader's srcdoc frame; microphone NOT denied, dictation uses it); `isFetchableSignatureUrl` (SSRF);
+  sync-all needs the bearer (CRON_SECRET is set on prod + preview since 27 Sep, so the audit's C-01 was
+  stale); public buckets images-only (staging; **production needs the two `update storage.buckets`**
+  at the end of schema.sql); `.env.example`. `check-security-audit` (31). Not done, owner's decisions:
+  rate limiting, MFA, backups, DPAs, Information Officer, privacy notice, breach plan.
+
+**"Held for Swordfish payovers" -- the design, not yet built** (read before building): a one-row table
+`swordfish_holding` (amount, reason, set by, at) rather than firm_settings columns (five hand-kept
+lists); set by `set_swordfish_holding(amount, reason)`, Administrator + finance.view, logged in
+`finance_setting_changes`, dated by the trust OPENING date (the holding is part of the opening).
+Debits after the opening allocated as "Swordfish payover" / "Swordfish-era drawing" through a new
+`allocate_swordfish_line` (allocation_kind stays 'other' -- the kind check cannot be widened from the
+MCP -- plus a new `bank_statement_lines.swordfish_kind`, no ledger entry: the money leaves the bucket,
+not anybody's ledger). `trust_position`'s owed_out adds what is left; `accountedFromCash` and
+`currentHoldings` take it so the overview and Not accounted for agree. Closing what is left after the
+last Swordfish run (firm fees can be written off, client money cannot) is the FIRM's call -- ask.
 
 Newest first. Each commit message carries the full reasoning; this is the index.
 
@@ -527,6 +577,9 @@ Nothing.
 ---
 
 ## 3. Open requests the firm has made and nobody has started
+
+S8: **Held for Swordfish payovers** (§3a item 2, designed in §2 S8). The bank file waits on FNB's import
+specification -- the user does not have it yet and will ask the bank.
 
 The four that stood here at the start of the fifth session were answered by the user on 10 Oct:
 1 (client pays into the business account) and 2 (match payovers by reference) are BUILT (§2); 4
