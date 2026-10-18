@@ -11,7 +11,7 @@ import { MonthProgress } from '../components/collections/MonthProgress'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import { useCollectionsMonth } from '../hooks/useCollectionsMonth'
-import { bookSlices, departmentHeadline, intakeBars, intakeComparison, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
+import { bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeSplit, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
 import { getPreviousSalesMonth } from '../lib/salesMonth'
 import { viewParams } from '../lib/accountViews'
 import { fetchBookSnapshot, fetchIntakeByDay, isoDay } from '../lib/companySnapshotData'
@@ -88,6 +88,7 @@ export function CompanyDashboard() {
       prior === null ? undefined : { fromIso: isoDay(before.start), toIso: isoDay(before.end), rows: prior })
   }, [intake, prior, month.period, month.asAt])
   const compare = bars ? intakeComparison(bars) : null
+  const split = bars ? intakeSplit(bars) : null
   const navigate = useNavigate()
   /* WHERE EACH FIGURE OPENS (the firm, 18 Oct: the numbers were dead ends). The account list's own
      saved views where one asks exactly this question, so the list and the figure agree on the rule. */
@@ -173,6 +174,26 @@ export function CompanyDashboard() {
               {' · '}{money(book.intakeCapital)} capital at handover — the client's money to recover, not the firm's.
             </>}
           </p>
+          {split && (
+            /* TOTAL, EXISTING, NEW (the firm, 18 Oct). A client is new for its first three months of
+               handovers, counted from its first account; the legend says so on hover. */
+            <div className="mb-2 grid grid-cols-3 gap-2" data-testid="intake-split">
+              {([
+                ['Total', split.total, null],
+                ['Existing clients', split.existing, 'var(--color-gold-400)'],
+                ['New clients', split.fresh, 'var(--color-navy-700)'],
+              ] as const).map(([label, v, colour]) => (
+                <div key={label} className="rounded-lg bg-slate-50 px-3 py-2"
+                  title={label === 'New clients' ? 'Inside their first three months of handovers, counted from their first account. Sales\u2019 work.'
+                    : label === 'Existing clients' ? 'Past their first three months. Communications\u2019 work.' : undefined}>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                    {colour && <span className="h-2 w-2 rounded-sm" style={{ background: colour }} />}{label}
+                  </div>
+                  <div className="text-base font-bold tabular-nums text-slate-800">{measure === 'accounts' ? count(v.accounts) : money(v.capital)}</div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mb-1 flex justify-end">
             <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-[11px]" role="radiogroup" aria-label="Show the bars as">
               {(['accounts', 'capital'] as const).map((m) => (
@@ -249,6 +270,8 @@ export function CompanyDashboard() {
                 mandates: sales.mandatesSigned,
                 intakeClients: book?.intakeClients ?? null,
                 intakeAccounts: book?.intakeAccounts ?? null,
+                fromNew: split ? split.fresh.accounts : null,
+                fromExisting: split ? split.existing.accounts : null,
               }, formatCurrency)} />
           ))}
         </div>
@@ -418,13 +441,23 @@ function IntakeChart({ bars, measure, onDay }: {
   onDay: (b: IntakeBar) => void
 }) {
   const key = measure === 'accounts' ? 'accounts' : 'capital'
+  /*
+   * EACH BAR IN TWO PARTS (the firm, 18 Oct): gold for work from EXISTING clients (Communications'),
+   * navy for work from NEW clients -- inside their first three months (Sales'). A weekend is no longer
+   * drawn grey: the colour now says whose work it was, and one colour cannot say two things.
+   */
+  const data = bars.map((b) => ({
+    ...b,
+    fromExisting: measure === 'accounts' ? b.accounts - b.newAccounts : b.capital - b.newCapital,
+    fromNew: measure === 'accounts' ? b.newAccounts : b.newCapital,
+  }))
   const priorKey = measure === 'accounts' ? 'priorAccounts' : 'priorCapital'
   const max = Math.max(0, ...bars.map((b) => Math.max(b[key], b[priorKey] ?? 0)))
   const fmt = (v: number) => measure === 'accounts' ? v.toLocaleString('en-ZA') : shortRand(v)
   return (
     <div className="h-48 [&_*:focus]:outline-none" data-testid="intake-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={bars} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap="18%" barGap="-100%">
+        <BarChart data={data} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap="18%" barGap="-100%">
           {/* barGap -100%: last month's bar sits BEHIND this month's, not beside it. */}
           <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />
           <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0}
@@ -436,24 +469,32 @@ function IntakeChart({ bars, measure, onDay }: {
               const b = payload?.[0]?.payload as IntakeBar | undefined
               if (!active || !b) return null
               const now = measure === 'accounts' ? `${b.accounts.toLocaleString('en-ZA')} ${b.accounts === 1 ? 'account' : 'accounts'}` : rand0(b.capital)
+              const split = measure === 'accounts'
+                ? { existing: (b.accounts - b.newAccounts).toLocaleString('en-ZA'), fresh: b.newAccounts.toLocaleString('en-ZA') }
+                : { existing: rand0(b.capital - b.newCapital), fresh: rand0(b.newCapital) }
               const then = b[priorKey] === null ? null : measure === 'accounts' ? `${(b.priorAccounts ?? 0).toLocaleString('en-ZA')}` : rand0(b.priorCapital ?? 0)
               return (
                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
                   <div className="font-semibold text-slate-800">{longDay(b.day)}</div>
                   <div className="text-slate-600">{b.future ? 'Still to come' : `${now} handed over`}</div>
+                  {!b.future && b.accounts > 0 && (
+                    <div className="text-slate-500">{split.existing} from existing clients · {split.fresh} from new</div>
+                  )}
                   {then !== null && <div className="text-slate-400">Same day last month: {then}</div>}
                   {!b.future && b.accounts > 0 && <div className="mt-1 text-gold-700">Click to open them</div>}
                 </div>
               )
             }} />
           <Bar dataKey={priorKey} fill="var(--color-slate-200)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-          <Bar dataKey={key} radius={[3, 3, 0, 0]} isAnimationActive={false}
-            onClick={(d: { payload?: IntakeBar }) => { if (d?.payload && d.payload.accounts > 0) onDay(d.payload) }}>
-            {bars.map((b) => (
-              <Cell key={b.day} cursor={b.accounts > 0 ? 'pointer' : undefined}
-                fill={b.future ? 'transparent' : b.weekend ? 'var(--color-slate-300)' : 'var(--color-gold-400)'} />
-            ))}
-          </Bar>
+          {(['fromExisting', 'fromNew'] as const).map((part) => (
+            <Bar key={part} dataKey={part} stackId="now" radius={part === 'fromNew' ? [3, 3, 0, 0] : [0, 0, 0, 0]} isAnimationActive={false}
+              onClick={(d: { payload?: IntakeBar }) => { if (d?.payload && d.payload.accounts > 0) onDay(d.payload) }}>
+              {data.map((b) => (
+                <Cell key={b.day} cursor={b.accounts > 0 ? 'pointer' : undefined}
+                  fill={b.future ? 'transparent' : part === 'fromNew' ? 'var(--color-navy-700)' : 'var(--color-gold-400)'} />
+              ))}
+            </Bar>
+          ))}
         </BarChart>
       </ResponsiveContainer>
     </div>

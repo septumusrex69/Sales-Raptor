@@ -19,7 +19,7 @@
  * Run: node scripts/qa/check-company-dashboard.mjs
  */
 import { readFileSync } from 'node:fs'
-import { bookSlices, departmentHeadline, intakeBars, intakeComparison, salesSnapshot } from '../../src/lib/companySnapshot.ts'
+import { awaitingFirstHandover, bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeSplit, salesSnapshot } from '../../src/lib/companySnapshot.ts'
 import { getSalesMonthForKey } from '../../src/lib/salesMonth.ts'
 
 let pass = 0
@@ -225,8 +225,8 @@ ok('...and a span of months is not called sales months either',
   ok('clients and gone quiet are not slices (they are not parts of the book)', !ring.some((x) => /client|quiet/i.test(x.label)))
 
   const intakeFn = sql.slice(sql.lastIndexOf('create or replace function public.company_intake_by_day('))
-  ok('the days are counted in the database', /count\(\*\)::integer/.test(intakeFn.slice(0, 600)) && /group by handover_date/.test(intakeFn.slice(0, 600)))
-  ok('...on the same rule as the snapshot\'s intake', /handover_date between p_from and p_to/.test(intakeFn.slice(0, 600)))
+  ok('the days are counted in the database', /count\(\*\)::integer/.test(intakeFn.slice(0, 1500)) && /group by a\.handover_date/.test(intakeFn.slice(0, 1500)))
+  ok('...on the same rule as the snapshot\'s intake', /a\.handover_date between p_from and p_to/.test(intakeFn.slice(0, 1500)))
   ok('...as the caller', /security invoker/.test(intakeFn.slice(0, 400)))
   ok('...and the browser only calls it', /supabase\.rpc\('company_intake_by_day'/.test(data))
   ok('the screen draws the bars and the ring', /<IntakeChart/.test(page) && /bookSlices\(book\)/.test(page))
@@ -252,6 +252,32 @@ ok('...and a span of months is not called sales months either',
   ok('no headline is commission or fees', !heads.some((h) => /commission|fee|annexure/i.test(h?.label ?? '')))
   ok('the screen links the ring to the account list\'s own views', /viewParams\('unallocated'/.test(page) && /viewParams\('gone_quiet'/.test(page))
   ok('...and a day\'s bar to that day\'s handovers', /onDay=\{\(b\) => navigate\(handedOver\(b\.day, b\.day\)\)\}/.test(page))
+
+  /* New and existing clients (the firm, 18 Oct): the three figures add up, from the same bars. */
+  const sb = intakeBars('2026-10-11', '2026-10-20', [
+    { day: '2026-10-12', accounts: 4, capital: 80000, newAccounts: 1, newCapital: 30000 },
+    { day: '2026-10-17', accounts: 3, capital: 57500, newAccounts: 3, newCapital: 57500 },
+  ], '2026-10-18')
+  same('total, existing and new', intakeSplit(sb), {
+    total: { accounts: 7, capital: 137500 }, fresh: { accounts: 4, capital: 87500 }, existing: { accounts: 3, capital: 50000 } })
+  same('sales\' headline is the new clients\' work, communications\' the existing',
+    ['Sales', 'Communications'].map((d) => departmentHeadline(d, { collected: 0, mandates: 9, intakeClients: 9, intakeAccounts: 9, fromNew: 4, fromExisting: 3 }, m)?.label),
+    ['accounts from new clients', 'accounts from existing clients'])
+  const ib = sql.slice(sql.lastIndexOf('create or replace function public.company_intake_by_day('))
+  ok('new is counted from the client\'s FIRST handover, not the mandate', /min\(handover_date\) as first_day/.test(ib.slice(0, 1500)) && !/mandate/.test(ib.slice(0, 1500)))
+  ok('...for three months', /first_day \+ interval '3 months'/.test(ib.slice(0, 1500)))
+  ok('...on the top-level client, so a sub-account shares its parent\'s clock', /coalesce\(c\.parent_company_id, c\.id\) as client/.test(ib.slice(0, 1500)))
+
+  /* Signed, nothing handed over yet. */
+  same('the longest waiting first, days on the firm\'s calendar', awaitingFirstHandover([
+    { company_id: 'a', name: 'Recent', mandate_signed_at: '2026-10-10T08:00:00Z', account_owner_id: null },
+    { company_id: 'b', name: 'Cold', mandate_signed_at: '2026-08-01T22:30:00Z', account_owner_id: 'u' },
+  ], '2026-10-18').map((c) => [c.name, c.days]), [['Cold', 78], ['Recent', 8]])
+  const aw = sql.slice(sql.lastIndexOf('create or replace function public.clients_awaiting_first_handover('))
+  ok('awaiting means a mandate and not one account, its sub-accounts included',
+    /mandate_signed_at is not null/.test(aw.slice(0, 900)) && /not exists/.test(aw.slice(0, 900)) && /s\.parent_company_id = c\.id/.test(aw.slice(0, 900)))
+  ok('...asked as the caller', /security invoker/.test(aw.slice(0, 400)))
+  ok('the communications dashboard shows it', /fetchAwaitingFirstHandover\(\)/.test(read('../../src/pages/CommunicationsDashboard.tsx')))
 }
 
 

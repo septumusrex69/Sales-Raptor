@@ -107,6 +107,12 @@ export interface IntakeBar {
   accounts: number
   /** Capital at handover that day -- the client's money to recover, never the firm's. */
   capital: number
+  /**
+   * OF THOSE, FROM A NEW CLIENT: one inside its first three months of handovers, counted from its
+   * first account (company_intake_by_day; the firm, 18 Oct). The rest is from existing clients.
+   */
+  newAccounts: number
+  newCapital: number
   /** The same day of LAST period (the nth day of it), drawn faintly behind; null past its end. */
   priorAccounts: number | null
   priorCapital: number | null
@@ -118,7 +124,7 @@ export interface IntakeBar {
   future: boolean
 }
 
-export interface IntakeRow { day: string; accounts: number; capital?: number }
+export interface IntakeRow { day: string; accounts: number; capital?: number; newAccounts?: number; newCapital?: number }
 
 /** Every day from one ISO date to another, inclusive, in UTC so no local clock moves a day. */
 function daysOf(fromIso: string, toIso: string): Date[] {
@@ -161,6 +167,7 @@ export function intakeBars(
     return {
       day: iso, label: String(at.getUTCDate()),
       accounts: r?.accounts ?? 0, capital: r?.capital ?? 0,
+      newAccounts: r?.newAccounts ?? 0, newCapital: r?.newCapital ?? 0,
       priorAccounts: pDay ? (p?.accounts ?? 0) : null,
       priorCapital: pDay ? (p?.capital ?? 0) : null,
       weekend: dow === 0 || dow === 6, future: iso > todayIso,
@@ -225,22 +232,68 @@ export function bookSlices(b: Pick<BookSnapshot, 'bookAccounts' | 'activeAccount
  * department is there to do, and NONE of them the firm's income (the condition the whole screen was
  * agreed under):
  *   - Call centre: collected this period -- the client's money recovered, the hero's own figure;
- *   - Sales: mandates signed;
- *   - Communications: clients who sent work (they look after the client relationship);
+ *   - Sales: accounts handed over by NEW clients (first three months; the firm, 18 Oct);
+ *   - Communications: accounts handed over by EXISTING clients (they look after the relationship);
  *   - Administration: accounts loaded onto the book this period.
  * Null while the figure is still being counted: a card reads "…" rather than a wrong nought.
  */
 export function departmentHeadline(
   id: string,
-  input: { collected: number | null; mandates: number; intakeClients: number | null; intakeAccounts: number | null },
+  input: { collected: number | null; mandates: number; intakeClients: number | null; intakeAccounts: number | null
+    fromNew?: number | null; fromExisting?: number | null },
   money: (v: number) => string,
 ): { value: string; label: string } | null {
   const n = (v: number | null) => (v === null ? '…' : v.toLocaleString('en-ZA'))
   switch (id) {
     case 'Call centre': return { value: input.collected === null ? '…' : money(input.collected), label: 'collected this month' }
-    case 'Sales': return { value: n(input.mandates), label: input.mandates === 1 ? 'mandate signed' : 'mandates signed' }
-    case 'Communications': return { value: n(input.intakeClients), label: input.intakeClients === 1 ? 'client sent work' : 'clients sent work' }
+    /* The work each side brought in (18 Oct): new clients are Sales', existing ones Communications'. */
+    case 'Sales': return input.fromNew === undefined
+      ? { value: n(input.mandates), label: input.mandates === 1 ? 'mandate signed' : 'mandates signed' }
+      : { value: n(input.fromNew), label: input.fromNew === 1 ? 'account from new clients' : 'accounts from new clients' }
+    case 'Communications': return input.fromExisting === undefined
+      ? { value: n(input.intakeClients), label: input.intakeClients === 1 ? 'client sent work' : 'clients sent work' }
+      : { value: n(input.fromExisting), label: input.fromExisting === 1 ? 'account from existing clients' : 'accounts from existing clients' }
     case 'Administration': return { value: n(input.intakeAccounts), label: input.intakeAccounts === 1 ? 'account loaded' : 'accounts loaded' }
     default: return null
   }
+}
+
+/**
+ * TOTAL, EXISTING CLIENTS, NEW CLIENTS -- the firm's three figures for work coming in (18 Oct): "there's
+ * a total one, and then there's one that comes in from existing clients, which comes from the
+ * communication department, and then there's ones that come in from new clients" (Sales). Summed from
+ * the same bars the chart draws, so the three and the chart cannot disagree; existing is the total
+ * less new, so the two always add up.
+ */
+export function intakeSplit(bars: IntakeBar[]): {
+  total: { accounts: number; capital: number }
+  existing: { accounts: number; capital: number }
+  fresh: { accounts: number; capital: number }
+} {
+  const total = { accounts: 0, capital: 0 }
+  const fresh = { accounts: 0, capital: 0 }
+  for (const b of bars) {
+    total.accounts += b.accounts; total.capital += b.capital
+    fresh.accounts += b.newAccounts; fresh.capital += b.newCapital
+  }
+  return { total, fresh, existing: { accounts: total.accounts - fresh.accounts, capital: total.capital - fresh.capital } }
+}
+
+/** A client signed and waiting for its first handover, and how long it has waited. */
+export interface AwaitingClient { companyId: string; name: string; signedOn: string; ownerId: string | null; days: number }
+
+/**
+ * SIGNED, NOTHING HANDED OVER YET (the firm, 18 Oct), oldest first: the longer a signed client sends
+ * nothing, the likelier the relationship has gone cold -- which is exactly what the clerk is there to
+ * catch. Days counted on 'YYYY-MM-DD' strings in UTC, so no clock moves a day.
+ */
+export function awaitingFirstHandover(
+  rows: { company_id: string; name: string; mandate_signed_at: string; account_owner_id: string | null }[],
+  todayIso: string,
+): AwaitingClient[] {
+  const day = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d) / 86_400_000 }
+  return rows
+    .map((r) => ({ companyId: r.company_id, name: r.name, signedOn: r.mandate_signed_at.slice(0, 10), ownerId: r.account_owner_id,
+      days: Math.max(0, day(todayIso) - day(r.mandate_signed_at)) }))
+    .sort((a, b) => b.days - a.days)
 }

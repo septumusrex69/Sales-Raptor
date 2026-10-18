@@ -19,7 +19,9 @@ import { downloadCsv } from '../lib/csvExport'
 import { topLevelClients, rollupClient, collectionsCoefficient, type ClientRollup } from '../lib/companyRollup'
 import { OUTCOME_WON, OUTCOME_REJECTED, OUTCOME_VALUE } from '../lib/colors'
 import type { Company, ID, Task, Team, User } from '../types'
-import { clockNow } from '../lib/clock.ts'
+import { clockNow, clockToday } from '../lib/clock.ts'
+import { awaitingFirstHandover, type AwaitingClient } from '../lib/companySnapshot'
+import { fetchAwaitingFirstHandover } from '../lib/companySnapshotData'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -85,9 +87,27 @@ export function CommunicationsDashboard() {
     }
   }, [currentUser])
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
+  /*
+   * SIGNED, NOTHING HANDED OVER YET (the firm, 18 Oct: "something ... that notifies on the dashboard of
+   * each communications clerk ... new clients that hasn't handed over yet"). Asked of the database,
+   * which can say "no account at all" without the book coming down the wire. Unreadable, the card is
+   * simply not drawn: a warning that cannot be counted is not shown as "none".
+   */
+  const [awaiting, setAwaiting] = useState<AwaitingClient[] | null>(null)
+  useEffect(() => {
+    let live = true
+    fetchAwaitingFirstHandover()
+      .then((rows) => { if (live) setAwaiting(awaitingFirstHandover(rows, clockToday())) })
+      .catch(() => { if (live) setAwaiting(null) })
+    return () => { live = false }
+  }, [])
 
   const scopedIds = useMemo(() => scopeIdsFor(scope, members, commsTeams), [scope, members, commsTeams])
   const scopedIdSet = useMemo(() => new Set(scopedIds), [scopedIds])
+  /* The clerk's own clients when one is picked (their own, by default), the department's otherwise --
+     the same scope as every other card here, read off the client's owner. */
+  const myAwaiting = useMemo(() => (awaiting ?? []).filter((c) => scope === 'all' || (c.ownerId !== null && scopedIdSet.has(c.ownerId))),
+    [awaiting, scope, scopedIdSet])
 
   const scopedActivities = useMemo(() => activities.filter((a) => scopedIdSet.has(a.userId)), [activities, scopedIdSet])
   const scopedTasks = useMemo(() => tasks.filter((t) => scopedIdSet.has(t.ownerId)), [tasks, scopedIdSet])
@@ -292,6 +312,26 @@ export function CommunicationsDashboard() {
             </Link>{' '}
             and assign its members.
           </p>
+        </Card>
+      )}
+
+      {awaiting !== null && myAwaiting.length > 0 && (
+        <Card className="border-gold-300 bg-gold-50/60" >
+          <div data-testid="awaiting-first-handover">
+            <CardHeader title={`Signed, nothing handed over yet · ${myAwaiting.length}`}
+              subtitle="A mandate is on record and not one account has arrived. The longer it waits, the colder it gets." />
+            <ul className="divide-y divide-gold-200/70">
+              {myAwaiting.map((c) => (
+                <li key={c.companyId} className="flex items-center gap-3 py-2 text-sm">
+                  <Link to={`/companies/${c.companyId}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
+                  <span className="shrink-0 text-xs text-slate-500">signed {c.signedOn.split('-').reverse().join('/')}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${c.days > 30 ? 'bg-rose-100 text-rose-700' : 'bg-white text-slate-600'}`}>
+                    {c.days === 1 ? '1 day' : `${c.days} days`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </Card>
       )}
 

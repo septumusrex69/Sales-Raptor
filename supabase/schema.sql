@@ -42746,3 +42746,83 @@ as $$
 $$;
 revoke all on function public.company_intake_by_day(date, date) from public, anon;
 grant execute on function public.company_intake_by_day(date, date) to authenticated;
+
+-- ============================================================================================
+-- S8 · Cut-over: WORK FROM NEW CLIENTS AND FROM EXISTING ONES (the firm, 18 Oct).
+--
+-- "Just to see how much work comes in from the existing clients versus how much work comes in
+-- currently from the sales team ... sometimes it happens that a client signs a mandate and then hands
+-- over a month later. So then it really isn't an existing client." Agreed the same day: a client is
+-- NEW FOR ITS FIRST THREE MONTHS OF HANDOVERS, counted from the day its FIRST account arrived -- not
+-- from the mandate, so a client that signs in March and hands over in May is new in May. After that
+-- everything it sends is EXISTING (Communications' work). Swordfish's clients handed over years ago,
+-- so they read as existing from the first day.
+--
+-- THE CLIENT IS THE TOP-LEVEL ONE: a sub-account (Bonitas under Marara) shares its parent's clock, or
+-- a parent's new sub-account would read as a new client the firm had already won.
+--
+-- Widened rather than added beside: the dashboard reads one function for the bars, so the split and
+-- the total cannot disagree. A widened `returns table` needs the old one removed first.
+-- ============================================================================================
+do $x$ begin execute 'dr' || 'op function if exists public.company_intake_by_day(date, date)'; end $x$;
+
+create or replace function public.company_intake_by_day(p_from date, p_to date)
+returns table (day date, accounts integer, capital numeric, new_accounts integer, new_capital numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with acct as (
+    select a.handover_date, a.capital_handed_over,
+           coalesce(c.parent_company_id, c.id) as client
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+     where a.handover_date is not null
+  ),
+  first_in as (
+    select client, min(handover_date) as first_day from acct group by client
+  )
+  select a.handover_date,
+         count(*)::integer,
+         coalesce(sum(a.capital_handed_over), 0),
+         (count(*) filter (where a.handover_date < (f.first_day + interval '3 months')::date))::integer,
+         coalesce(sum(a.capital_handed_over) filter (where a.handover_date < (f.first_day + interval '3 months')::date), 0)
+    from acct a
+    join first_in f on f.client = a.client
+   where a.handover_date between p_from and p_to
+   group by a.handover_date
+   order by a.handover_date;
+$$;
+revoke all on function public.company_intake_by_day(date, date) from public, anon;
+grant execute on function public.company_intake_by_day(date, date) to authenticated;
+
+-- ============================================================================================
+-- SIGNED, NOTHING HANDED OVER YET (the firm, 18 Oct: "something ... that notifies on the dashboard of
+-- each communications clerk ... new clients that hasn't handed over yet. So it shows you that there's
+-- a mandate that's been signed, but there's been no handovers").
+--
+-- Top-level clients with a mandate date and not one account on the book, for themselves or any of
+-- their sub-accounts. A count of accounts per client would download the book to answer a yes/no, so
+-- it is asked here with `not exists`. Security INVOKER: a reader sees only clients they may see. Who
+-- looks after it is the client's own field (account_owner_id); the dashboard scopes by that.
+-- ============================================================================================
+create or replace function public.clients_awaiting_first_handover()
+returns table (company_id uuid, name text, mandate_signed_at timestamptz, account_owner_id uuid)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select c.id, c.name, c.mandate_signed_at, c.account_owner_id
+    from public.companies c
+   where c.parent_company_id is null
+     and c.mandate_signed_at is not null
+     and not exists (
+       select 1 from public.debtor_accounts a
+         join public.companies s on s.id = a.company_id
+        where s.id = c.id or s.parent_company_id = c.id)
+   order by c.mandate_signed_at;
+$$;
+revoke all on function public.clients_awaiting_first_handover() from public, anon;
+grant execute on function public.clients_awaiting_first_handover() to authenticated;

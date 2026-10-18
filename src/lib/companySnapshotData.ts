@@ -12,7 +12,7 @@
  */
 import { supabase } from './supabase'
 import type { SalesMonthPeriod } from './salesMonth'
-import type { BookSnapshot } from './companySnapshot'
+import type { BookSnapshot, IntakeRow } from './companySnapshot'
 
 export async function fetchBookSnapshot(
   period: SalesMonthPeriod,
@@ -46,14 +46,22 @@ export async function fetchBookSnapshot(
  * WORK COMING IN, A DAY AT A TIME (the firm's layout, 18 Oct). Only days that had a handover come
  * back; intakeBars (companySnapshot.ts) lays them on every day of the period.
  */
-export async function fetchIntakeByDay(period: SalesMonthPeriod): Promise<{ day: string; accounts: number; capital: number }[]> {
+export async function fetchIntakeByDay(period: SalesMonthPeriod): Promise<IntakeRow[]> {
   const { data, error } = await supabase.rpc('company_intake_by_day', {
     p_from: isoDay(period.start),
     p_to: isoDay(period.end),
   })
   if (error) throw new Error(error.message)
-  return ((data ?? []) as { day: string; accounts: number | string; capital: number | string }[])
-    .map((r) => ({ day: String(r.day).slice(0, 10), accounts: Number(r.accounts), capital: Number(r.capital ?? 0) }))
+  return ((data ?? []) as { day: string; accounts: number | string; capital: number | string; new_accounts?: number | string; new_capital?: number | string }[])
+    .map((r) => ({ day: String(r.day).slice(0, 10), accounts: Number(r.accounts), capital: Number(r.capital ?? 0),
+      newAccounts: Number(r.new_accounts ?? 0), newCapital: Number(r.new_capital ?? 0) }))
+}
+
+/** Signed clients with nothing on the book yet (clients_awaiting_first_handover), as the database has them. */
+export async function fetchAwaitingFirstHandover(): Promise<{ company_id: string; name: string; mandate_signed_at: string; account_owner_id: string | null }[]> {
+  const { data, error } = await supabase.rpc('clients_awaiting_first_handover')
+  if (error) throw new Error(error.message)
+  return (data ?? []) as { company_id: string; name: string; mandate_signed_at: string; account_owner_id: string | null }[]
 }
 
 export { isoDay }

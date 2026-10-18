@@ -31,9 +31,10 @@ const PRIOR = [
   { day: '2026-09-30', accounts: 5, capital: 90000 },
 ]
 const INTAKE = [
-  { day: '2026-10-12', accounts: 4, capital: 80000 },
-  { day: '2026-10-14', accounts: 2, capital: 50000 },
-  { day: '2026-10-17', accounts: 3, capital: 57500 },
+  /* new_accounts: from a client inside its first three months of handovers (Sales' work). */
+  { day: '2026-10-12', accounts: 4, capital: 80000, new_accounts: 1, new_capital: 30000 },
+  { day: '2026-10-14', accounts: 2, capital: 50000, new_accounts: 0, new_capital: 0 },
+  { day: '2026-10-17', accounts: 3, capital: 57500, new_accounts: 3, new_capital: 57500 },
 ]
 
 const server = await startServer()
@@ -47,6 +48,10 @@ try {
     [(u) => /\/rest\/v1\/rpc\/company_intake_by_day/.test(u),
       (u, req) => ({ body: (req.postDataJSON()?.p_from ?? '') < '2026-10-11' ? PRIOR : INTAKE })],
     [(u) => /\/rest\/v1\/rpc\/collector_performance/.test(u), () => ({ body: [] })],
+    [(u) => /\/rest\/v1\/rpc\/clients_awaiting_first_handover/.test(u), () => ({ body: [
+      { company_id: 'c1', name: 'Recently Signed (Pty) Ltd', mandate_signed_at: '2026-10-10T08:00:00Z', account_owner_id: ADMIN.id },
+      { company_id: 'c2', name: 'Gone Cold Holdings', mandate_signed_at: '2026-08-01T08:00:00Z', account_owner_id: ADMIN.id },
+    ] })],
   ]
   const { context, page } = await signedInPage(browser, ADMIN, handlers, seen, { now: '2026-10-18T10:00:00+02:00' })
   for (let i = 0; i < 60; i += 1) {
@@ -72,14 +77,20 @@ try {
   t.check('a slot for every day of the period, empty days included', ticks, 31)
   /* Two layers: last month (faint, behind) then this month. This month's is the second. */
   const nowLayer = page.getByTestId('intake-chart').locator('.recharts-bar').nth(1)
+  const newLayer = page.getByTestId('intake-chart').locator('.recharts-bar').nth(2)
   const priorDrawn = await page.getByTestId('intake-chart').locator('.recharts-bar').nth(0).locator('.recharts-bar-rectangle path').count()
   t.check('last month is drawn behind, its two days with work', priorDrawn, 2)
   const fills = await nowLayer.locator('.recharts-bar-rectangle path').evaluateAll(
     (ps) => ps.map((p) => p.getAttribute('fill')))
   /* Recharts draws no rectangle for a zero, so the drawn bars are the three days with work. */
-  t.check('three days brought work in', fills.length, 3)
-  t.check('a weekday is gold, a Saturday grey', JSON.stringify(fills),
-    JSON.stringify(['var(--color-gold-400)', 'var(--color-gold-400)', 'var(--color-slate-300)']))
+  /* Existing clients' part (gold) on the days it had any; the new clients' part (navy) stacked on top. */
+  t.check('existing clients\' work on 12 and 14 Oct', fills.length, 2)
+  t.ok('...in gold', fills.every((f) => f === 'var(--color-gold-400)'))
+  const newFills = await newLayer.locator('.recharts-bar-rectangle path').evaluateAll((ps) => ps.map((p) => p.getAttribute('fill')))
+  t.check('new clients\' work on 12 and 17 Oct', newFills.length, 2)
+  t.ok('...in navy', newFills.every((f) => f === 'var(--color-navy-700)'))
+  const split = await page.getByTestId('intake-split').innerText()
+  t.ok('total, existing and new, as three figures', /Total\s*9/.test(split) && /Existing clients\s*5/.test(split) && /New clients\s*4/.test(split))
   /* Up to the 8th day of each: 9 now against 2 then (30 Sep is the 20th day, not yet reached). */
   t.ok('compared with last month by the same day', /up from 2 last month by the same day/.test(await page.getByTestId('intake-compare').innerText()))
 
@@ -115,8 +126,8 @@ try {
     '/accounts?book=whole&from=2026-10-11&to=2026-11-10')
 
   /* ---------- Departments ---------- */
-  t.ok('each department carries its headline: sales', /0\s+mandates signed/.test(await page.getByTestId('headline-Sales').innerText()))
-  t.ok('...communications', /2\s+clients sent work/.test(await page.getByTestId('headline-Communications').innerText()))
+  t.ok('each department carries its headline: sales', /4\s+accounts from new clients/.test(await page.getByTestId('headline-Sales').innerText()))
+  t.ok('...communications', /5\s+accounts from existing clients/.test(await page.getByTestId('headline-Communications').innerText()))
   t.ok('...administration', /9\s+accounts loaded/.test(await page.getByTestId('headline-Administration').innerText()))
   t.ok('...call centre, in rand', /R\s?0\s+collected this month/.test(await page.getByTestId('headline-Call centre').innerText()))
   t.check('four departments in one row', await page.getByTestId('departments').locator('a').count(), 4)
@@ -139,6 +150,16 @@ try {
   await nowLayer.locator('.recharts-bar-rectangle').first().click()
   await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
   t.ok('clicking a day opens that day\'s handovers', /\/accounts\?book=whole&from=2026-10-12&to=2026-10-12/.test(page.url()))
+
+  /* ---------- the communications dashboard: signed, nothing handed over ---------- */
+  await page.goto(`http://localhost:${PORT}/dashboard/communications`)
+  await page.getByTestId('awaiting-first-handover').waitFor({ timeout: 15000 })
+  const aw = await page.getByTestId('awaiting-first-handover').innerText()
+  t.ok('the communications dashboard lists clients signed with nothing handed over', /Signed, nothing handed over yet · 2/.test(aw))
+  t.ok('...the longest waiting first, with how long', aw.indexOf('Gone Cold Holdings') >= 0 && aw.indexOf('Gone Cold Holdings') < aw.indexOf('Recently Signed') && /78 days/.test(aw))
+  t.check('...each opens the client', await page.getByTestId('awaiting-first-handover').getByRole('link', { name: 'Gone Cold Holdings' }).getAttribute('href'), '/companies/c2')
+  await page.getByTestId('awaiting-first-handover').scrollIntoViewIfNeeded()
+  await t.shot(page, 'communications-awaiting')
 
   await context.close()
 } finally {
