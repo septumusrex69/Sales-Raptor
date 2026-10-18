@@ -43119,3 +43119,5 @@ begin
   end if;
   return new;
 end;
+$$;
+revoke all on function public.mandate_on_signed() from public, anon;

@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, UserPlus, StickyNote, CalendarClock, Users2, XCircle, Phone, Mail,
   MessageSquare, Trash2, Plus, Handshake,
+  FileSignature,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
@@ -21,6 +22,7 @@ import { WriteButton } from '../../components/email/MessageActions'
 import { AddDealModal, QuickLogModal, ScheduleFollowUpModal, ScheduleMeetingModal } from '../../components/QuickModals'
 import { RejectLeadModal } from '../../components/leads/RejectLeadModal'
 import { ConvertLeadModal } from '../../components/leads/ConvertLeadModal'
+import { SendMandateModal } from '../../components/leads/SendMandateModal'
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
@@ -45,7 +47,7 @@ import { leadClassifications } from '../../data/mockData'
 import type { Contact, LeadStatus } from '../../types'
 import { LeadOpportunityFields, leadOpportunityValueFromLead, leadOpportunityPatch, serviceValueLabel, leadServiceValueList } from '../../components/leads/LeadOpportunityFields'
 import { summaryLine } from '../../lib/summaryLine'
-import { hasDealValue } from '../../lib/dealKind'
+import { dealKind, hasDealValue } from '../../lib/dealKind'
 import { clockNow } from '../../lib/clock.ts'
 
 type LeadTab = 'Overview' | 'Emails' | 'Notes' | 'Tasks'
@@ -103,6 +105,7 @@ export function LeadDetail() {
   const [meetingOpen, setMeetingOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const [convertOpen, setConvertOpen] = useState(false)
+  const [mandateOpen, setMandateOpen] = useState(false)
   const [dealOpen, setDealOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
@@ -654,8 +657,16 @@ export function LeadDetail() {
               title={lead.email ? 'Send from your connected mailbox' : 'No email address on this lead yet'} />
             <RecordAction icon={StickyNote} label="Add Note" onClick={() => setNoteOpen(true)}
               title="Write on the timeline" />
+            {/* SEND THE MANDATE (the firm, 18 Oct): the PDF and a sign-online link in one email. Signing it
+                makes the lead a client by itself (mandate_on_signed), so it sits before Convert, which is
+                now the way for a client who signed on paper. */}
             {canEdit && active && (
-              <RecordAction icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)} primary />
+              <RecordAction icon={FileSignature} label="Send mandate" onClick={() => setMandateOpen(true)} primary
+                title="Email the debt collection agreement to sign online" />
+            )}
+            {canEdit && active && (
+              <RecordAction icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)}
+                title="For a client who signed on paper" />
             )}
 
             {/*
@@ -814,6 +825,18 @@ export function LeadDetail() {
             deleteLead(lead.id)
             navigate('/leads')
           }}
+        />
+      )}
+      {mandateOpen && (
+        <SendMandateModal
+          leadId={lead.id}
+          /* The lead's open mandate deal, if it has one, is the one signing wins; otherwise signing makes it. */
+          dealId={deals.find((d) => d.leadId === lead.id && dealKind(d) === 'Handover' && d.stage !== 'Won' && d.stage !== 'Rejected')?.id ?? null}
+          clientName={lead.companyName || `${lead.firstName} ${lead.lastName}`.trim()}
+          email={lead.email ?? null}
+          contactName={`${lead.firstName} ${lead.lastName}`.trim() || null}
+          onClose={() => setMandateOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
         />
       )}
       {emailOpen && lead.email && (

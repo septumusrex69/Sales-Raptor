@@ -51,6 +51,7 @@ export function ComposeEmailModal({
   quotedHtml,
   appendHtml,
   appendNote,
+  title,
   contextNote,
   inReplyTo,
   initialCc,
@@ -165,6 +166,8 @@ export function ComposeEmailModal({
   appendHtml?: string
   /** One line saying what was added, so nobody wonders what is going out under their words. */
   appendNote?: string
+  /** The window's heading. A subject given up front is not always a reply (a mandate, say). */
+  title?: string
   /**
    * The Message-ID being replied to, where this is a reply.
    *
@@ -472,7 +475,7 @@ export function ComposeEmailModal({
       reply to a debtor's three paragraphs was typed through a letterbox, and the quoted original
       below it would have been unreadable.
     */
-    <Modal title={initialSubject ? `Reply to ${to ?? address}` : 'New Email'} onClose={onClose} width={760}>
+    <Modal title={title ?? (initialSubject ? `Reply to ${to ?? address}` : 'New Email')} onClose={onClose} width={760}>
       {/*
         noValidate: THE BROWSER MAY NOT BE THE ONE TO REFUSE.
 

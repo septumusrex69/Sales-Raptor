@@ -3,9 +3,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, CheckCircle2, XCircle, StickyNote, CheckSquare, FileText, Send, Plus, Upload,
   Trash2, Mail, MessageSquare, Building2,
+  FileSignature,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
+import { SendMandateModal } from '../../components/leads/SendMandateModal'
 import { canEditOwned, canReassign, isAssignableOwner} from '../../lib/permissions'
 import { Card, CardHeader } from '../../components/ui/Card'
 import { StageBadge } from '../../components/ui/Badge'
@@ -93,6 +95,7 @@ export function DealDetail() {
   const [noteLimit, setNoteLimit] = useState<RowLimit>(5)
   const [emailLimit, setEmailLimit] = useState<RowLimit>(5)
   const [composeOpen, setComposeOpen] = useState(false)
+  const [mandateOpen, setMandateOpen] = useState(false)
   /**
    * Answering a message that is already on the deal.
    *
@@ -608,8 +611,14 @@ export function DealDetail() {
             title="Send from your connected mailbox" />
           <RecordAction icon={StickyNote} label="Add Activity" onClick={() => setActivityOpen(true)}
             title="Write on the timeline" />
+          {/* The mandate, sent to sign online (the firm, 18 Oct). Signing it wins this deal by itself;
+              "Mandate Signed" stays for a client who signed on paper. */}
+          {canEdit && isHandover && !isClosed && (
+            <RecordAction icon={FileSignature} label="Send mandate" primary onClick={() => setMandateOpen(true)}
+              title="Email the debt collection agreement to sign online" />
+          )}
           {canEdit && (
-            <RecordAction icon={CheckCircle2} label={isHandover ? 'Mandate Signed' : 'Mark Won'} primary
+            <RecordAction icon={CheckCircle2} label={isHandover ? 'Mandate Signed' : 'Mark Won'} primary={!isHandover || isClosed}
               onClick={isClosed ? undefined : () => setWonOpen(true)}
               title={isClosed ? 'This deal is already closed.' : undefined} />
           )}
@@ -690,6 +699,17 @@ export function DealDetail() {
         />
       )}
 
+      {mandateOpen && (
+        <SendMandateModal
+          leadId={deal.leadId ?? null}
+          dealId={deal.id}
+          clientName={company?.name ?? deal.name.replace(/\s*-\s*collections mandate$/i, '')}
+          email={contact?.email ?? recipients[0]?.email ?? null}
+          contactName={contact ? `${contact.firstName} ${contact.lastName}`.trim() : null}
+          onClose={() => setMandateOpen(false)}
+          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id })}
+        />
+      )}
       {composeOpen && (
         <ComposeEmailModal
           to={contact?.email ?? recipients[0]?.email}

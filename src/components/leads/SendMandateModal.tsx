@@ -108,6 +108,7 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
   if (compose) {
     return (
       <ComposeEmailModal
+        title="Send the mandate"
         to={email ?? undefined}
         initialSubject={compose.subject}
         initialBody={compose.body}
