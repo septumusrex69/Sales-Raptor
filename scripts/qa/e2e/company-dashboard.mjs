@@ -151,6 +151,20 @@ try {
   await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
   t.ok('clicking a day opens that day\'s handovers', /\/accounts\?book=whole&from=2026-10-12&to=2026-10-12/.test(page.url()))
 
+  /* ---------- over six months, one bar a month (the firm, 18 Oct) ---------- */
+  await page.goto(`http://localhost:${PORT}/`)
+  await page.getByTestId('intake-chart').waitFor({ timeout: 15000 })
+  await page.locator('select:has(option[value="last6"])').first().selectOption('last6')
+  await page.waitForTimeout(800)
+  await page.getByTestId('intake-chart').locator('.recharts-bar-rectangle').first().waitFor({ timeout: 15000 })
+  const monthTicks = await page.getByTestId('intake-chart').locator('.recharts-xAxis-tick-labels text').allTextContents()
+  t.check('over Last 6 months the chart draws six months, not a hundred and eighty days', JSON.stringify(monthTicks), JSON.stringify(['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov']))
+  await page.getByTestId('work-coming-in').scrollIntoViewIfNeeded()
+  await t.shot(page, 'company-dashboard-months')
+  await page.getByTestId('intake-chart').locator('.recharts-bar').nth(1).locator('.recharts-bar-rectangle').last().click()
+  await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
+  t.ok('...and a month bar opens that whole sales month, the 11th to the 10th', /\/accounts\?book=whole&from=2026-(\d\d)-11&to=2026-\d\d-10$/.test(page.url()) && (() => { const m = page.url().match(/from=2026-(\d\d)-11&to=2026-(\d\d)-10/); return !!m && Number(m[2]) === Number(m[1]) + 1 })())
+
   /* ---------- the communications dashboard: signed, nothing handed over ---------- */
   await page.goto(`http://localhost:${PORT}/dashboard/communications`)
   await page.getByTestId('awaiting-first-handover').waitFor({ timeout: 15000 })

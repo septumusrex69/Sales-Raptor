@@ -25,7 +25,7 @@
  */
 import { dealKind } from './dealKind.ts'
 import { isActiveLead } from './leadStatus.ts'
-import { isWithinPeriod, type SalesMonthPeriod } from './salesMonth.ts'
+import { getSalesMonthForDate, isWithinPeriod, type SalesMonthPeriod } from './salesMonth.ts'
 import type { Deal, Lead } from '../types'
 
 /** What the book looks like, counted in the database. Every figure is accounts, never earnings. */
@@ -100,9 +100,13 @@ export function salesSnapshot(leads: Lead[], deals: Deal[], period: SalesMonthPe
 
 /** One day's bar on "Work coming in". */
 export interface IntakeBar {
-  /** 'YYYY-MM-DD' */
+  /** 'YYYY-MM-DD' -- the day, or the first day of a month bar. */
   day: string
-  /** The day of the month, as the axis prints it. */
+  /** The last day the bar covers: the same day for a day bar, the month's last for a month bar. */
+  toDay: string
+  /** A day of the period, or a whole sales month of a longer span (intakeMonthBars). */
+  span: 'day' | 'month'
+  /** The day of the month, or the month ("May", "May 26" across a year end), as the axis prints it. */
   label: string
   accounts: number
   /** Capital at handover that day -- the client's money to recover, never the firm's. */
@@ -165,7 +169,7 @@ export function intakeBars(
     const pDay = prior && i < priorDays.length ? priorDays[i] : null
     const p = pDay ? priorBy.get(pDay) : undefined
     return {
-      day: iso, label: String(at.getUTCDate()),
+      day: iso, toDay: iso, span: 'day' as const, label: String(at.getUTCDate()),
       accounts: r?.accounts ?? 0, capital: r?.capital ?? 0,
       newAccounts: r?.newAccounts ?? 0, newCapital: r?.newCapital ?? 0,
       priorAccounts: pDay ? (p?.accounts ?? 0) : null,
@@ -173,6 +177,51 @@ export function intakeBars(
       weekend: dow === 0 || dow === 6, future: iso > todayIso,
     }
   })
+}
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** True when a span reaches past one sales month, which is when the chart draws months, not days. */
+export function spansMonths(fromIso: string, toIso: string): boolean {
+  return getSalesMonthForDate(new Date(`${fromIso}T12:00:00`)).key !== getSalesMonthForDate(new Date(`${toIso}T12:00:00`)).key
+}
+
+/**
+ * OVER A RUN OF MONTHS, ONE BAR A MONTH (the firm, 18 Oct: "when it's in the form of a specific time
+ * frame, like 3 months or more time ... compare the months to each other instead of the days"). A
+ * hundred and eighty daily bars could not be read, and their labels ran into each other.
+ *
+ * The month is the firm's SALES month (the 11th to the 10th), the same month every period picker in
+ * the app means. A month the span only touches is cut to the span, so the first and last bar count
+ * only what the span holds. There is no faint bar behind: the months ARE the comparison. A month not
+ * yet begun is a future slot; the one in progress is drawn as far as it has got.
+ */
+export function intakeMonthBars(fromIso: string, toIso: string, rows: IntakeRow[], todayIso: string): IntakeBar[] {
+  const days = intakeBars(fromIso, toIso, rows, todayIso)
+  const out: IntakeBar[] = []
+  const keys = new Map<string, IntakeBar>()
+  const years = new Set<number>()
+  for (const d of days) {
+    const m = getSalesMonthForDate(new Date(`${d.day}T12:00:00`))
+    years.add(m.end.getFullYear())
+    let bar = keys.get(m.key)
+    if (!bar) {
+      bar = { day: d.day, toDay: d.day, span: 'month', label: m.key, accounts: 0, capital: 0, newAccounts: 0, newCapital: 0,
+        priorAccounts: null, priorCapital: null, weekend: false, future: true }
+      keys.set(m.key, bar)
+      out.push(bar)
+    }
+    bar.toDay = d.day
+    bar.accounts += d.accounts; bar.capital += d.capital
+    bar.newAccounts += d.newAccounts; bar.newCapital += d.newCapital
+    if (!d.future) bar.future = false
+  }
+  const across = years.size > 1
+  for (const b of out) {
+    const [y, mo] = b.label.split('-').map(Number)
+    b.label = across ? `${MON[mo - 1]} ${String(y).slice(2)}` : MON[mo - 1]
+  }
+  return out
 }
 
 /**

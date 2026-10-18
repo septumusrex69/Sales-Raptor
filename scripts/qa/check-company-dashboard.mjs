@@ -19,7 +19,7 @@
  * Run: node scripts/qa/check-company-dashboard.mjs
  */
 import { readFileSync } from 'node:fs'
-import { awaitingFirstHandover, bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeSplit, salesSnapshot } from '../../src/lib/companySnapshot.ts'
+import { awaitingFirstHandover, bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeMonthBars, intakeSplit, salesSnapshot, spansMonths } from '../../src/lib/companySnapshot.ts'
 import { getSalesMonthForKey } from '../../src/lib/salesMonth.ts'
 
 let pass = 0
@@ -251,7 +251,7 @@ ok('...and a span of months is not called sales months either',
     departmentHeadline('Call centre', { collected: null, mandates: 0, intakeClients: null, intakeAccounts: null }, m)?.value, '…')
   ok('no headline is commission or fees', !heads.some((h) => /commission|fee|annexure/i.test(h?.label ?? '')))
   ok('the screen links the ring to the account list\'s own views', /viewParams\('unallocated'/.test(page) && /viewParams\('gone_quiet'/.test(page))
-  ok('...and a day\'s bar to that day\'s handovers', /onDay=\{\(b\) => navigate\(handedOver\(b\.day, b\.day\)\)\}/.test(page))
+  ok('...and a bar to the handovers it covers: its day, or its whole month', /onDay=\{\(b\) => navigate\(handedOver\(b\.day, b\.toDay\)\)\}/.test(page))
 
   /* New and existing clients (the firm, 18 Oct): the three figures add up, from the same bars. */
   const sb = intakeBars('2026-10-11', '2026-10-20', [
@@ -263,6 +263,22 @@ ok('...and a span of months is not called sales months either',
   same('sales\' headline is the new clients\' work, communications\' the existing',
     ['Sales', 'Communications'].map((d) => departmentHeadline(d, { collected: 0, mandates: 9, intakeClients: 9, intakeAccounts: 9, fromNew: 4, fromExisting: 3 }, m)?.label),
     ['accounts from new clients', 'accounts from existing clients'])
+  /* OVER A SPAN OF MONTHS, ONE BAR A MONTH (the firm, 18 Oct: "compare the months to each other instead
+     of the days"). Sales months, 11th to 10th; the one in progress drawn as far as it has got. */
+  ok('one sales month is days', !spansMonths('2026-08-11', '2026-09-10'))
+  ok('...six of them are months', spansMonths('2026-04-11', '2026-10-10'))
+  const mb = intakeMonthBars('2026-04-11', '2026-10-10', [
+    { day: '2026-04-11', accounts: 2, capital: 100, newAccounts: 1, newCapital: 40 },
+    { day: '2026-05-10', accounts: 3, capital: 300, newAccounts: 0, newCapital: 0 },
+    { day: '2026-05-11', accounts: 5, capital: 500, newAccounts: 5, newCapital: 500 },
+    { day: '2026-09-01', accounts: 7, capital: 700, newAccounts: 2, newCapital: 200 },
+  ], '2026-09-05')
+  same('six bars, by the month each ends in', mb.map((x) => x.label), ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'])
+  same('...the 10th belongs to the month ending that day, the 11th to the next', mb.slice(0, 2).map((x) => [x.accounts, x.newAccounts]), [[5, 1], [5, 5]])
+  same('...each bar opens the month it covers', [mb[0].day, mb[0].toDay, mb[0].span], ['2026-04-11', '2026-05-10', 'month'])
+  same('...the month in progress is drawn, the one not yet begun is a future slot', [mb[4].future, mb[4].accounts, mb[5].future], [false, 7, true])
+  same('...and no faint bar behind: the months are the comparison', mb.every((x) => x.priorAccounts === null), true)
+  same('across a year end the label says the year', intakeMonthBars('2025-11-11', '2026-02-10', [], '2026-03-01').map((x) => x.label), ['Dec 25', 'Jan 26', 'Feb 26'])
   const ib = sql.slice(sql.lastIndexOf('create or replace function public.company_intake_by_day('))
   ok('new is counted from the client\'s FIRST handover, not the mandate', /min\(handover_date\) as first_day/.test(ib.slice(0, 1500)) && !/mandate/.test(ib.slice(0, 1500)))
   ok('...for three months', /first_day \+ interval '3 months'/.test(ib.slice(0, 1500)))

@@ -193,6 +193,12 @@ Also:
 Mandates and Deal outcomes now sit side by side from `lg` (iPad) up, with container queries
 inside the cards.
 
+**Work coming in draws months over a span of months** (`intakeMonthBars`, `spansMonths`):
+- One SALES month per bar.
+- No faint prior bar: the months are the comparison.
+- A bar opens its whole month (`toDay`).
+- The firm: "when it's ... 3 months or more ... compare the months to each other instead of the days".
+
 ### S7 · Clean Break (12 Oct)
 
 - **Payover runs: four tabs, one cycle each** (the firm, 12 Oct, on staging day 11 Aug: "in the

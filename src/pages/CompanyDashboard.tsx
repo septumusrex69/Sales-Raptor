@@ -11,7 +11,7 @@ import { MonthProgress } from '../components/collections/MonthProgress'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import { useCollectionsMonth } from '../hooks/useCollectionsMonth'
-import { bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeSplit, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
+import { bookSlices, departmentHeadline, intakeBars, intakeComparison, intakeMonthBars, spansMonths, intakeSplit, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
 import { getPreviousSalesMonth } from '../lib/salesMonth'
 import { viewParams } from '../lib/accountViews'
 import { fetchBookSnapshot, fetchIntakeByDay, isoDay } from '../lib/companySnapshotData'
@@ -81,12 +81,15 @@ export function CompanyDashboard() {
   }, [month.period])
 
   /* Every day of the period, the as-at day deciding which are still to come. */
+  const monthly = spansMonths(isoDay(month.period.start), isoDay(month.period.end))
   const bars = useMemo(() => {
     if (intake === null) return null
+    /* A span of months is drawn a month a bar -- see intakeMonthBars. */
+    if (monthly) return intakeMonthBars(isoDay(month.period.start), isoDay(month.period.end), intake, isoDay(month.asAt))
     const before = getPreviousSalesMonth(month.period)
     return intakeBars(isoDay(month.period.start), isoDay(month.period.end), intake, isoDay(month.asAt),
       prior === null ? undefined : { fromIso: isoDay(before.start), toIso: isoDay(before.end), rows: prior })
-  }, [intake, prior, month.period, month.asAt])
+  }, [intake, prior, month.period, month.asAt, monthly])
   const compare = bars ? intakeComparison(bars) : null
   const split = bars ? intakeSplit(bars) : null
   const navigate = useNavigate()
@@ -207,7 +210,7 @@ export function CompanyDashboard() {
           </div>
           <Figures loading={bars === null && barsError === null} error={barsError} plain>
             <IntakeChart bars={bars ?? []} measure={measure}
-              onDay={(b) => navigate(handedOver(b.day, b.day))} />
+              onDay={(b) => navigate(handedOver(b.day, b.toDay))} />
           </Figures>
           <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
             <SalesTile icon={<FileText size={16} />} label="Open leads" value={count(sales.openLeads)}
@@ -457,7 +460,7 @@ function IntakeChart({ bars, measure, onDay }: {
   return (
     <div className="h-48 [&_*:focus]:outline-none" data-testid="intake-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap="18%" barGap="-100%">
+        <BarChart data={data} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap={bars[0]?.span === 'month' ? '28%' : '18%'} barGap="-100%">
           {/* barGap -100%: last month's bar sits BEHIND this month's, not beside it. */}
           <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />
           <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0}
@@ -475,8 +478,8 @@ function IntakeChart({ bars, measure, onDay }: {
               const then = b[priorKey] === null ? null : measure === 'accounts' ? `${(b.priorAccounts ?? 0).toLocaleString('en-ZA')}` : rand0(b.priorCapital ?? 0)
               return (
                 <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
-                  <div className="font-semibold text-slate-800">{longDay(b.day)}</div>
-                  <div className="text-slate-600">{b.future ? 'Still to come' : `${now} handed over`}</div>
+                  <div className="font-semibold text-slate-800">{b.span === 'month' ? `${longDay(b.day)} to ${longDay(b.toDay)}` : longDay(b.day)}</div>
+                  <div className="text-slate-600">{b.future ? 'Still to come' : `${now} handed over${b.span === 'month' ? ' in the month' : ''}`}</div>
                   {!b.future && b.accounts > 0 && (
                     <div className="text-slate-500">{split.existing} from existing clients · {split.fresh} from new</div>
                   )}
