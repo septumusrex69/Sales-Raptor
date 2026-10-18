@@ -95,12 +95,22 @@ export function PhoneLink({ number, className = '', iconSize = 13, children, log
   if (!canDial) {
     // The device's own dialler. Still worth telling the caller it happened — an account wants
     // the call on its timeline however it was placed — but nothing will report back on it.
-    return (
+    /* SAID, NOT SILENT, WHEN BUZZBOX IS THERE AND YOUR EXTENSION IS NOT (the firm, 18 Oct: "you
+       should also be able to call from BuzzBox ... on a lead or a deal or anything"). Every Call
+       button already dials through BuzzBox -- for a person with an extension. Without one it falls
+       back to the device's phone link, which on an iPad with no SIM looks like nothing happening. */
+    const noExtension = !!status?.connected && !status.extension
+    const link = (
       <a href={`tel:${number.replace(/\s/g, '')}`} className={`${block ? 'block w-full ' : ''}${className}`}
+        title={noExtension ? 'You have no BuzzBox extension, so this uses your device\u2019s own phone. Pick yours in Settings, Integrations.' : undefined}
         onClick={() => onDialled?.({ from: '', to: number, viaPabx: false })}>
         {content}
       </a>
     )
+    if (noExtension && inActionRow) {
+      return <RecordActionNote note={<a href="/settings?tab=Integrations" className="text-[11px] text-gold-700 hover:underline">No BuzzBox extension: pick yours</a>}>{link}</RecordActionNote>
+    }
+    return link
   }
 
   async function handleClick() {

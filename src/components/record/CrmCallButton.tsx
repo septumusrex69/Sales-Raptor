@@ -41,7 +41,7 @@ export function CrmCallButton({ numbers, to, subject, className }: {
   // One number: no question to ask, so do not ask one.
   if (numbers.length === 1) {
     return (
-      <PhoneLink number={numbers[0].value} className={className} log={log}>
+      <PhoneLink number={numbers[0].value} className={className} log={log} inActionRow>
         <Phone size={14} /> Call
       </PhoneLink>
     )
