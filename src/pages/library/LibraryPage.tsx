@@ -331,12 +331,18 @@ export function LibraryPage() {
       {rows !== null && (
         /*
           TWO COLUMNS, at the firm's own suggestion after working with a review copy laid out this
-          way: the list stays put while you read, so moving between twenty pieces of wording is a
-          click rather than a scroll back up. It stacks below `lg`, where a 288px column would
-          leave the letter itself unreadable.
+          way. It stacks below `lg`, where the list column would leave the letter unreadable.
+
+          THE TEMPLATE STAYS STILL, NOT THE LIST (the firm, 18 Oct, on the iPad: "when you scroll
+          down, the right side stays still ... currently if you scroll down, you click at the
+          bottom, then you have to scroll all the way up"). The list was the sticky one, but at
+          fifty SMS templates it is far taller than the screen, so it scrolled away regardless and
+          the template opened at the top of the page, out of sight. Now the list scrolls with the
+          page and the opened template is pinned under the top bar, scrolling inside itself when it
+          is longer than the window.
         */
-        <div className="grid gap-4 lg:grid-cols-[288px_minmax(0,1fr)] items-start">
-          <div className="lg:sticky lg:top-2">
+        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)] items-start">
+          <div>
             {KINDS_FOR_SCOPE[scope].map((kind) => (
               <KindGroup key={kind} kind={kind}
                 rows={rows.filter((r) => r.kind === kind)}
@@ -350,6 +356,7 @@ export function LibraryPage() {
             )}
           </div>
 
+          <div className="lg:sticky lg:top-2 lg:max-h-[calc(100dvh-7.5rem)] lg:overflow-y-auto rounded-xl" data-testid="library-open">
           <Card padded={false}>
             {/* `mayEdit &&` as well as the hidden buttons: hiding a control is not a permission,
                 and this is the one place a stale state could still put a form on screen. */}
@@ -427,6 +434,7 @@ export function LibraryPage() {
               </div>
             )}
           </Card>
+          </div>
         </div>
       )}
     </div>
@@ -476,11 +484,13 @@ function ListRow({ template, current, onOpen, attaches }: {
   const broken = unknownFields(template.scope, template.body, template.subject).length > 0
   const filedAs = template.seedKey ?? (template.position ? DESK_POSITIONS[template.position].label : 'written here')
   return (
-    /* ONE LINE, the firm's checking-list look ("thin, sleek, easy to read"): what it is filed
+    /* ONE LINE, the firm's checking-list look ("thin, sleek, easy to read") -- and a size up since
+       18 Oct ("make these ones on the left a little bit bigger to view"): 14px, a finger's height
+       on the iPad. What it is filed
        under used to be a second line of its own under every name. It trails the name in grey now,
        gives way first when the column is narrow, and is always in the tooltip. */
     <button type="button" onClick={onOpen} aria-current={current} title={`${template.name} \u00b7 ${filedAs}`}
-      className={`flex w-full items-center gap-1.5 text-left border-b border-slate-50 border-l-[3px] px-2 py-1.5 text-[12.5px] whitespace-nowrap transition
+      className={`flex w-full items-center gap-2 text-left border-b border-slate-100 border-l-[3px] px-2.5 py-2.5 text-[14px] whitespace-nowrap transition
         ${current
           ? 'border-l-gold-500 bg-navy-50'
           : 'border-l-transparent hover:bg-slate-50'}`}>
@@ -500,7 +510,7 @@ function ListRow({ template, current, onOpen, attaches }: {
         </span>
       )}
       {!template.active && <span className="text-[10px] text-slate-400 shrink-0">retired</span>}
-      <span className="min-w-0 flex-1 shrink-[2] truncate text-[10.5px] font-mono text-slate-400">
+      <span className="min-w-0 flex-1 shrink-[2] truncate text-[11.5px] font-mono text-slate-400">
         &middot; {filedAs}
       </span>
     </button>

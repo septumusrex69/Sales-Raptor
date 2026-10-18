@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
-import { Activity, ArrowRight, Banknote, BarChart3, Coins, FileSignature, FileText, Handshake, Headset, Loader2, Users } from 'lucide-react'
+import { ArrowRight, Banknote, Coins, FileSignature, FileText, Handshake, Loader2 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../components/ui/Card'
 import { CollectionsHero } from '../components/collections/CollectionsHero'
@@ -334,40 +334,49 @@ function DepartmentCard({ id, label, blurb, people, ours, headline }: {
   ours: boolean
   headline: { value: string; label: string } | null
 }) {
-  const Icon = DEPARTMENT_ICON[id]
+  const photo = DEPARTMENT_PHOTO[id]
+  /*
+   * A PHOTOGRAPH A DEPARTMENT (the firm, 18 Oct, sending the four pictures and the mock-up: "do
+   * this"). The desk for administration, the summit for sales, the open sea for communications, the
+   * headset for the call centre. The words sit on a dark wash from the left so they read on any part
+   * of the picture, in light and dark skins alike. Yours wears the gold edge.
+   */
   return (
-    <Link to={dashboardPathFor(id)} title={blurb} data-testid={`department-${id}`}
-      className={clsx('group flex items-center gap-3 rounded-2xl border bg-white px-4 py-3 transition-colors',
-        ours ? 'border-gold-300 bg-gold-50/60' : 'border-slate-200 hover:border-slate-300')}>
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gold-50 text-gold-700">
-        <Icon size={18} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-bold leading-tight text-slate-800">{label}</span>
-        {headline && (
-          <span className="block truncate text-xs text-slate-600" data-testid={`headline-${id}`}>
-            <span className="font-bold tabular-nums text-slate-800">{headline.value}</span> {headline.label}
+    <div data-testid={`department-${id}`}
+      className={clsx('relative isolate overflow-hidden rounded-2xl bg-navy-950 text-white min-h-[150px]',
+        ours ? 'ring-2 ring-gold-400' : 'ring-1 ring-black/5')}>
+      {photo && <img src={photo} alt="" loading="lazy" className="absolute inset-0 -z-10 h-full w-full object-cover" />}
+      <div className="absolute inset-0 -z-10 bg-gradient-to-r from-navy-950/90 via-navy-950/65 to-navy-950/10" />
+      <div className="flex h-full flex-col gap-1.5 p-4">
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-base font-bold leading-tight">{label}</h3>
+          <span className="shrink-0 text-xs tabular-nums text-white/75">
+            {people === 1 ? '1 person' : `${people} people`}
           </span>
+        </div>
+        <p className="max-w-[17rem] text-[12.5px] leading-snug text-white/85">{blurb}</p>
+        {headline && (
+          <p className="text-xs text-white/80" data-testid={`headline-${id}`}>
+            <span className="font-bold tabular-nums text-gold-300">{headline.value}</span> {headline.label}
+          </p>
         )}
-        <span className="block text-[11px] tabular-nums text-slate-400">
-          {people === 1 ? '1 person' : `${people} people`}{ours ? ' · yours' : ''}
-        </span>
-      </span>
-      <span className={clsx('grid h-8 w-8 place-items-center rounded-full',
-        ours ? 'bg-navy-900 text-white' : 'bg-slate-50 text-slate-600 group-hover:bg-slate-100')}>
-        <ArrowRight size={15} />
-      </span>
-    </Link>
+        <Link to={dashboardPathFor(id)}
+          className={clsx('mt-auto inline-flex w-fit items-center gap-1.5 rounded-lg border px-4 py-1.5 text-xs font-semibold backdrop-blur-sm',
+            ours ? 'border-gold-400 bg-gold-400 text-navy-950 hover:bg-gold-300' : 'border-white/40 bg-navy-950/40 hover:bg-navy-950/70')}>
+          {ours ? 'Yours' : 'Open'} <ArrowRight size={13} />
+        </Link>
+      </div>
+    </div>
   )
 }
 
-const DEPARTMENT_ICON: Record<Department, typeof Users> = {
-  'Administration': Users,
-  'Sales': BarChart3,
-  'Communications': Activity,
-  'Call centre': Headset,
-  'Other': Users,
+const DEPARTMENT_PHOTO: Partial<Record<Department, string>> = {
+  'Administration': '/brand/departments/administration.webp',
+  'Sales': '/brand/departments/sales.webp',
+  'Communications': '/brand/departments/communications.webp',
+  'Call centre': '/brand/departments/call-centre.webp',
 }
+
 
 /** A white card with a title, a quiet subtitle and "View all" -- the firm's mock-up, both panels. */
 function Panel({ title, why, to, testId, className, children }: {

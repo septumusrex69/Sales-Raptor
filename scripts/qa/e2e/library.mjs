@@ -350,6 +350,20 @@ try {
     filled.includes('{{bank_account_number}}'))
   await t.shot(page, '60-library-collections')
 
+  /*
+   * THE OPENED TEMPLATE STAYS STILL WHILE THE LIST SCROLLS (the firm, 18 Oct, on the iPad: "when
+   * you scroll down, the right side stays still"), and the rows are a size up ("a little bit bigger
+   * to view"). Asked of the rendered page: the pinned panel is sticky, the list column is not.
+   */
+  {
+    const pinned = await page.getByTestId('library-open').evaluate((el) => getComputedStyle(el).position)
+    t.check('the opened template is pinned while the list scrolls', pinned, 'sticky')
+    const listSticky = await page.getByTestId('library-open').evaluate((el) => getComputedStyle(el.previousElementSibling).position)
+    t.check('...and the list is not (it is taller than the screen)', listSticky, 'static')
+    const rowSize = await page.locator('button[aria-current]').first().evaluate((el) => getComputedStyle(el).fontSize)
+    t.check('the list rows are a size up', rowSize, '14px')
+  }
+
   /* ---------- the other side is a different library, not a filter ---------- */
 
   await page.getByRole('button', { name: 'Sales', exact: true }).click()

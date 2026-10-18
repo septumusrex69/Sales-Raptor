@@ -120,9 +120,10 @@ try {
   t.ok('...administration', /9\s+accounts loaded/.test(await page.getByTestId('headline-Administration').innerText()))
   t.ok('...call centre, in rand', /R\s?0\s+collected this month/.test(await page.getByTestId('headline-Call centre').innerText()))
   t.check('four departments in one row', await page.getByTestId('departments').locator('a').count(), 4)
+  t.check('...each on its own photograph', await page.getByTestId('departments').locator('img[src^="/brand/departments/"]').count(), 4)
   const row = await page.getByTestId('departments').locator('a').evaluateAll((as) => as.map((a) => Math.round(a.getBoundingClientRect().top)))
   t.ok('...on one line at a laptop\'s width', new Set(row).size === 1)
-  t.ok('yours is marked', /Administration[\s\S]*yours/.test(await page.getByTestId('department-Administration').innerText()))
+  t.ok('yours is marked', /Administration[\s\S]*Yours/.test(await page.getByTestId('department-Administration').innerText()))
 
   /* ---------- the promise the screen was agreed under ---------- */
   t.ok('no commission on the screen', !/commission/i.test(text.replace(/Commission and Annexure B income are deliberately not on[\s\S]*?audience\./, '')))
