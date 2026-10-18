@@ -65,8 +65,9 @@ ok('your own mailbox is still its own door', /\.eq\('user_id', caller\.id\)/.tes
  * THE ORDER IS LOAD-BEARING. The cron is recognised BEFORE a session is demanded, because a cron
  * request has none. Ask for the session first and the nightly run gets a 401 every night.
  */
+/* ONLY by its bearer since 18 Oct (security audit C-01): an unset CRON_SECRET no longer counts as one. */
 ok('the cron is recognised by its bearer',
-  /const fromCron = !cronSecret \|\| req\.headers\.authorization === `Bearer \$\{cronSecret\}`/.test(all))
+  /const fromCron = !!cronSecret && req\.headers\.authorization === `Bearer \$\{cronSecret\}`/.test(all))
 ok('...and is not asked for a session', /if \(!fromCron\) \{[\s\S]{0,300}?requireCaller/.test(all))
 /* AND A CALLER WITH NEITHER IS REFUSED. This is the half that would be missed: with no
    CRON_SECRET set the bearer test passes for everyone, so the session branch is the only thing
