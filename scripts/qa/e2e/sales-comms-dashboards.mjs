@@ -23,6 +23,18 @@ const BOOKS = [
   { company_id: 'c3', name: 'Waiting Signee', account_owner_id: ADMIN.id, mandate_signed_at: '2026-10-01T00:00:00Z', first_handover: null, last_handover: null, accounts: 0, capital: 0, collected: 0, period_accounts: 0, period_capital: 0, value_band: null },
 ]
 
+/* Leads and mandates across the last months, so the stacked bars have something to stack. */
+const LEADS = Array.from({ length: 40 }, (_, i) => ({
+  id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, lead_number: i + 1, first_name: 'Lead', last_name: String(i),
+  company_name: `Lead Co ${i}`, source: 'Website', status: 'Interested', owner_id: ADMIN.id,
+  created_at: `2026-${String(5 + (i % 5)).padStart(2, '0')}-20T09:00:00Z`,
+}))
+const DEALS = Array.from({ length: 8 }, (_, i) => ({
+  id: `00000000-0000-4000-9000-${String(i).padStart(12, '0')}`, name: `Mandate ${i}`, company_id: 'c1', owner_id: ADMIN.id,
+  stage: 'Won', value: 0, kind: 'Handover', service: 'Debt Collection', source: 'Website',
+  won_at: `2026-${String(5 + (i % 5)).padStart(2, '0')}-25T09:00:00Z`, expected_close_date: '2026-09-01T00:00:00Z', created_at: '2026-05-01T00:00:00Z',
+}))
+
 const server = await startServer()
 let browser
 try {
@@ -32,6 +44,8 @@ try {
     [(u) => /\/rpc\/company_intake_by_day/.test(u), () => ({ body: INTAKE })],
     [(u) => /\/rpc\/client_book_summary/.test(u), () => ({ body: BOOKS })],
     [(u) => /\/rpc\/clients_awaiting_first_handover/.test(u), () => ({ body: [] })],
+    [(u) => /\/rest\/v1\/leads/.test(u), () => ({ body: LEADS })],
+    [(u) => /\/rest\/v1\/deals/.test(u), () => ({ body: DEALS })],
   ]
   const { context, page } = await signedInPage(browser, ADMIN, handlers, [], { now: '2026-10-18T10:00:00+02:00' })
   for (let i = 0; i < 60; i += 1) {
@@ -49,6 +63,16 @@ try {
   await page.getByTestId('sales-track-months-12').click()
   await page.waitForTimeout(400)
   t.check('...and twelve on the switch', await monthsShown(), 12)
+  /* ONE BAR A MONTH, filled from the bottom by the mandates: two layers stacked, the closing rate over it. */
+  t.check('mandates and unsigned leads stack into one bar', await page.getByTestId('sales-track').locator('.recharts-bar').count(), 2)
+  t.ok('...with the closing rate printed over the bar', (await page.getByTestId('sales-track').locator('.recharts-label-list text').allTextContents()).some((x) => /^\d+%$/.test(x)))
+  await page.getByTestId('sales-track-show-lines').click()
+  await page.waitForTimeout(300)
+  t.check('the Line switch draws lines instead', JSON.stringify([await page.getByTestId('sales-track').locator('.recharts-bar').count(), await page.getByTestId('sales-track').locator('.recharts-line').count()]), '[0,2]')
+  await page.getByTestId('sales-track-show-both').click()
+  await page.waitForTimeout(300)
+  t.check('...and Both draws both', JSON.stringify([await page.getByTestId('sales-track').locator('.recharts-bar').count(), await page.getByTestId('sales-track').locator('.recharts-line').count()]), '[2,2]')
+  t.ok('the charts are compact', ((await page.getByTestId('sales-track').locator('.recharts-responsive-container').boundingBox())?.height ?? 999) <= 180)
   t.ok('new-client handovers this month in the row: 2 accounts', /2 · R\s?40[\s,]000/.test(await page.getByTestId('sales-collections-row').innerText()))
   t.ok('signed, nothing handed over, for Sales', /Waiting Signee/.test(await page.getByTestId('sales-awaiting').innerText()))
   t.ok('what each rep brought in', await page.getByTestId('sales-reps-brought-in').isVisible())

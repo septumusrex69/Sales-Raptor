@@ -497,9 +497,9 @@ export function Dashboard() {
           hint="Accounts and capital from clients in their first three months of handovers -- the work Sales brought in. The firm's whole intake, whichever rep is picked." />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <MonthTrackCard kind="pipeline" rows={track} months={months} onMonths={setMonths} testId="sales-track"
-          title="Leads and mandates, month by month" subtitle="Two bars a month, and the closing rate across them" />
+          title="Leads and mandates, month by month" subtitle="Each bar is the leads; the navy part was signed. The % is the closing rate." />
         <MonthTrackCard kind="new" rows={track} months={months} onMonths={setMonths} testId="sales-new-handovers"
           title="Handovers from new clients" subtitle="Clients in their first three months of handovers" />
       </div>

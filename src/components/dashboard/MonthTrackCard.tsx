@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import clsx from 'clsx'
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, CartesianGrid, ComposedChart, LabelList, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card, CardHeader } from '../ui/Card'
 import type { MonthTrack } from '../../lib/clientBook'
 
@@ -9,7 +9,8 @@ import type { MonthTrack } from '../../lib/clientBook'
  * months ... interchangeable ... possibly show the closing rate for the previous months").
  *
  * Three readings of the same months, chosen by `kind`:
- *   - 'pipeline': leads and mandates as two bars a month, the closing rate a line on its own axis;
+ *   - 'pipeline': one bar a month, its height the leads, filled from the bottom by the mandates signed
+ *     (the share filled is the closing rate, printed above it); lines for leads and mandates on a switch;
  *   - 'new':      handovers from NEW clients (Sales' work), accounts or rand;
  *   - 'existing': handovers from EXISTING clients (Communications' work), accounts or rand.
  * The months are handed in; the 6 / 12 switch tells the page how many to work out.
@@ -24,11 +25,27 @@ export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, 
   testId: string
 }) {
   const [measure, setMeasure] = useState<'accounts' | 'capital'>('accounts')
+  /*
+   * BARS, LINES OR BOTH (the firm, 18 Oct: "you can be able to remove the line graph, or you can only
+   * see the line graph ... connecting those dots on the mandates signed or on the amount of leads").
+   */
+  const [show, setShow] = useState<'bars' | 'both' | 'lines'>('bars')
+  const bars = show !== 'lines'
+  const lines = show !== 'bars'
   const money = kind !== 'pipeline' && measure === 'capital'
   const fmt = (v: number) => money ? shortRand(v) : v.toLocaleString('en-ZA')
   const data = rows.map((r) => ({
     ...r,
     value: kind === 'new' ? (money ? r.newCapital : r.newAccounts) : kind === 'existing' ? (money ? r.existingCapital : r.existingAccounts) : 0,
+    /*
+     * ONE BAR A MONTH, FILLED FROM THE BOTTOM BY WHAT WAS SIGNED (the firm, 18 Oct, colouring it in on
+     * the screenshot: "30 mandates ... and a certain percentage is colored in which was signed. So from
+     * the bottom up"). The bar's height is the leads; the navy part is the mandates, the gold the leads
+     * that did not sign that month -- so the two stack to the leads and the share filled IS the closing
+     * rate. A month with more mandates than leads (signed from earlier months' leads) is all navy.
+     */
+    unsigned: Math.max(0, r.leads - r.mandates),
+    rateLabel: r.closingRate === null ? '' : `${r.closingRate}%`,
   }))
   return (
     <Card>
@@ -37,20 +54,18 @@ export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, 
           <CardHeader title={title} subtitle={subtitle} />
           <div className="flex items-center gap-2">
             {kind !== 'pipeline' && <Switch options={[['accounts', 'Accounts'], ['capital', 'Rand']]} value={measure} onChange={setMeasure} name={`${testId}-measure`} />}
+            <Switch options={[['bars', 'Bars'], ['both', 'Both'], ['lines', 'Line']]} value={show} onChange={setShow} name={`${testId}-show`} />
             <Switch options={[[6, '6 months'], [12, '12 months']]} value={months} onChange={onMonths} name={`${testId}-months`} />
           </div>
         </div>
-        <div className="h-64 [&_*:focus]:outline-none">
+        {/* SMALLER (the firm: "the charts are too big ... taking up a lot of space"). */}
+        <div className="h-44 [&_*:focus]:outline-none">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={data} accessibilityLayer={false} margin={{ top: 8, right: kind === 'pipeline' ? 8 : 4, bottom: 0, left: money ? -4 : -18 }}>
+            <ComposedChart data={data} accessibilityLayer={false} margin={{ top: 14, right: 4, bottom: 0, left: money ? -4 : -18 }}>
               <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />
               <XAxis dataKey="short" tickLine={false} axisLine={false} interval={0} tick={{ fontSize: 11, fill: 'var(--color-slate-400)' }} />
               <YAxis yAxisId="n" allowDecimals={false} tickLine={false} axisLine={false} width={money ? 52 : 40}
                 tickFormatter={fmt} tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
-              {kind === 'pipeline' && (
-                <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tickLine={false} axisLine={false} width={36}
-                  tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
-              )}
               <Tooltip cursor={{ fill: 'var(--color-slate-50)' }}
                 content={({ active, payload }) => {
                   const r = payload?.[0]?.payload as (MonthTrack & { value: number }) | undefined
@@ -67,14 +82,21 @@ export function MonthTrackCard({ kind, rows, months, onMonths, title, subtitle, 
                 }} />
               {kind === 'pipeline' && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />}
               {kind === 'pipeline' ? <>
-                <Bar yAxisId="n" dataKey="leads" name="Leads" fill="var(--color-gold-400)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-                <Bar yAxisId="n" dataKey="mandates" name="Mandates signed" fill="var(--color-navy-700)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-                <Line yAxisId="pct" dataKey="closingRate" name="Closing rate" stroke="var(--color-emerald-600)" strokeWidth={2}
-                  dot={{ r: 3 }} connectNulls isAnimationActive={false} />
-              </> : (
-                <Bar yAxisId="n" dataKey="value" name={kind === 'new' ? 'From new clients' : 'From existing clients'}
-                  fill={kind === 'new' ? 'var(--color-navy-700)' : 'var(--color-gold-400)'} radius={[3, 3, 0, 0]} isAnimationActive={false} />
-              )}
+                {bars && <Bar yAxisId="n" dataKey="mandates" stackId="m" name="Mandates signed" fill="var(--color-navy-700)" legendType="circle" isAnimationActive={false} />}
+                {bars && (
+                  <Bar yAxisId="n" dataKey="unsigned" stackId="m" name="Leads not signed" fill="var(--color-gold-300)" legendType="circle" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                    {/* The closing rate over each bar: the share of it filled navy. */}
+                    <LabelList dataKey="rateLabel" position="top" style={{ fontSize: 9, fill: 'var(--color-slate-500)' }} />
+                  </Bar>
+                )}
+                {lines && <Line yAxisId="n" dataKey="leads" name="Leads" stroke="var(--color-gold-600)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
+                {lines && <Line yAxisId="n" dataKey="mandates" name="Mandates" stroke="var(--color-navy-900)" strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
+              </> : <>
+                {bars && <Bar yAxisId="n" dataKey="value" name={kind === 'new' ? 'From new clients' : 'From existing clients'}
+                  fill={kind === 'new' ? 'var(--color-navy-700)' : 'var(--color-gold-400)'} radius={[3, 3, 0, 0]} isAnimationActive={false} />}
+                {lines && <Line yAxisId="n" dataKey="value" name="Trend" stroke={kind === 'new' ? 'var(--color-navy-900)' : 'var(--color-gold-600)'}
+                  strokeWidth={2} dot={{ r: 2.5 }} isAnimationActive={false} />}
+              </>}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
