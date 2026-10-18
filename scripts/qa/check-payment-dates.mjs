@@ -93,7 +93,7 @@ const imp = read('src/lib/swordfishImport.ts')
  */
 ok('the import takes the cut-off as an option', /settledThrough\?: string/.test(imp))
 ok('...defaulted rather than required',
-  /options\.settledThrough \?\? settledThroughDefault\(today\)/.test(imp))
+  /options\.settledThrough\s*\?\?\s*\(options\.cleanBreak \? cutoverDefault\(today\) : settledThroughDefault\(today\)\)/.test(imp))
 /* ON OR BEFORE, because the cut-off is the last day of a cycle Swordfish paid: a receipt dated
    that very day is inside it. */
 ok('a receipt on the cut-off day is history',

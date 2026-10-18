@@ -107,6 +107,24 @@ export function settledThroughDefault(today: string, lagMonths = 1): string {
   return new Date(Date.UTC(y, m - 1 - lagMonths, d - 1)).toISOString().slice(0, 10)
 }
 
+/**
+ * THE CUT-OVER, by default: the last day of the last cycle to CLOSE (S8, the go-live plan of 10 Oct).
+ *
+ * A CLEAN BREAK draws the line somewhere else from settledThroughDefault, and for a different reason.
+ * That one asks "what has Swordfish already paid over?" and lags a month behind. A clean break asks
+ * "whose receipts are these to pay over?" -- and the firm's answer is: everything received up to the
+ * cut-over is Swordfish's, INCLUDING the cycle(s) Swordfish has not paid yet ("Camille keeps running
+ * those runs from Swordfish"); Raptor splits only what arrives the day after. The plan: cut-over at the
+ * end of 10 December, Swordfish pays 11 Dec and 11 Jan, Raptor's first payover is 11 Feb. Import on
+ * 11 December and the default is 10 December.
+ *
+ * Still only a default. The parallel run (cut-over 10 Oct, imported in November) needs it changed,
+ * and the import screen says so.
+ */
+export function cutoverDefault(today: string): string {
+  return settledThroughDefault(today, 0)
+}
+
 /** '2026-09-10' as a day count, in UTC, so no local clock can move it. */
 function dayOf(iso: string): number {
   const [y, m, d] = iso.split('-').map(Number)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, CheckCircle2, Database, FileUp, Info, Loader2, Upload } from 'lucide-react'
+import clsx from 'clsx'
 import { Card, CardHeader } from '../ui/Card'
 import { inputClass } from '../ui/Modal'
 import { useAuth } from '../../store/AuthContext'
@@ -12,7 +13,7 @@ import {
   buildImportPlan, countWhatAWipeWouldDelete, planRows, tollIsUnknown, wipeTollLine,
   IMPORT_TABLES, WIPE_TABLES, type ImportPlan, type WipeToll,
 } from '../../lib/swordfishImport'
-import { settledThroughDefault } from '../../lib/trustCycles'
+import { cutoverDefault, settledThroughDefault } from '../../lib/trustCycles'
 import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
 } from '../../lib/accountEnrich'
@@ -146,8 +147,14 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
    * time for money they already have, too late and a month of collections is never remitted.
    * settledThroughDefault offers their own worked example; this box is where they correct it.
    */
+  /*
+   * A CLEAN BREAK BY DEFAULT (S8). The go-live plan the firm agreed on 10 Oct: everything received up to
+   * the cut-over is Swordfish's to pay over, paid or not yet paid, and Raptor splits only what comes
+   * after. The other mode -- "Swordfish has paid up to" -- is the old one, kept for trial imports.
+   */
+  const [cleanBreak, setCleanBreak] = useState(true)
   const [settledThrough, setSettledThrough] = useState(
-    () => settledThroughDefault(clockToday()),
+    () => cutoverDefault(clockToday()),
   )
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [reading, setReading] = useState(false)
@@ -238,7 +245,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           debtors: parsed.debtors,
         },
         {
-          ownerId, only: only.trim() || undefined, settledThrough,
+          ownerId, only: only.trim() || undefined, settledThrough, cleanBreak,
           /* Every user, active or not: an inactive match is flagged rather than treated as unknown. */
           clerks: users.map((u) => ({ id: u.id, name: u.name, active: u.status === 'Active' })),
         },
@@ -248,7 +255,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
     } finally {
       setReading(false); setPhase(null)
     }
-  }, [files, ownerId, only, settledThrough, users])
+  }, [files, ownerId, only, settledThrough, cleanBreak, users])
 
   const runImport = useCallback(async () => {
     if (!plan) return
@@ -455,9 +462,23 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             fold: it is not a tuning knob, it is the question "what has Swordfish already paid your
             clients?", and the firm has to answer it every time.
           */}
-          <label className="block">
+          <div className="block">
+            <div className="flex gap-1 mb-1" role="radiogroup" aria-label="Where Raptor's money starts">
+              {([[true, 'Clean break'], [false, 'Swordfish has paid up to']] as const).map(([v, label]) => (
+                <button key={label} type="button" role="radio" aria-checked={cleanBreak === v}
+                  className={clsx('text-[11px] px-2 py-0.5 rounded-full border',
+                    cleanBreak === v ? 'bg-navy-900 text-white border-navy-900' : 'text-slate-500 border-slate-200')}
+                  onClick={() => {
+                    setCleanBreak(v)
+                    setSettledThrough(v ? cutoverDefault(clockToday()) : settledThroughDefault(clockToday()))
+                    setPlan(null)
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <span className="block text-xs font-medium text-slate-500 mb-1">
-              Swordfish has paid clients over up to and including
+              {cleanBreak ? 'Cut-over: Swordfish\u2019s up to and including' : 'Swordfish has paid clients over up to and including'}
             </span>
             <input
               type="date"
@@ -466,11 +487,15 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
               onChange={(e) => { setSettledThrough(e.target.value); setPlan(null) }}
             />
             <span className="block text-[11px] text-slate-400 mt-1">
-              Receipts up to this day are history: they stay out of the approval queue and no payover
-              run can claim them. Everything after it arrives needing approval. Raptor cannot work
-              this out &mdash; set it to the last day the old system actually remitted.
+              {cleanBreak
+                ? <>Every receipt up to this day is Swordfish&rsquo;s to pay over, including the cycles it has
+                  not paid yet. Raptor splits only what arrives after it. Go-live: 10 December. The parallel
+                  run: 10 October.</>
+                : <>Receipts up to this day are history: they stay out of the approval queue and no payover
+                  run can claim them. Everything after it arrives needing approval. Raptor cannot work
+                  this out &mdash; set it to the last day the old system actually remitted.</>}
             </span>
-          </label>
+          </div>
           <label className="block">
             <span className="block text-xs font-medium text-slate-500 mb-1">Only these clients (optional)</span>
             <input

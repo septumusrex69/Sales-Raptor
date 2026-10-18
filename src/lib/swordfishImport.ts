@@ -27,7 +27,7 @@ import { kindFromIdentity, normaliseRegistrationNumber } from './debtorIdentity.
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
 import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
-import { settledThroughDefault } from './trustCycles.ts'
+import { cutoverDefault, settledThroughDefault } from './trustCycles.ts'
 import { readDebtorsPerClient, type ContactRow, type NoteRow, type PromiseRow } from './swordfishDebtors.ts'
 import { clockNow } from './clock.ts'
 
@@ -289,6 +289,20 @@ export interface BuildOptions {
    */
   settledThrough?: string
   /**
+   * A CLEAN BREAK (S8, the go-live plan agreed 10 Oct): `settledThrough` is then the CUT-OVER, and
+   * every receipt on or before it is Swordfish's to pay over -- paid already, or still to be paid by
+   * Swordfish's own runs (Camille keeps running those). Raptor splits only what arrives after it.
+   *
+   * THE SAME FLAG ON EVERY RECEIPT, on purpose. `paid_over_in_swordfish` is what keeps a receipt out
+   * of the split, the queue and every run (allocate_payment's first gate), and that is exactly what a
+   * clean break needs: Raptor must never pay over a receipt Swordfish will. What differs is only what
+   * the import SAYS, and what it does not complain about: in a clean break "nothing left to approve"
+   * is the expected shape of an import taken on the cut-over day, not a warning. The money Swordfish
+   * has not yet paid over is still in the trust account; it is ring-fenced by "Held for Swordfish
+   * payovers" (set_swordfish_holding), not by anything on the receipts.
+   */
+  cleanBreak?: boolean
+  /**
    * RAPTOR'S USERS, so an account can go to the clerk Swordfish had it with. The firm, 8 Oct: "when
    * an account is imported, it should go automatically to its swordfish clerk." Matched on the
    * whole name only (see `clerkKey`); an unknown or inactive name is FLAGGED, never guessed at.
@@ -328,7 +342,8 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
    * already paid over by Swordfish and is history; everything after it needs a decision in Raptor.
    * See settledThroughDefault for why this is a date somebody states rather than one we work out.
    */
-  const settledThrough = options.settledThrough ?? settledThroughDefault(today)
+  const settledThrough = options.settledThrough
+    ?? (options.cleanBreak ? cutoverDefault(today) : settledThroughDefault(today))
 
   /*
    * WHOSE DESK. Active users by whole name; an inactive one is known but cannot work an account,
@@ -969,7 +984,46 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
    */
   const settledCount = payments.filter((p) => p.paid_over_in_swordfish).length
   const toApprove = payments.length - settledCount
-  if (payments.length > 0) {
+  if (payments.length > 0 && options.cleanBreak) {
+    const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
+    const swordfish = payments.filter((p) => p.paid_over_in_swordfish)
+    /*
+     * WHAT SWORDFISH HAS NOT PAID OVER YET, as far as the firm's own rule can say: a cycle is paid on
+     * the 11th of the month after it closes (settledThroughDefault), so receipts after that day and up
+     * to the cut-over are still Swordfish's to pay. An ESTIMATE from the receipts' dates, and said to
+     * be one -- Swordfish cannot report what it owes per client ("Swordfish can do nothing"). Reported
+     * so the figure for "Held for Swordfish payovers" has something to be compared with; it is never
+     * written anywhere. PTCs are left out: that money went to the client, not into trust.
+     *
+     * JUDGED AT THE CUT-OVER, not on import day, because that is the day the holding is captured
+     * (with the bank's opening balance at its end). At the end of 10 Dec the 11 Dec run has not gone,
+     * so 11 Oct - 10 Dec is still Swordfish's to pay -- two cycles, paid 11 Dec and 11 Jan.
+     */
+    const paidBy = settledThroughDefault(settledThrough)
+    const stillOwed = swordfish.filter((p) => !p.paid_to_client && !p.reversed_at
+      && p.received_at.slice(0, 10) > paidBy)
+    notes.push(
+      `Clean break at the end of ${settledThrough}: ${swordfish.length} receipts up to that day `
+      + `(R${sum(swordfish).toFixed(2)}) are Swordfish's to pay over -- Raptor never splits them, and no `
+      + `payover run can claim them. ${toApprove} received after it (R${sum(payments.filter((p) => !p.paid_over_in_swordfish)).toFixed(2)}) `
+      + 'are Raptor\'s and need approving.',
+    )
+    if (stillOwed.length > 0) {
+      notes.push(
+        `Of Swordfish's, ${stillOwed.length} receipts into trust after ${paidBy} `
+        + `(R${sum(stillOwed).toFixed(2)}) fall in cycles Swordfish has not yet paid over, going by the `
+        + '11th-of-the-next-month rule. That money is still in the trust account and is Swordfish\'s '
+        + 'to pay: capture it under Trust settings → Held for Swordfish payovers (with the opening '
+        + 'balance at the cut-over), so the overview does not count it as anybody else\'s.',
+      )
+    }
+    if (settledCount === 0) {
+      problem(`Every receipt is dated after the cut-over (${settledThrough}), so the whole payment history `
+        + 'will land in the approval queue as Raptor\'s. Approving it would pay the clients for money '
+        + 'Swordfish has already remitted or will remit. Check the date before importing.')
+    }
+    /* Nothing after the cut-over is what an import ON the cut-over day looks like: no warning. */
+  } else if (payments.length > 0) {
     const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
     notes.push(
       `${settledCount} receipts received up to ${settledThrough} (R${sum(payments.filter((p) => p.paid_over_in_swordfish)).toFixed(2)}) `
