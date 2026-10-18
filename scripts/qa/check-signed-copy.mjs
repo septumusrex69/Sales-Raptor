@@ -378,11 +378,11 @@ ok(`...below the last line of text (${planI.signedInitials?.yMm.toFixed(1)}mm)`,
 ok('...and clear of the letterhead’s printed footer',
   (planI.signedInitials?.yMm ?? 0) + (planI.signedInitials?.hMm ?? 0) < 279.8)
 ok('...capped at five millimetres', (planI.signedInitials?.hMm ?? 99) <= MARK_MAX_MM / 2)
-/* RIGHT-ALIGNED, because the running line is left-aligned at the same height: "Page 2 of 4" on the
-   left and the initials on the right, sharing the strip without meeting. */
-check('...right-aligned to the text frame',
-  Math.round((planI.signedInitials?.xMm ?? 0) + (planI.signedInitials?.wMm ?? 0)),
-  A4_LETTERHEAD.widthMm - A4_LETTERHEAD.marginRightMm)
+/* ON THE LEFT, where the strip is bare paper (the firm, 18 Oct: "it's very strange where these
+   initials are" -- on the right they printed across the letterhead's contact line, which runs along
+   the right of the foot). After the running line when there is one, so the two never meet. */
+check('...at the left of the text frame', Math.round(planI.signedInitials?.xMm ?? -1), A4_LETTERHEAD.marginLeftMm + (planI.runningFoot ? 45 : 0))
+ok('...well clear of the contact line on the right half', ((planI.signedInitials?.xMm ?? 999) + (planI.signedInitials?.wMm ?? 0)) < A4_LETTERHEAD.widthMm / 2)
 /* AND THEY COST NOTHING. The pages break exactly where they did without them. */
 check('the pages break where they did unsigned', planI.pages.length, plain.pages.length)
 

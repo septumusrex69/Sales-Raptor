@@ -710,7 +710,12 @@ export function planLetter(doc: LetterDocument, page: PageSetup, input: {
     signedInitials: initials && signed?.initialsPng
       ? {
         src: signed.initialsPng,
-        xMm: right - initials.wMm,
+        /* LEFT, NOT RIGHT (the firm, 18 Oct, of the first signed mandate: "it's very strange where
+           these initials are"). On the firm's letterhead the contact line -- phone, email, website --
+           runs along the RIGHT of this strip, and the initials were printed across the website.
+           The left of the strip is bare paper; they go there, after the running line if there is
+           one, so the two still share the strip without meeting. */
+        xMm: left + (doc.runningFoot ? 45 : 0),
         yMm: footY - initials.hMm,
         wMm: initials.wMm,
         hMm: initials.hMm,

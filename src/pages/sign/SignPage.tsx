@@ -258,8 +258,24 @@ export default function SignPage() {
             otherwise pad a short document out to a full A4 and leave the signing controls below
             the fold on a one-paragraph mandate.
           */}
-          <div className="ltr-page" style={{ minHeight: 0 }}>
-            <div className="ltr-body" dangerouslySetInnerHTML={{ __html: html }} />
+          {/*
+            THE LETTERHEAD'S HEAD AT THE TOP AND ITS FOOT AT THE BOTTOM, NOTHING IN BETWEEN. Drawn as
+            one whole A4 behind a continuous sheet, page one's footer landed 297mm down -- across
+            clause 5 of the mandate (the firm circled it, 18 Oct). The sheet is one scroll with no
+            page ends, so it carries the two bands the letterhead is made of: the head cut from the
+            top of the image, the foot from the bottom of it, each the height of its margin. The PDF
+            is where the full letterhead goes on every page.
+          */}
+          <div className="ltr-page" style={{ minHeight: 0, backgroundImage: 'none', position: 'relative' }}>
+            {page.backgroundUrl && (
+              <>
+                <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0" data-testid="sign-letterhead-head"
+                  style={{ height: `${page.marginTopMm}mm`, backgroundImage: `url("${page.backgroundUrl}")`, backgroundSize: `${page.widthMm}mm ${page.heightMm}mm`, backgroundRepeat: 'no-repeat', backgroundPosition: 'top left' }} />
+                <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0" data-testid="sign-letterhead-foot"
+                  style={{ height: `${page.marginBottomMm}mm`, backgroundImage: `url("${page.backgroundUrl}")`, backgroundSize: `${page.widthMm}mm ${page.heightMm}mm`, backgroundRepeat: 'no-repeat', backgroundPosition: 'bottom left' }} />
+              </>
+            )}
+            <div className="ltr-body relative" dangerouslySetInnerHTML={{ __html: html }} />
           </div>
         </div>
       </div>
