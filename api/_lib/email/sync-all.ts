@@ -119,13 +119,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   /*
    * THE CRON FIRST, because its request carries no session and must not be made to have one.
    *
-   * `cronSecret &&` is kept exactly as it was: with no CRON_SECRET set, a cron request has no
-   * bearer to check and is allowed through. That is deliberate for local and preview deployments
-   * -- and it is also why a caller with no session at all still reaches the branch below, which
-   * refuses it.
+   * A request is the cron only when it carries the secret; see below for why an unset secret no
+   * longer counts as one.
    */
   const cronSecret = process.env.CRON_SECRET
-  const fromCron = !cronSecret || req.headers.authorization === `Bearer ${cronSecret}`
+  /*
+   * NO SECRET, NO ANONYMOUS SYNC (security audit C-01, built 18 Oct). With CRON_SECRET unset this
+   * used to wave every request through as "the cron", so anybody who knew the address could set the
+   * whole firm's mailboxes syncing. CRON_SECRET is now set on production and every preview (since 27
+   * Sep), so a deployment without it falls to the session check below -- a person can still press
+   * "sync the company", a stranger cannot.
+   */
+  const fromCron = !!cronSecret && req.headers.authorization === `Bearer ${cronSecret}`
   let pressedBy: string | null = null
   if (!fromCron) {
     const caller = await requireCaller(req, admin)

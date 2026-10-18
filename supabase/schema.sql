@@ -42826,3 +42826,15 @@ as $$
 $$;
 revoke all on function public.clients_awaiting_first_handover() from public, anon;
 grant execute on function public.clients_awaiting_first_handover() to authenticated;
+
+-- ============================================================================================
+-- S8 · Cut-over: THE TWO PUBLIC BUCKETS TAKE PICTURES AND NOTHING ELSE (security audit G-01, 5 Oct;
+-- applied 18 Oct). email-signatures and letterheads are PUBLIC, so anything uploaded there is served
+-- from the Supabase domain to anybody with the link -- an HTML or SVG file there is a phishing page
+-- wearing a trusted address. The screens already offer images only (SignatureEditor, LetterheadSettings);
+-- the bucket now refuses anything else, and anything oversized, whatever sends it.
+-- ============================================================================================
+update storage.buckets set allowed_mime_types = array['image/png','image/jpeg','image/gif','image/webp'], file_size_limit = 2097152
+ where id = 'email-signatures';
+update storage.buckets set allowed_mime_types = array['image/png','image/jpeg','image/webp'], file_size_limit = 5242880
+ where id = 'letterheads';

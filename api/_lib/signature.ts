@@ -82,15 +82,37 @@ export function composeBody(bodyHtml: string, signature: string, style?: string 
  * what it did before and is still better than dropping the signature. A send must not fail
  * because a picture was slow.
  */
+/**
+ * ONLY THE FIRM'S OWN STORAGE IS FETCHED (security audit C-04, 5 Oct; built 18 Oct).
+ *
+ * The URL is whatever a person saved on their profile, and this runs on the SERVER, so an unchecked
+ * fetch is a door into whatever the server can reach (a metadata address, an internal service) --
+ * server-side request forgery. A signature image only ever comes from the email-signatures bucket,
+ * so the rule is narrow rather than a deny-list of private ranges that has to be complete to work:
+ * https, on a Supabase host (the project's own or any *.supabase.co), no credentials in the URL, no
+ * port. Anything else is not fetched and the caller links the image instead, as it does when a fetch
+ * fails. Redirects are refused too, or an allowed host could hand the request on somewhere that is not.
+ */
+export function isFetchableSignatureUrl(url: string, projectUrl = process.env.VITE_SUPABASE_URL ?? ''): boolean {
+  let u: URL
+  try { u = new URL(url) } catch { return false }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return false
+  const host = u.hostname.toLowerCase()
+  let own = ''
+  try { own = projectUrl ? new URL(projectUrl).hostname.toLowerCase() : '' } catch { own = '' }
+  return host === own || /^[a-z0-9-]+\.supabase\.co$/.test(host)
+}
+
 export async function fetchSignatureImage(
   url: string,
 ): Promise<{ content: Buffer; contentType: string } | null> {
+  if (!isFetchableSignatureUrl(url)) return null
   try {
     // Bounded, because this sits in the path of every send and the storage host is not ours to
     // rely on.
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5000)
-    const res = await fetch(url, { signal: controller.signal })
+    const res = await fetch(url, { signal: controller.signal, redirect: 'error' })
     clearTimeout(timer)
     if (!res.ok) return null
 
