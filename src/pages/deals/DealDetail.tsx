@@ -704,6 +704,7 @@ export function DealDetail() {
           leadId={deal.leadId ?? null}
           dealId={deal.id}
           clientName={company?.name ?? deal.name.replace(/\s*-\s*collections mandate$/i, '')}
+          party={leads.find((l) => l.id === deal.leadId)?.party}
           email={contact?.email ?? recipients[0]?.email ?? null}
           contactName={contact ? `${contact.firstName} ${contact.lastName}`.trim() : null}
           onClose={() => setMandateOpen(false)}

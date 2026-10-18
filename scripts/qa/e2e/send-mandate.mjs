@@ -22,7 +22,7 @@ const handlers = [
   [(u) => u.includes('/rest/v1/companies'), () => ({ body: [{ ...COMPANY, id: COMPANY_ID }] })],
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
-  [(u) => u.includes('/rest/v1/leads'), () => ({ body: [{ ...LEAD, status: 'Interested' }] })],
+  [(u) => u.includes('/rest/v1/leads'), () => ({ body: [{ ...LEAD, status: 'Interested', party: 'individual' }] })],
   [(u, req) => u.includes('/rest/v1/signing_requests') && req.method() !== 'GET', (u, req) => {
     writes.push({ method: req.method(), body: req.postDataJSON() })
     return { status: 201, body: [] }
@@ -44,7 +44,16 @@ try {
   t.ok('the lead offers Send mandate', await button.first().isVisible())
   await button.first().click()
   await page.getByTestId('send-mandate').waitFor({ timeout: 10000 })
-  t.check('...the firm\'s standard sliding scale to start', JSON.stringify(await page.getByTestId('mandate-scale').locator('input[aria-label$="rate"]').evaluateAll((xs) => xs.map((x) => x.value))), '["25","20","15","10"]')
+  /* FLAT FIRST, the scale the option; the party as the lead was added (the firm, 18 Oct). */
+  t.check('...opening on a flat rate', await page.getByRole('radio', { name: 'Flat rate' }).getAttribute('aria-checked'), 'true')
+  t.check('...as the individual the lead was added as', await page.getByRole('radio', { name: 'An individual' }).getAttribute('aria-checked'), 'true')
+  await page.getByRole('radio', { name: 'Sliding scale' }).click()
+  t.check('...the firm\'s standard sliding scale behind it', JSON.stringify(await page.getByTestId('mandate-scale').locator('input[aria-label$="rate"]').evaluateAll((xs) => xs.map((x) => x.value))), '["25","20","15","10"]')
+  const scaleText = (await page.getByTestId('mandate-scale').innerText()).replace(/\u00a0/g, ' ')
+  t.check('...amounts grouped in thousands', await page.getByLabel('Band 3 up to').inputValue(), '1 000 000')
+  t.ok('...and every band says where it starts', /Up to/.test(scaleText) && /From R 100 000\.01 up to/.test(scaleText) && /Above R 1 000 000/.test(scaleText))
+  await page.getByLabel('Band 3 up to').fill('2,000,000')
+  t.check('...typed with commas, kept as the number, shown grouped', await page.getByLabel('Band 3 up to').inputValue(), '2 000 000')
 
   /* A flat rate this time, edited: the terms chosen must be the terms frozen. */
   await page.getByRole('radio', { name: 'Flat rate' }).click()
@@ -64,7 +73,7 @@ try {
   const update = writes.find((w) => w.method === 'PATCH')?.body
   t.ok('a signing request is made, titled for the agreement', insert?.title === 'Debt collection agreement')
   t.ok('...asking the client for their details and banking', Array.isArray(insert?.blanks) && insert.blanks.some((b) => b.key === 'mandate_bank_account'))
-  t.check('...and the terms frozen on it are the ones chosen', JSON.stringify(update?.mandate?.commission), JSON.stringify({ kind: 'rate', rate: 0.3 }))
+  t.check('...and the terms frozen on it are the ones chosen', JSON.stringify([update?.mandate?.party, update?.mandate?.commission]), JSON.stringify(['individual', { kind: 'rate', rate: 0.3 }]))
   t.check('...filed against the lead', update?.lead_id, LEAD_ID)
   t.check('...with the name and email filled in for the client', JSON.stringify(update?.filled), JSON.stringify({ mandate_client_name: 'Vaal Fire Services', mandate_email: LEAD.email }))
   await t.shot(page, 'send-mandate-email')

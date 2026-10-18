@@ -125,6 +125,7 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
     firstName: initial?.firstName ?? '',
     lastName: initial?.lastName ?? '',
     companyName: initial?.companyName ?? '',
+    party: 'company' as 'company' | 'individual',
     phone: initial?.phone ?? '',
     email: initial?.email ?? '',
     source: initial?.source ?? ('Website' as LeadSource),
@@ -141,6 +142,7 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
             firstName: form.firstName,
             lastName: form.lastName,
             companyName: form.companyName,
+            party: form.party,
             phone: form.phone || undefined,
             email: form.email || undefined,
             source: form.source,
@@ -161,8 +163,18 @@ export function LeadForm({ onClose, store, navigate, initial, title = 'Add Lead'
             <input className={inputClass} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
           </FormField>
         </div>
-        <FormField label="Company" required>
-          <input className={inputClass} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required />
+        {/* COMPANY OR INDIVIDUAL, SAID HERE (the firm, 18 Oct: "when we add the lead, we should already
+            say if it's a company or an individual"). The mandate opens on it and only confirms it. */}
+        <div className="mb-3 inline-flex rounded-lg border border-slate-200 p-0.5 text-sm" role="radiogroup" aria-label="The client is">
+          {([['company', 'A company'], ['individual', 'An individual']] as const).map(([v, label]) => (
+            <button key={v} type="button" role="radio" aria-checked={form.party === v} data-testid={`lead-party-${v}`}
+              onClick={() => setForm({ ...form, party: v })}
+              className={`rounded-md px-3 py-1 ${form.party === v ? 'bg-navy-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}>{label}</button>
+          ))}
+        </div>
+        <FormField label={form.party === 'company' ? 'Company' : 'Client name (the individual)'} required>
+          <input className={inputClass} value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required
+            placeholder={form.party === 'individual' ? 'As it will appear on the mandate' : undefined} />
         </FormField>
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Phone">

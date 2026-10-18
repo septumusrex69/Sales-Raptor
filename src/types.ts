@@ -86,6 +86,8 @@ export interface Lead {
   jobTitle?: string
   companyId?: ID
   companyName: string
+  /** A company or an individual, said when the lead is added (S8): the mandate opens on it. */
+  party?: 'company' | 'individual'
   phone?: string
   mobile?: string
   email?: string

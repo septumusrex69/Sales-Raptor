@@ -32,8 +32,10 @@ import {
  * is made when the email is prepared and holds the terms frozen; signing it (mandate_on_signed) makes
  * the lead a client.
  */
-export function SendMandateModal({ leadId, dealId, clientName, email, contactName, onClose, onSent }: {
+export function SendMandateModal({ leadId, dealId, clientName, email, contactName, party: partyGiven, onClose, onSent }: {
   leadId: string | null
+  /** What the lead was added as (S8): the window opens on it and only confirms it. */
+  party?: MandateParty
   dealId: string | null
   clientName: string
   email: string | null
@@ -43,9 +45,11 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
   onSent: (subject: string, body: string, note: string) => void
 }) {
   const { currentUser } = useAuth()
-  const [party, setParty] = useState<MandateParty>('company')
+  const [party, setParty] = useState<MandateParty>(partyGiven ?? 'company')
   const [name, setName] = useState(clientName)
-  const [kind, setKind] = useState<'rate' | 'scale'>('scale')
+  /* FLAT FIRST (the firm, 18 Oct: "by default, it should be on flat rate. Sliding scale should be the
+     option"). */
+  const [kind, setKind] = useState<'rate' | 'scale'>('rate')
   const [rate, setRate] = useState(String(STANDARD_RATE * 100))
   const [bands, setBands] = useState<{ upTo: string; rate: string }[]>(
     () => STANDARD_SCALE.map((b) => ({ upTo: b.upTo === null ? '' : String(b.upTo), rate: String(b.rate * 100) })))
@@ -160,7 +164,7 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
 
         <div>
           <span className="mb-1 block text-xs font-medium text-slate-500">Commission</span>
-          <Segmented value={kind} onChange={setKind} options={[['scale', 'Sliding scale'], ['rate', 'Flat rate']]} name="commission" />
+          <Segmented value={kind} onChange={setKind} options={[['rate', 'Flat rate'], ['scale', 'Sliding scale']]} name="commission" />
           {kind === 'rate' ? (
             <div className="mt-2 flex items-center gap-2">
               <input className={clsx(inputClass, 'w-24')} inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} aria-label="Commission rate" />
@@ -169,17 +173,25 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
           ) : (
             <div className="mt-2 rounded-lg border border-slate-200">
               <table className="w-full text-sm" data-testid="mandate-scale">
-                <thead><tr className="text-left text-[11px] text-slate-400"><th className="px-3 py-1.5 font-medium">Capital on the account up to and including</th><th className="px-3 py-1.5 font-medium">Commission</th><th /></tr></thead>
+                <thead><tr className="text-left text-[11px] text-slate-400"><th className="px-3 py-1.5 font-medium">Capital on the account</th><th className="px-3 py-1.5 font-medium">Commission</th><th /></tr></thead>
                 <tbody>
                   {bands.map((b, i) => {
                     const last = i === bands.length - 1
                     return (
                       <tr key={i} className="border-t border-slate-100">
                         <td className="px-3 py-1.5">
-                          {last ? <span className="text-slate-500">and above</span> : (
-                            <div className="flex items-center gap-1"><span className="text-slate-400">R</span>
-                              <input className={clsx(inputClass, 'py-1')} inputMode="numeric" value={b.upTo} aria-label={`Band ${i + 1} up to`}
-                                onChange={(e) => setBands((all) => all.map((x, j) => j === i ? { ...x, upTo: e.target.value } : x))} /></div>
+                          {/* EACH BAND SAYS WHERE IT STARTS AND ENDS, in words, and the amounts are grouped
+                              in thousands (the firm, 18 Oct: "all of these zeros are confusing ... it should
+                              also show ... below or between"). */}
+                          {last ? (
+                            <span className="text-slate-600">Above <b className="tabular-nums">{rands(bands[i - 1]?.upTo)}</b></span>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                              <span className="whitespace-nowrap text-slate-600">{i === 0 ? 'Up to' : <>From <b className="tabular-nums">{rands(bands[i - 1]?.upTo, 0.01)}</b> up to</>}</span>
+                              <span className="text-slate-400">R</span>
+                              <input className={clsx(inputClass, 'w-36 py-1 tabular-nums')} inputMode="numeric" value={grouped(b.upTo)} aria-label={`Band ${i + 1} up to`}
+                                onChange={(e) => setBands((all) => all.map((x, j) => j === i ? { ...x, upTo: e.target.value.replace(/[^0-9]/g, '') } : x))} />
+                            </div>
                           )}
                         </td>
                         <td className="px-3 py-1.5">
@@ -231,6 +243,18 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
       </div>
     </Modal>
   )
+}
+
+/** "100000" -> "100 000": the thousands grouped the way every rand in Raptor is written. */
+function grouped(v: string): string {
+  const digits = v.replace(/[^0-9]/g, '')
+  return digits ? Number(digits).toLocaleString('en-ZA').replace(/[\s,]/g, ' ') : ''
+}
+/** A band's boundary as rand, "R 100 000" or, as the start of the next band, "R 100 000.01". */
+function rands(v: string | undefined, plus = 0): string {
+  const n = Number((v ?? '').replace(/[^0-9]/g, ''))
+  if (!n) return 'R …'
+  return `R ${grouped(String(Math.floor(n)))}${plus ? '.01' : ''}`
 }
 
 function Segmented<T extends string>({ value, onChange, options, name }: { value: T; onChange: (v: T) => void; options: [T, string][]; name: string }) {

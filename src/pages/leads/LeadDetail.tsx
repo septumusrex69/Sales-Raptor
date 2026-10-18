@@ -838,6 +838,7 @@ export function LeadDetail() {
           /* The lead's open mandate deal, if it has one, is the one signing wins; otherwise signing makes it. */
           dealId={deals.find((d) => d.leadId === lead.id && dealKind(d) === 'Handover' && d.stage !== 'Won' && d.stage !== 'Rejected')?.id ?? null}
           clientName={lead.companyName || `${lead.firstName} ${lead.lastName}`.trim()}
+          party={lead.party}
           email={lead.email ?? null}
           contactName={`${lead.firstName} ${lead.lastName}`.trim() || null}
           onClose={() => setMandateOpen(false)}

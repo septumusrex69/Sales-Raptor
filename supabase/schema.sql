@@ -43369,3 +43369,7 @@ begin
 end;
 $$;
 revoke all on function public.mandate_on_signed() from public, anon;
+
+-- S8: a lead is a company or an individual, said when it is added; the mandate opens on it.
+alter table public.leads add column if not exists party text not null default 'company' check (party in ('company', 'individual'));
+comment on column public.leads.party is 'A company or an individual, said when the lead is added (S8). The mandate opens on it.';
