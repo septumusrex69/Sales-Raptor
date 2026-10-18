@@ -142,6 +142,8 @@ export function LeadDetail() {
   }
 
   const active = isActiveLead(lead)
+  /* A mandate already went out from this lead: its "sent for signing" line is on the timeline. */
+  const mandateSent = activities.some((a) => a.leadId === lead.id && /^Mandate sent for signing/.test(a.subject))
 
   /*
    * The panels, built once and placed by whichever layout is chosen.
@@ -661,8 +663,11 @@ export function LeadDetail() {
                 makes the lead a client by itself (mandate_on_signed), so it sits before Convert, which is
                 now the way for a client who signed on paper. */}
             {canEdit && active && (
-              <RecordAction icon={FileSignature} label="Send mandate" onClick={() => setMandateOpen(true)} primary
-                title="Email the debt collection agreement to sign online" />
+              /* RESEND, the same button (the firm, 18 Oct: "a month later we make contact again ... he says
+                 send it again"). A fresh link and PDF each time; whichever the client signs, signing
+                 does the same thing. */
+              <RecordAction icon={FileSignature} label={mandateSent ? 'Resend mandate' : 'Send mandate'} onClick={() => setMandateOpen(true)} primary
+                title={mandateSent ? 'Send the debt collection agreement again, with a new sign-online link' : 'Email the debt collection agreement to sign online'} />
             )}
             {canEdit && active && (
               <RecordAction icon={UserPlus} label="Convert to Client" onClick={() => setConvertOpen(true)}

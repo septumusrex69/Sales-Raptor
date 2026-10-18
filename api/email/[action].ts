@@ -8,6 +8,7 @@ import signedCopy from '../_lib/email/signedCopy.js'
 import status from '../_lib/email/status.js'
 import sync from '../_lib/email/sync.js'
 import syncAll from '../_lib/email/sync-all.js'
+import welcome from '../_lib/email/welcome.js'
 
 /**
  * One serverless function for every /api/email/* route.
@@ -36,6 +37,8 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* ANONYMOUS, and the token is the authority -- see signedCopy for why nothing else it is
      sent is trusted. */
   'signed-copy': signedCopy,
+  /* Assign a new client's liaison and send the welcome from her (S8). */
+  welcome,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

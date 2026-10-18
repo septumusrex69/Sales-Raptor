@@ -9,6 +9,7 @@ import { Topbar } from './Topbar'
 import { TitleSlotProvider } from './TitleSlot'
 import { ReminderWatcher } from '../reminders/ReminderWatcher'
 import { NewWorkPopup } from '../collections/NewWorkPopup'
+import { NewClientPopup } from '../companies/NewClientPopup'
 
 const TITLES: { test: RegExp; title: string }[] = [
   { test: /^\/$/, title: 'Dashboard' },
@@ -123,6 +124,7 @@ export function AppLayout() {
           always.
         */}
         <NewWorkPopup />
+        <NewClientPopup />
       </div>
     </TitleSlotProvider>
   )

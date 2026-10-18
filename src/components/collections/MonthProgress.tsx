@@ -84,9 +84,12 @@ export function MonthProgress({ pace, line, note, tone = 'light', measured = tru
       </div>
       <div className={`px-4 relative ${dark ? 'pb-2 h-4' : 'pb-3 h-4'}`}>
         {!pace.finished && (
-          <span className={`absolute text-[11px] tabular-nums -translate-x-1/2 whitespace-nowrap ${
-            dark ? 'text-white/45' : 'text-slate-500'
-          }`} style={{ left: `calc(${marker}% + 1rem)` }}>
+          /* HELD INSIDE THE BAR at either end: centred under a marker at 0% it hung off the left of
+             the panel on the first day of the month (the firm circled it, 18 Oct). Near an end the
+             label starts (or ends) at the marker instead of straddling it. */
+          <span className={`absolute text-[11px] tabular-nums whitespace-nowrap ${
+            marker < 12 ? '' : marker > 88 ? '-translate-x-full' : '-translate-x-1/2'
+          } ${dark ? 'text-white/45' : 'text-slate-500'}`} style={{ left: `calc(${marker}% + 1rem)` }}>
             {marker}% expected by now
           </span>
         )}

@@ -199,6 +199,24 @@ inside the cards.
 - A bar opens its whole month (`toDay`).
 - The firm: "when it's ... 3 months or more ... compare the months to each other instead of the days".
 
+**The welcome flow (S8, 18 Oct): mandate signed online → liaison → welcome.**
+1. `mandate_on_signed` sets `companies.liaison_needed`.
+2. The closer's bell links to the client, where `WelcomeCard` has **Assign and welcome**. The sales
+   dashboard lists "Signed, waiting for a liaison".
+3. `POST /api/email/welcome` (`api/_lib/email/welcome.ts`) does five things:
+   - sets `account_owner_id`, clears `liaison_needed`, stamps `liaison_assigned_at`;
+   - sends `welcomeEmail()` from the LIAISON's mailbox (falling back to the caller's), with the
+     banner `/brand/email/welcome.jpg`, and stamps `welcome_sent_at`;
+   - adds a "Welcome call" task for her on the next working day;
+   - raises a `client.assigned` notification, which pops up via `NewClientPopup` / `newClientPopup`;
+   - writes both into the client's notes.
+4. The welcome steps are DERIVED (`welcome.ts`): the last one ticks on a Call or Courtesy Call
+   logged on the client after the assignment.
+5. Checks: `check-welcome`, `e2e/client-welcome`.
+6. "Send mandate" reads **Resend mandate** once one has gone. Each send is a fresh link, and
+   whichever link is signed does the same thing.
+7. Abc cricket (the firm's test client on staging) was set `liaison_needed` so they can try it.
+
 ### S7 · Clean Break (12 Oct)
 
 - **Payover runs: four tabs, one cycle each** (the firm, 12 Oct, on staging day 11 Aug: "in the

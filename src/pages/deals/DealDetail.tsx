@@ -614,8 +614,8 @@ export function DealDetail() {
           {/* The mandate, sent to sign online (the firm, 18 Oct). Signing it wins this deal by itself;
               "Mandate Signed" stays for a client who signed on paper. */}
           {canEdit && isHandover && !isClosed && (
-            <RecordAction icon={FileSignature} label="Send mandate" primary onClick={() => setMandateOpen(true)}
-              title="Email the debt collection agreement to sign online" />
+            <RecordAction icon={FileSignature} label={deal.mandateSentAt || deal.stage === 'Mandate Sent' ? 'Resend mandate' : 'Send mandate'} primary onClick={() => setMandateOpen(true)}
+              title={deal.mandateSentAt || deal.stage === 'Mandate Sent' ? 'Send the agreement again, with a new sign-online link (the firm: "he says send it again")' : 'Email the debt collection agreement to sign online'} />
           )}
           {canEdit && (
             <RecordAction icon={CheckCircle2} label={isHandover ? 'Mandate Signed' : 'Mark Won'} primary={!isHandover || isClosed}

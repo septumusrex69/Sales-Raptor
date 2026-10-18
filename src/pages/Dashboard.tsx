@@ -77,7 +77,7 @@ function minutesToLabel(mins: number): string {
 }
 
 export function Dashboard() {
-  const { leads, deals, tasks, activities, users, teams, targets, userById, companyById, updateTask } = useAppStore()
+  const { leads, deals, tasks, activities, users, teams, targets, userById, companyById, updateTask, companies } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
   const [period, setPeriod] = useState<SalesMonthPeriod>(() => getCurrentSalesMonth(TODAY))
@@ -139,6 +139,8 @@ export function Dashboard() {
     return { start: first.start, end: period.end }
   }, [period, months])
   const spanLabel = `over the last ${months} months`
+  const waitingForLiaison = useMemo(() => companies.filter((c) => c.liaisonNeeded)
+    .sort((a, b) => (a.mandateSignedAt ?? '').localeCompare(b.mandateSignedAt ?? '')), [companies])
   const sources = useMemo(() => leadSources({ span, leads, deals, owners: scope === 'all' ? undefined : repIdSet }), [span, leads, deals, scope, repIdSet])
   const toHandover = useMemo(() => {
     const first = new Map((books ?? []).map((b) => [b.companyId, b.firstHandover]))
@@ -530,6 +532,28 @@ export function Dashboard() {
           periodParam={periodParam}
         />
       </div>
+
+      {/* SIGNED, WAITING FOR A LIAISON (the firm, 18 Oct: "it should show up in the salesperson's dashboard
+          and it should be allocated to a liaison"). Straight under Mandates and Deals once there is one: a client
+          who signed and hears nothing is the first thing to put right. Each opens the client, where
+          the Assign box is. */}
+      {waitingForLiaison.length > 0 && (
+        <Card className="border-gold-300 bg-gold-50/60">
+          <div data-testid="waiting-for-liaison">
+            <CardHeader title={`Signed, waiting for a liaison · ${waitingForLiaison.length}`}
+              subtitle="Assign each one: the welcome email goes from the liaison and a welcome call goes on her list." />
+            <ul className="divide-y divide-gold-200/70">
+              {waitingForLiaison.map((c) => (
+                <li key={c.id} className="flex items-center gap-3 py-2 text-sm">
+                  <Link to={`/companies/${c.id}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
+                  <span className="shrink-0 text-xs text-slate-500">signed {(c.mandateSignedAt ?? '').slice(0, 10).split('-').reverse().join('/')}</span>
+                  <Link to={`/companies/${c.id}`} className="shrink-0 rounded-lg bg-navy-900 px-3 py-1 text-xs font-semibold text-white">Assign</Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Card>
+      )}
 
       {/* ---------- 3. THE TRACK RECORD: the line and the stacked bars ---------- */}
       <div className="grid gap-4 lg:grid-cols-2">

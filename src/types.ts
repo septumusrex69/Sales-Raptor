@@ -371,6 +371,12 @@ export interface Company {
   commissionTiers?: { prefix: string; rate: number }[]
   /** When the collection mandate was signed — the clock on "signed, but nothing handed over yet". */
   mandateSignedAt?: string
+  /** THE WELCOME FLOW (S8). Signed online and waiting for Sales to assign a liaison. */
+  liaisonNeeded?: boolean
+  /** When Sales handed the client to its liaison. */
+  liaisonAssignedAt?: string
+  /** When the liaison's welcome email went to the client. */
+  welcomeSentAt?: string
   /**
    * Set on a client the Swordfish import created -- the run that brought it across. Such a client
    * takes handovers without a mandate date (prompt 10); see mandateRule.ts.
@@ -692,6 +698,9 @@ export type NotificationType =
    */
   | 'handover.allocated'
   | 'handover.referred'
+  /* The welcome flow (S8): the closer, told a mandate was signed; the liaison, given a new client. */
+  | 'mandate_signed'
+  | 'client.assigned'
 
 export interface AppNotification {
   id: ID

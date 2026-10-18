@@ -277,6 +277,8 @@ interface AppActions {
   updateContact: (id: ID, patch: Partial<Contact>) => void
   addCompany: (input: Partial<Company> & { name: string }) => Company
   updateCompany: (id: ID, patch: Partial<Company>) => void
+  /** The screen's copy only, for a change the SERVER already wrote (the welcome route, S8): no second write. */
+  showCompanyChange: (id: ID, patch: Partial<Company>) => void
   deleteCompany: (id: ID) => void
   addTask: (input: Partial<Task> & { title: string; dueDate: string }) => Task
   updateTask: (id: ID, patch: Partial<Task>) => void
@@ -521,6 +523,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
    * until something re-fetches — previously only a full page reload did, which
    * is why a synced email wouldn't appear on the client until you refreshed.
    */
+  const showCompanyChange = useCallback<AppActions['showCompanyChange']>((id, patch) => {
+    setCompanies((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+  }, [])
+
   const refreshSyncedData = useCallback<AppActions['refreshSyncedData']>(async () => {
     const [ac, nt] = await Promise.all([fetchTable<Activity>('activities', 'activity_date'), fetchTable<AppNotification>('notifications', 'created_at')])
     setActivities(ac)
@@ -1643,6 +1649,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateContact,
       addCompany,
       updateCompany,
+      showCompanyChange,
       deleteCompany,
       addTask,
       updateTask,
@@ -1702,6 +1709,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       updateContact,
       addCompany,
       updateCompany,
+      showCompanyChange,
       deleteCompany,
       addTask,
       updateTask,

@@ -49,6 +49,7 @@ import { uploadDocument } from '../../lib/accountWorkspace'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
 import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
+import { WelcomeCard } from '../../components/companies/WelcomeCard'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
@@ -886,6 +887,8 @@ export function CompanyDetail() {
                   </button>
                 </div>
               )}
+              {/* The new client's welcome (S8): assign a liaison, then the four steps ticked. */}
+              <WelcomeCard company={company} />
               <HandoverBook company={company}
                 onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
               {/* Their handovers month by month, under the book they add up to (the firm, 18 Oct). */}

@@ -58,3 +58,14 @@ export function newWorkPopup(notifications: AppNotification[], path: string): Ne
 
   return { notices, lines: notices.map((n) => n.message), seeLink }
 }
+
+/**
+ * A NEW CLIENT FOR A LIAISON (S8, 18 Oct; the firm: "inform somehow the liaison that it should call
+ * this person ... a pop-up or notification"). The same three rules as the hand-out card: its own kind
+ * only, unread only, and never over the client it would send you to.
+ */
+export const NEW_CLIENT_NOTICE = 'client.assigned'
+
+export function newClientPopup(notifications: AppNotification[], path: string): AppNotification[] {
+  return notifications.filter((n) => !n.read && n.type === NEW_CLIENT_NOTICE && (n.link ?? '') !== path)
+}
