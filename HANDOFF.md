@@ -17,6 +17,14 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+0. **S7 · Clean Break is finished** (last commit `c0936c2`, 13 Oct). **The next session is S8**: name it
+   here first (`S8 · Theme`, branch `claude/s08-theme`). Read §2's three S7 sections first: the trust
+   was regrouped (overview, To sort, Clients owe us, Bank statement, Payments out), clients pay against
+   their statement, bounces are handled, prompt 12 is complete, and the trust balances to nil on
+   staging. Still open from S7, in §3: the bank's bulk-payment template (assumed FNB) and
+   `business.income` for Stephan on production. Tests at the end of S7: fast suite all green (17 995
+   checks); full suite 324 of 327, and the three reds (`performance`, `account-templates`,
+   `excess-credit`) predate S7.
 1. **Work on staging.** Production is NOT live and the user has said so: "We are not going live."
 2. **Staging now runs on a clock (prompt 10, §2).** `raptor_now()` / `raptor_today()` are every
    business date. It is on the REAL date and nothing has been cleared -- the firm moves it from the
