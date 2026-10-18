@@ -56,6 +56,9 @@ export default function SignPage() {
       setRequest(r)
       setMissing(r === null)
       if (r?.signerName && !name) setName(r.signerName)
+      /* WHAT THE FIRM ALREADY KNEW, OFFERED AS THE STARTING ANSWER (S8: a mandate goes out with the
+         client's name and email in), so the signer corrects rather than retypes. Their typing wins. */
+      if (r?.state === 'sent' && r.filled && Object.keys(r.filled).length) setFilled((f) => ({ ...r.filled, ...f }))
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))
     } finally {

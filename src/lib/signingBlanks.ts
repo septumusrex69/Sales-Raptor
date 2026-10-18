@@ -382,6 +382,9 @@ export function withFilled(
       continue
     }
     const given = (filled[b.key] ?? '').trim()
+    /* A MANDATE'S UNANSWERED BOX READS AS A DASH, not as braces (S8): it sits in a table cell, and a
+       signed agreement must not show "{{mandate_vat_no}}" where a client has no VAT number. */
+    if (!given && b.key.startsWith('mandate_')) { out[b.key] = '\u2014'; continue }
     if (!given) continue
     /*
      * AND WHAT THE DEBTOR TYPED IS WRITTEN THE WAY THE FIRM WRITES IT.

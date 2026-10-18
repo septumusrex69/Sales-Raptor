@@ -73,6 +73,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   interface RequestRow {
     id: string
     account_id: string | null
+    /* A MANDATE (S8): set by mandate_on_signed when the client signs; then the copy is the client's. */
+    company_id: string | null
+    created_by: string | null
     title: string
     body: unknown
     page_setup: unknown
@@ -88,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: found } = await admin
     .from('signing_requests')
-    .select('id, account_id, title, body, page_setup, blanks, filled, state, signed_at, '
+    .select('id, account_id, company_id, created_by, title, body, page_setup, blanks, filled, state, signed_at, '
       + 'signature_png, initials_png, signed_name, copy_sent_at')
     .eq('token', token)
     .maybeSingle()
@@ -114,6 +117,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('id')
   if (!claimed || claimed.length === 0) {
     res.status(200).json({ sent: false })
+    return
+  }
+
+  if (request.company_id) {
+    await mandateCopy(admin, request, res)
     return
   }
 
@@ -261,4 +269,86 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   })
 
   res.status(200).json({ sent: true })
+}
+
+/**
+ * A SIGNED MANDATE (S8, 18 Oct): "It immediately goes to the client, it saves it on the client."
+ *
+ * mandate_on_signed has already made the lead a client and set request.company_id. Here the signed
+ * agreement is drawn exactly as the debtors' copies are, FILED on the client (client_documents, kind
+ * 'Mandate', which the client's Mandate card reads), and emailed to the address the client typed on
+ * the form, from the salesperson's own mailbox with the salesperson copied in.
+ */
+async function mandateCopy(
+  admin: NonNullable<ReturnType<typeof adminClient>>,
+  request: {
+    id: string; company_id: string | null; created_by: string | null; title: string; body: unknown; page_setup: unknown
+    blanks: unknown; filled: unknown; signed_at: string | null; signature_png: string | null; initials_png: string | null; signed_name: string | null
+  },
+  res: VercelResponse,
+) {
+  const companyId = request.company_id as string
+  const page = (request.page_setup ?? A4_LETTERHEAD) as typeof A4_LETTERHEAD
+  const doc = { ...blankLetter(), blocks: request.body as ReturnType<typeof blankLetter>['blocks'] }
+  const origin = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ''
+  let letterhead: { bytes: Uint8Array; type: 'png' | 'jpg' } | null = null
+  if (page.backgroundUrl) {
+    try {
+      const got = await fetch(page.backgroundUrl)
+      if (got.ok) letterhead = { bytes: new Uint8Array(await got.arrayBuffer()), type: /\.jpe?g($|\?)/i.test(page.backgroundUrl) ? 'jpg' : 'png' }
+    } catch { /* Plain paper rather than no document. */ }
+  }
+  const signed: SignedMark | null = request.signature_png && request.signed_name && request.signed_at
+    ? { signaturePng: request.signature_png, name: request.signed_name, signedAt: request.signed_at, initialsPng: request.initials_png }
+    : null
+  let bytes: Uint8Array
+  try {
+    bytes = await letterToPdf({
+      doc, page, filled: true,
+      values: withFilled({}, (request.blanks ?? []) as never, (request.filled ?? {}) as never),
+      letterhead, charter: isCharter(doc.defaults.font) ? await fetchCharter(origin) : null, signed,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) })
+    return
+  }
+  const filename = letterFilename(`${request.title} signed`, request.signed_name)
+
+  /* FILED FIRST: the client record holding the signed mandate matters more than the courtesy email. */
+  const path = `${companyId}/${crypto.randomUUID()}-${filename.replace(/[^A-Za-z0-9._ -]/g, '_')}`
+  const up = await admin.storage.from('client-documents').upload(path, Buffer.from(bytes), { contentType: 'application/pdf', upsert: false })
+  if (!up.error) {
+    await admin.from('client_documents').insert({
+      company_id: companyId, name: filename, storage_path: path, mime_type: 'application/pdf', size_bytes: bytes.length,
+      kind: 'Mandate', notes: 'Signed online', uploaded_by: request.created_by, uploaded_by_name: 'Signed online',
+    })
+  }
+
+  const filled = (request.filled ?? {}) as Record<string, string>
+  const to = (filled.mandate_email ?? '').trim()
+  const rep = request.created_by
+  if (!to || !/@/.test(to) || !rep) {
+    res.status(200).json({ sent: false, filed: !up.error, reason: 'no address' })
+    return
+  }
+  const { data: foundRep } = await admin.from('profiles').select('name, email').eq('id', rep).maybeSingle()
+  const repRow = foundRep as { name: string | null; email: string | null } | null
+  const who = (filled.mandate_signatory_name ?? '').trim()
+  const words = `${who ? `Dear ${who}` : 'Good day'}\n\n`
+    + 'Thank you for choosing Bredell Ferreira. Attached is the signed copy of our debt collection agreement, for your records.\n\n'
+    + 'Your liaison at Bredell Ferreira will be in touch shortly to welcome you and to arrange your first handover.\n\n'
+    + 'Kind regards'
+  const sent = await sendAsUser(admin, rep, {
+    to, cc: repRow?.email ?? null,
+    subject: 'Signed debt collection agreement - Bredell Ferreira',
+    bodyHtml: emailBodyHtml(words),
+    attachments: [{ filename, content: Buffer.from(bytes), contentType: 'application/pdf' }],
+  })
+  if (sent.ok) {
+    await admin.from('activities').insert({
+      type: 'Email', user_id: rep, company_id: companyId,
+      subject: 'Signed debt collection agreement - Bredell Ferreira', notes: words, activity_date: new Date().toISOString(),
+    })
+  }
+  res.status(200).json({ sent: sent.ok, filed: !up.error })
 }
