@@ -48,6 +48,7 @@ import { createDebtorAccount, fetchAccountReferences, fetchClientCommission } fr
 import { uploadDocument } from '../../lib/accountWorkspace'
 import { toAccountRow, toContactRows, type NewDebtorInput } from '../../lib/newDebtor'
 import { HandoverBook } from '../../components/companies/HandoverBook'
+import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
@@ -887,6 +888,8 @@ export function CompanyDetail() {
               )}
               <HandoverBook company={company}
                 onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
+              {/* Their handovers month by month, under the book they add up to (the firm, 18 Oct). */}
+              <ClientHandoverChart clientId={company.parentCompanyId ?? company.id} />
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
                   asking. Here they are capped at five with a "show more"; the tab is where you
                   go for the lot. */}

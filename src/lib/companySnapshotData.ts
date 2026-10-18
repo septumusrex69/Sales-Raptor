@@ -81,3 +81,11 @@ export async function fetchClientBook(period: Pick<SalesMonthPeriod, 'start' | '
   if (error) throw new Error(error.message)
   return ((data ?? []) as Record<string, unknown>[]).map(toClientBook)
 }
+
+/** One client's handovers by day, its sub-accounts included (client_intake_by_day). */
+export async function fetchClientIntakeByDay(clientId: string, period: Pick<SalesMonthPeriod, 'start' | 'end'>): Promise<IntakeRow[]> {
+  const { data, error } = await supabase.rpc('client_intake_by_day', { p_client: clientId, p_from: isoDay(period.start), p_to: isoDay(period.end) })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as { day: string; accounts: number | string; capital: number | string }[])
+    .map((r) => ({ day: String(r.day).slice(0, 10), accounts: Number(r.accounts), capital: Number(r.capital ?? 0), newAccounts: 0, newCapital: 0 }))
+}

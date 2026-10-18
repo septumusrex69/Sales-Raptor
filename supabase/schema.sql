@@ -43228,3 +43228,25 @@ begin
 end;
 $$;
 revoke all on function public.mandate_on_signed() from public, anon;
+
+-- S8: one client's handovers by day, for the chart on the client page.
+create or replace function public.client_intake_by_day(p_client uuid, p_from date, p_to date)
+returns table (day date, accounts integer, capital numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  -- ONE CLIENT'S HANDOVERS BY DAY (the firm, 18 Oct, on the client page: "graphs showing their
+  -- handovers ... every month ... the amount ... the number"). The client and its sub-accounts, as
+  -- everywhere a client's book is counted; the months are cut in the browser (intakeMonthBars).
+  select a.handover_date, count(*)::integer, coalesce(sum(a.capital_handed_over), 0)
+    from public.debtor_accounts a
+    join public.companies c on c.id = a.company_id
+   where coalesce(c.parent_company_id, c.id) = p_client
+     and a.handover_date between p_from and p_to
+   group by a.handover_date
+   order by a.handover_date;
+$$;
+revoke all on function public.client_intake_by_day(uuid, date, date) from public, anon;
+grant execute on function public.client_intake_by_day(uuid, date, date) to authenticated;
