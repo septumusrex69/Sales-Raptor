@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { LayoutGrid, List, Plus, Search } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
@@ -34,7 +34,11 @@ export function DealsBoard() {
   const [searchParams] = useSearchParams()
 
   // One-time drill-down filters carried in from Dashboard links — not exposed as UI controls.
-  const [stageFilter, setStageFilter] = useState(() => readParam(searchParams, 'stage'))
+  /* SEVERAL STAGES AT ONCE (the firm, 18 Oct: "tick them ... to filter them"). A drill-down link still
+     arrives with one (?stage=Won), or several comma-separated. */
+  const [stages, setStages] = useState<string[]>(() => (readParam(searchParams, 'stage') ?? '').split(',').filter(Boolean))
+  const stageFilter = stages.length === 1 ? stages[0] : undefined
+  const setStageFilter = (stage: string | undefined) => setStages(stage ? [stage] : [])
   // "atLeast" matches the Sales Funnel's "at this stage or further" framing (deals pile up
   // further down the pipeline in a snapshot, so an exact-stage match would undercount).
   const [stageAtLeast] = useState(() => readParam(searchParams, 'atLeast') === '1')
@@ -45,7 +49,7 @@ export function DealsBoard() {
   const [openOnlyFilter] = useState(() => readParam(searchParams, 'open') === '1')
 
   const [view, setView] = useState<'kanban' | 'table'>(() =>
-    readParam(searchParams, 'view') === 'table' || stageFilter || noNextActionFilter || overdueFilter || companyIdFilter || openOnlyFilter
+    readParam(searchParams, 'view') === 'table' || stages.length > 0 || noNextActionFilter || overdueFilter || companyIdFilter || openOnlyFilter
       ? 'table'
       : 'kanban',
   )
@@ -77,12 +81,10 @@ export function DealsBoard() {
     if (view !== 'table') return filtered
     const stageFilterIndex = stageFilter ? FUNNEL_STAGES.indexOf(stageFilter as (typeof FUNNEL_STAGES)[number]) : -1
     return filtered.filter((d) => {
-      if (stageFilter) {
-        if (stageAtLeast && stageFilterIndex >= 0) {
-          if (FUNNEL_STAGES.indexOf(d.stage as (typeof FUNNEL_STAGES)[number]) < stageFilterIndex) return false
-        } else if (d.stage !== stageFilter) {
-          return false
-        }
+      if (stageFilter && stageAtLeast && stageFilterIndex >= 0) {
+        if (FUNNEL_STAGES.indexOf(d.stage as (typeof FUNNEL_STAGES)[number]) < stageFilterIndex) return false
+      } else if (stages.length > 0 && !stages.includes(d.stage)) {
+        return false
       }
       if (noNextActionFilter && (d.stage === 'Won' || d.stage === 'Rejected' || d.nextActionAt)) return false
       if (overdueFilter && (d.stage === 'Won' || d.stage === 'Rejected' || new Date(d.expectedCloseDate) >= TODAY)) return false
@@ -94,7 +96,7 @@ export function DealsBoard() {
       }
       return true
     })
-  }, [filtered, view, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
+  }, [filtered, view, stages, stageFilter, stageAtLeast, noNextActionFilter, overdueFilter, salesMonthFilter, companyIdFilter, openOnlyFilter])
 
   // Annotated rather than asserted: `as DealStage[]` would let a retired stage name through,
   // and a column nothing matches is a column of deals nobody can see.
@@ -183,18 +185,8 @@ export function DealsBoard() {
         {/* Working a stage is how the day is actually organised — every mandate that has gone
             out and is waiting, all in one list — so it needs a control, not only a drill-down
             link from somewhere else. */}
-        <select
-          value={stageFilter ?? ''}
-          onChange={(e) => setStageFilter(e.target.value || undefined)}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none"
-        >
-          <option value="">All Stages</option>
-          {DEAL_STAGES.map((stage) => (
-            <option key={stage} value={stage}>
-              {stage}
-            </option>
-          ))}
-        </select>
+        <StagePicker stages={DEAL_STAGES} chosen={stages}
+          onChange={(next) => { setStages(next); if (next.length) setView('table') }} />
         <select value={owner} onChange={(e) => setOwner(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 outline-none">
           <option value="All">All Owners</option>
           {reps.map((r) => (
@@ -387,6 +379,45 @@ function DealCard({ deal, canDrag, onDragStart, onOpen }: { deal: Deal; canDrag:
         </span>
         <span className="ml-auto shrink-0 tabular-nums">{deal.probability}%</span>
       </div>
+    </div>
+  )
+}
+
+/**
+ * TICK THE STAGES TO SEE (the firm, 18 Oct). A box per stage in a small panel under one button; the
+ * button says what is chosen. Closes on a tap outside it, like the select it replaced.
+ */
+function StagePicker({ stages, chosen, onChange }: { stages: readonly string[]; chosen: string[]; onChange: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [open])
+  const label = chosen.length === 0 ? 'All Stages' : chosen.length === 1 ? chosen[0] : `${chosen.length} stages`
+  return (
+    <div className="relative" ref={box}>
+      <button type="button" onClick={() => setOpen((o) => !o)} data-testid="stage-picker" aria-expanded={open}
+        className={`text-sm border rounded-lg px-3 py-2 bg-white outline-none ${chosen.length ? 'border-navy-900 text-slate-800' : 'border-slate-200 text-slate-600'}`}>
+        {label} <span className="text-slate-400">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg" role="group" aria-label="Stages">
+          {stages.map((st) => (
+            <label key={st} className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+              <input type="checkbox" className="accent-brand-600" checked={chosen.includes(st)}
+                onChange={(e) => onChange(e.target.checked ? [...chosen, st] : chosen.filter((x) => x !== st))} />
+              {st}
+            </label>
+          ))}
+          <div className="mt-1 flex justify-between border-t border-slate-100 px-2 pt-1.5 text-xs">
+            <button type="button" className="text-slate-500 hover:text-slate-800" onClick={() => onChange([])}>All stages</button>
+            <button type="button" className="font-medium text-brand-600 hover:underline" onClick={() => setOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
