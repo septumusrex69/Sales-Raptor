@@ -538,7 +538,12 @@ export function ComposeEmailModal({
           </button>
         )}
         <FormField label="Subject" required>
-          <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required autoFocus={!initialSubject} />
+          {/* THE CURSOR STARTS AT THE TOP (the firm, 18 Oct, on the iPad: "it should start immediately
+              where it's on the top ... to type the person's name, not the subject"). To and Subject
+              both asked for focus on a new email and the later one won; Subject now takes it only
+              when the address is already filled in. */}
+          <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} required
+            autoFocus={!initialSubject && !!address} />
         </FormField>
         {/* Required on everything except a forward, where the original IS the message -- and the
             asterisk has to agree with the box, or it marks a field somebody can leave empty. */}

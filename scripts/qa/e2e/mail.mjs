@@ -286,6 +286,18 @@ try {
    */
   t.ok('the header names the mailbox', await page.getByText(PROFILE.email).first().isVisible())
   t.ok('New email is on the header', await page.getByRole('button', { name: 'New email' }).isVisible())
+  /* THE CURSOR STARTS IN "To" (the firm, 18 Oct: "it should start immediately where it's on the top
+     ... to type the person's name, not the subject"). */
+  {
+    await page.getByRole('button', { name: 'New email' }).click()
+    await page.getByText('New Email').first().waitFor({ timeout: 5000 })
+    await page.waitForTimeout(300)
+    const where = await page.evaluate(() => document.activeElement?.getAttribute('placeholder') ?? document.activeElement?.tagName ?? '')
+    t.check('a new email opens with the cursor in To', where, 'name@company.co.za')
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Close' }).first().click().catch(() => {})
+    await page.waitForTimeout(300)
+  }
   t.ok('...and the sync button with it',
     await page.getByRole('button', { name: 'Check for new mail now' }).isVisible())
 
