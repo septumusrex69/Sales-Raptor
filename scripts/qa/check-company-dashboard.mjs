@@ -19,7 +19,7 @@
  * Run: node scripts/qa/check-company-dashboard.mjs
  */
 import { readFileSync } from 'node:fs'
-import { bookSlices, intakeBars, salesSnapshot } from '../../src/lib/companySnapshot.ts'
+import { bookSlices, departmentHeadline, intakeBars, intakeComparison, salesSnapshot } from '../../src/lib/companySnapshot.ts'
 import { getSalesMonthForKey } from '../../src/lib/salesMonth.ts'
 
 let pass = 0
@@ -230,6 +230,28 @@ ok('...and a span of months is not called sales months either',
   ok('...as the caller', /security invoker/.test(intakeFn.slice(0, 400)))
   ok('...and the browser only calls it', /supabase\.rpc\('company_intake_by_day'/.test(data))
   ok('the screen draws the bars and the ring', /<IntakeChart/.test(page) && /bookSlices\(book\)/.test(page))
+  /* Last month, day for day, and the words. */
+  const withPrior = intakeBars('2026-10-11', '2026-11-10', [{ day: '2026-10-12', accounts: 4 }, { day: '2026-10-17', accounts: 5 }], '2026-10-18',
+    { fromIso: '2026-09-11', toIso: '2026-10-10', rows: [{ day: '2026-09-14', accounts: 2 }, { day: '2026-09-30', accounts: 5 }] })
+  same('last month is laid by position: its 4th day beside this 4th day', withPrior.slice(0, 5).map((b) => b.priorAccounts), [0, 0, 0, 2, 0])
+  same('...and a slot past the end of the shorter month has no prior figure, not a nought', withPrior.at(-1)?.priorAccounts, null)
+  same('compared by the same day, not against the whole of last month', intakeComparison(withPrior)?.words, 'up from 2 last month by the same day')
+  same('...the whole month once it is over', intakeComparison(intakeBars('2026-09-11', '2026-10-10', [{ day: '2026-09-12', accounts: 1 }], '2026-10-18',
+    { fromIso: '2026-08-11', toIso: '2026-09-10', rows: [{ day: '2026-08-20', accounts: 3 }] }))?.words, 'down from 3 last month')
+  same('nothing to compare is no sentence', intakeComparison(intakeBars('2026-10-11', '2026-11-10', [], '2026-10-18')), null)
+  same('capital rides along for the rand view', intakeBars('2026-10-11', '2026-10-12', [{ day: '2026-10-12', accounts: 1, capital: 5000 }], '2026-10-18')[1].capital, 5000)
+
+  /* Each department's headline: none of them the firm's income. */
+  const m = (v) => `R ${v}`
+  const heads = ['Call centre', 'Sales', 'Communications', 'Administration'].map((d) =>
+    departmentHeadline(d, { collected: 1200, mandates: 1, intakeClients: 2, intakeAccounts: 9 }, m))
+  same('every department has a headline', heads.map((h) => h && `${h.value} ${h.label}`),
+    ['R 1200 collected this month', '1 mandate signed', '2 clients sent work', '9 accounts loaded'])
+  same('a figure still being counted reads as waiting, not nought',
+    departmentHeadline('Call centre', { collected: null, mandates: 0, intakeClients: null, intakeAccounts: null }, m)?.value, '…')
+  ok('no headline is commission or fees', !heads.some((h) => /commission|fee|annexure/i.test(h?.label ?? '')))
+  ok('the screen links the ring to the account list\'s own views', /viewParams\('unallocated'/.test(page) && /viewParams\('gone_quiet'/.test(page))
+  ok('...and a day\'s bar to that day\'s handovers', /onDay=\{\(b\) => navigate\(handedOver\(b\.day, b\.day\)\)\}/.test(page))
 }
 
 

@@ -25,6 +25,11 @@ const SNAPSHOT = [{
   unallocated_active: 3, quiet_accounts: 1, never_actioned: 0,
 }]
 /* Only the days that had a handover, as the database returns them. 17 and 18 Oct are a weekend. */
+/* Last month (11 Sep - 10 Oct), asked for by its own dates: 2 by the 8th day, 7 in all. */
+const PRIOR = [
+  { day: '2026-09-14', accounts: 2, capital: 20000 },
+  { day: '2026-09-30', accounts: 5, capital: 90000 },
+]
 const INTAKE = [
   { day: '2026-10-12', accounts: 4, capital: 80000 },
   { day: '2026-10-14', accounts: 2, capital: 50000 },
@@ -39,7 +44,9 @@ try {
   const handlers = [
     [(u) => /\/rest\/v1\/profiles/.test(u), () => ({ body: [ADMIN] })],
     [(u) => /\/rest\/v1\/rpc\/company_snapshot/.test(u), () => ({ body: SNAPSHOT })],
-    [(u) => /\/rest\/v1\/rpc\/company_intake_by_day/.test(u), () => ({ body: INTAKE })],
+    [(u) => /\/rest\/v1\/rpc\/company_intake_by_day/.test(u),
+      (u, req) => ({ body: (req.postDataJSON()?.p_from ?? '') < '2026-10-11' ? PRIOR : INTAKE })],
+    [(u) => /\/rest\/v1\/rpc\/collector_performance/.test(u), () => ({ body: [] })],
   ]
   const { context, page } = await signedInPage(browser, ADMIN, handlers, seen, { now: '2026-10-18T10:00:00+02:00' })
   for (let i = 0; i < 60; i += 1) {
@@ -63,12 +70,27 @@ try {
   /* 11 Oct - 10 Nov is 31 days: a bar slot for every one, not the three the database returned. */
   const ticks = await page.getByTestId('intake-chart').locator('.recharts-xAxis .recharts-cartesian-axis-tick').count()
   t.check('a slot for every day of the period, empty days included', ticks, 31)
-  const fills = await page.getByTestId('intake-chart').locator('.recharts-bar-rectangle path').evaluateAll(
+  /* Two layers: last month (faint, behind) then this month. This month's is the second. */
+  const nowLayer = page.getByTestId('intake-chart').locator('.recharts-bar').nth(1)
+  const priorDrawn = await page.getByTestId('intake-chart').locator('.recharts-bar').nth(0).locator('.recharts-bar-rectangle path').count()
+  t.check('last month is drawn behind, its two days with work', priorDrawn, 2)
+  const fills = await nowLayer.locator('.recharts-bar-rectangle path').evaluateAll(
     (ps) => ps.map((p) => p.getAttribute('fill')))
   /* Recharts draws no rectangle for a zero, so the drawn bars are the three days with work. */
   t.check('three days brought work in', fills.length, 3)
   t.check('a weekday is gold, a Saturday grey', JSON.stringify(fills),
     JSON.stringify(['var(--color-gold-400)', 'var(--color-gold-400)', 'var(--color-slate-300)']))
+  /* Up to the 8th day of each: 9 now against 2 then (30 Sep is the 20th day, not yet reached). */
+  t.ok('compared with last month by the same day', /up from 2 last month by the same day/.test(await page.getByTestId('intake-compare').innerText()))
+
+  /* Rand instead of accounts: the axis reads in rand. */
+  await page.getByTestId('measure-capital').click()
+  await page.waitForTimeout(300)
+  const yTicks = await page.getByTestId('intake-chart').locator('.recharts-cartesian-axis-tick-labels text').evaluateAll((ts) => ts.map((x) => x.textContent ?? ''))
+  t.ok('the bars can be shown in rand', yTicks.some((x) => /^R\d+k$/.test(x.trim())))
+  await page.getByTestId('measure-accounts').click()
+  await page.waitForTimeout(300)
+
   const text = await page.locator('body').innerText()
   for (const tile of ['Open leads', 'Mandates signed', 'Deals open', 'Deal value won']) {
     t.ok(`the sales tile "${tile}" sits in the panel`, (await page.getByTestId('work-coming-in').innerText()).includes(tile))
@@ -84,7 +106,19 @@ try {
   t.ok('clients and gone quiet are listed, not drawn as slices', /Clients with live accounts\s*4/.test(ring) && /Gone quiet\s*1/.test(ring))
   t.ok('what is owed on those accounts is under the ring', /Owed on those accounts\s*R\s?189[\s,]240/.test(await page.getByTestId('owed').innerText()))
 
+  /* ---------- every figure is a way in ---------- */
+  t.check('not yet allocated opens the unallocated view', await page.getByTestId('ring-unallocated').getAttribute('href'), '/accounts?book=active&who=nobody')
+  t.check('gone quiet opens the gone-quiet view', await page.getByTestId('ring-quiet').getAttribute('href'), '/accounts?book=active&quiet=30')
+  t.ok('not yet allocated is flagged gold when there are any', /bg-gold-100/.test(await page.getByTestId('ring-unallocated').innerHTML()))
+  t.check('View all on Work coming in opens the period\'s handovers',
+    await page.getByTestId('work-coming-in').getByRole('link', { name: /View all/ }).getAttribute('href'),
+    '/accounts?book=whole&from=2026-10-11&to=2026-11-10')
+
   /* ---------- Departments ---------- */
+  t.ok('each department carries its headline: sales', /0\s+mandates signed/.test(await page.getByTestId('headline-Sales').innerText()))
+  t.ok('...communications', /2\s+clients sent work/.test(await page.getByTestId('headline-Communications').innerText()))
+  t.ok('...administration', /9\s+accounts loaded/.test(await page.getByTestId('headline-Administration').innerText()))
+  t.ok('...call centre, in rand', /R\s?0\s+collected this month/.test(await page.getByTestId('headline-Call centre').innerText()))
   t.check('four departments in one row', await page.getByTestId('departments').locator('a').count(), 4)
   const row = await page.getByTestId('departments').locator('a').evaluateAll((as) => as.map((a) => Math.round(a.getBoundingClientRect().top)))
   t.ok('...on one line at a laptop\'s width', new Set(row).size === 1)
@@ -100,6 +134,11 @@ try {
   await page.getByTestId('work-coming-in').scrollIntoViewIfNeeded()
   await page.evaluate(() => { const m = document.querySelector('main'); if (m) m.scrollTop += 120 })
   await t.shot(page, 'company-dashboard-panels')
+  /* A bar opens the accounts handed over that day (12 Oct). */
+  await nowLayer.locator('.recharts-bar-rectangle').first().click()
+  await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
+  t.ok('clicking a day opens that day\'s handovers', /\/accounts\?book=whole&from=2026-10-12&to=2026-10-12/.test(page.url()))
+
   await context.close()
 } finally {
   if (browser) await browser.close()

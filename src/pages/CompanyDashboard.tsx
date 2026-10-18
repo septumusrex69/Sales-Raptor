@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { Activity, ArrowRight, Banknote, BarChart3, Coins, FileSignature, FileText, Handshake, Headset, Loader2, Users } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -11,7 +11,9 @@ import { MonthProgress } from '../components/collections/MonthProgress'
 import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import { useCollectionsMonth } from '../hooks/useCollectionsMonth'
-import { bookSlices, intakeBars, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar } from '../lib/companySnapshot'
+import { bookSlices, departmentHeadline, intakeBars, intakeComparison, salesSnapshot, type BookSlice, type BookSnapshot, type IntakeBar, type IntakeRow } from '../lib/companySnapshot'
+import { getPreviousSalesMonth } from '../lib/salesMonth'
+import { viewParams } from '../lib/accountViews'
 import { fetchBookSnapshot, fetchIntakeByDay, isoDay } from '../lib/companySnapshotData'
 import { DEPARTMENTS, dashboardPathFor, departmentOf, myDashboardPath, type Department } from '../lib/departments'
 import { formatCurrency } from '../data/mockData'
@@ -48,7 +50,10 @@ export function CompanyDashboard() {
   const month = useCollectionsMonth()
   const [book, setBook] = useState<BookSnapshot | null>(null)
   const [bookError, setBookError] = useState<string | null>(null)
-  const [intake, setIntake] = useState<{ day: string; accounts: number }[] | null>(null)
+  const [intake, setIntake] = useState<IntakeRow[] | null>(null)
+  const [prior, setPrior] = useState<IntakeRow[] | null>(null)
+  /* ACCOUNTS OR RAND (the firm, 18 Oct): ten small accounts and one of R500 000 are different days. */
+  const [measure, setMeasure] = useState<'accounts' | 'capital'>('accounts')
   const [barsError, setBarsError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -63,16 +68,31 @@ export function CompanyDashboard() {
   useEffect(() => {
     let cancelled = false
     setIntake(null); setBarsError(null)
+    setPrior(null)
     fetchIntakeByDay(month.period)
       .then((rows) => { if (!cancelled) setIntake(rows) })
       .catch((e) => { if (!cancelled) setBarsError(e instanceof Error ? e.message : String(e)) })
+    /* Last month, for the faint bars behind and the "up from" words. Unreadable, it is simply left
+       off -- this month's chart does not wait on it or fail with it. */
+    fetchIntakeByDay(getPreviousSalesMonth(month.period))
+      .then((rows) => { if (!cancelled) setPrior(rows) })
+      .catch(() => { if (!cancelled) setPrior([]) })
     return () => { cancelled = true }
   }, [month.period])
 
   /* Every day of the period, the as-at day deciding which are still to come. */
-  const bars = useMemo(() => intake === null ? null
-    : intakeBars(isoDay(month.period.start), isoDay(month.period.end), intake, isoDay(month.asAt)),
-  [intake, month.period, month.asAt])
+  const bars = useMemo(() => {
+    if (intake === null) return null
+    const before = getPreviousSalesMonth(month.period)
+    return intakeBars(isoDay(month.period.start), isoDay(month.period.end), intake, isoDay(month.asAt),
+      prior === null ? undefined : { fromIso: isoDay(before.start), toIso: isoDay(before.end), rows: prior })
+  }, [intake, prior, month.period, month.asAt])
+  const compare = bars ? intakeComparison(bars) : null
+  const navigate = useNavigate()
+  /* WHERE EACH FIGURE OPENS (the firm, 18 Oct: the numbers were dead ends). The account list's own
+     saved views where one asks exactly this question, so the list and the figure agree on the rule. */
+  const accountsLink = (p: URLSearchParams) => `/accounts?${p.toString()}`
+  const handedOver = (from: string, to: string) => accountsLink(new URLSearchParams({ book: 'whole', from, to }))
 
   /* The sales side is a few hundred rows AppStore already holds, so it is counted here rather
      than asked for again. See companySnapshot.ts on why a mandate is not a deal value. */
@@ -138,7 +158,7 @@ export function CompanyDashboard() {
       <div className="grid gap-4 lg:grid-cols-5">
         {/* ---------- what came in ---------- */}
         <Panel className="lg:col-span-3" title="Work coming in" why={`Handed to us in ${month.period.label}`}
-          to="/accounts" testId="work-coming-in">
+          to={handedOver(isoDay(month.period.start), isoDay(month.period.end))} testId="work-coming-in">
           {/*
             SAID IN WORDS, ONCE, because a six-figure number on a dashboard is read as the firm's
             money unless something says otherwise. It is the client's book to recover.
@@ -147,11 +167,26 @@ export function CompanyDashboard() {
             {book === null ? '\u00a0' : <>
               <span className="font-semibold text-slate-700">{count(book.intakeAccounts)} accounts</span>
               {' from '}{count(book.intakeClients)} {book.intakeClients === 1 ? 'client' : 'clients'}
+              {compare && <span data-testid="intake-compare" className={clsx('font-medium',
+                compare.now > compare.then ? 'text-emerald-700' : compare.now < compare.then ? 'text-rose-600' : 'text-slate-500')}>
+                {', '}{compare.words}</span>}
               {' · '}{money(book.intakeCapital)} capital at handover — the client's money to recover, not the firm's.
             </>}
           </p>
+          <div className="mb-1 flex justify-end">
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-[11px]" role="radiogroup" aria-label="Show the bars as">
+              {(['accounts', 'capital'] as const).map((m) => (
+                <button key={m} type="button" role="radio" aria-checked={measure === m} data-testid={`measure-${m}`}
+                  onClick={() => setMeasure(m)}
+                  className={clsx('rounded-md px-2 py-0.5', measure === m ? 'bg-navy-900 text-white' : 'text-slate-500 hover:text-slate-700')}>
+                  {m === 'accounts' ? 'Accounts' : 'Rand'}
+                </button>
+              ))}
+            </div>
+          </div>
           <Figures loading={bars === null && barsError === null} error={barsError} plain>
-            <IntakeChart bars={bars ?? []} />
+            <IntakeChart bars={bars ?? []} measure={measure}
+              onDay={(b) => navigate(handedOver(b.day, b.day))} />
           </Figures>
           <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
             <SalesTile icon={<FileText size={16} />} label="Open leads" value={count(sales.openLeads)}
@@ -168,9 +203,14 @@ export function CompanyDashboard() {
         </Panel>
 
         {/* ---------- what we are holding ---------- */}
-        <Panel className="lg:col-span-2" title="The book" why="What the firm is holding right now" to="/accounts" testId="the-book">
+        <Panel className="lg:col-span-2" title="The book" why="What the firm is holding right now" to={accountsLink(viewParams('whole_book', null))} testId="the-book">
           <Figures loading={book === null} error={bookError} plain>
-            {book && <BookRing book={book} />}
+            {book && <BookRing book={book} links={{
+              worked: accountsLink(new URLSearchParams({ book: 'active' })),
+              unallocated: accountsLink(viewParams('unallocated', null)),
+              quiet: accountsLink(viewParams('gone_quiet', null)),
+              clients: '/clients',
+            }} />}
           </Figures>
           {book !== null && (
             <div className="mt-4 flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3" data-testid="owed">
@@ -203,7 +243,13 @@ export function CompanyDashboard() {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="departments">
           {DEPARTMENTS.filter((d) => d.id !== 'Other').map((d) => (
             <DepartmentCard key={d.id} id={d.id} label={d.label} blurb={d.blurb}
-              people={headcount.get(d.id) ?? 0} ours={d.id === mine} />
+              people={headcount.get(d.id) ?? 0} ours={d.id === mine}
+              headline={departmentHeadline(d.id, {
+                collected: month.rows === null ? null : month.figures.collected,
+                mandates: sales.mandatesSigned,
+                intakeClients: book?.intakeClients ?? null,
+                intakeAccounts: book?.intakeAccounts ?? null,
+              }, formatCurrency)} />
           ))}
         </div>
       </Section>
@@ -280,12 +326,13 @@ function Figures({ loading, error, plain, children }: {
  * ... their own statistics is important, their team statistics is important, and their
  * department statistics is important for them to see."
  */
-function DepartmentCard({ id, label, blurb, people, ours }: {
+function DepartmentCard({ id, label, blurb, people, ours, headline }: {
   id: Department
   label: string
   blurb: string
   people: number
   ours: boolean
+  headline: { value: string; label: string } | null
 }) {
   const Icon = DEPARTMENT_ICON[id]
   return (
@@ -296,8 +343,13 @@ function DepartmentCard({ id, label, blurb, people, ours }: {
         <Icon size={18} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-bold text-slate-800">{label}</span>
-        <span className="block text-xs tabular-nums text-slate-400">
+        <span className="block text-sm font-bold leading-tight text-slate-800">{label}</span>
+        {headline && (
+          <span className="block truncate text-xs text-slate-600" data-testid={`headline-${id}`}>
+            <span className="font-bold tabular-nums text-slate-800">{headline.value}</span> {headline.label}
+          </span>
+        )}
+        <span className="block text-[11px] tabular-nums text-slate-400">
           {people === 1 ? '1 person' : `${people} people`}{ours ? ' · yours' : ''}
         </span>
       </span>
@@ -346,32 +398,84 @@ function Panel({ title, why, to, testId, className, children }: {
  * A BAR A DAY, the firm's own picture of "Work coming in".
  *
  * Gold for a working day, grey for a weekend (a short Saturday is a closed day, not a slow one), and
- * a day still to come drawn as an empty slot rather than a nought bar. The tooltip says the day and
- * the count; nothing here is money.
+ * a day still to come drawn as an empty slot rather than a nought bar. LAST MONTH sits faintly behind,
+ * day for day, so growing or drying up is read at a glance (the firm, 18 Oct). A bar is a way in:
+ * clicking it opens the accounts handed over that day. Accounts or rand -- the rand is capital at
+ * handover, the client's money to recover; nothing here is the firm's.
  */
-function IntakeChart({ bars }: { bars: IntakeBar[] }) {
-  const max = Math.max(0, ...bars.map((b) => b.accounts))
+function IntakeChart({ bars, measure, onDay }: {
+  bars: IntakeBar[]
+  measure: 'accounts' | 'capital'
+  onDay: (b: IntakeBar) => void
+}) {
+  const key = measure === 'accounts' ? 'accounts' : 'capital'
+  const priorKey = measure === 'accounts' ? 'priorAccounts' : 'priorCapital'
+  const max = Math.max(0, ...bars.map((b) => Math.max(b[key], b[priorKey] ?? 0)))
+  const fmt = (v: number) => measure === 'accounts' ? v.toLocaleString('en-ZA') : shortRand(v)
   return (
-    <div className="h-48" data-testid="intake-chart">
+    <div className="h-48 [&_*:focus]:outline-none" data-testid="intake-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={bars} margin={{ top: 4, right: 0, bottom: 0, left: -24 }} barCategoryGap="18%">
+        <BarChart data={bars} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap="18%" barGap="-100%">
+          {/* barGap -100%: last month's bar sits BEHIND this month's, not beside it. */}
           <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />
           <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0}
             tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
-          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40}
-            domain={[0, max > 0 ? 'auto' : 4]} tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
+          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={measure === 'accounts' ? 40 : 52}
+            domain={[0, max > 0 ? 'auto' : 4]} tickFormatter={fmt} tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
           <Tooltip cursor={{ fill: 'var(--color-slate-50)' }}
-            formatter={(v) => [`${Number(v).toLocaleString('en-ZA')} ${Number(v) === 1 ? 'account' : 'accounts'}`, 'Handed over']}
-            labelFormatter={(_, p) => { const b = p?.[0]?.payload as IntakeBar | undefined; return b ? longDay(b.day) : '' }} />
-          <Bar dataKey="accounts" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+            content={({ active, payload }) => {
+              const b = payload?.[0]?.payload as IntakeBar | undefined
+              if (!active || !b) return null
+              const now = measure === 'accounts' ? `${b.accounts.toLocaleString('en-ZA')} ${b.accounts === 1 ? 'account' : 'accounts'}` : rand0(b.capital)
+              const then = b[priorKey] === null ? null : measure === 'accounts' ? `${(b.priorAccounts ?? 0).toLocaleString('en-ZA')}` : rand0(b.priorCapital ?? 0)
+              return (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
+                  <div className="font-semibold text-slate-800">{longDay(b.day)}</div>
+                  <div className="text-slate-600">{b.future ? 'Still to come' : `${now} handed over`}</div>
+                  {then !== null && <div className="text-slate-400">Same day last month: {then}</div>}
+                  {!b.future && b.accounts > 0 && <div className="mt-1 text-gold-700">Click to open them</div>}
+                </div>
+              )
+            }} />
+          <Bar dataKey={priorKey} fill="var(--color-slate-200)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+          <Bar dataKey={key} radius={[3, 3, 0, 0]} isAnimationActive={false}
+            onClick={(d: { payload?: IntakeBar }) => { if (d?.payload && d.payload.accounts > 0) onDay(d.payload) }}>
             {bars.map((b) => (
-              <Cell key={b.day} fill={b.future ? 'transparent' : b.weekend ? 'var(--color-slate-300)' : 'var(--color-gold-400)'} />
+              <Cell key={b.day} cursor={b.accounts > 0 ? 'pointer' : undefined}
+                fill={b.future ? 'transparent' : b.weekend ? 'var(--color-slate-300)' : 'var(--color-gold-400)'} />
             ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
   )
+}
+
+/* "R 187 500" on the tooltip; "R188k" on the axis, where five digits do not fit. */
+const rand0 = (v: number): string => `R ${Math.round(v).toLocaleString('en-ZA')}`
+const shortRand = (v: number): string => v >= 1_000_000 ? `R${(v / 1_000_000).toFixed(1)}m` : v >= 1000 ? `R${Math.round(v / 1000)}k` : `R${Math.round(v)}`
+
+/** A legend line that opens its accounts, the arrow appearing on hover. */
+function LegendRow({ to, testId, dot, label, value, tone }: {
+  to?: string
+  testId: string
+  dot?: React.ReactNode
+  label: string
+  value: string
+  tone?: 'warn' | 'bad'
+}) {
+  const inner = (
+    <>
+      {dot ?? <span className="h-2.5 w-2.5 shrink-0" />}
+      <span className="flex-1 text-slate-600">{label}</span>
+      <span className={clsx('font-semibold tabular-nums', tone === 'warn' ? 'rounded bg-gold-100 px-1.5 text-gold-800'
+        : tone === 'bad' ? 'text-rose-600' : 'text-slate-800')}>{value}</span>
+      {to && <ArrowRight size={12} className="shrink-0 text-slate-300 group-hover:text-slate-600" />}
+    </>
+  )
+  return to
+    ? <Link to={to} data-testid={testId} className="group -mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-0.5 hover:bg-slate-50">{inner}</Link>
+    : <div data-testid={testId} className="flex items-center gap-2 py-0.5">{inner}</div>
 }
 
 const RING_COLOUR: Record<BookSlice['key'], string> = {
@@ -381,29 +485,33 @@ const RING_COLOUR: Record<BookSlice['key'], string> = {
 }
 
 /** The book as a ring that adds up (bookSlices), with the two figures that are not slices under it. */
-function BookRing({ book }: { book: BookSnapshot }) {
+function BookRing({ book, links }: {
+  book: BookSnapshot
+  links: { worked: string; unallocated: string; quiet: string; clients: string }
+}) {
   const slices = bookSlices(book)
+  const to: Partial<Record<BookSlice['key'], string>> = { worked: links.worked, unallocated: links.unallocated }
   return (
     <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-center" data-testid="book-ring">
       <Ring slices={slices} total={book.bookAccounts} />
       <ul className="w-full space-y-2 text-sm">
-        {slices.map((s) => (
-          <li key={s.key} className="flex items-center gap-2"
-            title={s.key === 'not_worked' ? 'On the book and not live: closed, on hold, written off or frozen.' : undefined}>
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: RING_COLOUR[s.key] }} />
-            <span className="flex-1 text-slate-600">{s.label}</span>
-            <span className="font-semibold tabular-nums text-slate-800">{count(s.value)}</span>
-          </li>
-        ))}
-        <li className="border-t border-slate-100 pt-2 flex items-center gap-2">
-          <span className="h-2.5 w-2.5 shrink-0" />
-          <span className="flex-1 text-slate-600">Clients with live accounts</span>
-          <span className="font-semibold tabular-nums text-slate-800">{count(book.activeClients)}</span>
+        {slices.map((s) => {
+          /* NOT YET ALLOCATED IS A JOB, so it is gold when it is not nought (the firm, 18 Oct). */
+          const alert = s.key === 'unallocated' && s.value > 0
+          return (
+            <li key={s.key} title={s.key === 'not_worked' ? 'On the book and not live: closed, on hold, written off or frozen.' : undefined}>
+              <LegendRow to={to[s.key]} testId={`ring-${s.key}`}
+                dot={<span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: RING_COLOUR[s.key] }} />}
+                label={s.label} value={count(s.value)} tone={alert ? 'warn' : undefined} />
+            </li>
+          )
+        })}
+        <li className="border-t border-slate-100 pt-2">
+          <LegendRow to={links.clients} testId="ring-clients" label="Clients with live accounts" value={count(book.activeClients)} />
         </li>
-        <li className="flex items-center gap-2" title="Worked at some point, and not in the last 30 days. Accounts with no action recorded in Raptor at all are counted separately.">
-          <span className="h-2.5 w-2.5 shrink-0" />
-          <span className="flex-1 text-slate-600">Gone quiet</span>
-          <span className={clsx('font-semibold tabular-nums', book.quietAccounts > 0 ? 'text-rose-600' : 'text-slate-800')}>{count(book.quietAccounts)}</span>
+        <li title="Worked at some point, and not in the last 30 days. Accounts with no action recorded in Raptor at all are counted separately.">
+          <LegendRow to={links.quiet} testId="ring-quiet" label="Gone quiet" value={count(book.quietAccounts)}
+            tone={book.quietAccounts > 0 ? 'bad' : undefined} />
         </li>
       </ul>
     </div>

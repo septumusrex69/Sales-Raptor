@@ -105,6 +105,11 @@ export interface IntakeBar {
   /** The day of the month, as the axis prints it. */
   label: string
   accounts: number
+  /** Capital at handover that day -- the client's money to recover, never the firm's. */
+  capital: number
+  /** The same day of LAST period (the nth day of it), drawn faintly behind; null past its end. */
+  priorAccounts: number | null
+  priorCapital: number | null
   /** Saturday or Sunday: drawn grey, because a handover is a working-day event and a weekend bar
       that is short reads as a slow day when it is simply a closed one. */
   weekend: boolean
@@ -113,29 +118,72 @@ export interface IntakeBar {
   future: boolean
 }
 
+export interface IntakeRow { day: string; accounts: number; capital?: number }
+
+/** Every day from one ISO date to another, inclusive, in UTC so no local clock moves a day. */
+function daysOf(fromIso: string, toIso: string): Date[] {
+  const out: Date[] = []
+  const [y, m, d] = fromIso.split('-').map(Number)
+  for (let i = 0; i < 400; i++) {
+    const at = new Date(Date.UTC(y, m - 1, d + i))
+    if (at.toISOString().slice(0, 10) > toIso) break
+    out.push(at)
+  }
+  return out
+}
+
 /**
  * EVERY DAY OF THE PERIOD, IN ORDER, with the database's counts placed on it.
  *
  * THE DATABASE RETURNS ONLY DAYS THAT HAD A HANDOVER (company_intake_by_day groups by the date), so
  * the gaps are filled here: a chart that skipped empty days would put 11 Sep beside 14 Sep and read as
- * three busy days in a row. UTC arithmetic on 'YYYY-MM-DD' strings only, so no local clock moves a
- * day. A day the database counted outside the period is ignored rather than tacked on.
+ * three busy days in a row. A day the database counted outside the period is ignored rather than
+ * tacked on.
+ *
+ * LAST PERIOD IS LAID DAY FOR DAY: the first day beside the first day (the firm, 18 Oct, agreeing "is
+ * work coming in growing or drying up" as the question). Periods differ in length by a day or three,
+ * so the comparison is by position, and a slot past the end of the shorter one has no prior figure
+ * rather than a nought.
  */
-export function intakeBars(fromIso: string, toIso: string, rows: { day: string; accounts: number }[], todayIso: string): IntakeBar[] {
-  const counts = new Map(rows.map((r) => [r.day.slice(0, 10), r.accounts]))
-  const out: IntakeBar[] = []
-  const [y, m, d] = fromIso.split('-').map(Number)
-  for (let i = 0; i < 400; i++) {
-    const at = new Date(Date.UTC(y, m - 1, d + i))
+export function intakeBars(
+  fromIso: string, toIso: string, rows: IntakeRow[], todayIso: string,
+  prior?: { fromIso: string; toIso: string; rows: IntakeRow[] },
+): IntakeBar[] {
+  const counts = new Map(rows.map((r) => [r.day.slice(0, 10), r]))
+  const priorDays = prior ? daysOf(prior.fromIso, prior.toIso).map((d) => d.toISOString().slice(0, 10)) : []
+  const priorBy = new Map((prior?.rows ?? []).map((r) => [r.day.slice(0, 10), r]))
+  return daysOf(fromIso, toIso).map((at, i) => {
     const iso = at.toISOString().slice(0, 10)
-    if (iso > toIso) break
     const dow = at.getUTCDay()
-    out.push({
-      day: iso, label: String(at.getUTCDate()), accounts: counts.get(iso) ?? 0,
+    const r = counts.get(iso)
+    const pDay = prior && i < priorDays.length ? priorDays[i] : null
+    const p = pDay ? priorBy.get(pDay) : undefined
+    return {
+      day: iso, label: String(at.getUTCDate()),
+      accounts: r?.accounts ?? 0, capital: r?.capital ?? 0,
+      priorAccounts: pDay ? (p?.accounts ?? 0) : null,
+      priorCapital: pDay ? (p?.capital ?? 0) : null,
       weekend: dow === 0 || dow === 6, future: iso > todayIso,
-    })
-  }
-  return out
+    }
+  })
+}
+
+/**
+ * "UP FROM 6 LAST MONTH", in words, comparing like with like: last period only up to the same day
+ * of it as this one has reached, so the 7th of this month is not set against the whole of last.
+ * Null where there is nothing to compare (no prior period, or a fresh period with nothing in yet).
+ */
+export function intakeComparison(bars: IntakeBar[]): { now: number; then: number; words: string } | null {
+  const past = bars.filter((b) => !b.future)
+  if (!bars.some((b) => b.priorAccounts !== null)) return null
+  const now = past.reduce((t, b) => t + b.accounts, 0)
+  const then = past.reduce((t, b) => t + (b.priorAccounts ?? 0), 0)
+  if (now === 0 && then === 0) return null
+  const sameDay = past.length < bars.length ? ' by the same day' : ''
+  const words = now === then ? `the same as last month${sameDay}`
+    : now > then ? `up from ${then.toLocaleString('en-ZA')} last month${sameDay}`
+      : `down from ${then.toLocaleString('en-ZA')} last month${sameDay}`
+  return { now, then, words }
 }
 
 /** A slice of "The book" ring, and the line in its legend. */
@@ -169,4 +217,30 @@ export function bookSlices(b: Pick<BookSnapshot, 'bookAccounts' | 'activeAccount
     { key: 'unallocated', label: 'Not yet allocated', value: unallocated },
     { key: 'not_worked', label: 'Not being worked', value: notWorked },
   ]
+}
+
+/**
+ * EACH DEPARTMENT'S HEADLINE (the firm, 18 Oct). The section has always said "Everybody sees
+ * everybody's headline" and the cards carried a headcount. One figure each, chosen as the work that
+ * department is there to do, and NONE of them the firm's income (the condition the whole screen was
+ * agreed under):
+ *   - Call centre: collected this period -- the client's money recovered, the hero's own figure;
+ *   - Sales: mandates signed;
+ *   - Communications: clients who sent work (they look after the client relationship);
+ *   - Administration: accounts loaded onto the book this period.
+ * Null while the figure is still being counted: a card reads "…" rather than a wrong nought.
+ */
+export function departmentHeadline(
+  id: string,
+  input: { collected: number | null; mandates: number; intakeClients: number | null; intakeAccounts: number | null },
+  money: (v: number) => string,
+): { value: string; label: string } | null {
+  const n = (v: number | null) => (v === null ? '…' : v.toLocaleString('en-ZA'))
+  switch (id) {
+    case 'Call centre': return { value: input.collected === null ? '…' : money(input.collected), label: 'collected this month' }
+    case 'Sales': return { value: n(input.mandates), label: input.mandates === 1 ? 'mandate signed' : 'mandates signed' }
+    case 'Communications': return { value: n(input.intakeClients), label: input.intakeClients === 1 ? 'client sent work' : 'clients sent work' }
+    case 'Administration': return { value: n(input.intakeAccounts), label: input.intakeAccounts === 1 ? 'account loaded' : 'accounts loaded' }
+    default: return null
+  }
 }
