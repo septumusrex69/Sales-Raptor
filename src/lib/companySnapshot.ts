@@ -134,7 +134,9 @@ export interface IntakeRow { day: string; accounts: number; capital?: number; ne
 function daysOf(fromIso: string, toIso: string): Date[] {
   const out: Date[] = []
   const [y, m, d] = fromIso.split('-').map(Number)
-  for (let i = 0; i < 400; i++) {
+  /* Twenty years at most: a client's whole history (All time) reaches past one year, a runaway range
+     does not reach forever. */
+  for (let i = 0; i < 7400; i++) {
     const at = new Date(Date.UTC(y, m - 1, d + i))
     if (at.toISOString().slice(0, 10) > toIso) break
     out.push(at)

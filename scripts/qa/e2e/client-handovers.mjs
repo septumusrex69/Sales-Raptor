@@ -21,6 +21,7 @@ try {
     [(u) => /\/rpc\/client_intake_by_day/.test(u), (u, req) => {
       asked.push(req.postDataJSON())
       return { body: [
+        { day: '2024-03-02', accounts: 3, capital: 30000 },
         { day: '2026-08-20', accounts: 12, capital: 240000 },
         { day: '2026-09-15', accounts: 5, capital: 80000 },
         { day: '2026-10-12', accounts: 7, capital: 120000 },
@@ -47,6 +48,15 @@ try {
   t.ok('Rand switches the figures to capital', /R 440 000 over 12 months|R 440,000 over 12 months|R 440 000 over 12 months/.test(await card.innerText()))
   await page.getByTestId('client-handovers-months-6').click(); await page.waitForTimeout(500)
   t.check('six months on the switch', (await card.locator('.recharts-xAxis-tick-labels text').allTextContents()).length, 6)
+  /* ALL TIME, AND IT SLIDES ("an option to view the accounts for all time ... slide from left to right.
+     Don't try to cram"). From the first handover, every month the same width, opened on the latest. */
+  await page.getByTestId('client-handovers-months-all').click(); await page.waitForTimeout(700)
+  const allTicks = await card.locator('.recharts-xAxis-tick-labels text').allTextContents()
+  t.ok('All time starts at the client\'s first handover', allTicks[0] === 'Mar 24' && allTicks.length >= 30)
+  const scroll = await page.getByTestId('client-handovers-scroll').evaluate((el) => ({ wide: el.scrollWidth > el.clientWidth + 50, atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2 }))
+  t.check('...too many months to fit, so it slides sideways rather than squeezing', scroll.wide, true)
+  t.check('...opened on the most recent months', scroll.atEnd, true)
+  t.ok('...and the words say all time', /over \d+ months, all time/.test(await card.innerText()))
   await card.scrollIntoViewIfNeeded()
   await t.shot(page, 'client-handovers')
 } finally {
