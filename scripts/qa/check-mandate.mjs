@@ -87,6 +87,13 @@ ok('...wins the deal, or makes a won mandate deal', /stage = 'Won'/.test(body) &
 ok('...converts the lead', /status = 'Converted'/.test(body))
 ok('...and tells the closer to assign a liaison', /'mandate_signed'/.test(body) && /Assign them a liaison/.test(body))
 ok('...only on the move INTO signed, never twice', /coalesce\(old\.state, ''\) = 'signed' then return new/.test(body))
+ok('...writes the signature into the client\'s notes, by name', /'Mandate signed online by '/.test(body) && /mandate_signatory_name/.test(body))
+ok('...and brings the lead\'s history (the email that sent it) across to the client', /update public\.activities set company_id = v_company where lead_id = v_lead\.id and company_id is null/.test(body))
+const sign = readFileSync(new URL('../../src/pages/sign/SignPage.tsx', import.meta.url), 'utf8')
+ok('the signing page asks the signer\'s name once: the mandate\'s signatory IS the signer', /const signer = asksSignatory \? \(filled\[SIGNATORY\] \?\? ''\) : name/.test(sign) && /\{!asksSignatory && \(/.test(sign) && /name: signer/.test(sign))
+const modal = readFileSync(new URL('../../src/components/leads/SendMandateModal.tsx', import.meta.url), 'utf8')
+ok('the letterhead and fonts are fetched when the window opens, not when Prepare is pressed', /assets\.current = \(async/.test(modal) && !/await fetchLetterheads\(\)\)\?\.page/.test(modal.slice(modal.indexOf('async function prepare'))))
+ok('sending writes a "Mandate sent for signing" line for the notes', /Mandate sent for signing online/.test(modal))
 ok('the trigger runs before the update, so the request carries the client', /before update on public\.signing_requests/.test(sql.slice(sql.lastIndexOf('create or replace trigger mandate_on_signed'))))
 
 if (failures.length) { console.error(`check-mandate: ${failures.length} failed, ${pass} passed\n  ✗ ${failures.join('\n  ✗ ')}`); process.exit(1) }

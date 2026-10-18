@@ -151,6 +151,22 @@ try {
   await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
   t.ok('clicking a day opens that day\'s handovers', /\/accounts\?book=whole&from=2026-10-12&to=2026-10-12/.test(page.url()))
 
+  /* ---------- View all opens the period's handovers (the firm, 18 Oct: "this button doesn't work") ---------- */
+  await page.goto(`http://localhost:${PORT}/`)
+  await page.getByTestId('work-coming-in').waitFor({ timeout: 15000 })
+  await page.setViewportSize({ width: 1180, height: 1024 })
+  await page.waitForTimeout(300)
+  const viewAll = page.getByTestId('work-coming-in').getByRole('link', { name: /View all/ })
+  t.ok('View all is not covered by anything at iPad width', await viewAll.evaluate((a) => {
+    a.scrollIntoView({ block: 'center' }); const r = a.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return a === hit || a.contains(hit)
+  }))
+  await page.getByTestId('work-coming-in').getByRole('link', { name: /View all/ }).click()
+  await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
+  t.ok('...and opens the accounts handed over in the period, on the whole book', /\/accounts\?book=whole&from=2026-10-11&to=2026-11-10/.test(page.url()))
+  await page.setViewportSize({ width: 1440, height: 900 })
+
   /* ---------- over six months, one bar a month (the firm, 18 Oct) ---------- */
   await page.goto(`http://localhost:${PORT}/`)
   await page.getByTestId('intake-chart').waitFor({ timeout: 15000 })
@@ -159,9 +175,25 @@ try {
   await page.getByTestId('intake-chart').locator('.recharts-bar-rectangle').first().waitFor({ timeout: 15000 })
   const monthTicks = await page.getByTestId('intake-chart').locator('.recharts-xAxis-tick-labels text').allTextContents()
   t.check('over Last 6 months the chart draws six months, not a hundred and eighty days', JSON.stringify(monthTicks), JSON.stringify(['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov']))
+  /* WHOSE WORK, AND BARS OR LINES (the firm, 18 Oct): the tiles filter; the lines compare new and existing. */
+  const chart = page.getByTestId('intake-chart')
+  const layers = async () => JSON.stringify([await chart.locator('.recharts-bar').count(), await chart.locator('.recharts-line').count()])
+  t.check('everybody\'s work: two stacked layers, no lines', await layers(), '[2,0]')
+  await page.getByTestId('intake-who-new').click(); await page.waitForTimeout(300)
+  t.check('New clients only: one layer', await layers(), '[1,0]')
+  t.ok('...the tile says it is the one chosen', (await page.getByTestId('intake-who-new').getAttribute('aria-pressed')) === 'true')
+  await page.getByTestId('intake-who-all').click()
+  await page.getByTestId('intake-show-line').click(); await page.waitForTimeout(300)
+  t.check('Line: existing against new, a line each, no bars', await layers(), '[0,2]')
+  await page.getByTestId('intake-show-both').click(); await page.waitForTimeout(300)
+  t.check('Both: the bars and the two lines', await layers(), '[2,2]')
+  await page.getByTestId('intake-who-existing').click(); await page.waitForTimeout(300)
+  t.check('...Existing only, with Both: one layer and its line', await layers(), '[1,1]')
+  await page.getByTestId('intake-who-all').click(); await page.getByTestId('intake-show-bars').click(); await page.waitForTimeout(300)
   await page.getByTestId('work-coming-in').scrollIntoViewIfNeeded()
   await t.shot(page, 'company-dashboard-months')
-  await page.getByTestId('intake-chart').locator('.recharts-bar').nth(1).locator('.recharts-bar-rectangle').last().click()
+  /* No faint layer in month mode, so existing is the first layer. */
+  await page.getByTestId('intake-chart').locator('.recharts-bar').nth(0).locator('.recharts-bar-rectangle').last().click()
   await page.waitForURL(/\/accounts\?/, { timeout: 10000 }).catch(() => {})
   t.ok('...and a month bar opens that whole sales month, the 11th to the 10th', /\/accounts\?book=whole&from=2026-(\d\d)-11&to=2026-\d\d-10$/.test(page.url()) && (() => { const m = page.url().match(/from=2026-(\d\d)-11&to=2026-(\d\d)-10/); return !!m && Number(m[2]) === Number(m[1]) + 1 })())
 

@@ -44,6 +44,14 @@ export default function SignPage() {
    * to make."
    */
   const [filled, setFilled] = useState<Record<string, string>>({})
+  /*
+   * ONE NAME, ASKED ONCE (the firm, 18 Oct, looking at the mandate: "Name of the person signing" and
+   * then "Your full name" under the signature). Where the document already asks who is signing, that
+   * answer IS the signer's name, and the second box is not shown.
+   */
+  const SIGNATORY = 'mandate_signatory_name'
+  const asksSignatory = !!request?.blanks?.some((b) => b.key === SIGNATORY)
+  const signer = asksSignatory ? (filled[SIGNATORY] ?? '') : name
   const set = (key: string, value: string) => setFilled((f) => ({ ...f, [key]: value }))
   const [agreed, setAgreed] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -145,12 +153,12 @@ export default function SignPage() {
       return
     }
     if (!signature) { setProblem('Sign in the box before submitting.'); return }
-    if (!name.trim()) { setProblem('Type your full name before submitting.'); return }
+    if (!signer.trim()) { setProblem('Type your full name before submitting.'); return }
     if (!agreed) { setProblem('Tick the box to confirm you intend to sign.'); return }
     setBusy(true)
     try {
       const done = await signDocument({
-        token, signaturePng: signature, initialsPng: initials, name, filled,
+        token, signaturePng: signature, initialsPng: initials, name: signer, filled,
       })
       /*
        * FALSE IS NOT AN ERROR. The link was already used -- a second tab, a double tap, a colleague
@@ -411,6 +419,7 @@ export default function SignPage() {
           <SignaturePad label="Your initials — these go at the foot of every page" height={110}
             onChange={setInitials} />
 
+{!asksSignatory && (
           <label className="block">
             <span className="text-xs font-medium text-slate-600">Your full name</span>
             <input value={name} onChange={(e) => setName(e.target.value)}
@@ -425,6 +434,7 @@ export default function SignPage() {
               Typed, so the document says who signed it as well as carrying the mark.
             </span>
           </label>
+          )}
 
           <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer select-none">
             <input type="checkbox" className="mt-1 shrink-0" checked={agreed}

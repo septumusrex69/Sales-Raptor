@@ -707,7 +707,11 @@ export function DealDetail() {
           email={contact?.email ?? recipients[0]?.email ?? null}
           contactName={contact ? `${contact.firstName} ${contact.lastName}`.trim() : null}
           onClose={() => setMandateOpen(false)}
-          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id })}
+          onSent={(subject, bodyText, note) => {
+            addActivity({ type: 'Email', subject, notes: bodyText, dealId: deal.id, contactId: contact?.id })
+            /* A line in Notes as well as the email in Emails: the firm looks for "mandate sent" there. */
+            addActivity({ type: 'Deal update', subject: note, dealId: deal.id, contactId: contact?.id })
+          }}
         />
       )}
       {composeOpen && (

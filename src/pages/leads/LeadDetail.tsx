@@ -836,7 +836,11 @@ export function LeadDetail() {
           email={lead.email ?? null}
           contactName={`${lead.firstName} ${lead.lastName}`.trim() || null}
           onClose={() => setMandateOpen(false)}
-          onSent={(subject, bodyText) => addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })}
+          onSent={(subject, bodyText, note) => {
+            addActivity({ type: 'Email', subject, notes: bodyText, leadId: lead.id, companyId: lead.companyId })
+            /* A line in Notes as well as the email in Emails: the firm looks for "mandate sent" there. */
+            addActivity({ type: 'Deal update', subject: note, leadId: lead.id, companyId: lead.companyId })
+          }}
         />
       )}
       {emailOpen && lead.email && (

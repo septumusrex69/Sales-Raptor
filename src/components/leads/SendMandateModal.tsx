@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Modal, inputClass } from '../ui/Modal'
@@ -39,7 +39,8 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
   email: string | null
   contactName: string | null
   onClose: () => void
-  onSent: (subject: string, body: string) => void
+  /** The email as sent, and one line for the record's notes ("Mandate sent for signing online: ..."). */
+  onSent: (subject: string, body: string, note: string) => void
 }) {
   const { currentUser } = useAuth()
   const [party, setParty] = useState<MandateParty>('company')
@@ -58,6 +59,29 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
   [kind, rate, bands])
   const problems = [...commissionProblems(commission), ...(name.trim() ? [] : ['Give the client’s name.'])]
 
+  /*
+   * FETCHED WHILE THE TERMS ARE CHOSEN, NOT AFTER (the firm, 18 Oct: "it's kind of taking a long time
+   * preparing the email"). The letterhead image and the four Charter files are the slow part -- a
+   * full-page image off storage and four font files -- and none of them depends on anything typed
+   * here, so they start the moment the window opens and are usually in hand by the time Prepare is
+   * pressed.
+   */
+  const assets = useRef<Promise<{ sheet: typeof A4_LETTERHEAD; letterhead: { bytes: Uint8Array; type: 'png' | 'jpg' } | null; charter: Awaited<ReturnType<typeof fetchCharter>> }> | null>(null)
+  if (!assets.current) {
+    assets.current = (async () => {
+      const [sheet, charter] = await Promise.all([
+        fetchLetterheads().then((all) => defaultOf(all)?.page ?? A4_LETTERHEAD).catch(() => A4_LETTERHEAD),
+        fetchCharter(''),
+      ])
+      let letterhead: { bytes: Uint8Array; type: 'png' | 'jpg' } | null = null
+      if (sheet.backgroundUrl) {
+        const got = await fetch(sheet.backgroundUrl).catch(() => null)
+        if (got?.ok) letterhead = { bytes: new Uint8Array(await got.arrayBuffer()), type: /\.jpe?g($|\?)/i.test(sheet.backgroundUrl) ? 'jpg' : 'png' }
+      }
+      return { sheet, letterhead, charter }
+    })()
+  }
+
   async function prepare() {
     setBusy(true); setError(null)
     try {
@@ -65,7 +89,7 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
       const doc = mandateDocument(terms)
       const blanks = mandateBlanks(party)
       const prefill: Record<string, string> = { mandate_client_name: name.trim(), ...(email ? { mandate_email: email } : {}) }
-      const sheet = defaultOf(await fetchLetterheads())?.page ?? A4_LETTERHEAD
+      const { sheet, letterhead, charter } = await (assets.current as NonNullable<typeof assets.current>)
       /* The request first: the PDF and the email both point at it. Frozen terms, prefilled answers. */
       const token = await createSigningRequest({
         accountId: null, title: 'Debt collection agreement', body: doc.blocks, pageSetup: sheet, blanks,
@@ -75,14 +99,9 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
         .update({ lead_id: leadId, deal_id: dealId, mandate: terms, filled: prefill }).eq('token', token)
       if (e) throw new Error(e.message)
 
-      let letterhead: { bytes: Uint8Array; type: 'png' | 'jpg' } | null = null
-      if (sheet.backgroundUrl) {
-        const got = await fetch(sheet.backgroundUrl).catch(() => null)
-        if (got?.ok) letterhead = { bytes: new Uint8Array(await got.arrayBuffer()), type: /\.jpe?g($|\?)/i.test(sheet.backgroundUrl) ? 'jpg' : 'png' }
-      }
       const bytes = await letterToPdf({
         doc, page: sheet, filled: true, values: withFilled({}, blanks, prefill), letterhead,
-        charter: isCharter(doc.defaults.font) ? await fetchCharter('') : null, signed: null,
+        charter: isCharter(doc.defaults.font) ? charter : null, signed: null,
       })
       const filename = letterFilename('Debt collection agreement', name.trim())
       const url = signingLink(token, window.location.origin)
@@ -119,7 +138,7 @@ export function SendMandateModal({ leadId, dealId, clientName, email, contactNam
         onSent={async (subject, body) => {
           /* The deal moves to Mandate Sent, with the day, as the pipeline already reads it. */
           if (dealId) await supabase.from('deals').update({ stage: 'Mandate Sent', mandate_sent_at: clockNow().toISOString() }).eq('id', dealId).neq('stage', 'Won')
-          onSent(subject, body)
+          onSent(subject, body, `Mandate sent for signing online: ${party === 'company' ? 'a company' : 'an individual'}, commission ${commissionLine(commission)}`)
         }}
       />
     )

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { ArrowRight, Banknote, Coins, FileSignature, FileText, Handshake, Loader2 } from 'lucide-react'
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, CartesianGrid, Cell, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../components/ui/Card'
 import { CollectionsHero } from '../components/collections/CollectionsHero'
 import { MyDetailsMissing } from '../components/dashboard/MyDetailsMissing'
@@ -54,6 +54,10 @@ export function CompanyDashboard() {
   const [prior, setPrior] = useState<IntakeRow[] | null>(null)
   /* ACCOUNTS OR RAND (the firm, 18 Oct): ten small accounts and one of R500 000 are different days. */
   const [measure, setMeasure] = useState<'accounts' | 'capital'>('accounts')
+  /* WHOSE WORK, AND HOW (the firm, 18 Oct: "filter ... only new clients or only existing clients ...
+     and also add the line graphs ... a comparison between new handovers and existing"). */
+  const [who, setWho] = useState<IntakeWho>('all')
+  const [show, setShow] = useState<'bars' | 'both' | 'line'>('bars')
   const [barsError, setBarsError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -185,19 +189,34 @@ export function CompanyDashboard() {
                 ['Total', split.total, null],
                 ['Existing clients', split.existing, 'var(--color-gold-400)'],
                 ['New clients', split.fresh, 'var(--color-navy-700)'],
-              ] as const).map(([label, v, colour]) => (
-                <div key={label} className="rounded-lg bg-slate-50 px-3 py-2"
-                  title={label === 'New clients' ? 'Inside their first three months of handovers, counted from their first account. Sales\u2019 work.'
-                    : label === 'Existing clients' ? 'Past their first three months. Communications\u2019 work.' : undefined}>
+              ] as const).map(([label, v, colour]) => {
+                /* THE TILES ARE THE FILTER: press Existing to see only Communications' work, New for
+                   only Sales', Total for both. One control, where the figures already are. */
+                const value: IntakeWho = label === 'Total' ? 'all' : label === 'Existing clients' ? 'existing' : 'new'
+                return (
+                <button key={label} type="button" aria-pressed={who === value} data-testid={`intake-who-${value}`}
+                  onClick={() => setWho(value)}
+                  className={clsx('rounded-lg px-3 py-2 text-left ring-1 transition-colors',
+                    who === value ? 'bg-white ring-navy-900' : 'bg-slate-50 ring-transparent hover:ring-slate-200')}
+                  title={label === 'New clients' ? 'Inside their first three months of handovers, counted from their first account. Sales\u2019 work. Press to see only these.'
+                    : label === 'Existing clients' ? 'Past their first three months. Communications\u2019 work. Press to see only these.' : 'Press to see everybody\u2019s'}>
                   <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                     {colour && <span className="h-2 w-2 rounded-sm" style={{ background: colour }} />}{label}
                   </div>
                   <div className="text-base font-bold tabular-nums text-slate-800">{measure === 'accounts' ? count(v.accounts) : money(v.capital)}</div>
-                </div>
-              ))}
+                </button>
+                )
+              })}
             </div>
           )}
-          <div className="mb-1 flex justify-end">
+          <div className="mb-1 flex flex-wrap justify-end gap-2">
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-[11px]" role="radiogroup" aria-label="Draw as">
+              {([['bars', 'Bars'], ['both', 'Both'], ['line', 'Line']] as const).map(([v, label]) => (
+                <button key={v} type="button" role="radio" aria-checked={show === v} data-testid={`intake-show-${v}`}
+                  onClick={() => setShow(v)}
+                  className={clsx('rounded-md px-2 py-0.5', show === v ? 'bg-navy-900 text-white' : 'text-slate-500 hover:text-slate-700')}>{label}</button>
+              ))}
+            </div>
             <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-[11px]" role="radiogroup" aria-label="Show the bars as">
               {(['accounts', 'capital'] as const).map((m) => (
                 <button key={m} type="button" role="radio" aria-checked={measure === m} data-testid={`measure-${m}`}
@@ -209,7 +228,7 @@ export function CompanyDashboard() {
             </div>
           </div>
           <Figures loading={bars === null && barsError === null} error={barsError} plain>
-            <IntakeChart bars={bars ?? []} measure={measure}
+            <IntakeChart bars={bars ?? []} measure={measure} who={who} show={show}
               onDay={(b) => navigate(handedOver(b.day, b.toDay))} />
           </Figures>
           <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -438,9 +457,13 @@ function Panel({ title, why, to, testId, className, children }: {
  * clicking it opens the accounts handed over that day. Accounts or rand -- the rand is capital at
  * handover, the client's money to recover; nothing here is the firm's.
  */
-function IntakeChart({ bars, measure, onDay }: {
+type IntakeWho = 'all' | 'existing' | 'new'
+
+function IntakeChart({ bars, measure, who, show, onDay }: {
   bars: IntakeBar[]
   measure: 'accounts' | 'capital'
+  who: IntakeWho
+  show: 'bars' | 'both' | 'line'
   onDay: (b: IntakeBar) => void
 }) {
   const key = measure === 'accounts' ? 'accounts' : 'capital'
@@ -455,12 +478,21 @@ function IntakeChart({ bars, measure, onDay }: {
     fromNew: measure === 'accounts' ? b.newAccounts : b.newCapital,
   }))
   const priorKey = measure === 'accounts' ? 'priorAccounts' : 'priorCapital'
-  const max = Math.max(0, ...bars.map((b) => Math.max(b[key], b[priorKey] ?? 0)))
+  /* Last month's faint bar is a TOTAL, so it stands behind the bars only when they are the total. */
+  const drawBars = show !== 'line'
+  const drawLines = show !== 'bars'
+  const drawPrior = drawBars && who === 'all' && bars.some((b) => b[priorKey] !== null)
+  const parts = who === 'all' ? (['fromExisting', 'fromNew'] as const) : who === 'existing' ? (['fromExisting'] as const) : (['fromNew'] as const)
+  /* The lines are the COMPARISON: existing against new, one line each, whatever the bars show --
+     unless one side is chosen, when only its line is drawn. */
+  const lines = who === 'all' ? (['fromExisting', 'fromNew'] as const) : parts
+  const height = (b: (typeof data)[number]) => parts.reduce((t, p) => t + b[p], 0)
+  const max = Math.max(0, ...data.map((b) => Math.max(who === 'all' ? b[key] : height(b), drawPrior ? (b[priorKey] ?? 0) : 0)))
   const fmt = (v: number) => measure === 'accounts' ? v.toLocaleString('en-ZA') : shortRand(v)
   return (
     <div className="h-48 [&_*:focus]:outline-none" data-testid="intake-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap={bars[0]?.span === 'month' ? '28%' : '18%'} barGap="-100%">
+        <ComposedChart data={data} accessibilityLayer={false} margin={{ top: 4, right: 0, bottom: 0, left: measure === 'accounts' ? -24 : -4 }} barCategoryGap={bars[0]?.span === 'month' ? '28%' : '18%'} barGap="-100%">
           {/* barGap -100%: last month's bar sits BEHIND this month's, not beside it. */}
           <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />
           <XAxis dataKey="label" tickLine={false} axisLine={false} interval={0}
@@ -488,9 +520,10 @@ function IntakeChart({ bars, measure, onDay }: {
                 </div>
               )
             }} />
-          <Bar dataKey={priorKey} fill="var(--color-slate-200)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
-          {(['fromExisting', 'fromNew'] as const).map((part) => (
-            <Bar key={part} dataKey={part} stackId="now" radius={part === 'fromNew' ? [3, 3, 0, 0] : [0, 0, 0, 0]} isAnimationActive={false}
+          {drawPrior && <Bar dataKey={priorKey} fill="var(--color-slate-200)" radius={[3, 3, 0, 0]} isAnimationActive={false} legendType="none" />}
+          {drawBars && parts.map((part, i) => (
+            <Bar key={part} dataKey={part} stackId="now" name={part === 'fromNew' ? 'New clients' : 'Existing clients'} legendType="none"
+              radius={i === parts.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} isAnimationActive={false}
               onClick={(d: { payload?: IntakeBar }) => { if (d?.payload && d.payload.accounts > 0) onDay(d.payload) }}>
               {data.map((b) => (
                 <Cell key={b.day} cursor={b.accounts > 0 ? 'pointer' : undefined}
@@ -498,7 +531,13 @@ function IntakeChart({ bars, measure, onDay }: {
               ))}
             </Bar>
           ))}
-        </BarChart>
+          {drawLines && lines.map((part) => (
+            <Line key={`line-${part}`} dataKey={(b: (typeof data)[number]) => (b.future ? null : b[part])} name={part === 'fromNew' ? 'New clients' : 'Existing clients'}
+              stroke={part === 'fromNew' ? 'var(--color-navy-900)' : 'var(--color-gold-600)'} strokeWidth={2}
+              dot={bars[0]?.span === 'month' ? { r: 3 } : false} connectNulls={false} isAnimationActive={false} />
+          ))}
+          {drawLines && lines.length > 1 && <Legend iconType="plainline" iconSize={14} wrapperStyle={{ fontSize: 11 }} />}
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   )
