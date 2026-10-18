@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, Suspense, lazy } from 'react'
+import { useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, CheckCircle2, Circle } from 'lucide-react'
 import { useAppStore } from '../store/AppStore'
@@ -13,6 +13,11 @@ import { CompareSelector, type CompareMode } from '../components/ui/CompareSelec
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
+import { MonthTrackCard } from '../components/dashboard/MonthTrackCard'
+import { ValueBand } from '../components/dashboard/ClientBookCards'
+import { fetchClientBook, fetchIntakeByDay } from '../lib/companySnapshotData'
+import { mandateToHandover, monthTrack, type ClientBook } from '../lib/clientBook'
+import type { IntakeRow } from '../lib/companySnapshot'
 import { clockNow } from '../lib/clock.ts'
 /*
  * The only thing on this page that needs the charting library, and it sits below the fold.
@@ -70,12 +75,7 @@ function minutesToLabel(mins: number): string {
   return `${Math.round(mins / (60 * 24))}d`
 }
 
-interface DashboardProps {
-  /** Given the page's selected period, so a combined view reports one month throughout. */
-  communicationsSnapshot?: (period: SalesMonthPeriod) => ReactNode
-}
-
-export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
+export function Dashboard() {
   const { leads, deals, tasks, activities, users, teams, targets, userById, companyById, updateTask } = useAppStore()
   const { currentUser } = useAuth()
   const reps = useMemo(() => users.filter((u) => isAssignableOwner(u.role)), [users])
@@ -100,8 +100,42 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
   }, [currentUser])
   const [rescheduleTask, setRescheduleTask] = useState<Task | null>(null)
 
+  /*
+   * THE DEBT-COLLECTION SIDE FIRST (the firm, 18 Oct: "focus more on the debt collection side. And then
+   * secondary, the additional revenue one"). The track record over 6 or 12 months, the handovers that
+   * came in from NEW clients (the work Sales brought), and each client's book. The handovers are the
+   * firm's whole intake, so they are read once for the widest range and cut by month in clientBook.
+   */
+  const [months, setMonths] = useState<6 | 12>(6)
+  const [intake, setIntake] = useState<IntakeRow[] | null>(null)
+  const [books, setBooks] = useState<ClientBook[] | null>(null)
+  useEffect(() => {
+    let live = true
+    const end = period.end
+    let first = period
+    for (let i = 1; i < 12; i++) first = getPreviousSalesMonth(first)
+    setIntake(null)
+    fetchIntakeByDay({ start: first.start, end }).then((r) => { if (live) setIntake(r) }).catch(() => { if (live) setIntake([]) })
+    fetchClientBook(period).then((r) => { if (live) setBooks(r) }).catch(() => { if (live) setBooks([]) })
+    return () => { live = false }
+  }, [period])
+
   const repIds = useMemo(() => repIdsForScope(scope, reps, teams), [scope, reps, teams])
   const repIdSet = useMemo(() => new Set(repIds), [repIds])
+  const track = useMemo(() => monthTrack({
+    current: period, months, leads, deals, intake: intake ?? [], owners: scope === 'all' ? undefined : repIdSet,
+  }), [period, months, leads, deals, intake, scope, repIdSet])
+  const thisMonth = track[track.length - 1]
+  const bookOf = useMemo(() => new Map((books ?? []).map((b) => [b.companyId, b])), [books])
+  /* A rep's clients: the ones they signed a mandate with. Sub-accounts roll up to the client. */
+  const repHandover = useMemo(() => mandateToHandover(deals, (id) => bookOf.get(id)?.firstHandover ?? null), [deals, bookOf])
+  const awaiting = useMemo(() => {
+    const signedBy = new Map<string, string>()
+    for (const d of deals) if (d.stage === 'Won' && d.wonAt && dealKind(d) === 'Handover' && d.companyId) signedBy.set(d.companyId, d.ownerId)
+    return (books ?? [])
+      .filter((b) => b.mandateSignedAt && b.accounts === 0)
+      .filter((b) => scope === 'all' || repIdSet.has(signedBy.get(b.companyId) ?? b.ownerId ?? ''))
+  }, [books, deals, scope, repIdSet])
 
   const scopedLeads = useMemo(() => leads.filter((l) => repIdSet.has(l.ownerId)), [leads, repIdSet])
   const scopedDeals = useMemo(() => deals.filter((d) => repIdSet.has(d.ownerId)), [deals, repIdSet])
@@ -449,7 +483,80 @@ export function Dashboard({ communicationsSnapshot }: DashboardProps = {}) {
         </button>
       </DashboardHero>
 
-      {communicationsSnapshot?.(period)}
+      {/* ---------- the debt-collection side, first ---------- */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="sales-collections-row">
+        <StatTile size="secondary" label="Leads" value={thisMonth ? thisMonth.leads.toLocaleString('en-ZA') : '—'}
+          hint="Leads created this month." to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })} />
+        <StatTile size="secondary" label="Mandates signed" value={thisMonth ? thisMonth.mandates.toLocaleString('en-ZA') : '—'}
+          hint="Handover deals won this month." to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })} />
+        <StatTile size="secondary" label="Closing rate" accent="gold"
+          value={thisMonth?.closingRate === null || !thisMonth ? '—' : `${thisMonth.closingRate}%`}
+          hint="Mandates signed as a share of leads created, in the same month." />
+        <StatTile size="secondary" label="Handed over by new clients"
+          value={intake === null || !thisMonth ? '…' : `${thisMonth.newAccounts.toLocaleString('en-ZA')} · ${formatCurrency(thisMonth.newCapital)}`}
+          hint="Accounts and capital from clients in their first three months of handovers -- the work Sales brought in. The firm's whole intake, whichever rep is picked." />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <MonthTrackCard kind="pipeline" rows={track} months={months} onMonths={setMonths} testId="sales-track"
+          title="Leads and mandates, month by month" subtitle="Two bars a month, and the closing rate across them" />
+        <MonthTrackCard kind="new" rows={track} months={months} onMonths={setMonths} testId="sales-new-handovers"
+          title="Handovers from new clients" subtitle="Clients in their first three months of handovers" />
+      </div>
+
+      <Card padded={false}>
+        <div className="p-5 pb-3" data-testid="sales-reps-brought-in">
+          <CardHeader title="What each rep brought in" subtitle={`Mandates signed in ${period.label}, and how soon their clients send work`} />
+        </div>
+        <div className="overflow-x-auto px-5 pb-4">
+          <table className="list-table w-full">
+            <thead>
+              <tr className="text-left text-[11px] text-slate-400">
+                <th className="py-1.5 pr-2 font-medium">Rep</th>
+                <th className="py-1.5 px-2 text-right font-medium">Mandates this month</th>
+                <th className="py-1.5 px-2 text-right font-medium">Mandates in all</th>
+                <th className="py-1.5 px-2 text-right font-medium" title="Average days from the mandate to the client's first account">Days to first handover</th>
+                <th className="py-1.5 pl-2 text-right font-medium">Signed, nothing yet</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {reps.filter((r) => scope === 'all' || repIdSet.has(r.id)).map((r) => {
+                const mine = deals.filter((d) => d.ownerId === r.id && d.stage === 'Won' && d.wonAt && dealKind(d) === 'Handover')
+                const h = repHandover.get(r.id)
+                return (
+                  <tr key={r.id} className="whitespace-nowrap">
+                    <td className="py-1.5 pr-2 font-medium text-slate-800">{r.name}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">{mine.filter((d) => isWithinPeriod(d.wonAt, period)).length}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">{mine.length}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">{h?.avgDays === null || h?.avgDays === undefined ? '—' : `${h.avgDays} days`}</td>
+                    <td className={`py-1.5 pl-2 text-right tabular-nums ${h?.waiting ? 'font-semibold text-rose-600' : ''}`}>{h?.waiting ?? 0}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {awaiting.length > 0 && (
+        <Card className="border-gold-300 bg-gold-50/60">
+          <div data-testid="sales-awaiting">
+            <CardHeader title={`Signed, nothing handed over yet · ${awaiting.length}`}
+              subtitle="Mandates won with not one account on the book. Sales won these; chase the first handover." />
+            <ul className="divide-y divide-gold-200/70">
+              {awaiting.map((c) => (
+                <li key={c.companyId} className="flex items-center gap-3 py-2 text-sm">
+                  <Link to={`/companies/${c.companyId}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
+                  <ValueBand band={c.valueBand} />
+                  <span className="shrink-0 text-xs text-slate-500">signed {(c.mandateSignedAt ?? '').slice(0, 10).split('-').reverse().join('/')}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Card>
+      )}
+
+      {/* ---------- then the revenue side, as before ---------- */}
 
       <WinRateCard
         cohort={cohort}

@@ -21,7 +21,11 @@ import { OUTCOME_WON, OUTCOME_REJECTED, OUTCOME_VALUE } from '../lib/colors'
 import type { Company, ID, Task, Team, User } from '../types'
 import { clockNow, clockToday } from '../lib/clock.ts'
 import { awaitingFirstHandover, type AwaitingClient } from '../lib/companySnapshot'
-import { fetchAwaitingFirstHandover } from '../lib/companySnapshotData'
+import { fetchAwaitingFirstHandover, fetchClientBook, fetchIntakeByDay } from '../lib/companySnapshotData'
+import type { IntakeRow } from '../lib/companySnapshot'
+import { clientsTouched, monthTrack, type ClientBook } from '../lib/clientBook'
+import { MonthTrackCard } from '../components/dashboard/MonthTrackCard'
+import { GoneQuietCard, TopClientsCard } from '../components/dashboard/ClientBookCards'
 
 function daysAgoLabel(dateIso: string) {
   const diff = Math.round((new Date(dateIso).getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
@@ -106,6 +110,29 @@ export function CommunicationsDashboard() {
   const scopedIdSet = useMemo(() => new Set(scopedIds), [scopedIds])
   /* The clerk's own clients when one is picked (their own, by default), the department's otherwise --
      the same scope as every other card here, read off the client's owner. */
+  /*
+   * THE CLIENTS' BOOKS AND THE WORK THEY SENT (the firm, 18 Oct): handovers from existing clients this
+   * month and by month, the top clients, who has gone quiet, and how many clients were actually
+   * touched. Read for the clerk in scope by the client's owner, like every other card here.
+   */
+  const [months, setMonths] = useState<6 | 12>(6)
+  const [intake, setIntake] = useState<IntakeRow[] | null>(null)
+  const [books, setBooks] = useState<ClientBook[] | null>(null)
+  useEffect(() => {
+    let live = true
+    let first = period
+    for (let i = 1; i < 12; i++) first = getPreviousSalesMonth(first)
+    setIntake(null)
+    fetchIntakeByDay({ start: first.start, end: period.end }).then((r) => { if (live) setIntake(r) }).catch(() => { if (live) setIntake([]) })
+    fetchClientBook(period).then((r) => { if (live) setBooks(r) }).catch(() => { if (live) setBooks([]) })
+    return () => { live = false }
+  }, [period])
+  const myBooks = useMemo(() => (books ?? []).filter((b) => scope === 'all' || (b.ownerId !== null && scopedIdSet.has(b.ownerId))), [books, scope, scopedIdSet])
+  /* The month-by-month intake is the firm's (handovers are not filed by clerk); the client lists are the clerk's. */
+  const track = useMemo(() => monthTrack({ current: period, months, leads: [], deals: [], intake: intake ?? [] }), [period, months, intake])
+  const thisMonth = track[track.length - 1]
+  const touched = useMemo(() => clientsTouched(activities, period, scopedIdSet,
+    (id) => companyById(id)?.parentCompanyId ?? id), [activities, period, scopedIdSet, companyById])
   const myAwaiting = useMemo(() => (awaiting ?? []).filter((c) => scope === 'all' || (c.ownerId !== null && scopedIdSet.has(c.ownerId))),
     [awaiting, scope, scopedIdSet])
 
@@ -314,6 +341,27 @@ export function CommunicationsDashboard() {
           </p>
         </Card>
       )}
+
+      {/* ---------- the clients' work, first ---------- */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="comms-row">
+        <StatTile size="secondary" label="Handed over by existing clients"
+          value={intake === null || !thisMonth ? '…' : `${thisMonth.existingAccounts.toLocaleString('en-ZA')} · ${formatCurrency(thisMonth.existingCapital)}`}
+          hint="Accounts and capital this month from clients past their first three months -- the relationship Communications keeps." />
+        <StatTile size="secondary" label="Clients sending work" value={books === null ? '…' : myBooks.filter((b) => b.periodAccounts > 0).length.toLocaleString('en-ZA')}
+          hint="Clients in scope with at least one account handed over this month." />
+        <StatTile size="secondary" label="Clients touched" value={touched.touched.toLocaleString('en-ZA')}
+          hint="Unique clients with any call, meeting, email or note logged this month by the people in scope." />
+        <StatTile size="secondary" label="Courtesy calls" value={touched.courtesy.toLocaleString('en-ZA')}
+          hint="Unique clients who had a courtesy call logged this month." />
+      </div>
+
+      <MonthTrackCard kind="existing" rows={track} months={months} onMonths={setMonths} testId="comms-existing-handovers"
+        title="Handovers from existing clients, month by month" subtitle="The firm's intake from clients past their first three months" />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        {books !== null && <TopClientsCard books={myBooks} periodLabel={period.label} />}
+        {books !== null && <GoneQuietCard books={myBooks} todayIso={clockToday()} />}
+      </div>
 
       {awaiting !== null && myAwaiting.length > 0 && (
         <Card className="border-gold-300 bg-gold-50/60" >

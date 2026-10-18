@@ -42838,3 +42838,75 @@ update storage.buckets set allowed_mime_types = array['image/png','image/jpeg','
  where id = 'email-signatures';
 update storage.buckets set allowed_mime_types = array['image/png','image/jpeg','image/webp'], file_size_limit = 5242880
  where id = 'letterheads';
+
+-- ============================================================================================
+-- S8 · Cut-over: EACH CLIENT'S BOOK, ONE ROW A CLIENT, FOR THE SALES AND COMMUNICATIONS DASHBOARDS
+-- (the firm, 18 Oct).
+--
+-- One reader so the two dashboards agree: per TOP-LEVEL client (a sub-account rolls up into its
+-- parent), its first and last handover, accounts and capital handed over, what has been collected,
+-- what it handed over inside the period asked about -- and its VALUE BAND.
+--
+-- THE VALUE BAND, NOT THE RAND (the firm: "I like the high, medium, or low for the profitability").
+-- The firm's own figure stays off these screens, as on the company dashboard: the band is all that
+-- leaves the database. FAIR ACROSS AGE, at the firm's request ("Dr. C.A. Roo can be a client for 10
+-- years ... another client could be a client for 1 month"): commission per month WHILE ACTIVE, over the
+-- last twelve months -- an old client is judged on its last year, a new one only on the months it has
+-- been sending work. Commission is ESTIMATED as collected x the account's own commission rate, the one
+-- rule that reads the same for Swordfish's history and Raptor's. Clients that earned something are cut
+-- into thirds (High / Medium / Low); one that earned nothing in the window has no band.
+-- Security INVOKER: a reader sees only clients and accounts they may see.
+-- ============================================================================================
+create or replace function public.client_book_summary(p_from date, p_to date)
+returns table (company_id uuid, name text, account_owner_id uuid, mandate_signed_at timestamptz,
+               first_handover date, last_handover date, accounts integer, capital numeric,
+               collected numeric, period_accounts integer, period_capital numeric, value_band text)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with acct as (
+    select a.id, a.handover_date, a.capital_handed_over, coalesce(a.commission_rate, 0) as rate,
+           coalesce(c.parent_company_id, c.id) as client
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+  ),
+  pay as (
+    select ac.client, p.amount, p.received_at::date as day, ac.rate
+      from public.account_payments p
+      join acct ac on ac.id = p.account_id
+     where p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+       and p.approved_at is not null
+  ),
+  books as (
+    select client, min(handover_date) as first_day, max(handover_date) as last_day,
+           count(*)::integer as accounts, coalesce(sum(capital_handed_over), 0) as capital,
+           (count(*) filter (where handover_date between p_from and p_to))::integer as period_accounts,
+           coalesce(sum(capital_handed_over) filter (where handover_date between p_from and p_to), 0) as period_capital
+      from acct group by client
+  ),
+  money as (
+    select client, coalesce(sum(amount), 0) as collected,
+           coalesce(sum(amount * rate) filter (where day > public.raptor_today() - 365), 0) as earned_12m
+      from pay group by client
+  ),
+  rated as (
+    select b.*, coalesce(m.collected, 0) as collected,
+           coalesce(m.earned_12m, 0)
+             / greatest(1, ((public.raptor_today() - greatest(b.first_day, public.raptor_today() - 365)) / 30.4)::numeric) as per_month
+      from books b left join money m on m.client = b.client
+  ),
+  banded as (
+    select r.*, case when r.per_month > 0 then ntile(3) over (partition by (r.per_month > 0) order by r.per_month desc) end as third
+      from rated r
+  )
+  select c.id, c.name, c.account_owner_id, c.mandate_signed_at,
+         b.first_day, b.last_day, b.accounts, b.capital, b.collected, b.period_accounts, b.period_capital,
+         case b.third when 1 then 'High' when 2 then 'Medium' when 3 then 'Low' end
+    from banded b
+    join public.companies c on c.id = b.client
+   order by b.capital desc;
+$$;
+revoke all on function public.client_book_summary(date, date) from public, anon;
+grant execute on function public.client_book_summary(date, date) to authenticated;

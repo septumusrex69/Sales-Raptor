@@ -13,6 +13,7 @@
 import { supabase } from './supabase'
 import type { SalesMonthPeriod } from './salesMonth'
 import type { BookSnapshot, IntakeRow } from './companySnapshot'
+import { toClientBook, type ClientBook } from './clientBook'
 
 export async function fetchBookSnapshot(
   period: SalesMonthPeriod,
@@ -46,7 +47,7 @@ export async function fetchBookSnapshot(
  * WORK COMING IN, A DAY AT A TIME (the firm's layout, 18 Oct). Only days that had a handover come
  * back; intakeBars (companySnapshot.ts) lays them on every day of the period.
  */
-export async function fetchIntakeByDay(period: SalesMonthPeriod): Promise<IntakeRow[]> {
+export async function fetchIntakeByDay(period: Pick<SalesMonthPeriod, 'start' | 'end'>): Promise<IntakeRow[]> {
   const { data, error } = await supabase.rpc('company_intake_by_day', {
     p_from: isoDay(period.start),
     p_to: isoDay(period.end),
@@ -69,4 +70,14 @@ export { isoDay }
 /** A date as Postgres wants it, in local time — `toISOString` would shift a SAST evening back a day. */
 function isoDay(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * EACH CLIENT'S BOOK (client_book_summary): first and last handover, accounts, capital, collected,
+ * what it handed over in `period`, and its value band. One row a top-level client.
+ */
+export async function fetchClientBook(period: Pick<SalesMonthPeriod, 'start' | 'end'>): Promise<ClientBook[]> {
+  const { data, error } = await supabase.rpc('client_book_summary', { p_from: isoDay(period.start), p_to: isoDay(period.end) })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map(toClientBook)
 }

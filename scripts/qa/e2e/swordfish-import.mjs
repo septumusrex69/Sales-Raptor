@@ -98,8 +98,10 @@ async function importWith(page, cutoff, whileRunning = null) {
   await pick('Payments', 'payments.csv', PAYMENTS)
   await pick('Actions performed per Client', 'actions.csv', ACTIONS)
   await pick('Interest per Period', 'interest.csv', INTEREST)
-  await page.locator('label', { hasText: 'Swordfish has paid clients over up to and including' })
-    .locator('input[type=date]').fill(cutoff)
+  /* The lagged mode, by name: since S8 the screen opens on "Clean break", and this file is about the
+     line drawn at what Swordfish has PAID. */
+  await page.getByRole('radio', { name: 'Swordfish has paid up to' }).click()
+  await page.getByLabel('Swordfish has paid clients over up to and including').fill(cutoff)
   await page.getByRole('button', { name: 'Read the exports' }).click()
   const go = page.getByRole('button', { name: /^Import 1 accounts?$/ })
   await go.waitFor({ timeout: 20000 })

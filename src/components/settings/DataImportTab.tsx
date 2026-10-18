@@ -482,6 +482,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
             </span>
             <input
               type="date"
+              aria-label={cleanBreak ? 'Cut-over date' : 'Swordfish has paid clients over up to and including'}
               className={inputClass}
               value={settledThrough}
               onChange={(e) => { setSettledThrough(e.target.value); setPlan(null) }}
