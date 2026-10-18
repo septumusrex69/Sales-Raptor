@@ -147,10 +147,15 @@ check('...and a live one does not stop at all', rrc5.writtenOffAt, null)
 
 const list = read('src/pages/accounts/AccountsList.tsx')
 /* THE FIVE COLUMNS, IN THE ORDER THE FIRM GAVE THEM: they build to the balance left to right. */
-const headings = [...list.matchAll(/font-medium text-right">([A-Za-z]+)</g)].map((m) => m[1])
-check('the five money columns are in the firm’s own order',
-  headings.slice(0, 5), ['Capital', 'Fees', 'Interest', 'Paid', 'Balance'])
-ok('...with the rate after them', headings[5] === 'Rate')
+/* THE FIRM, 18 OCT: "combine the two, fees and interest in one thing", and the balance is what it
+   takes to SETTLE in full, receipt fee included. Read as the heading text each money column shows,
+   whether it is a sort button, a plain word or a word with a hover. */
+const headings = [...list.matchAll(/font-medium text-right">(?:\{sortBy\('[a-z]+', '([^']+)'\)\}|<span[^>]*>([^<]+)<\/span>|([A-Za-z &;]+))</g)].map((m) => (m[1] ?? m[2] ?? m[3]).replace('&amp;', '&'))
+check('the money columns are in the firm’s own order',
+  headings.slice(0, 4), ['Capital', 'Fees & interest', 'Paid', 'To settle'])
+ok('...with the rate after them', headings[4] === 'Rate')
+ok('fees and interest are one figure, receipt fees in it', /balances\.get\(a\.id\)!\.fees \+ balances\.get\(a\.id\)!\.receiptFees \+ balances\.get\(a\.id\)!\.interest/.test(list))
+ok('the last figure is the settlement, the receipt fee on the balance included', /formatCurrency\(balances\.get\(a\.id\)!\.settlement\)/.test(list))
 
 /*
  * AND THE DAY IT CAME IN. THE FIRM: "something on there that can be added is the hand-over date as
@@ -158,7 +163,7 @@ ok('...with the rate after them', headings[5] === 'Rate')
  * is what prescription runs from.
  */
 /* A resizable heading now (columnWidths.ts) -- the column is the same, its edge can be dragged. */
-ok('the book says when each account was handed over', /font-medium">Handed over<\/ResizableTh>/.test(list))
+ok('the book says when each account was handed over', /font-medium">\{sortBy\('handed', 'Handed over'\)\}<\/ResizableTh>/.test(list))
 ok('...off the account’s own handover date', /a\.handoverDate \? formatDate\(a\.handoverDate\)/.test(list))
 /* A DASH WHERE THERE IS NONE, not a blank: half the inherited book arrived without one, and a
    column that quietly shows nothing reads as a rendering fault. */

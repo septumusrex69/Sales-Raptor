@@ -11,6 +11,7 @@
  * when the app takes an action that the tariff prices, and it is the only place that does. The
  * boundary moved on purpose rather than eroding one call site at a time.
  */
+import type { AccountSort } from './accountFilters.ts'
 import { supabase } from './supabase'
 import type { LedgerRows } from './balanceInput.ts'
 import type { FrozenBy } from './clientPosition.ts'
@@ -384,6 +385,15 @@ export interface AccountQuery {
    */
   handoverId?: string
   /** Handed over on or after this date. */
+  /**
+   * THE ORDER OF THE PAGE (the firm, 18 Oct: "we should be able to sort, for example, highest number
+   * to lowest number, collected or outstanding balance"). Done in the DATABASE, because the book is
+   * paged there: sorting a page in the browser would order a hundred rows and call it the book.
+   * Only columns the database holds as the list shows them. The balance is computed per row by
+   * computeBalance (in duplum, fees, receipts) and has no stored twin that agrees with it to the
+   * cent, so it is not offered as a sort until one exists.
+   */
+  sort?: { by: AccountSort; dir: 'asc' | 'desc' }
   handedOverFrom?: string
   /** Handed over on or before this date. */
   handedOverTo?: string
@@ -536,6 +546,11 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+const SORT_COLUMN: Record<AccountSort, string> = {
+  account: 'account_number', debtor: 'debtor_surname', client: 'companies(name)',
+  handed: 'handover_date', capital: 'capital_handed_over', paid: 'payments_to_date',
+}
+
 export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> {
   const pageSize = q.pageSize ?? 50
   const page = q.page ?? 0
@@ -562,7 +577,12 @@ export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> 
        * itself -- and losing one here would be silent, because toAccount names every field by hand.
        */
       .select('*, companies(name)', counted ? { count: 'exact' } : undefined)
+      /* The asked-for order first, nulls last either way, then the account number, so a page of
+         equal capitals is in the same order every time it is read and paging neither repeats nor
+         skips a row. */
+      .order(SORT_COLUMN[q.sort?.by ?? 'account'], { ascending: (q.sort?.dir ?? 'asc') === 'asc', nullsFirst: false })
       .order('account_number')
+      .order('id')
       .range(page * pageSize, page * pageSize + pageSize - 1),
     q,
   )

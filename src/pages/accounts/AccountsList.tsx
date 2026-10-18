@@ -20,7 +20,7 @@ import { computeBalance, type BalanceBreakdown } from '../../lib/accountBalance.
 import { balanceInputFor } from '../../lib/balanceInput.ts'
 import { accountEnded, isWrittenOff } from '../../lib/accountStatus.ts'
 import { firmToday } from '../../lib/dateLabels.ts'
-import { clearedFilters, filterChips, queryFromParams } from '../../lib/accountFilters'
+import { clearedFilters, filterChips, queryFromParams, type AccountSort } from '../../lib/accountFilters'
 import {
   QUIET_VIEW_DAYS, activeView, landingParams, viewParams, viewsFor, type ViewCounts,
 } from '../../lib/accountViews'
@@ -119,7 +119,7 @@ export function AccountsList() {
   const { widths, setWidth, reset: resetWidths, changed: widthsChanged } = useColumnWidths(
     'raptor.accounts.columns.v1',
     {
-      account: 150, debtor: 210, client: 190, handed: 120, capital: 110, fees: 90, interest: 100,
+      account: 150, debtor: 210, client: 190, handed: 120, capital: 110, fees: 130, interest: 100,
       paid: 100, balance: 120, rate: 80, position: 140, desk: 150, worked: 130,
     },
   )
@@ -188,6 +188,26 @@ export function AccountsList() {
     () => queryFromParams(new URLSearchParams(key), clockNow(), { teamMembers }),
     [key, teamMembers],
   )
+  /*
+   * A HEADER THAT SORTS (the firm, 18 Oct: "sort ... highest number to lowest number"). In the address
+   * (?sort=capital.desc), so the database orders the whole book, not the page on screen. A figure
+   * starts highest first, a name A to Z; pressing again turns it round.
+   */
+  const sortNow = query.sort ?? { by: 'account' as AccountSort, dir: 'asc' as const }
+  const sortBy = (by: AccountSort, label: string) => {
+    const on = sortNow.by === by
+    const numeric = by === 'capital' || by === 'paid' || by === 'handed'
+    const next = on ? (sortNow.dir === 'asc' ? 'desc' : 'asc') : numeric ? 'desc' : 'asc'
+    return (
+      <button type="button" data-testid={`sort-${by}`} aria-sort={on ? (sortNow.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        onClick={() => setParam('sort', by === 'account' && next === 'asc' ? null : `${by}.${next}`)}
+        className={`inline-flex items-center gap-1 hover:text-slate-700 ${on ? 'text-slate-700' : ''}`}>
+        {label}
+        <span className="text-[10px]" aria-hidden>{on ? (sortNow.dir === 'asc' ? '\u25B2' : '\u25BC') : ''}</span>
+      </button>
+    )
+  }
+
 
   /*
    * A SELECTION DOES NOT SURVIVE A CHANGE OF QUESTION. Ticking eleven rows, then narrowing the
@@ -774,8 +794,8 @@ export function AccountsList() {
                         onChange={togglePage} aria-label="Select every account on this page" />
                     </th>
                   )}
-                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className={`${canAllocate ? 'px-2' : 'pl-3 pr-2'} py-1.5 font-medium`}>Account</ResizableTh>
-                  <ResizableTh label="Debtor" width={widths.debtor} onWidth={(px) => setWidth('debtor', px)} className="px-2 py-1.5 font-medium">Debtor</ResizableTh>
+                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className={`${canAllocate ? 'px-2' : 'pl-3 pr-2'} py-1.5 font-medium`}>{sortBy('account', 'Account')}</ResizableTh>
+                  <ResizableTh label="Debtor" width={widths.debtor} onWidth={(px) => setWidth('debtor', px)} className="px-2 py-1.5 font-medium">{sortBy('debtor', 'Debtor')}</ResizableTh>
                   {/*
                     WHOSE BOOK THE ACCOUNT IS ON, at the firm's asking, and beside the debtor
                     because the two names are the two parties to the debt.
@@ -785,11 +805,11 @@ export function AccountsList() {
                     tile and in the scope line. A column of one repeated value is the "warning that
                     fires when nothing is wrong" in table form.
                   */}
-                  {!companyId && <ResizableTh label="Client" width={widths.client} onWidth={(px) => setWidth('client', px)} className="px-2 py-1.5 font-medium">Client</ResizableTh>}
+                  {!companyId && <ResizableTh label="Client" width={widths.client} onWidth={(px) => setWidth('client', px)} className="px-2 py-1.5 font-medium">{sortBy('client', 'Client')}</ResizableTh>}
                   {/* THE FIRM: "something on there that can be added is the hand-over date as
                       well." It is how old the matter is, which is the first thing asked of a row
                       nobody has worked -- and it is what prescription runs from. */}
-                  <ResizableTh label="Handed over" width={widths.handed} onWidth={(px) => setWidth('handed', px)} className="px-2 py-1.5 font-medium">Handed over</ResizableTh>
+                  <ResizableTh label="Handed over" width={widths.handed} onWidth={(px) => setWidth('handed', px)} className="px-2 py-1.5 font-medium">{sortBy('handed', 'Handed over')}</ResizableTh>
                   {/*
                     THE FIVE FIGURES THE FIRM ASKED FOR, IN THE ORDER THEY ASKED FOR THEM:
                     "capital, fees, interest, paid, balance." They build to the balance left to
@@ -797,11 +817,12 @@ export function AccountsList() {
                     the same words the account's own summary uses, so a collector moving between
                     the two is reading one statement rather than learning a second layout.
                   */}
-                  <ResizableTh label="Capital" width={widths.capital} onWidth={(px) => setWidth('capital', px)} className="px-2 py-1.5 font-medium text-right">Capital</ResizableTh>
-                  <ResizableTh label="Fees" width={widths.fees} onWidth={(px) => setWidth('fees', px)} className="px-2 py-1.5 font-medium text-right">Fees</ResizableTh>
-                  <ResizableTh label="Interest" width={widths.interest} onWidth={(px) => setWidth('interest', px)} className="px-2 py-1.5 font-medium text-right">Interest</ResizableTh>
-                  <ResizableTh label="Paid" width={widths.paid} onWidth={(px) => setWidth('paid', px)} className="px-2 py-1.5 font-medium text-right">Paid</ResizableTh>
-                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-2 py-1.5 font-medium text-right">Balance</ResizableTh>
+                  <ResizableTh label="Capital" width={widths.capital} onWidth={(px) => setWidth('capital', px)} className="px-2 py-1.5 font-medium text-right">{sortBy('capital', 'Capital')}</ResizableTh>
+                  {/* ONE COLUMN (the firm, 18 Oct: "you can combine the two, fees and interest in one
+                      thing"): everything added to the capital, receipt fees included. */}
+                  <ResizableTh label="Fees and interest" width={widths.fees} onWidth={(px) => setWidth('fees', px)} className="px-2 py-1.5 font-medium text-right">Fees &amp; interest</ResizableTh>
+                  <ResizableTh label="Paid" width={widths.paid} onWidth={(px) => setWidth('paid', px)} className="px-2 py-1.5 font-medium text-right">{sortBy('paid', 'Paid')}</ResizableTh>
+                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-2 py-1.5 font-medium text-right"><span title="What settling in full today costs: the balance plus the receipt fee on it">To settle</span></ResizableTh>
                   <ResizableTh label="Rate" width={widths.rate} onWidth={(px) => setWidth('rate', px)} className="px-2 py-1.5 font-medium text-right">Rate</ResizableTh>
                   <ResizableTh label="Position" width={widths.position} onWidth={(px) => setWidth('position', px)} className="px-2 py-1.5 font-medium">Position</ResizableTh>
                   <ResizableTh label="Desk" width={widths.desk} onWidth={(px) => setWidth('desk', px)} className="px-2 py-1.5 font-medium">Desk</ResizableTh>
@@ -865,13 +886,11 @@ export function AccountsList() {
                         they would be a distinction a collector scanning a book does not need and
                         the firm did not ask for.
                       */}
-                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
+                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500"
+                        title={balances.has(a.id) ? `Fees ${formatCurrency(balances.get(a.id)!.fees + balances.get(a.id)!.receiptFees)} · interest ${formatCurrency(balances.get(a.id)!.interest)}` : undefined}>
                         {balances.has(a.id)
-                          ? formatCurrency(balances.get(a.id)!.fees + balances.get(a.id)!.receiptFees)
+                          ? formatCurrency(balances.get(a.id)!.fees + balances.get(a.id)!.receiptFees + balances.get(a.id)!.interest)
                           : '—'}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
-                        {balances.has(a.id) ? formatCurrency(balances.get(a.id)!.interest) : '—'}
                       </td>
                       {/* PAID COMES OFF THE SAME READING AS THE REST, not off `paymentsToDate` --
                           that is the imported figure and it is not net of a reversal, so the two
@@ -903,7 +922,11 @@ export function AccountsList() {
                             : balances.get(a.id)!.cappedBy
                               ? `Stopped by ${balances.get(a.id)!.cappedBy} — ${formatCurrency(balances.get(a.id)!.withheld)} cannot be recovered.`
                               : undefined}>
-                            {formatCurrency(balances.get(a.id)!.balance)}
+                            {/* WHAT IT TAKES TO SETTLE IN FULL TODAY (the firm, 18 Oct: "the outstanding balance
+                                should be including the receipt fees as well, should the amount be settled
+                                in full"): computeBalance's own settlement, the item 9 fee on the balance
+                                included -- the figure a debtor asking "what do I owe to close this" is told. */}
+                            {formatCurrency(balances.get(a.id)!.settlement)}
                             {balances.get(a.id)!.cappedBy && <span className="text-amber-600"> *</span>}
                           </span>
                         ) : '—'}

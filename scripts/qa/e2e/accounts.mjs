@@ -1044,9 +1044,24 @@ try {
    */
   await page.goto(`http://localhost:${PORT}/accounts?who=nobody`)
   await page.locator('table tbody tr').first().waitFor({ timeout: 15000 })
-  const debtorTh = page.locator('thead th', { hasText: /^Debtor$/ }).first()
+  const debtorTh = page.locator('thead th', { hasText: /^Debtor\s*$/ }).first()
   const edge = page.getByRole('separator', { name: /Resize the Debtor column/ })
-  t.check('every heading but the tick box can be resized', await page.getByRole('separator').count(), 13)
+  /* Twelve since fees and interest became one column (the firm, 18 Oct). */
+  t.check('every heading but the tick box can be resized', await page.getByRole('separator').count(), 12)
+  /* SORTING IS THE DATABASE'S (the firm, 18 Oct: "sort ... highest number to lowest number"). The
+     press puts the order in the address and the request asks PostgREST for it, so the whole book is
+     ordered and not just the page on screen. */
+  seen.length = 0
+  await page.getByTestId('sort-capital').click()
+  await page.waitForTimeout(800)
+  t.ok('pressing Capital sorts by it, highest first, in the address', /sort=capital\.desc/.test(page.url()))
+  t.ok('...and in the request to the database', seen.some((r) => /debtor_accounts\?.*order=capital_handed_over\.desc\.nullslast,account_number\.asc/.test(decodeURIComponent(r))))
+  await page.getByTestId('sort-capital').click()
+  await page.waitForTimeout(800)
+  t.ok('...pressed again, lowest first', /sort=capital\.asc/.test(page.url()))
+  t.check('...and the heading says which way', await page.getByTestId('sort-capital').getAttribute('aria-sort'), 'ascending')
+  await page.goto(`http://localhost:${PORT}/accounts?who=nobody`)
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15000 })
   const debtorWidth = async () => Math.round((await debtorTh.boundingBox())?.width ?? 0)
   /* The debtor cells: the same index as the heading, read in the page. */
   const debtorCells = () => page.evaluate(() => {

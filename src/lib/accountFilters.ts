@@ -15,6 +15,11 @@ import type { AccountQuery } from './accountBook.ts'
 import { parseBook } from './accountBooks.ts'
 import { clockNow } from './clock.ts'
 
+/** The columns the account list may be sorted on, in the database (see AccountQuery.sort). Here, not in
+    accountBook, so a check can read it without the Supabase client. */
+export type AccountSort = 'account' | 'debtor' | 'client' | 'handed' | 'capital' | 'paid'
+export const ACCOUNT_SORTS: readonly AccountSort[] = ['account', 'debtor', 'client', 'handed', 'capital', 'paid']
+
 /** Relative windows, because nobody asks "since 17 July". They ask "in the last two months". */
 export const QUIET_CHOICES = [
   { days: 7, label: 'nothing in 7 days' },
@@ -158,6 +163,9 @@ export function queryFromParams(
 
   const from = params.get('from')
   if (from) q.handedOverFrom = from
+  /* ?sort=capital.desc -- carried in the address so a sorted book can be shared and comes back sorted. */
+  const sort = /^([a-z]+)\.(asc|desc)$/.exec(params.get('sort') ?? '')
+  if (sort && (ACCOUNT_SORTS as readonly string[]).includes(sort[1])) q.sort = { by: sort[1] as AccountSort, dir: sort[2] as 'asc' | 'desc' }
   const to = params.get('to')
   if (to) q.handedOverTo = to
 
