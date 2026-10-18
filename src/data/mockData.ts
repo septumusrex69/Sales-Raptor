@@ -17,7 +17,15 @@ import type {
 } from '../types'
 
 /** The app's notion of "now" — was a fixed demo-data anchor date; real usage needs the real current time. */
+/*
+ * TODAY FOLLOWS THE FIRM'S CLOCK. Read once here, at import, it was the machine's day -- the module
+ * loads before the staging clock is asked -- so on staging set to 11 Sep the sales dashboard opened
+ * on November and showed nothing (the firm, 18 Oct). It stays ONE Date object, which twenty screens
+ * import, and `syncToday` (called by clockLoad once the clock is read, before any page draws) moves
+ * it to the firm's moment. On production the two are the same and nothing changes.
+ */
 const TODAY = new Date()
+export function syncToday(ms: number): void { TODAY.setTime(ms) }
 
 // ---------- Users & Teams ----------
 export const users: User[] = [

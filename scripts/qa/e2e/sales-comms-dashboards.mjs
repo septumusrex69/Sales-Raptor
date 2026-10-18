@@ -105,6 +105,17 @@ try {
     return m && d ? [Math.abs(m.top - d.top) < 40, d.left > m.left + 200] : null
   })
   t.check('Mandates and Deal outcomes sit side by side', JSON.stringify(row), '[true,true]')
+  /* ...on the firm's iPad too, not only a wide screen (they drew the split on it, 18 Oct). */
+  await page.setViewportSize({ width: 1180, height: 820 })
+  await page.waitForTimeout(400)
+  const ipad = await page.evaluate(() => {
+    const m = document.querySelector('[data-testid="mandate-outcomes"]')?.getBoundingClientRect()
+    const d = [...document.querySelectorAll('h3, h2, p, span')].find((x) => x.textContent?.trim() === 'Deal Outcomes')?.getBoundingClientRect()
+    return m && d ? [Math.abs(m.top - d.top) < 40, d.left > m.left + 200, document.documentElement.scrollWidth <= window.innerWidth] : null
+  })
+  t.check('...side by side at iPad width, with no sideways scroll', JSON.stringify(ipad), '[true,true,true]')
+  await t.shot(page, 'sales-dashboard-ipad')
+  await page.setViewportSize({ width: 1440, height: 900 })
   t.check('the rep table that repeated the leaderboard is gone', await page.getByTestId('sales-reps-brought-in').count(), 0)
   t.ok('deal outcomes no longer carry the lead pipeline', !/Lead pipeline, same period/.test(await page.locator('main').innerText()))
   /* MANDATES FIRST, DEALS SECOND, THEN THE GRAPHS (the firm, 18 Oct: "a mandate is a mandate and a deal
@@ -132,6 +143,17 @@ try {
   t.ok('gone quiet: nothing for 60 days', /Quiet Holdings/.test(quiet) && !/Big Book/.test(quiet))
   await t.shot(page, 'communications-dashboard')
   await context.close()
+
+  /* THE SALES PAGE FOLLOWS THE STAGING CLOCK (the firm, 18 Oct: staging on 11 Sep, the page opened on
+     November and showed nothing). TODAY was read at import, before the clock was asked. */
+  const staged = await signedInPage(browser, ADMIN, [
+    [(u) => /\/rpc\/raptor_clock/.test(u), () => ({ body: [{ business_now: '2026-09-11T08:00:00+02:00', business_today: '2026-09-11', real_now: '2026-10-18T10:00:00+02:00', real_today: '2026-10-18', staging: true, moved: true }] })],
+    ...handlers,
+  ], [], { now: '2026-10-18T10:00:00+02:00' })
+  await staged.page.goto(`http://localhost:${PORT}/dashboard/sales`)
+  await staged.page.getByTestId('mandate-outcomes').waitFor({ timeout: 15000 })
+  t.ok('on staging set to 11 Sep, the sales page opens on September', /September 2026/.test(await staged.page.locator('main').innerText()) && !/November 2026/.test(await staged.page.locator('main').innerText()))
+  await staged.context.close()
 } finally {
   if (browser) await browser.close()
   stopServer(server)

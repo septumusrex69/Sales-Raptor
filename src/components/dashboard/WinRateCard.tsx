@@ -71,7 +71,8 @@ export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabe
         <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{periodLabel}</span>
       </div>
 
-      <div className={`grid grid-cols-1 gap-6 items-start ${showLeadPipeline ? 'md:grid-cols-[176px_1fr_1fr]' : 'sm:grid-cols-[176px_1fr]'}`}>
+      <div className="@container">
+      <div className={`grid grid-cols-1 gap-6 items-start ${showLeadPipeline ? 'md:grid-cols-[176px_1fr_1fr]' : 'gap-5 @[24rem]:grid-cols-[164px_1fr]'}`}>
         <RingDonut data={donutData} centerValue={`${outcomeRate}%`} centerColor={OUTCOME_VALUE} centerLabel="WON SO FAR" caption={`Of ${total} opened`} />
 
         <div className="flex flex-col gap-4">
@@ -125,6 +126,7 @@ export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabe
             </Link>
           ))}
         </div>}
+      </div>
       </div>
 
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400 gap-3">

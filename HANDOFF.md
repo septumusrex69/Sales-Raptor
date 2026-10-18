@@ -182,6 +182,17 @@ Also:
   - Both cover the same months as the chart's 6/12 switch. The arithmetic is `leadSources` and
     `mandateToHandover(…, span)` in `clientBook.ts`, checked in `check-client-book`.
 
+**`TODAY` (mockData) now follows the staging clock.**
+- It was read at import, before `loadClock` asked the database, so about twenty screens ran on the
+  machine's day. The firm saw it as the sales dashboard on November, all zeros, with staging on
+  11 Sep.
+- `syncToday` moves that one shared Date once the clock is read (`clockLoad.ts`), before
+  AppLayout draws a page.
+- The e2e asserts September on a staged clock.
+
+Mandates and Deal outcomes now sit side by side from `lg` (iPad) up, with container queries
+inside the cards.
+
 ### S7 · Clean Break (12 Oct)
 
 - **Payover runs: four tabs, one cycle each** (the firm, 12 Oct, on staging day 11 Aug: "in the

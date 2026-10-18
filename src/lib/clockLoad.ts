@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
-import { applyClock, resetClock, type FirmClock } from './clock.ts'
+import { applyClock, clockNowMs, resetClock, type FirmClock } from './clock.ts'
+import { syncToday } from '../data/mockData'
 
 /**
  * READ THE FIRM'S CLOCK, ONCE PER PAGE LOAD (prompt 10). AppLayout calls this before it draws any
@@ -14,6 +15,7 @@ export async function loadClock(): Promise<FirmClock | null> {
   const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
   if (error || !row || typeof row.business_now !== 'string') {
     resetClock()
+    syncToday(clockNowMs())
     return null
   }
   const clock: FirmClock = {
@@ -25,6 +27,7 @@ export async function loadClock(): Promise<FirmClock | null> {
     moved: row.moved === true,
   }
   applyClock(clock)
+  syncToday(clockNowMs())
   return clock
 }
 

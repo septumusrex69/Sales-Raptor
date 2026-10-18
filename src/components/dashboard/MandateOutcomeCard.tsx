@@ -42,7 +42,10 @@ export function MandateOutcomeCard({ leads, mandates, closingRate, newAccounts, 
         {/* RING AND THREE FIGURES, nothing between them: the card sits beside Deal outcomes (the firm,
             18 Oct: "fit these guys in next to each other"), and the words that stood in the middle
             said again what the ring and the figures already say. */}
-        <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-[176px_1fr]">
+        {/* Ring beside the figures when the CARD has room, above them when it has not -- a container
+            query, because the card is half a page on an iPad and the whole page on a phone. */}
+        <div className="@container">
+        <div className="grid grid-cols-1 items-start gap-5 @[24rem]:grid-cols-[164px_1fr]">
           <RingDonut data={donut} centerValue={closingRate === null ? '—' : `${closingRate}%`} centerColor={OUTCOME_VALUE} centerLabel="CLOSING RATE" caption={`Of ${leads} ${leads === 1 ? 'lead' : 'leads'}`} />
           <div className="flex flex-col gap-2.5">
             <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">{periodLabel}</span>
@@ -57,6 +60,7 @@ export function MandateOutcomeCard({ leads, mandates, closingRate, newAccounts, 
             ))}
             <p className="text-[11.5px] text-slate-400">Closing rate: mandates signed ÷ leads created, in the same month.</p>
           </div>
+        </div>
         </div>
       </div>
     </Card>

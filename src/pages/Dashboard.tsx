@@ -514,7 +514,8 @@ export function Dashboard() {
           to act on, then the detail. */}
       {/* ---------- 1 and 2. MANDATES, then DEALS: side by side ("fit these guys in next to each
           other"), mandates on the left where the eye starts. A mandate is never a deal here. ---------- */}
-      <div className="grid gap-4 xl:grid-cols-2">
+      {/* From iPad width up (lg), not only on a wide screen: the firm drew the split on their iPad. */}
+      <div className="grid gap-4 lg:grid-cols-2">
         <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
           newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
           periodLabel={period.label} periodParam={periodParam} />
@@ -539,7 +540,7 @@ export function Dashboard() {
       </div>
 
       {/* ---------- 4. WHAT TO DO ABOUT IT: chase, who is selling, what is slipping ---------- */}
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <MandateToHandoverCard rows={toHandover} spanLabel={spanLabel} />
         <LeadSourcesCard rows={sources} spanLabel={spanLabel} />
       </div>
