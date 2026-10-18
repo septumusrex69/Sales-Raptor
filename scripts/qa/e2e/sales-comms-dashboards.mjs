@@ -95,7 +95,16 @@ try {
   t.ok('the charts are compact', ((await page.getByTestId('sales-track').locator('.recharts-responsive-container').boundingBox())?.height ?? 999) <= 180)
   t.ok('new-client handovers this month on it: 2 accounts', /2 · R\s?40[\s,]000/.test(await page.getByTestId('mandate-outcomes').innerText()))
   t.ok('...and the closing rate in its ring', /CLOSING RATE/.test(await page.getByTestId('mandate-outcomes').innerText()))
-  t.ok('signed, nothing handed over, for Sales', /Waiting Signee/.test(await page.getByTestId('sales-awaiting').innerText()))
+  t.check('signed-nothing-yet is the liaisons\', not on the sales page', await page.getByTestId('sales-awaiting').count(), 0)
+  t.ok('mandate to first handover, per closer', /Mandate to first handover/.test(await page.getByTestId('mandate-to-handover').innerText()))
+  t.ok('where mandates come from, by source', /Website/.test(await page.getByTestId('lead-sources').innerText()))
+  /* "fit these guys in next to each other": Mandates and Deal outcomes share a row on a wide screen. */
+  const row = await page.evaluate(() => {
+    const m = document.querySelector('[data-testid="mandate-outcomes"]')?.getBoundingClientRect()
+    const d = [...document.querySelectorAll('h3, h2, p, span')].find((x) => x.textContent?.trim() === 'Deal Outcomes')?.getBoundingClientRect()
+    return m && d ? [Math.abs(m.top - d.top) < 40, d.left > m.left + 200] : null
+  })
+  t.check('Mandates and Deal outcomes sit side by side', JSON.stringify(row), '[true,true]')
   t.check('the rep table that repeated the leaderboard is gone', await page.getByTestId('sales-reps-brought-in').count(), 0)
   t.ok('deal outcomes no longer carry the lead pipeline', !/Lead pipeline, same period/.test(await page.locator('main').innerText()))
   /* MANDATES FIRST, DEALS SECOND, THEN THE GRAPHS (the firm, 18 Oct: "a mandate is a mandate and a deal
@@ -105,7 +114,7 @@ try {
   const yMandates = await yOf(page.getByTestId('mandate-outcomes'))
   const yDeals = await yOf(page.getByText('Deal Outcomes', { exact: true }).first())
   const yTrack = await yOf(page.getByTestId('sales-track'))
-  t.check('the order is mandates, deals, then the track record', JSON.stringify([await page.getByTestId('mandate-outcomes').count(), yMandates < yDeals, yDeals < yTrack]), '[1,true,true]')
+  t.check('the order is mandates, deals (beside or below), then the track record', JSON.stringify([await page.getByTestId('mandate-outcomes').count(), yMandates <= yDeals + 40, yDeals < yTrack]), '[1,true,true]')
   t.ok('deal outcomes count the 2 service deals and not the mandate out for signature', /The 2 service deals opened/.test(await page.locator('main').innerText()))
   t.ok('the leaderboard says closers', /Top performing closers/.test(body) || /Top performing closers/.test(await page.locator('main').innerText()))
   t.ok('...and the picker offers closers and liaisons', (await page.locator('option').allTextContents()).some((x) => /All closers and liaisons/.test(x)))

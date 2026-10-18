@@ -33,36 +33,19 @@ export function MandateOutcomeCard({ leads, mandates, closingRate, newAccounts, 
     { label: 'Handed over by new clients', value: loadingHandovers ? '…' : `${newAccounts.toLocaleString('en-ZA')} · ${formatCurrency(newCapital)}`, color: 'var(--c-gold-deep)', bg: 'var(--tint-gold-deep)', to: '/accounts' },
   ]
   return (
-    <Card>
+    <Card className="h-full">
       <div data-testid="mandate-outcomes">
         <div className="mb-4 flex items-start justify-between gap-3">
-          <CardHeader title="Mandates" subtitle={`Leads created in ${periodLabel}, the mandates signed, and the work new clients sent`} />
+          <CardHeader title="Mandates" subtitle="Debt-collection mandates signed against the leads created, and the work new clients sent" />
           <span className="shrink-0 whitespace-nowrap rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-600">{periodLabel}</span>
         </div>
-        <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-[176px_1fr_1fr]">
+        {/* RING AND THREE FIGURES, nothing between them: the card sits beside Deal outcomes (the firm,
+            18 Oct: "fit these guys in next to each other"), and the words that stood in the middle
+            said again what the ring and the figures already say. */}
+        <div className="grid grid-cols-1 items-start gap-6 sm:grid-cols-[176px_1fr]">
           <RingDonut data={donut} centerValue={closingRate === null ? '—' : `${closingRate}%`} centerColor={OUTCOME_VALUE} centerLabel="CLOSING RATE" caption={`Of ${leads} ${leads === 1 ? 'lead' : 'leads'}`} />
-          <div className="flex flex-col gap-4">
-            <div>
-              <p className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Closing rate</p>
-              <p className="text-2xl font-extrabold leading-tight text-slate-800">{closingRate === null ? '—' : `${closingRate}%`}</p>
-              <p className="text-[11.5px] text-slate-400">Mandates signed ÷ leads created, in the same month</p>
-            </div>
-            <div>
-              <p className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">Mandates signed</p>
-              <p className="text-2xl font-extrabold leading-tight text-slate-800">{mandates}</p>
-              <p className="text-[11.5px] text-slate-400">{leads ? `${unsigned} of ${leads} leads not signed this month` : 'No leads created this month yet'}</p>
-            </div>
-            {leads > 0 && (
-              <div>
-                <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-100">
-                  {mandates > 0 && <span style={{ width: `${Math.min(100, (mandates / leads) * 100)}%`, backgroundColor: OUTCOME_WON }} />}
-                  {unsigned > 0 && <span style={{ width: `${(unsigned / leads) * 100}%`, backgroundColor: OUTCOME_OPEN }} />}
-                </div>
-              </div>
-            )}
-          </div>
           <div className="flex flex-col gap-2.5">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">This month</span>
+            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">{periodLabel}</span>
             {rows.map((r) => (
               <Link key={r.label} to={r.to} className="flex items-center gap-3 rounded-xl border border-slate-100 px-3.5 py-2.5 hover:bg-slate-50/60">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: r.color }} />
@@ -72,6 +55,7 @@ export function MandateOutcomeCard({ leads, mandates, closingRate, newAccounts, 
                 </span>
               </Link>
             ))}
+            <p className="text-[11.5px] text-slate-400">Closing rate: mandates signed ÷ leads created, in the same month.</p>
           </div>
         </div>
       </div>

@@ -176,11 +176,13 @@ export function clientsTouched(
 export function mandateToHandover(
   deals: Pick<Deal, 'stage' | 'wonAt' | 'kind' | 'service' | 'ownerId' | 'companyId'>[],
   firstHandoverOf: (companyId: string) => string | null,
+  span?: Pick<SalesMonthPeriod, 'start' | 'end'>,
 ): Map<string, { avgDays: number | null; handedOver: number; waiting: number }> {
   const out = new Map<string, { total: number; handedOver: number; waiting: number }>()
   const day = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d) / 86_400_000 }
   for (const d of deals) {
     if (d.stage !== 'Won' || !d.wonAt || dealKind(d) !== 'Handover' || !d.companyId) continue
+    if (span && (new Date(d.wonAt) < span.start || new Date(d.wonAt) > span.end)) continue
     const row = out.get(d.ownerId) ?? { total: 0, handedOver: 0, waiting: 0 }
     const first = firstHandoverOf(d.companyId)
     if (first && first >= d.wonAt.slice(0, 10)) { row.total += day(first) - day(d.wonAt); row.handedOver += 1 }
@@ -188,4 +190,44 @@ export function mandateToHandover(
     out.set(d.ownerId, row)
   }
   return new Map([...out].map(([k, v]) => [k, { avgDays: v.handedOver ? Math.round(v.total / v.handedOver) : null, handedOver: v.handedOver, waiting: v.waiting }]))
+}
+
+/* ------------------------------------------------------------------ where mandates come from */
+
+export interface SourceRow {
+  source: string
+  leads: number
+  mandates: number
+  /** Mandates as a share of leads from that source, a whole percent; null with no leads. */
+  rate: number | null
+}
+
+/**
+ * WHICH LEAD SOURCES TURN INTO MANDATES (the firm, 18 Oct: "which lead sources ... you can continue
+ * with that"). Over a span of months, per source: leads created, and debt-collection mandates signed.
+ *
+ * A mandate's source is its LEAD's when the deal came from one, the deal's own otherwise -- a deal
+ * opened by hand carries a source of its own, and a converted lead's source is the true one (the
+ * deal copies it, but a rep can change it). Counted like the closing rate: by the month each thing
+ * HAPPENED, so a source can sign more than it brought in over a short span. Most mandates first,
+ * and on a tie the better rate: the source that signs as many from fewer leads is the better one.
+ */
+export function leadSources(input: {
+  span: Pick<SalesMonthPeriod, 'start' | 'end'>
+  leads: Pick<Lead, 'id' | 'createdAt' | 'ownerId' | 'source'>[]
+  deals: Pick<Deal, 'stage' | 'wonAt' | 'kind' | 'service' | 'ownerId' | 'source' | 'leadId'>[]
+  owners?: Set<string>
+}): SourceRow[] {
+  const within = (iso: string | undefined) => !!iso && new Date(iso) >= input.span.start && new Date(iso) <= input.span.end
+  const mine = (ownerId: string) => !input.owners || input.owners.has(ownerId)
+  const leadSource = new Map(input.leads.map((l) => [l.id, l.source as string]))
+  const rows = new Map<string, { leads: number; mandates: number }>()
+  const row = (s: string) => { const r = rows.get(s) ?? { leads: 0, mandates: 0 }; rows.set(s, r); return r }
+  for (const l of input.leads) if (mine(l.ownerId) && within(l.createdAt)) row(l.source || 'Unknown').leads += 1
+  for (const d of input.deals) {
+    if (!mine(d.ownerId) || d.stage !== 'Won' || !within(d.wonAt) || dealKind(d) !== 'Handover') continue
+    row((d.leadId && leadSource.get(d.leadId)) || d.source || 'Unknown').mandates += 1
+  }
+  return [...rows].map(([source, r]) => ({ source, ...r, rate: r.leads > 0 ? Math.round((r.mandates / r.leads) * 100) : null }))
+    .sort((a, b) => b.mandates - a.mandates || (b.rate ?? -1) - (a.rate ?? -1) || b.leads - a.leads || a.source.localeCompare(b.source))
 }

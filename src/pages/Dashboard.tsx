@@ -15,9 +15,8 @@ import { WinRateCard } from '../components/dashboard/WinRateCard'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { MonthTrackCard } from '../components/dashboard/MonthTrackCard'
 import { MandateOutcomeCard } from '../components/dashboard/MandateOutcomeCard'
-import { ValueBand } from '../components/dashboard/ClientBookCards'
 import { fetchClientBook, fetchIntakeByDay } from '../lib/companySnapshotData'
-import { monthTrack, type ClientBook } from '../lib/clientBook'
+import { leadSources, mandateToHandover, monthTrack, type ClientBook } from '../lib/clientBook'
 import type { IntakeRow } from '../lib/companySnapshot'
 import { clockNow } from '../lib/clock.ts'
 /*
@@ -38,6 +37,7 @@ import {
 } from '../lib/targets'
 import type { Target, TargetMetric } from '../types'
 import { dealKind, dealSize, dealSizeLabel } from '../lib/dealKind'
+import { MandateToHandoverCard, LeadSourcesCard } from '../components/dashboard/SalesSourceCards'
 import { RepLeaderboard, type LeaderboardRow } from '../components/dashboard/RepLeaderboard'
 import { formatCurrency, formatDate, timeAgo, TODAY } from '../data/mockData'
 import { getCurrentSalesMonth, getPreviousSalesMonth, isWithinPeriod, encodeSalesMonthParam, type SalesMonthPeriod } from '../lib/salesMonth'
@@ -127,13 +127,24 @@ export function Dashboard() {
     current: period, months, leads, deals, intake: intake ?? [], owners: scope === 'all' ? undefined : repIdSet,
   }), [period, months, leads, deals, intake, scope, repIdSet])
   const thisMonth = track[track.length - 1]
-  const awaiting = useMemo(() => {
-    const signedBy = new Map<string, string>()
-    for (const d of deals) if (d.stage === 'Won' && d.wonAt && dealKind(d) === 'Handover' && d.companyId) signedBy.set(d.companyId, d.ownerId)
-    return (books ?? [])
-      .filter((b) => b.mandateSignedAt && b.accounts === 0)
-      .filter((b) => scope === 'all' || repIdSet.has(signedBy.get(b.companyId) ?? b.ownerId ?? ''))
-  }, [books, deals, scope, repIdSet])
+  /*
+   * The same months as the chart, for the two cards that need a run of months to mean anything: how
+   * fast each closer's mandates hand over, and which lead sources sign. (Signed-but-nothing-yet left
+   * this page: the firm, 18 Oct, "that's in the communications department, the liaison department's
+   * things" -- the Communications dashboard has it.)
+   */
+  const span = useMemo(() => {
+    let first = period
+    for (let i = 1; i < months; i++) first = getPreviousSalesMonth(first)
+    return { start: first.start, end: period.end }
+  }, [period, months])
+  const spanLabel = `over the last ${months} months`
+  const sources = useMemo(() => leadSources({ span, leads, deals, owners: scope === 'all' ? undefined : repIdSet }), [span, leads, deals, scope, repIdSet])
+  const toHandover = useMemo(() => {
+    const first = new Map((books ?? []).map((b) => [b.companyId, b.firstHandover]))
+    const byOwner = mandateToHandover(deals.filter((d) => repIdSet.has(d.ownerId)), (id) => first.get(id) ?? null, span)
+    return [...byOwner].map(([ownerId, v]) => ({ ownerId, name: userById(ownerId)?.name ?? 'Former colleague', ...v }))
+  }, [books, deals, repIdSet, span, userById])
 
   const scopedLeads = useMemo(() => leads.filter((l) => repIdSet.has(l.ownerId)), [leads, repIdSet])
   const scopedDeals = useMemo(() => deals.filter((d) => repIdSet.has(d.ownerId)), [deals, repIdSet])
@@ -501,22 +512,23 @@ export function Dashboard() {
           thing, and then deals are secondary ... the line graph as well and the stack graph. So
           that's the secondary thing that you see." Mandates, deals, the track record, then what
           to act on, then the detail. */}
-      {/* ---------- 1. MANDATES, first ---------- */}
-      <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
-        newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
-        periodLabel={period.label} periodParam={periodParam} />
+      {/* ---------- 1 and 2. MANDATES, then DEALS: side by side ("fit these guys in next to each
+          other"), mandates on the left where the eye starts. A mandate is never a deal here. ---------- */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
+          newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
+          periodLabel={period.label} periodParam={periodParam} />
 
-      {/* ---------- 2. DEALS, second: the additional services, never a mandate ---------- */}
-      <WinRateCard
-        showLeadPipeline={false}
-        cohort={cohort}
-        newLeads={kpis.curr.newLeads}
-        qualified={kpis.curr.qualified}
-        converted={kpis.curr.converted}
-        periodLabel={period.label}
-        periodParam={periodParam}
-      />
-
+        <WinRateCard
+          showLeadPipeline={false}
+          cohort={cohort}
+          newLeads={kpis.curr.newLeads}
+          qualified={kpis.curr.qualified}
+          converted={kpis.curr.converted}
+          periodLabel={period.label}
+          periodParam={periodParam}
+        />
+      </div>
 
       {/* ---------- 3. THE TRACK RECORD: the line and the stacked bars ---------- */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -527,23 +539,10 @@ export function Dashboard() {
       </div>
 
       {/* ---------- 4. WHAT TO DO ABOUT IT: chase, who is selling, what is slipping ---------- */}
-      {awaiting.length > 0 && (
-        <Card className="border-gold-300 bg-gold-50/60">
-          <div data-testid="sales-awaiting">
-            <CardHeader title={`Signed, nothing handed over yet · ${awaiting.length}`}
-              subtitle="Mandates won with not one account on the book. Sales won these; chase the first handover." />
-            <ul className="divide-y divide-gold-200/70">
-              {awaiting.map((c) => (
-                <li key={c.companyId} className="flex items-center gap-3 py-2 text-sm">
-                  <Link to={`/companies/${c.companyId}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
-                  <ValueBand band={c.valueBand} />
-                  <span className="shrink-0 text-xs text-slate-500">signed {(c.mandateSignedAt ?? '').slice(0, 10).split('-').reverse().join('/')}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </Card>
-      )}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <MandateToHandoverCard rows={toHandover} spanLabel={spanLabel} />
+        <LeadSourcesCard rows={sources} spanLabel={spanLabel} />
+      </div>
 
       <RepLeaderboard rows={leaderboardRows} />
 

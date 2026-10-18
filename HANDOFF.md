@@ -170,6 +170,18 @@ Also:
 - In Both mode, the closing-rate % sits on the leads LINE, not the bar. The line runs along the bar
   tops and the label sat on it; the firm circled it. The e2e measures the gap.
 
+**Then (18 Oct, afternoon):**
+- **Mandates and Deal outcomes share a row** from `xl` up ("fit these guys in next to each other").
+  Both are compact: a ring beside the figures.
+- **"Signed, nothing handed over yet" left the sales page.** It is the liaisons' list and stays on
+  the Communications dashboard.
+- **In its place:**
+  - `MandateToHandoverCard`: days from mandate to first handover, per closer.
+  - `LeadSourcesCard`: leads and mandates per source. A mandate takes its LEAD's source when it
+    came from one, the deal's otherwise.
+  - Both cover the same months as the chart's 6/12 switch. The arithmetic is `leadSources` and
+    `mandateToHandover(…, span)` in `clientBook.ts`, checked in `check-client-book`.
+
 ### S7 · Clean Break (12 Oct)
 
 - **Payover runs: four tabs, one cycle each** (the firm, 12 Oct, on staging day 11 Aug: "in the

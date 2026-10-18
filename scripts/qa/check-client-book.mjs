@@ -5,7 +5,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-client-book.mjs
  */
 import { readFileSync } from 'node:fs'
-import { clientsTouched, goneQuiet, mandateToHandover, monthTrack, recoveryRate, topClients } from '../../src/lib/clientBook.ts'
+import { clientsTouched, goneQuiet, leadSources, mandateToHandover, monthTrack, recoveryRate, topClients } from '../../src/lib/clientBook.ts'
 import { getSalesMonthForKey } from '../../src/lib/salesMonth.ts'
 
 let pass = 0
@@ -59,6 +59,31 @@ check('unique clients touched, a sub-account counted as its client', [touched.to
 const h = mandateToHandover([mandate('2026-09-01T10:00:00', 'r1', 'c1'), mandate('2026-09-10T10:00:00', 'r1', 'c2'), mandate('2026-09-05T10:00:00', 'r1', 'c3')],
   (id) => ({ c1: '2026-09-11', c2: '2026-09-30', c3: null }[id]))
 check('days from mandate to first handover, averaged; a waiting one counted, not averaged', h.get('r1'), { avgDays: 15, handedOver: 2, waiting: 1 })
+
+const hs = mandateToHandover([mandate('2026-09-01T10:00:00', 'r1', 'c1'), mandate('2026-03-01T10:00:00', 'r1', 'c2')],
+  (id) => ({ c1: '2026-09-11', c2: '2026-03-31' }[id]), { start: new Date('2026-08-11T00:00:00'), end: new Date('2026-10-10T23:59:59') })
+check('...only mandates signed inside the span count', hs.get('r1'), { avgDays: 10, handedOver: 1, waiting: 0 })
+
+/* WHERE MANDATES COME FROM: a converted lead's source wins over the deal's; outside the span is out. */
+const span = { start: new Date('2026-08-11T00:00:00'), end: new Date('2026-10-10T23:59:59') }
+const srcLeads = [
+  { id: 'L1', createdAt: '2026-09-01T09:00:00', ownerId: 'r1', source: 'Referral' },
+  { id: 'L2', createdAt: '2026-09-02T09:00:00', ownerId: 'r1', source: 'Website' },
+  { id: 'L3', createdAt: '2026-09-03T09:00:00', ownerId: 'r1', source: 'Website' },
+  { id: 'L4', createdAt: '2026-01-03T09:00:00', ownerId: 'r1', source: 'Website' },
+  { id: 'L5', createdAt: '2026-09-03T09:00:00', ownerId: 'other', source: 'Google Ads' },
+]
+const srcDeals = [
+  { ...mandate('2026-09-20T10:00:00'), source: 'Website', leadId: 'L1' },
+  { ...mandate('2026-09-21T10:00:00'), source: 'Website' },
+  { ...mandate('2026-02-21T10:00:00'), source: 'Website' },
+  { stage: 'Won', wonAt: '2026-09-22T10:00:00', kind: 'Service', ownerId: 'r1', source: 'Website' },
+]
+check('lead sources: leads and mandates per source, the lead\'s source winning, most mandates first and the better rate on a tie',
+  leadSources({ span, leads: srcLeads, deals: srcDeals }).map((r) => [r.source, r.leads, r.mandates, r.rate]),
+  [['Referral', 1, 1, 100], ['Website', 2, 1, 50], ['Google Ads', 1, 0, 0]])
+check('...a service deal is never a mandate, and the owners filter applies',
+  leadSources({ span, leads: srcLeads, deals: srcDeals, owners: new Set(['r1']) }).map((r) => r.source), ['Referral', 'Website'])
 
 const sql = readFileSync(new URL('../../supabase/schema.sql', import.meta.url), 'utf8')
 const fn = sql.slice(sql.lastIndexOf('create or replace function public.client_book_summary('))

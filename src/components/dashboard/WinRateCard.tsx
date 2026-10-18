@@ -65,13 +65,13 @@ export function WinRateCard({ cohort, newLeads, qualified, converted, periodLabe
   ]
 
   return (
-    <Card>
+    <Card className={showLeadPipeline ? undefined : 'h-full'}>
       <div className="flex items-start justify-between mb-4 gap-3">
-        <CardHeader title="Deal Outcomes" subtitle={`The ${total} ${showLeadPipeline ? (total === 1 ? 'deal' : 'deals') : (total === 1 ? 'service deal' : 'service deals')} opened in this sales month, and where they stand today${showLeadPipeline ? '' : ' (mandates are counted above)'}`} />
+        <CardHeader title="Deal Outcomes" subtitle={`The ${total} ${showLeadPipeline ? (total === 1 ? 'deal' : 'deals') : (total === 1 ? 'service deal' : 'service deals')} opened in this period, and where they stand today${showLeadPipeline ? '' : '. Mandates are counted on their own'}`} />
         <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{periodLabel}</span>
       </div>
 
-      <div className={`grid grid-cols-1 gap-6 items-start ${showLeadPipeline ? 'md:grid-cols-[176px_1fr_1fr]' : 'md:grid-cols-[176px_1fr]'}`}>
+      <div className={`grid grid-cols-1 gap-6 items-start ${showLeadPipeline ? 'md:grid-cols-[176px_1fr_1fr]' : 'sm:grid-cols-[176px_1fr]'}`}>
         <RingDonut data={donutData} centerValue={`${outcomeRate}%`} centerColor={OUTCOME_VALUE} centerLabel="WON SO FAR" caption={`Of ${total} opened`} />
 
         <div className="flex flex-col gap-4">
