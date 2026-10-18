@@ -122,8 +122,21 @@ Commits `7f81d32` onwards; each message carries the reasoning.
   reader's srcdoc frame; microphone NOT denied, dictation uses it); `isFetchableSignatureUrl` (SSRF);
   sync-all needs the bearer (CRON_SECRET is set on prod + preview since 27 Sep, so the audit's C-01 was
   stale); public buckets images-only (staging; **production needs the two `update storage.buckets`**
-  at the end of schema.sql); `.env.example`. `check-security-audit` (31). Not done, owner's decisions:
-  rate limiting, MFA, backups, DPAs, Information Officer, privacy notice, breach plan.
+  at the end of schema.sql); `.env.example`. `check-security-audit` (49). Not done: rate limiting
+  (asked, not answered); privacy notice and breach plan (the user: not now); Information Officer and
+  operator terms (the user: not needed / already done).
+- **Two-step sign-in for Administrators** (audit B-02, the user asked 18 Oct). `AdminTwoStep` inside
+  `RequireAuth`: an Administrator below aal2 types the authenticator code, or sets one up (QR + key)
+  if they have none; nobody else is asked (`needsTwoStep`, src/lib/twoStep.ts). The server holds it too:
+  `callerIsAdmin(admin, id, req)` and delete-user / update-user-email refuse an Administrator's token
+  below aal2 (`tokenAal`). Lost phone: remove the factor in the Supabase dashboard (Authentication ->
+  Users -> MFA). The e2e harness now signs in at aal2 with a verified factor by default
+  (`signedInPage(..., { aal, factors })`); `e2e/two-step` (11) sees the gate. TOTP is on by default
+  in Supabase; if enrolment errors with "MFA disabled", turn TOTP on in Authentication -> MFA.
+- **Plans, checked 18 Oct:** Supabase org "Team Raptor" is on the **FREE plan** -- no backups at all;
+  the user was told Pro is needed before real money. **Vercel is PRO** (the user; CLAUDE.md's "Hobby,
+  12 functions" note is out of date). Spend Management is the user's to set in the dashboard (no MCP
+  tool for it). Supabase's and Vercel's DPAs form part of their terms; nothing to sign.
 
 **"Held for Swordfish payovers" -- the design, not yet built** (read before building): a one-row table
 `swordfish_holding` (amount, reason, set by, at) rather than firm_settings columns (five hand-kept

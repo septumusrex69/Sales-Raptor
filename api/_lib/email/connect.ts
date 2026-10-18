@@ -45,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let userId = caller.id
   if (targetUserId && targetUserId !== caller.id) {
-    if (!(await callerIsAdmin(admin, caller.id))) {
+    if (!(await callerIsAdmin(admin, caller.id, req))) {
       res.status(403).json({ error: 'Only administrators can connect another user’s mailbox.' })
       return
     }

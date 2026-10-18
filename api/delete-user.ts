@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { tokenAal } from './_lib/auth.js'
 import { createClient } from '@supabase/supabase-js'
 
 /**
@@ -36,7 +37,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { data: callerProfile, error: profileError } = await admin.from('profiles').select('role').eq('id', callerData.user.id).single()
-  if (profileError || callerProfile?.role !== 'Administrator') {
+  /* aal2 as well (S8; audit B-02): see callerIsAdmin in _lib/auth.ts. */
+  if (profileError || callerProfile?.role !== 'Administrator' || tokenAal(token) !== 'aal2') {
     res.status(403).json({ error: 'Only administrators can remove a user.' })
     return
   }

@@ -54,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(401).json({ error: 'Invalid or expired session.' })
     return
   }
-  if (!(await callerIsAdmin(admin, caller.id))) {
+  if (!(await callerIsAdmin(admin, caller.id, req))) {
     res.status(403).json({ error: 'Only administrators can add people.' })
     return
   }
