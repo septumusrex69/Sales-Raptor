@@ -153,6 +153,23 @@ last Swordfish run (firm fees can be written off, client money cannot) is the FI
 
 Newest first. Each commit message carries the full reasoning; this is the index.
 
+**The sales dashboard's order (927ae72), the firm's: "a mandate is a mandate and a deal is a deal."**
+1. Mandates: `MandateOutcomeCard` (closing-rate ring, leads created, mandates signed, new-client
+   handovers).
+2. Deal outcomes: `WinRateCard` with `showLeadPipeline={false}`, **service deals only**. The cohort
+   leaves out `dealKind === 'Handover'`, so one signature is never two wins.
+3. The track record: stacked bars and line.
+4. What to act on: signed with nothing handed over, Top performing **closers**, needs attention,
+   tasks, targets.
+5. The detail.
+
+Also:
+- "Reps" are now **closers** on screen. The scope picker groups Closers and **Liaisons**: liaisons sell
+  services too ("drafting of contracts, executive listings") and were always counted through
+  `isAssignableOwner`.
+- In Both mode, the closing-rate % sits on the leads LINE, not the bar. The line runs along the bar
+  tops and the label sat on it; the firm circled it. The e2e measures the gap.
+
 ### S7 · Clean Break (12 Oct)
 
 - **Payover runs: four tabs, one cycle each** (the firm, 12 Oct, on staging day 11 Aug: "in the
