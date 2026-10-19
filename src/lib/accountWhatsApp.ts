@@ -29,6 +29,8 @@ export async function recordWhatsApp(input: {
   number: string
   /** Messages sent, as the person said. Nought is noted and not charged. */
   count: number
+  /** The letter sent with it, where one was (S9: "send a section 129 via WhatsApp"). */
+  about?: string | null
   actor: { id: string | null; name: string | null }
 }): Promise<ChargeResult | null> {
   const charge = input.count > 0 ? await chargeItem({
@@ -41,7 +43,7 @@ export async function recordWhatsApp(input: {
   }) : null
   await addNote({
     accountId: input.accountId,
-    body: whatsAppNote(input.number, input.count),
+    body: input.about && input.count > 0 ? `${whatsAppNote(input.number, input.count)} · ${input.about}` : whatsAppNote(input.number, input.count),
     authorName: input.actor.name,
     createdBy: input.actor.id,
     source: 'system',

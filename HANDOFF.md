@@ -62,9 +62,12 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        WhatsApp on the cellphone (27… form) with an opening line; on the way back it asks how many
        messages went. On an account each is charged R3.50 under 1(c) (the firm said "correspondence";
        1(a)'s R25 is letter/fax/e-mail -- confirm with them if they meant R25). Sales side: noted, free.
-       NEXT, asked for: "send a letter by WhatsApp" -- a short WhatsApp version of every letter, the PDF
-       downloaded to attach, WhatsApp opened with the short text. The short texts need drafting and
-       the firm's review. Later: the full WhatsApp API (docs/whatsapp-integration.md).
+       **A letter by WhatsApp** (`AccountWhatsApp`, `whatsappLetters.ts`): on an account, WhatsApp
+       asks "a message, or a letter"; a letter is drawn as the email's PDF, then two taps -- save
+       the PDF (iPad share sheet can hand it to WhatsApp), open WhatsApp with the letter's SHORT
+       covering line. The nine short lines are MY DRAFTS in code: the firm should read them; making
+       them editable in the Library is the next step if they want to change them themselves.
+       Later: the full WhatsApp API (docs/whatsapp-integration.md); screenshots of arrangements.
      - **Confirm and accept a payment arrangement**: the workflow's arrangement-confirmed email
        (`email-ptp-confirmed-*`) now carries a Confirm and accept button to a `signing_requests` row
        in mode `accept` (`arrangementDocument.ts`). The debtor types a name and ticks; `signing_accept`

@@ -9,11 +9,14 @@
  * Run: node scripts/qa/e2e/account-whatsapp.mjs
  */
 import { PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
-import { COMPANY, PROFILE, TEAM, USER_ID, accountsPage } from './fixtures.mjs'
+import { COMPANY, LIBRARY, PROFILE, TEAM, USER_ID, accountsPage } from './fixtures.mjs'
+import { readFileSync } from 'node:fs'
 
 const t = makeRunner('account-whatsapp')
 const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000', status: 'Active: Activated', case_number: 'BF-004321', debtor_first_name: 'Piet' }
 
+/* A section 129 in the library, as seeded: the WhatsApp box offers the letters written for this debtor. */
+const S129 = { ...LIBRARY.find((r) => r.kind === 'letter'), seed_key: 'letter-s129-individual', audience: 'individual', active: true }
 const seen = []
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
@@ -32,6 +35,7 @@ const handlers = [
   })],
   [(u) => u.includes('/rpc/account_charge_basis'), () => ({ body: { capital: 750000, spent_on_item: 0, towards_ceiling: 0 } })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
+  [(u) => u.includes('/rest/v1/message_templates'), () => ({ body: [S129] })],
   [(u) => u.includes('/rest/v1/debtor_accounts'), () => ({ body: [ACCOUNT], headers: { 'content-range': '0-0/1' } })],
 ]
 
@@ -50,18 +54,37 @@ try {
   }
   t.ok('the account opens', up)
 
-  const wa = page.getByTestId('whatsapp-link')
-  await wa.first().waitFor({ timeout: 20000 }).catch(() => {})
-  t.check('one cellphone, so WhatsApp opens straight away (the landline is not offered)', await wa.count(), 1)
+  /* WHATSAPP OPENS A BOX: a message, or a letter (the firm, 19 Oct: "I wanna send a section 129 via
+     WhatsApp"). */
+  const button = page.getByTestId('account-whatsapp')
+  await button.waitFor({ timeout: 20000 })
+  await button.click()
+  const box = page.getByTestId('account-whatsapp-box')
+  t.ok('WhatsApp opens the box: a message, or a letter', await box.isVisible())
+  const wa = box.getByTestId('whatsapp-link')
+  t.check('one cellphone, so no number is asked (the landline is not offered)', await box.getByText('Which number?').count(), 0)
   const href = (await wa.first().getAttribute('href')) ?? ''
-  t.ok(`...on the number as WhatsApp needs it (${href.slice(0, 40)}…)`, href.startsWith('https://wa.me/27824567890?text='))
+  t.ok(`a message: WhatsApp on the number as it needs it (${href.slice(0, 40)}…)`, href.startsWith('https://wa.me/27824567890?text='))
   const text = decodeURIComponent(href.split('text=')[1] ?? '')
   t.ok(`...with the opening line, our case number in it ("${text}")`, /^Good day Piet, this is .+ from Bredell Ferreira, regarding your account BF-004321\.$/.test(text))
   t.check('...in a new tab, Raptor stays where it is', await wa.first().getAttribute('target'), '_blank')
 
+  /* A LETTER: drawn, then two presses -- save the PDF, open WhatsApp with the short line. */
+  await box.getByTestId('whatsapp-letters').getByRole('button', { name: /Section 129/ }).click()
+  const ready = page.getByTestId('whatsapp-letter-ready')
+  await ready.getByTestId('whatsapp-letter-pdf').waitFor({ timeout: 20000 })
+  const line = await ready.getByTestId('whatsapp-letter-text').innerText()
+  t.ok(`the letter's short covering line, not the letter ("${line}")`, /Attached is a Section 129 notice/.test(line) && /BF-004321/.test(line) && line.length < 300)
+  const saved = page.waitForEvent('download', { timeout: 20000 })
+  await ready.getByTestId('whatsapp-letter-pdf').locator('[data-action="download"]').click()
+  const file = await saved
+  t.check('the PDF is saved, to attach in WhatsApp', readFileSync(await file.path()).subarray(0, 5).toString('latin1'), '%PDF-')
+  const letterHref = (await ready.getByTestId('whatsapp-link').getAttribute('href')) ?? ''
+  t.ok('...and WhatsApp opens with that line typed in', decodeURIComponent(letterHref.split('text=')[1] ?? '') === line)
+
   seen.length = 0
   const opened = context.waitForEvent('page', { timeout: 10000 }).catch(() => null)
-  await wa.first().click()
+  await ready.getByTestId('whatsapp-link').click()
   t.ok('pressing it opens WhatsApp', !!(await opened))
   await page.bringToFront()
   /* ON THE WAY BACK, HOW MANY WENT (the firm, 19 Oct). Nothing is recorded until it is answered. */
