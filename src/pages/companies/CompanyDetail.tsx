@@ -18,6 +18,7 @@ import {
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
 import { CrmWhatsAppButton } from '../../components/record/WhatsAppButton'
+import { ClientReportButton } from '../../components/companies/ClientReportButton'
 import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
@@ -872,6 +873,10 @@ export function CompanyDetail() {
                   setDebtorOpen(true)
                 }}
                 title="The single account a client phones in" />
+            )}
+            {/* The client's collection report (S9): the firm's Excel dashboard, remade as a PDF. */}
+            {isClient && (
+              <ClientReportButton client={{ id: company.id, name: company.name, code: company.code ?? null, accountIds: [company.id, ...subAccounts.map((s) => s.id)] }} />
             )}
 
             {/*

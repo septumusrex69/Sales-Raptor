@@ -94,17 +94,23 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        `signing_requests.sent_to`; and **the SMS confirmation carries the link ONLY where the debtor
        has no email** (`acceptLink` in step.ts, one helper for both channels; the SMS is re-priced on
        the text that leaves, link included). The link uses VERCEL_BRANCH_URL on previews.
-   - **NOT BUILT, PROPOSED: a client report** (the firm sent their Excel "Collection dashboard" PDF
-     and asked to discuss one). Their PDF's pie labels are wrong (298.95%, 100%), its ring is
-     unlabelled and page 2 is blank. Proposed: a PDF off the client page on the letterhead -- issue
-     date and range; At a glance (handovers received, handed over, excl. withdrawn, recovered,
-     still in process, % recovered); accounts by status with count, rand and %; collections by
-     month with the rate line; handovers by month. Waiting on the firm's yes and its contents.
-
+   - **BUILT: the client report** (the firm: their Excel "Collection dashboard" was "just ... a
+     reference ... you can fix all of that"). **Client report** in the client page's action row
+     (clients only, like Upload a batch) opens Open / Download of a two-page A4 landscape PDF in the
+     remittance advice's hand: (1) *Your book at a glance* -- accounts, capital, collected, recovery
+     rate on navy; what became of the accounts (recovered / active / closed: count, share, capital,
+     collected, TOTAL); where the active ones stand (position, count, share, capital, TOTAL); (2)
+     *Month by month* -- collections bars + the rate line over a table of the same figures, and
+     handovers bars over accounts and capital, last 12 sales months. Fixed from the reference: every
+     share column adds to exactly 100.0% (`shares`, largest remainder), every chart sits on its own
+     table, no blank page. No commission or fees (it goes to the client). `clientReport.ts` (pure),
+     `clientReportPdf.ts`, `clientReportData.ts` (the client page's own four reads),
+     `ClientReportButton`. `check-client-report` (24, break-tested), e2e client-handovers +3.
+     Not done: sending it by email from Raptor (today it is downloaded and attached); a date range.
    **Open, in order:** 1. code by email for an Administrator on a new device; 2. "Held for
    Swordfish payovers"; 3. the FNB template (waits on FNB: the firm has the CSV template, the
    import GUIDE is still needed for line 3's second number, the date, account-type codes and NOTIFY);
-   4. the client report (above); 5. production has none of S8's or S9's migrations.
+   4. production has none of S8's or S9's migrations.
 
 00. **S8 · Cut-over, end of 18 Oct.** The afternoon was the firm testing on the preview and asking,
    one screenshot at a time. All of it is built, checked and pushed (each item is in §2 under S8):

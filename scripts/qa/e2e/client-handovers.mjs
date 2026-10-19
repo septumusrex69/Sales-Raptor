@@ -6,10 +6,11 @@
  */
 import { OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
 import { PROFILE, COMPANY_ID } from './fixtures.mjs'
+import { readFileSync } from 'node:fs'
 
 const t = makeRunner('client-handovers')
 const ADMIN = { ...PROFILE, role: 'Administrator', name: 'Stephan' }
-const COMPANY = { id: COMPANY_ID, name: 'Rinda Roo Company', account_owner_id: ADMIN.id, created_at: '2025-10-01T07:27:05Z', commission_rate: 0.25 }
+const COMPANY = { id: COMPANY_ID, name: 'Rinda Roo Company', code: 'RRC', account_owner_id: ADMIN.id, created_at: '2025-10-01T07:27:05Z', commission_rate: 0.25 }
 const asked = []
 
 const server = await startServer()
@@ -128,6 +129,20 @@ try {
   t.ok('...and the words say all time', /over \d+ months, all time/.test(await card.innerText()))
   await card.scrollIntoViewIfNeeded()
   await t.shot(page, 'client-handovers')
+
+  /* ---------- THE CLIENT REPORT (S9, 19 Oct): the firm's Excel dashboard, remade as a PDF ---------- */
+  await page.getByRole('button', { name: 'Client report' }).click()
+  const reportBox = page.getByTestId('client-report-box')
+  t.ok('the client page offers the client report, as Open and Download', await reportBox.isVisible()
+    && await reportBox.getByTestId('client-report-pdf').locator('[data-action="download"]').isVisible())
+  const saved = page.waitForEvent('download', { timeout: 20000 }).catch(() => null)
+  await reportBox.getByTestId('client-report-pdf').locator('[data-action="download"]').click()
+  const report = await saved
+  const reportBytes = report ? readFileSync(await report.path()) : Buffer.from('')
+  t.check('Download gives a PDF', reportBytes.subarray(0, 5).toString('latin1'), '%PDF-')
+  t.ok(`...named for the client (${report?.suggestedFilename()})`, /^Rinda Roo Company collection report \d+ \w{3} 2026\.pdf$/.test(report?.suggestedFilename() ?? ''))
+  const { PDFDocument } = await import('pdf-lib')
+  t.check('...two pages: the book at a glance, then month by month', reportBytes.length ? (await PDFDocument.load(reportBytes)).getPageCount() : 0, 2)
 } finally {
   await browser.close()
   await stopServer(server)
