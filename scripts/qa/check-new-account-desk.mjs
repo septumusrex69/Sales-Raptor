@@ -112,10 +112,13 @@ ok('the client screen never writes an allocation itself',
  */
 ok('dismissing the screen is recorded rather than swallowed',
   /setHandOutNote\(handOutNew\)/.test(client))
+/* SAID IN ATTENTION REQUIRED since S9 (19 Oct): the client page gathers what needs doing into one
+   card, and the page hands it the note and the way to finish it. */
+const attention = readFileSync(new URL('../../src/components/companies/ClientAttentionCard.tsx', import.meta.url), 'utf8')
 ok('...and the person is told the account has no clerk and no date',
-  /on nobody&rsquo;s desk and in nobody&rsquo;s/.test(client))
+  /unallocated=\{handOutNote\}/.test(client) && /on nobody’s desk/.test(attention) && /in nobody’s diary/.test(attention))
 ok('...with the way to finish it, not just a complaint',
-  /Assign and refer\s*<\/button>/.test(client))
+  /onHandOut=\{\(\) => \{ setHandOutNew\(handOutNote\); setHandOutNote\(null\) \}\}/.test(client) && />Assign and refer<\/button>/.test(attention))
 
 /* ------------------------------------------------ and the rule underneath is still the rule */
 

@@ -32,8 +32,15 @@ import { ChevronDown, Columns3, MoreHorizontal, PanelRight, Rows3, type LucideIc
  * `small` is for the ones holding words rather than money — a status set at the size of a rand
  * amount reads as the most important thing on the page, and it is not.
  */
-export function RecordFigure({ label, value, note, strong, danger, small, onClick, title }: {
+export function RecordFigure({ label, value, note, strong, danger, small, onClick, title, icon: Icon, aside }: {
   label: string
+  /**
+   * A mark beside the figure (the client page, 19 Oct, after the firm's mock). Optional and off on
+   * every page that does not pass one, so the account and lead rows are unchanged.
+   */
+  icon?: LucideIcon
+  /** A small drawing in the icon's place -- the recovery rate's own ring. Wins over `icon`. */
+  aside?: ReactNode
   value: string
   note?: ReactNode
   /** The one figure the page is really about. */
@@ -44,7 +51,7 @@ export function RecordFigure({ label, value, note, strong, danger, small, onClic
   onClick?: () => void
   title?: string
 }) {
-  const body = (
+  const text = (
     <>
       <p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
       <p className={`font-semibold mt-0.5 ${small ? 'text-sm leading-snug' : 'text-lg tabular-nums'} ${
@@ -56,6 +63,14 @@ export function RecordFigure({ label, value, note, strong, danger, small, onClic
       )}
     </>
   )
+  const body = aside || Icon ? (
+    <div className="flex items-center gap-3">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-navy-900" aria-hidden>
+        {aside ?? (Icon && <Icon size={18} />)}
+      </span>
+      <div className="min-w-0">{text}</div>
+    </div>
+  ) : text
   const shell = `card px-3.5 py-2.5 ${strong ? 'border-gold-100' : ''}`
   if (!onClick) return <div className={shell}>{body}</div>
   return (

@@ -61,10 +61,10 @@ async function openDetail(browser, company, { saves = [], documents = [], timezo
 }
 
 /** The mandate card's rendered text, or a sentinel that fails loudly rather than throwing. */
-const cardText = (page) => page.evaluate(() => {
-  const h = Array.from(document.querySelectorAll('h3')).find((n) => n.textContent.trim() === 'The mandate')
-  return h ? h.closest('.card').innerText : '(no mandate card on the page)'
-})
+/* The card it lives in since 19 Oct: "Commission and mandate", one card (the firm: "just combine
+   the collection commission and the mandate together"). */
+const cardText = (page) => page.getByTestId('commission-mandate').innerText({ timeout: 15000 })
+  .catch(() => '(no mandate card on the page)')
 
 const server = await startServer()
 const browser = await chromium.launch()
@@ -92,8 +92,7 @@ try {
     /* THE UPLOAD OPENS ON 'Mandate'. The box files under whatever the picker holds, so a picker
        that opens on "Other" is a mandate the card will not find afterwards. */
     const kind = await page.evaluate(() => {
-      const h = Array.from(document.querySelectorAll('h3')).find((n) => n.textContent.trim() === 'The mandate')
-      const s = h?.closest('.card')?.querySelector('select')
+      const s = document.querySelector('[data-testid="commission-mandate"] select')
       return s ? s.options[s.selectedIndex].text : null
     })
     t.check('the upload picker opens on the mandate', kind, 'Mandate')

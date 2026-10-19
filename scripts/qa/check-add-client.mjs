@@ -223,7 +223,7 @@ ok('...handed the company rather than an account', /<CommissionCard[^>]*company=
    and the mandate together") -- both drawn bare inside it, in that order. */
 const combined = page.slice(page.indexOf('<Card key="commission-mandate">'))
 ok('commission and mandate are one card', page.indexOf('<Card key="commission-mandate">') > 0
-  && /^<Card key="commission-mandate">[\s\S]*?<CommissionCard company=\{company\} bare \/>[\s\S]*?<MandateCard company=\{company\} bare[\s\S]*?<\/Card>/.test(combined))
+  && /^<Card key="commission-mandate">[\s\S]*?<CommissionCard company=\{company\} bare \/>[\s\S]*?<MandateCard key=\{mandateKey\} company=\{company\} bare[\s\S]*?<\/Card>/.test(combined))
 ok('...titled for both', /bare \? 'Commission and mandate'/.test(card))
 ok('the card shows a fixed rate', /of everything collected/.test(card))
 ok('...and every tier of a scale', /bands\.map/.test(card))

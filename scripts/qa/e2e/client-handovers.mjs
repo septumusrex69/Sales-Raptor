@@ -4,7 +4,7 @@
  *
  * Run: node scripts/qa/e2e/client-handovers.mjs
  */
-import { PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
+import { OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
 import { PROFILE, COMPANY_ID } from './fixtures.mjs'
 
 const t = makeRunner('client-handovers')
@@ -31,6 +31,16 @@ try {
       { status: 'Active', sub_status: null, bucket: null },
       { status: 'Active', sub_status: null, bucket: null },
     ] })],
+    /* THE SAME BOOK AS THE OUTCOMES ABOVE, by day: R50 000 handed over, R12 000 collected, 24%. */
+    [(u) => /\/rpc\/client_money_by_day/.test(u), () => ({ body: [
+      { day: '2026-05-15', capital: 20000, collected: 0 },
+      { day: '2026-06-01', capital: 0, collected: 3000 },
+      { day: '2026-07-20', capital: 30000, collected: 0 },
+      { day: '2026-08-01', capital: 0, collected: 4000 },
+      { day: '2026-09-20', capital: 0, collected: 5000 },
+    ] })],
+    [(u) => /\/rest\/v1\/client_documents/.test(u), () => ({ body: [] })],
+    [(u) => /\/rest\/v1\/account_queries/.test(u), () => ({ body: [] })],
     [(u) => /\/rpc\/client_intake_by_day/.test(u), (u, req) => {
       asked.push(req.postDataJSON())
       return { body: [
@@ -46,6 +56,29 @@ try {
     try { await page.goto(`http://localhost:${PORT}/companies/${COMPANY_ID}`, { timeout: 2000 }); break }
     catch { await new Promise((r) => setTimeout(r, 500)) }
   }
+  /* ---------- THE OVERVIEW AS A DASHBOARD (S9, 19 Oct, after the firm's mock) ---------- */
+  const collections = page.getByTestId('client-collections')
+  await collections.locator('.recharts-bar-rectangle').first().waitFor({ timeout: 20000 })
+  const figures = (await collections.getByTestId('client-collections-figures').innerText()).replace(/\s+/g, ' ').replace(/\u00a0/g, ' ')
+  t.ok(`collections performance: handed over, collected and the rate (${figures})`,
+    /R 50[ ,]000 Capital handed over/.test(figures) && /R 12[ ,]000 Collected/.test(figures) && /24% Recovery rate/.test(figures))
+  t.ok('...a bar for each month collected in', (await collections.locator('.recharts-bar-rectangle').count()) >= 3)
+  t.ok('...and the recovery rate as a line', (await collections.locator('.recharts-line').count()) === 1)
+  t.ok('...beside what became of the accounts', /Active accounts 6 \(60%\)/.test((await page.getByTestId('client-collections-outcomes').innerText()).replace(/\s+/g, ' ')))
+  const tiles = (await page.locator('main').innerText()).replace(/\s+/g, ' ')
+  t.ok(`the figures row states the same 24%, and what was collected (${(tiles.match(/RECOVERY RATE.{0,40}/i) ?? [''])[0]})`, /RECOVERY RATE 24% R\s?12[ ,]?000(\.00)? collected/i.test(tiles.replace(/\u00a0/g, ' ')))
+  t.ok('...and the commission they are billed on', /COMMISSION 25% of everything collected/.test(tiles))
+  const attention = (await page.getByTestId('client-attention').innerText()).replace(/\s+/g, ' ')
+  t.ok('attention required names the missing mandate', /No mandate on record/.test(attention))
+  t.ok('...and says the disputes in one line', /No disputes escalated/.test(attention))
+  t.ok('recent activity sits beside the handovers', await page.getByTestId('client-recent-activity').isVisible())
+  /* Tall enough to hold the whole overview: the page scrolls inside its own panel, so a full-page
+     shot of a 1024-high window is the top of it only. */
+  await page.setViewportSize({ width: 1366, height: 3200 })
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: `${OUT}/client-overview-ipad.png`, fullPage: true })
+  await page.setViewportSize({ width: 1180, height: 900 })
+
   const card = page.getByTestId('client-handovers')
   await card.locator('.recharts-bar-rectangle').first().waitFor({ timeout: 20000 })
   t.check('asked for this client, sub-accounts included in the database', asked[0]?.p_client, COMPANY_ID)
@@ -71,7 +104,7 @@ try {
   /* THE RING COUNTS ACCOUNTS AND SAYS SO; the rate is rands, beside it, with its own bar (19 Oct). */
   t.ok('...the ring’s centre is the accounts it counts', /^10 ACCOUNTS/.test(outcomes) && !/RECOVERY RATE/.test(outcomes))
   const rate = (await page.getByTestId('client-recovery-rate').innerText()).replace(/\s+/g, ' ')
-  t.ok('...and the recovery rate beside it: R12 000 of R50 000', /Recovered 24%/.test(rate) && /R 12\s?000 collected of R 50\s?000 handed over/.test(rate.replace(/\u00a0/g, ' ')))
+  t.ok('...and the recovery rate beside it: R12 000 of R50 000', /Recovered 24%/.test(rate) && /R 12[ ,]000 collected of R 50[ ,]000 handed over/.test(rate.replace(/\u00a0/g, ' ')))
   const positions = (await page.getByTestId('client-ring-positions').innerText()).replace(/\s+/g, ' ')
   t.ok('the active accounts by where they stand, busiest first', /^6 ACTIVE/.test(positions) && positions.indexOf('In progress') < positions.indexOf('Arranged') && /Tracing 1 17%/.test(positions))
   await rings.scrollIntoViewIfNeeded()

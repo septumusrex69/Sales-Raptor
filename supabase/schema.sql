@@ -43626,3 +43626,38 @@ as $$
 $$;
 revoke all on function public.balance_sort_state() from public, anon;
 grant execute on function public.balance_sort_state() to authenticated, service_role;
+
+-- S9: ONE CLIENT'S MONEY BY DAY, for "Collections performance" on the client page (the firm's mock,
+-- 19 Oct: collected per month, with the recovery rate as a line). What was handed over and what was
+-- collected, each on its own day, over the client and its sub-accounts. WITHDRAWN ACCOUNTS ARE LEFT
+-- OUT OF BOTH, exactly as client_account_outcomes leaves them out of the rate, so the line ends on
+-- the same percentage the ring beside it states. Collected is live money only: not reversed, not
+-- rejected, not demo -- the same filter as client_account_outcomes. Months are cut in the browser.
+create or replace function public.client_money_by_day(p_client uuid)
+returns table (day date, capital numeric, collected numeric)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  with acct as (
+    select a.id, a.handover_date, a.capital_handed_over
+      from public.debtor_accounts a
+      join public.companies c on c.id = a.company_id
+     where coalesce(c.parent_company_id, c.id) = p_client
+       and a.ended_as is distinct from 'withdrawn'
+  ), handed as (
+    select handover_date as day, sum(capital_handed_over) as capital, 0::numeric as collected
+      from acct where handover_date is not null group by handover_date
+  ), paid as (
+    select (p.received_at at time zone 'Africa/Johannesburg')::date as day, 0::numeric as capital, sum(p.amount) as collected
+      from public.account_payments p
+     where p.account_id in (select id from acct)
+       and p.reversed_at is null and p.rejected_at is null and not coalesce(p.is_demo, false)
+     group by 1
+  )
+  select day, sum(capital), sum(collected) from (select * from handed union all select * from paid) x
+   group by day order by day;
+$$;
+revoke all on function public.client_money_by_day(uuid) from public, anon;
+grant execute on function public.client_money_by_day(uuid) to authenticated;

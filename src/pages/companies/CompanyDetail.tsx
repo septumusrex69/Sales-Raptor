@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   UserPlus, ArrowLeft, ArrowRight, Mail, Phone, Globe, StickyNote, Pencil, Handshake,
-  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus,
+  CalendarClock, Users2, Link2, Unlink, Trash2, Upload, MessageSquare, Plus, Users, Database, Percent, Trophy,
 } from 'lucide-react'
 import { useAppStore } from '../../store/AppStore'
 import { useBackLink, useRecordName } from '../../lib/backLink'
@@ -13,7 +13,7 @@ import { StatusBadge, StageBadge, ClassificationBadge, ServiceBadge } from '../.
 import { InlineSelect } from '../../components/ui/InlineSelect'
 import {
   ACTION_BASE, ACTION_ENABLED, RecordAction, RecordActions, RecordFigure, RecordFigures,
-  RecordActionsMore, RecordFigureShell, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
+  RecordActionsMore, RecordLayout, RecordLayoutSwitcher, RecordMoreAction,
   RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
@@ -51,6 +51,12 @@ import { HandoverBook } from '../../components/companies/HandoverBook'
 import { ClientHandoverChart } from '../../components/companies/ClientHandoverChart'
 import { WelcomeCard } from '../../components/companies/WelcomeCard'
 import { ClientBookRings } from '../../components/companies/ClientBookRings'
+import { ClientCollectionsCard } from '../../components/companies/ClientCollectionsCard'
+import { ClientAttentionCard } from '../../components/companies/ClientAttentionCard'
+import { ClientUpcomingPayover } from '../../components/companies/ClientUpcomingPayover'
+import { ClientRecentActivity } from '../../components/companies/ClientRecentActivity'
+import { outcomeRing, type OutcomeRow } from '../../lib/clientOutcomes'
+import { ruleKind } from '../../lib/commissionRule'
 import { HandOutModal } from '../accounts/HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
 import type { Company, Contact, ProductService } from '../../types'
@@ -216,10 +222,26 @@ export function CompanyDetail() {
   // Paid-to-date vs. handover amount. Can exceed 100% — payments here include
   // fees on top of the handover amount, which this system deliberately never
   // discloses, so the ratio isn't meant to cap at 100.
-  const collectionsCoefficient =
-    company?.handoverAmount !== undefined && company.handoverAmount > 0 && company?.paymentsToDate !== undefined
-      ? (company.paymentsToDate / company.handoverAmount) * 100
-      : undefined
+  /*
+   * THE RECOVERY RATE FOR THE FIGURES ROW (S9, 19 Oct), from client_account_outcomes -- the same call
+   * the ring and Collections performance read, withdrawn accounts left out -- so the tile, the ring
+   * and the chart's last point are one figure. It replaced "Paid to date" and "Coefficient": the
+   * coefficient divided ALL payments, fees included, by capital, and stood beside a ring stating a
+   * different percentage for the same client.
+   */
+  const bookId = company ? company.parentCompanyId ?? company.id : null
+  const [outcomes, setOutcomes] = useState<OutcomeRow[] | null>(null)
+  useEffect(() => {
+    if (!bookId) return
+    let live = true
+    supabase.rpc('client_account_outcomes', { p_client: bookId }).then(({ data }) => {
+      if (live) setOutcomes(((data ?? []) as Record<string, unknown>[]).map((r) => ({ outcome: String(r.outcome), accounts: Number(r.accounts), capital: Number(r.capital), collected: Number(r.collected) })))
+    })
+    return () => { live = false }
+  }, [bookId])
+  const recovery = outcomes ? outcomeRing(outcomes) : null
+  /* A mandate filed from Attention required reloads the mandate card's own list. */
+  const [mandateKey, setMandateKey] = useState(0)
 
   if (!company) {
     return (
@@ -524,8 +546,26 @@ export function CompanyDetail() {
   /** The firmographics. */
   const companyInfoPanel = (
     <Card>
-      <CardHeader title="Company Information" />
+      <CardHeader title="Client information" />
       <dl className="space-y-3 text-sm">
+        {/* CLASS, moved here off the figures row (S9): it is set once and read rarely, and the
+            figures row is for what a client is asked about. Still set in place, as it always was. */}
+        <div className="flex justify-between gap-3 items-center">
+          <dt className="text-slate-400">Class</dt>
+          <dd>
+            <InlineSelect
+              value={company.classification}
+              options={leadClassifications}
+              onChange={(classification) => updateCompany(company.id, { classification })}
+            >
+              {company.classification ? (
+                <ClassificationBadge classification={company.classification} />
+              ) : (
+                <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
+              )}
+            </InlineSelect>
+          </dd>
+        </div>
         <Field label="Industry" value={company.industry} />
         <Field label="Province" value={company.province} />
         <Field label="City" value={company.city} />
@@ -631,6 +671,24 @@ export function CompanyDetail() {
               const line = summaryLine([company.industry, summaryLine([company.city, company.province], ', ')])
               return line ? <span>{line}</span> : null
             })()}
+            {/*
+              WHAT THEY ARE TO US, IN THE BAND (S9, 19 Oct, after the firm's mock): a client with a
+              live book, and the services they signed for, as tags under the name -- read before
+              anything else on the page, as the debtor's band reads its position.
+            */}
+            {(isClient || companyServices.length > 0) && (
+              <span className="mt-2 flex w-full flex-wrap items-center gap-1.5" data-testid="client-hero-tags">
+                {isClient && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-2.5 py-0.5 text-[11.5px] font-medium text-white">
+                    <span className={`h-1.5 w-1.5 rounded-full ${(company.accountCount ?? 0) > 0 ? 'bg-emerald-400' : 'bg-white/40'}`} />
+                    {(company.accountCount ?? 0) > 0 ? 'Active' : 'No accounts yet'}
+                  </span>
+                )}
+                {companyServices.map((sv) => (
+                  <span key={sv} className="rounded-full border border-white/20 px-2.5 py-0.5 text-[11.5px] text-white/85">{sv}</span>
+                ))}
+              </span>
+            )}
           </span>
         }
       >
@@ -644,38 +702,35 @@ export function CompanyDetail() {
         the debtor page next door. The firm's point: a client liaison moving between a client and
         the debtors they handed over should not have to learn the page twice.
       */}
-      <RecordFigures count={collectionsCoefficient !== undefined ? 6 : 5}>
-        {/* Class sits first because it applies to every client, and it was previously invisible
-            on any client without handover totals — including the ungraded ones, which are
-            exactly the ones you would want to grade. */}
-        <RecordFigureShell label="Class">
-          <InlineSelect
-            value={company.classification}
-            options={leadClassifications}
-            onChange={(classification) => updateCompany(company.id, { classification })}
-          >
-            {company.classification ? (
-              <ClassificationBadge classification={company.classification} />
-            ) : (
-              <span className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-md px-2 py-1">Not yet graded</span>
-            )}
-          </InlineSelect>
-        </RecordFigureShell>
-
-        <RecordFigure label="Accounts" value={String(company.accountCount ?? 0)}
+      {/*
+        THE FIVE FIGURES A CLIENT IS ASKED ABOUT (S9, 19 Oct, after the firm's mock): how many
+        accounts, how much was handed over, how much of it we have brought in, what they are billed,
+        and what they are worth to the firm. Each with its mark, the recovery rate with its own ring.
+        Class moved to Client information -- it is set once and read rarely.
+      */}
+      <RecordFigures count={5}>
+        <RecordFigure icon={Users} label="Accounts" value={String(company.accountCount ?? 0)}
           note="handed over to us" />
-        <RecordFigure label="Handover amount" value={formatCurrency(company.handoverAmount ?? 0)}
+        <RecordFigure icon={Database} label="Capital handed over" value={formatCurrency(company.handoverAmount ?? 0)}
           note={company.estimatedHandoverAmount != null
             ? `estimated ${formatCurrency(company.estimatedHandoverAmount)} at signup`
-            : 'capital in the book'} />
-        <RecordFigure label="Paid to date" value={formatCurrency(company.paymentsToDate ?? 0)} strong />
-        {collectionsCoefficient !== undefined && (
-          /* Can exceed 100%: payments here include fees on top of the handover amount, which
-             this system deliberately never discloses, so the ratio is not meant to cap. */
-          <RecordFigure label="Coefficient" value={`${collectionsCoefficient.toFixed(0)}%`}
-            note="of what was handed over" />
-        )}
-        <RecordFigure label="Deals won" value={formatCurrency(lifetimeValue)}
+            : 'total book value'} />
+        <RecordFigure label="Recovery rate" strong
+          aside={<MiniRing pct={recovery?.recoveryRate ?? 0} />}
+          value={recovery?.recoveryRate == null ? '—' : `${recovery.recoveryRate}%`}
+          note={recovery ? `${formatCurrency(recovery.collected)} collected` : 'Reading…'} />
+        {(() => {
+          /* THE RULE THEY ARE BILLED ON, from the commission card's own reading of it. */
+          const kind = ruleKind(company)
+          const value = kind === 'flat' && typeof company.commissionRate === 'number'
+            ? `${(company.commissionRate * 100).toFixed(2).replace(/\.00$/, '')}%`
+            : kind === 'scale' || kind === 'scale_without_bands' ? 'Sliding scale' : 'Not set'
+          return (
+            <RecordFigure icon={Percent} label="Commission" value={value} danger={kind === 'none'}
+              note={kind === 'flat' ? 'of everything collected' : kind === 'none' ? 'nothing signed' : 'on the capital handed over'} />
+          )
+        })()}
+        <RecordFigure icon={Trophy} label="Deals won" value={formatCurrency(lifetimeValue)}
           note={`${openDeals.length} open`}
           onClick={() => navigate(buildDrilldownUrl('/deals', { company: company.id, open: '1', view: 'table' }))}
           title="Open this client's deals" />
@@ -740,7 +795,9 @@ export function CompanyDetail() {
           </p>
         )}
 
-        <div className="mt-4 pt-4 border-t border-slate-100">
+        {/* THE RULE ABOVE THE ACTIONS ONLY WHEN THERE IS SOMETHING ABOVE IT: without the estimate
+            line it drew an empty band across the top of the card (seen on the iPad, 19 Oct). */}
+        <div className={company.estimatedHandoverAmount != null ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
           {/*
             The same action row as the Account and Lead pages, in the same order of thought:
             reach them first, then record what happened, then move the record on. A client page
@@ -859,43 +916,55 @@ export function CompanyDetail() {
       )}
 
       {tab === 'Overview' && (
+        <div className="space-y-5">
+          {/*
+            THE OVERVIEW, READ AS A DASHBOARD FIRST (S9, 19 Oct, after the firm's mock: "take from it
+            what you think could be helpful"). Two rows before the reference material: how the book
+            is being collected and what needs doing; then what came in, what goes out next and what
+            was last said. Everything that was on the overview is still below, in the arrangement
+            the layout switcher chooses.
+          */}
+          {/*
+            TWO COLUMNS THAT RUN INDEPENDENTLY, not rows of cards: the charts take two thirds (a chart
+            in a third of an iPad's width collided its month labels), and what needs doing, what
+            goes out next and what was last said sit beside them. Rows would stretch every card to
+            its neighbour's height and leave boxes of nothing.
+          */}
+          <div className="grid items-start gap-5 lg:grid-cols-3">
+            <div className="min-w-0 space-y-5 lg:col-span-2">
+              <ClientCollectionsCard clientId={bookId ?? company.id} />
+              {/* Their handovers month by month (the firm, 18 Oct). */}
+              <ClientHandoverChart clientId={bookId ?? company.id} />
+              {/* What became of their accounts and where the active ones stand (the firm, 18 Oct),
+                  at a width the two rings fit. */}
+              <ClientBookRings clientId={bookId ?? company.id} />
+            </div>
+            <div className="min-w-0 space-y-5">
+              <ClientAttentionCard company={company}
+                canEdit={canEditOwned(currentUser, company.accountOwnerId)}
+                userId={currentUser?.id ?? null} userName={currentUser?.name ?? null}
+                unallocated={handOutNote}
+                onHandOut={() => { setHandOutNew(handOutNote); setHandOutNote(null) }}
+                onFiled={() => setMandateKey((k) => k + 1)} />
+              {/* Client money and the firm's commission on it: trust only, like the Payovers tab. */}
+              {canViewTrust(currentUser) && (
+                <ClientUpcomingPayover companyId={company.id} onOpen={() => setTab('Payovers')} />
+              )}
+              <ClientRecentActivity activities={companyActivities} users={users} onViewAll={() => setTab('Notes')} />
+            </div>
+          </div>
         <RecordLayout
           layout={layout}
           details={contactPanel}
           main={(
             <div className="space-y-5">
-              {/* Above the deals: for a debt collection client this IS the relationship. What
-                  they signed is one line on a deal; what they actually send is the work. */}
-              {/*
-                * AN ACCOUNT OPENED BY HAND AND NOT YET HANDED OUT.
-                *
-                * The row exists the moment it is created -- it has to, before anybody can be
-                * given it -- so closing the assign-and-refer screen cannot roll it back. What it
-                * must not do is leave quietly: an account on nobody's desk is in nobody's diary,
-                * and the firm's rule is that an active account always has both. So it is said
-                * here, in the client where it was opened, with the way to finish it.
-                */}
-              {handOutNote && (
-                <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
-                  <p className="text-sm text-amber-900">
-                    The account is open, but it is on nobody&rsquo;s desk and in nobody&rsquo;s
-                    diary. An active account needs a clerk and a date.
-                  </p>
-                  <button type="button"
-                    className="shrink-0 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
-                    onClick={() => { setHandOutNew(handOutNote); setHandOutNote(null) }}>
-                    Assign and refer
-                  </button>
-                </div>
-              )}
               {/* The new client's welcome (S8): assign a liaison, then the four steps ticked. */}
               <WelcomeCard company={company} />
               <HandoverBook company={company}
                 onUpload={() => navigate(`/settings?tab=Data+Import&client=${company.id}`)} />
-              {/* What became of their accounts and where the active ones stand (the firm, 18 Oct). */}
-              <ClientBookRings clientId={company.parentCompanyId ?? company.id} />
-              {/* Their handovers month by month, under the book they add up to (the firm, 18 Oct). */}
-              <ClientHandoverChart clientId={company.parentCompanyId ?? company.id} />
+              {/* Notes in the middle, and still on their own tab — both places, at the firm's
+                  asking. Here they are capped at five with a "show more"; the tab is where you
+                  go for the lot. */}
               {/* Notes in the middle, and still on their own tab — both places, at the firm's
                   asking. Here they are capped at five with a "show more"; the tab is where you
                   go for the lot. */}
@@ -905,17 +974,31 @@ export function CompanyDetail() {
             </div>
           )}
           side={[
+            /* Who they are first: the summary card of the side column (S9). */
+            companyInfoPanel,
+            <ClientBookCard key="book" companyId={company.id} />,
+            /*
+              TWO SECTIONS, at the firm's instruction: "queries are for clients and disputes are
+              for debtors ... there should be two different sections on the client portal about
+              which ones are their open disputes and which ones are their open queries."
+
+              Queries first: an import waiting on this client is something the firm is holding
+              them to, while a dispute is usually already being worked. The disputes carry the
+              anchor Attention required links to.
+            */
+            <ClientQueries key="client-queries" companyId={company.id} section="query" />,
+            <div key="client-disputes" id="client-disputes"><ClientQueries companyId={company.id} section="dispute" /></div>,
             /*
               ONE CARD, COMMISSION AND MANDATE (the firm, 19 Oct: "we should just combine the
-              collection commission and the mandate together"). The rate first -- "they're signing
-              what they're signed on", the one number every account on this book inherits -- and
-              the mandate under it, the same piece of paper read for its authority. Two cards here
-              gave a document nobody opens once the client is signed the rank of the book itself.
+              collection commission and the mandate together"), and LOWER than it was: "once the
+              client is signed, you're not going to look at the mandate every day." Its gaps are
+              raised in Attention required at the top; this is the reference copy, and the rate is
+              also in the figures row.
             */
             <Card key="commission-mandate">
               <div data-testid="commission-mandate">
                 <CommissionCard company={company} bare />
-                <MandateCard company={company} bare
+                <MandateCard key={mandateKey} company={company} bare
                   canEdit={canEditOwned(currentUser, company.accountOwnerId)}
                   canDelete={currentUser?.role === 'Administrator' || currentUser?.role === 'Sales Manager'
                     || currentUser?.role === 'Liaison Manager'}
@@ -924,24 +1007,11 @@ export function CompanyDetail() {
                   onSave={(patch) => updateCompany(company.id, patch)} />
               </div>
             </Card>,
-            <ClientBookCard key="book" companyId={company.id} />,
-            /* Beside the handover book, because these are the two things a liaison opens this
-               page for: what came in, and what is stuck. */
-            /*
-              TWO SECTIONS, at the firm's instruction: "queries are for clients and disputes are
-              for debtors ... there should be two different sections on the client portal about
-              which ones are their open disputes and which ones are their open queries."
-
-              Queries first: an import waiting on this client is something the firm is holding
-              them to, while a dispute is usually already being worked.
-            */
-            <ClientQueries key="client-queries" companyId={company.id} section="query" />,
-            <ClientQueries key="client-disputes" companyId={company.id} section="dispute" />,
-            companyInfoPanel,
             subAccountsPanel,
             leadsPanel,
           ]}
         />
+        </div>
       )}
 
       {tab === 'Emails' && emailsPanel}
@@ -1684,5 +1754,22 @@ function ClientBookCard({ companyId }: { companyId: string }) {
         Open the book <ArrowRight size={14} />
       </Link>
     </Card>
+  )
+}
+
+/**
+ * THE RECOVERY RATE AS A SMALL RING, in the figure's icon place. Fills to exactly the figure beside
+ * it -- the one place a ring and a percentage sit together, and they agree.
+ */
+function MiniRing({ pct }: { pct: number }) {
+  const r = 15
+  const c = 2 * Math.PI * r
+  const filled = Math.max(0, Math.min(100, pct)) / 100 * c
+  return (
+    <svg viewBox="0 0 40 40" className="h-10 w-10" aria-hidden>
+      <circle cx="20" cy="20" r={r} fill="none" stroke="var(--color-slate-200)" strokeWidth="5" />
+      <circle cx="20" cy="20" r={r} fill="none" stroke="var(--color-gold-500)" strokeWidth="5"
+        strokeDasharray={`${filled} ${c}`} transform="rotate(-90 20 20)" strokeLinecap="round" />
+    </svg>
   )
 }
