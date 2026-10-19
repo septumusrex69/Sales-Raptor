@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { whatsAppLink, whatsAppNumber, whatsAppOpening } from '../../lib/whatsapp'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Phone,
@@ -259,7 +260,11 @@ export function LeadsList() {
       else window.open(`tel:${lead.phone}`)
     }
     if (type === 'Email' && lead.email) window.open(`mailto:${lead.email}`)
-    if (type === 'WhatsApp' && lead.mobile) window.open(`https://wa.me/${lead.mobile.replace(/\D/g, '')}`)
+    /* THROUGH whatsAppNumber (S9): "0821234567" as typed reached nobody -- wa.me needs the 27. */
+    if (type === 'WhatsApp' && lead.mobile) {
+      const wa = whatsAppNumber(lead.mobile)
+      if (wa) window.open(whatsAppLink(wa, whatsAppOpening({ firstName: lead.firstName, senderName: currentUser?.name })), '_blank', 'noopener')
+    }
   }
 
   const col = visibleColumns

@@ -15,6 +15,7 @@ import {
   RecordFigures, RecordLayout, RecordLayoutSwitcher, RecordMoreAction, RecordTabs, useRecordLayout,
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
+import { CrmWhatsAppButton } from '../../components/record/WhatsAppButton'
 import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
   RecordComment, RecordCommentFact, RecordCommentSummary,
@@ -285,6 +286,8 @@ export function ContactDetail() {
             subject={`${contact.firstName} ${contact.lastName}`}
             className={`${ACTION_BASE} ${ACTION_ENABLED}`}
           />
+          {/* WhatsApp beside Call (S9): opens WhatsApp itself; nothing is charged on the sales side. */}
+          <CrmWhatsAppButton numbers={contactNumbers} to={{ contactId: contact.id, companyId: contact.companyId }} subject={`${contact.firstName} ${contact.lastName}`} firstName={contact.firstName} />
           <RecordAction icon={MessageSquare} label="SMS"
             onClick={contactNumbers.length > 0 ? () => setSmsOpen(true) : undefined}
             title={contactNumbers.length > 0

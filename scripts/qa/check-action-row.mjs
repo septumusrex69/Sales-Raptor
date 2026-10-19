@@ -145,8 +145,9 @@ ok('there is one class that sizes an action', /export const ACTION_BASE\b/.test(
 const base = shell.slice(shell.indexOf('export const ACTION_BASE'), shell.indexOf('export const ACTION_ENABLED'))
 ok('...with one padding', /px-3\.5 py-2/.test(base))
 ok('...and one text size', /text-sm/.test(base))
+/* Three since S9: Call, Trace, and WhatsApp -- a link, like Call, so not an Action either. */
 check('the account row hands that same class to the buttons that are not Actions',
-  (account.match(/\$\{ACTION_BASE\} \$\{ACTION_ENABLED\}/g) ?? []).length, 2)
+  (account.match(/\$\{ACTION_BASE\} \$\{ACTION_ENABLED\}/g) ?? []).length, 3)
 
 /* ---------------------------------------------------------------------------------------------
  * AND "ONE COLUMN" ENDS IN ONE COLUMN'S WORTH, NOT THREE.

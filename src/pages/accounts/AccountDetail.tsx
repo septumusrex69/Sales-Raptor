@@ -1,7 +1,7 @@
 import type { AttachedFile } from '../../lib/letterAttachment.ts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageCircle, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Banknote, Building2, CalendarClock, Check, CheckCircle2, Gavel, Home, Loader2, Mail, MapPin, MessageSquare, Phone, PhoneForwarded, Plus, Printer, ScrollText, Search, ShieldAlert, StickyNote, User, Users, X, XCircle } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { rand } from '../../lib/money'
 import { PhoneLink } from '../../components/PhoneLink'
@@ -143,6 +143,9 @@ import {
   hasProgress, instalmentProgress, moneyProgress, progressPercent, type PaymentProgress,
 } from '../../lib/paymentProgress.ts'
 import { instalmentsDue } from '../../lib/arrangements'
+import { WhatsAppButton } from '../../components/record/WhatsAppButton'
+import { whatsAppOpening } from '../../lib/whatsapp'
+import { recordWhatsApp } from '../../lib/accountWhatsApp'
 
 type Tab = 'Overview' | 'Workflow' | 'Transactions' | 'Emails' | 'Documents'
 
@@ -1848,6 +1851,14 @@ export function AccountDetail() {
       <ActionBar
         callNumber={callContact?.value}
         callNumbers={smsNumbers}
+        whatsAppMessage={whatsAppOpening({ firstName: account.debtorFirstName, senderName: currentUser?.name, caseNumber: account.caseNumber })}
+        onWhatsApp={(number) => {
+          /* Recorded beside the press, never before it: WhatsApp has already opened. A charge
+             that will not save is said on the page rather than lost. */
+          void recordWhatsApp({ accountId: account.id, number, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
+            .then(() => reload())
+            .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+        }}
         onEmail={emailContact ? () => setComposeTo(emailContact.value) : undefined}
         onNote={() => { setTab('Overview'); setNoteOpen(true); setTimeout(() => noteRef.current?.focus(), 0) }}
         onPromise={() => { setTab('Overview'); setPromiseOpen(true) }}
@@ -2614,7 +2625,7 @@ function isoWeekday(iso: string): number {
  * arrives in a bank account and is reconciled against the book, and a button that lets someone
  * type one in is a hole in the ledger.
  */
-function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow, onTransfer }: {
+function ActionBar({ callNumber, callNumbers, whatsAppMessage, onWhatsApp, onEmail, onNote, onPromise, onDispute, onSms, onScript, onDiarise, accountId, actor, livePromise, standing, idNumber, debtorKind, debtorName, traceMobile, onTraced, onUpload, onAskClient, startable, onStartWorkflow, onTransfer }: {
   /** Copied to the clipboard when XDS opens, once it is checked — see TraceButton. */
   idNumber: string | null
   /** Which number that field is meant to hold: an ID, or a registration number. */
@@ -2623,6 +2634,9 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   callNumber?: string
   /** Every number that could reach this debtor, primary first. */
   callNumbers: { label: string; value: string }[]
+  /** The opening line WhatsApp opens with (S9), and what is recorded once it is opened. */
+  whatsAppMessage: string
+  onWhatsApp: (number: string) => void
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
@@ -2664,7 +2678,6 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
   /** Goes to the Workflow tab and opens the confirmation there. See WorkflowRunPanel.askingFor. */
   onStartWorkflow: (versionId: string) => void
 }) {
-  const soon = 'Not built yet — needs a provider connected and a decision on whether it charges the debtor.'
   return (
     <RecordActions>
       {/*
@@ -2686,7 +2699,11 @@ function ActionBar({ callNumber, callNumbers, onEmail, onNote, onPromise, onDisp
       {/* Beside Call, because it is what somebody opens on their way into one. */}
       <Action icon={ScrollText} label="Call script" onClick={onScript}
         title="The firm's wording, with this debtor's figures in it" />
-      <Action icon={MessageCircle} label="WhatsApp" title={soon} />
+      {/* WHATSAPP (S9, 19 Oct): opens WhatsApp on the debtor's cellphone with the opening line
+          typed in. Free to send; recorded and charged under 1(c) on the press -- see
+          accountWhatsApp.ts. */}
+      <WhatsAppButton numbers={callNumbers} message={whatsAppMessage} onOpened={onWhatsApp}
+        className={`${ACTION_BASE} ${ACTION_ENABLED}`} />
       {/* The number the SMS goes to is the same one Call rings: one number on file, one thing
           that happens when you reach for it. */}
       <Action icon={MessageSquare} label="SMS" onClick={callNumber ? onSms : undefined}
