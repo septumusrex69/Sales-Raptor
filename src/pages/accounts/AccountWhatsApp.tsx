@@ -186,7 +186,9 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
       )}
       {asking && (
         <WhatsAppSentModal number={asking.number}
-          charged="Each message is charged R3.50 under Annexure B item 1(c), like an SMS."
+          charged={asking.about
+            ? `Each message is charged R3.50 under Annexure B item 1(c), and the ${asking.about} R25 under item 1(a), as a letter.`
+            : 'Each message is charged R3.50 under Annexure B item 1(c), like an SMS.'}
           onDone={(count) => { onSent(asking.number, count, asking.about); setAsking(null) }}
           onClose={() => setAsking(null)} />
       )}

@@ -68,7 +68,13 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        letter's SHORT covering line and opens WhatsApp on the number with it typed in -- the firm sent
        a final notice with nothing attached under the old two-tap version. Works only because the
        PDF is drawn before the tap. NOT YET SEEN ON A REAL iPad: if Safari drops the download there,
-       the Save button under it still works, and the fallback is the share sheet (no preset chat). The nine short lines are MY DRAFTS in code: the firm should read them; making
+       the Save button under it still works, and the fallback is the share sheet (no preset chat).
+       A LETTER BY WHATSAPP IS ALSO A LETTER (the firm, 19 Oct: "It's a WhatsApp, but it's a
+       letter ... it should charge them for that as well"): `recordWhatsApp` raises item 1(a) R25
+       once (action code `letter`, "Letter by WhatsApp: <name>") on top of 1(c) per message, only
+       when the count is above nought. OPEN: an acknowledgement of debt sent this way raises 1(a),
+       not 4(a) -- 4(a) is still raised only by SigningPanel. Ask the firm if a WhatsApped AOD
+       should carry 4(a) too. The nine short lines are MY DRAFTS in code: the firm should read them; making
        them editable in the Library is the next step if they want to change them themselves.
        Later: the full WhatsApp API (docs/whatsapp-integration.md); screenshots of arrangements.
      - **Confirm and accept a payment arrangement**: the workflow's arrangement-confirmed email

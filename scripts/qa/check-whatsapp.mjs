@@ -83,6 +83,8 @@ ok('...then ONE press (the firm: "automatically ... copy the message and then op
 ok('...the download in this tab, so the tap\'s one new tab is WhatsApp\'s', /if \(!opts\.sameTab\) a\.target = '_blank'/.test(read('src/lib/fileSave.ts')))
 ok('...and a Save button underneath for the device that still does not keep it', /<FileActions name=\{ready\.filename\}/.test(box))
 ok('...and the letter is named on the timeline with the count', /about && input\.count > 0 \? `\$\{whatsAppNote\(input\.number, input\.count\)\} · \$\{input\.about\}`/.test(strip(read('src/lib/accountWhatsApp.ts'))))
+ok('a letter by WhatsApp is ALSO a letter: item 1(a) once, beside the messages, only when something went (the firm, 19 Oct)',
+  /WHATSAPP_LETTER_ITEM = '1a'/.test(read('src/lib/accountWhatsApp.ts')) && /const letter = input\.about && input\.count > 0 \? await chargeItem\(\{[\s\S]*?itemId: WHATSAPP_LETTER_ITEM,[\s\S]*?quantity: 1,/.test(acct))
 ok('...and records the press through recordWhatsApp', /recordWhatsApp\(\{ accountId: account\.id, number/.test(detail))
 
 for (const [what, file] of [

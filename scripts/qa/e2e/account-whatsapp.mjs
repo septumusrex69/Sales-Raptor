@@ -18,7 +18,13 @@ const ACCOUNT = { ...accountsPage(1)[0], id: 'acc-0000', status: 'Active: Activa
 /* A section 129 in the library, as seeded: the WhatsApp box offers the letters written for this debtor. */
 const S129 = { ...LIBRARY.find((r) => r.kind === 'letter'), seed_key: 'letter-s129-individual', audience: 'individual', active: true }
 const seen = []
+/* What each charge asked for, by item: the assertion this file adds for a letter sent by WhatsApp. */
+const fees = []
 const handlers = [
+  [(u, req) => u.includes('/rest/v1/account_fees') && req.method() === 'POST', (u, req) => {
+    try { const b = JSON.parse(req.postData() ?? '{}'); fees.push(...(Array.isArray(b) ? b : [b])) } catch { fees.push({ unparsed: true }) }
+    return { status: 201, body: [] }
+  }],
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: USER_ID, email: PROFILE.email } })],
   [(u) => u.includes('/rest/v1/profiles'), (u) => {
     const one = /id=eq\.([0-9a-f-]+)/.exec(u)?.[1]
@@ -99,7 +105,10 @@ try {
   await page.getByTestId('whatsapp-sent-save').click()
   await page.waitForTimeout(1500)
   t.ok('two messages: the account is noted', seen.some((s) => /POST \/rest\/v1\/account_notes/.test(s)))
-  t.ok('...and item 1(c) is raised for them', seen.some((s) => /POST \/rest\/v1\/account_fees/.test(s)))
+  t.ok('...and item 1(c) is raised for them', fees.some((f) => f.annexure_item === '1c'))
+  /* A LETTER BY WHATSAPP IS ALSO A LETTER (the firm, 19 Oct: "It's a WhatsApp, but it's a letter ...
+     it should charge them for that as well"): R25 under 1(a), once, beside the messages. */
+  t.check('...and the letter under item 1(a), once', fees.filter((f) => f.annexure_item === '1a').length, 1)
 } catch (e) {
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message : String(e)})`, false)
 } finally {
