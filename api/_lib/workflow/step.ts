@@ -6,6 +6,8 @@ import { computeBalance } from '../../../src/lib/accountBalance.js'
 import { balanceInputFor } from '../../../src/lib/balanceInput.js'
 import { balanceAccountFromRow, fetchLedgerRows } from '../../../src/lib/storedBalance.js'
 import { planSend, type StepTemplate } from '../../../src/lib/workflowSend.js'
+import { smsCost } from '../../../src/lib/smsSegments.js'
+import { itemAmountFor, scheduleFor } from '../../../src/lib/annexureB.js'
 import { letterToPdf, letterFilename } from '../../../src/lib/letterPdf.js'
 import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
 import type { LetterDocument } from '../../../src/lib/letterDocument.js'
@@ -520,16 +522,66 @@ export async function runOneStep(
   /* The account_emails row this send files, so the fee raised further down can correct the price
      written on it. Null on an SMS, and on an email whose filing failed. */
   let filedEmailId: string | null = null
+  /*
+   * CONFIRM AND ACCEPT, ON THE ARRANGEMENT CONFIRMATION (S9, 19 Oct). The firm: "once a promise
+   * has been made and it's been captured ... they should just click here to confirm and accept."
+   * A signing request in mode 'accept' holding the arrangement as a one-page document
+   * (arrangementDocument). Accepting it is a signed document under item 4(b), charged once by the
+   * signed-copy route when the debtor accepts -- never here, where nothing has been signed.
+   *
+   * BY EMAIL, OR BY SMS WHERE THERE IS NO EMAIL (the firm, 19 Oct: "If the debtor has no email
+   * address, put it in the SMS"). Never both: the email's confirmation carries it where the debtor
+   * has an address, and the SMS stays as short as it was -- a link is sixty-odd characters, which
+   * is a second segment the debtor pays for under item 1(c).
+   *
+   * `sent_to` IS THE ADDRESS OR NUMBER THE LINK WENT TO, because that is now the acceptance's
+   * identification: the debtor ticks and types nothing ("They don't even have to type the name.
+   * They just tick the box and it's to the email address that was sent"), so what says who accepted
+   * is that the one link sent to that address was used. signing_accept writes it into the document.
+   *
+   * NEVER STOPS THE CONFIRMATION. A request that will not save, or an arrangement that cannot be
+   * stated, sends the message as it always went: the confirmation is the notice, the link is extra.
+   */
+  const chosen = rows.find((t) => t.id === plan.template?.id)
+  const promiseRow = promiseRes.data as { id?: string } | null
+  const debtorEmail = pickContact(contacts, 'email')
+  const acceptLink = async (channel: 'email' | 'sms', sentTo: string): Promise<string | null> => {
+    const origin = siteOrigin()
+    if (!chosen?.seed_key?.startsWith(`${channel}-ptp-confirmed`) || !promiseRow?.id || !origin) return null
+    if (channel === 'sms' && debtorEmail) return null
+    const blocks = arrangementDocument(values)
+    if (!blocks) return null
+    const token = newToken()
+    const paper = await letterheadFor(admin)
+    const { error: reqError } = await admin.from('signing_requests').insert({
+      token, account_id: account.id, title: ARRANGEMENT_TITLE, body: blocks, page_setup: paper.page,
+      mode: 'accept', promise_id: promiseRow.id, signer_name: values.debtor_name ?? null,
+      signer_email: debtorEmail, sent_to: sentTo,
+    })
+    return reqError ? null : signingLink(token, origin)
+  }
+  /* WHAT THE SMS SAYS AND WHAT IT COSTS, recounted where the link went into it: segments are counted
+     on the text that leaves, or the quote is for words the debtor never paid for -- or the reverse. */
+  let smsBody = plan.body ?? ''
+  let stepCharge = plan.charge
   if (node.channel === 'sms') {
     /* Not null: planSend already refused with `no_address` if there were no number, and this is
        past that. Named here rather than resolved twice, so the number that was sent to and the
        number that is recorded cannot be different ones. */
     const number = pickContact(contacts, 'mobile') ?? pickContact(contacts, 'phone') ?? ''
+    const smsUrl = await acceptLink('sms', number)
+    if (smsUrl) {
+      smsBody = `${smsBody.replace(/\s+$/, '')} Confirm and accept: ${smsUrl}`
+      if (stepCharge) {
+        const { segments } = smsCost(smsBody)
+        stepCharge = { ...stepCharge, segments, rand: itemAmountFor(stepCharge.item, segments, 0, scheduleFor(step.due_on)) }
+      }
+    }
     try {
       /* It THROWS on a refusal -- SmsError -- rather than returning a flag, so the catch below is
          the whole error path. `reference` is what the provider quotes back on the delivery
          report, so a DLR can be matched to the step that sent it, not only to the account. */
-      await sendSms({ to: toMsisdn(number) ?? number, text: plan.body, reference: step.id })
+      await sendSms({ to: toMsisdn(number) ?? number, text: smsBody, reference: step.id })
     } catch (e) {
       /* THE PROVIDER REFUSED, which is not something a collector fixes by filling in a field.
          `failed` rather than `held`, so it reads as a fault rather than as waiting on somebody. */
@@ -539,7 +591,7 @@ export async function runOneStep(
     }
     await admin.from('sms_messages').insert({
       account_id: account.id, direction: 'outbound', msisdn: number,
-      body: plan.body, segments: plan.charge?.segments ?? 1,
+      body: smsBody, segments: stepCharge?.segments ?? 1,
       /* The same reference the provider was given, so its delivery report finds this row. */
       reference: step.id, sent_at: sentAt,
       /* AND AS A REAL KEY BESIDE IT. `reference` is text the provider echoes back and could be
@@ -579,38 +631,13 @@ export async function runOneStep(
         contentType: 'application/pdf',
       })
     }
-    /*
-     * CONFIRM AND ACCEPT, ON THE ARRANGEMENT CONFIRMATION (S9, 19 Oct). The firm: "once a promise
-     * has been made and it's been captured ... they should just click here to confirm and accept."
-     * A signing request in mode 'accept' holding the arrangement as a one-page document
-     * (arrangementDocument), the button under the firm's wording, and the address in the text too
-     * so the filed email keeps it. Accepting it is a signed document under item 4(b), charged once
-     * by the signed-copy route when the debtor accepts -- never here, where nothing has been signed.
-     *
-     * NEVER STOPS THE CONFIRMATION. A request that will not save, or an arrangement that cannot be
-     * stated, sends the email as it always went: the confirmation is the notice, the button is extra.
-     */
+    /* The link, under the firm's wording and in the text too so the filed email keeps it. */
     let bodyText = plan.body ?? ''
     let acceptHtml = ''
-    const chosen = rows.find((t) => t.id === plan.template?.id)
-    const origin = siteOrigin()
-    const promiseRow = promiseRes.data as { id?: string } | null
-    if (chosen?.seed_key?.startsWith('email-ptp-confirmed') && promiseRow?.id && origin) {
-      const blocks = arrangementDocument(values)
-      if (blocks) {
-        const token = newToken()
-        const paper = await letterheadFor(admin)
-        const { error: reqError } = await admin.from('signing_requests').insert({
-          token, account_id: account.id, title: ARRANGEMENT_TITLE, body: blocks, page_setup: paper.page,
-          mode: 'accept', promise_id: promiseRow.id, signer_name: values.debtor_name ?? null,
-          signer_email: pickContact(contacts, 'email'),
-        })
-        if (!reqError) {
-          const url = signingLink(token, origin)
-          bodyText = `${bodyText.replace(/\s+$/, '')}\n\nPlease confirm and accept this arrangement here:\n${url}`
-          acceptHtml = signingButtonHtml(url, 'Confirm and accept')
-        }
-      }
+    const emailUrl = debtorEmail ? await acceptLink('email', debtorEmail) : null
+    if (emailUrl) {
+      bodyText = `${bodyText.replace(/\s+$/, '')}\n\nPlease confirm and accept this arrangement here:\n${emailUrl}`
+      acceptHtml = signingButtonHtml(emailUrl, 'Confirm and accept')
     }
     const sent = await sendAsUser(admin, collector!.id, {
       to: pickContact(contacts, 'email')!,
@@ -676,7 +703,7 @@ export async function runOneStep(
        * have succeeded. So this is the best number available at this line -- and it is not always
        * the true one, which is what `filedEmailId` is for.
        */
-      charged_excl_vat: plan.charge?.rand ?? 0,
+      charged_excl_vat: stepCharge?.rand ?? 0,
     }).select('id').maybeSingle()
     if (fileError) {
       console.error(`[workflow] ${step.id}: the notice went but was not filed: ${fileError.message}`)
@@ -722,17 +749,17 @@ export async function runOneStep(
    * person here will be looking at a campaign over a list.
    */
   let fee: ChargeResult | null = null
-  if (plan.charge) {
+  if (stepCharge) {
     fee = await chargeItemWith(admin as unknown as ChargeDb, {
       accountId: account.id as string,
-      itemId: plan.charge.item,
+      itemId: stepCharge.item,
       /* The catalogue code the timeline draws an icon from, and what reconciliation groups on. It
          was null on every workflow fee, which is why they had no icon. */
       actionCode: node.channel === 'sms' ? 'sms' : 'email_out',
       description: node.label,
       /* SEGMENTS ARE THE QUANTITY. One row at the segment rate, not one row per segment -- a
          statement is read by a debtor. Null on an email, which is priced per message, so one. */
-      quantity: plan.charge.segments ?? 1,
+      quantity: stepCharge.segments ?? 1,
       /* THE ACTION'S OWN MOMENT, not when the sweep happened to run: the engine prices on
          scheduleFor(at), so a fee stamped with the cron's clock would eventually be priced on one
          schedule and dated into another. */
@@ -758,7 +785,7 @@ export async function runOneStep(
    * THE LEDGER IS THE TRUTH and this makes the list agree with it. Only where they differ, so the
    * ordinary send is one write as before.
    */
-  if (filedEmailId && fee && fee.exclVat !== (plan.charge?.rand ?? 0)) {
+  if (filedEmailId && fee && fee.exclVat !== (stepCharge?.rand ?? 0)) {
     await admin.from('account_emails')
       .update({ charged_excl_vat: fee.exclVat })
       .eq('id', filedEmailId)

@@ -63,8 +63,7 @@ export default function SignPage() {
       const r = await openSigningRequest(token)
       setRequest(r)
       setMissing(r === null)
-      /* NOT on an acceptance (S9): the typed name IS the acceptance's identification, so the
-         debtor types it rather than ticking under one we wrote for them. */
+      /* Not on an acceptance, which asks for no name at all (below). */
       if (r?.signerName && !name && r.mode !== 'accept') setName(r.signerName)
       /* WHAT THE FIRM ALREADY KNEW, OFFERED AS THE STARTING ANSWER (S8: a mandate goes out with the
          client's name and email in), so the signer corrects rather than retypes. Their typing wins. */
@@ -154,16 +153,19 @@ export default function SignPage() {
       setProblem(`Fill in: ${short.map((b) => b.label.toLowerCase()).join(', ')}.`)
       return
     }
-    /* CONFIRM AND ACCEPT (S9) asks for no drawing -- "they should just click here to confirm and
-       accept" -- only the typed name and the tick, which together still identify and assent. */
+    /* CONFIRM AND ACCEPT (S9) asks for no drawing and no name -- the firm: "they should just click
+       here to confirm and accept", then "They don't even have to type the name. They just tick the
+       box and it's to the email address that was sent." The tick is the assent; what identifies the
+       debtor is the one link, sent to their address, being used -- signing_accept writes both the
+       name it was made out to and where it was sent into the document. */
     const accepting = request?.mode === 'accept'
     if (!accepting && !signature) { setProblem('Sign in the box before submitting.'); return }
-    if (!signer.trim()) { setProblem(accepting ? 'Type your full name before accepting.' : 'Type your full name before submitting.'); return }
+    if (!accepting && !signer.trim()) { setProblem('Type your full name before submitting.'); return }
     if (!agreed) { setProblem(accepting ? 'Tick the box to confirm you accept the arrangement.' : 'Tick the box to confirm you intend to sign.'); return }
     setBusy(true)
     try {
       const done = accepting
-        ? await acceptDocument({ token, name: signer })
+        ? await acceptDocument({ token, name: '' })
         : await signDocument({ token, signaturePng: signature!, initialsPng: initials, name: signer, filled })
       /*
        * FALSE IS NOT AN ERROR. The link was already used -- a second tab, a double tap, a colleague
@@ -442,7 +444,7 @@ export default function SignPage() {
             onChange={setInitials} />
           </>)}
 
-{!asksSignatory && (
+{!asksSignatory && request?.mode !== 'accept' && (
           <label className="block">
             <span className="text-xs font-medium text-slate-600">Your full name</span>
             <input value={name} onChange={(e) => setName(e.target.value)}
@@ -464,7 +466,7 @@ export default function SignPage() {
               onChange={(e) => setAgreed(e.target.checked)} />
             <span>
               {request?.mode === 'accept'
-                ? 'I have read this payment arrangement and I confirm and accept it.'
+                ? `I${request.signerName ? `, ${request.signerName},` : ''} have read this payment arrangement and I confirm and accept it.`
                 : 'I have read this document and I intend my signature above to be my signature on it.'}
             </span>
           </label>

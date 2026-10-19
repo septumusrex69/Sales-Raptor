@@ -2,9 +2,10 @@
  * CONFIRM AND ACCEPT A PAYMENT ARRANGEMENT, as the debtor sees it (S9, 19 Oct). The firm: "they
  * should just click here to confirm and accept ... it's a signed document in terms of 4B."
  *
- * The page shows the arrangement on the letterhead, asks for no drawn signature -- a typed name and
- * a tick -- refuses without either, and on Confirm and accept calls signing_accept and then the
- * signed-copy route, which is where item 4(b) is raised.
+ * The page shows the arrangement on the letterhead, asks for no drawn signature and no typed name --
+ * only a tick (the firm, 19 Oct: "They don't even have to type the name. They just tick the box") --
+ * refuses without the tick, and on Confirm and accept calls signing_accept and then the signed-copy
+ * route, which is where item 4(b) is raised.
  *
  * Run: node scripts/qa/e2e/arrangement-accept.mjs
  */
@@ -47,18 +48,17 @@ try {
   t.ok('...and it is not called an acknowledgement of debt (the firm’s word)', !/acknowledg/i.test(text))
   t.check('no signature pad: confirm and accept, not sign', await page.locator('canvas').count(), 0)
 
+  t.check('no name to type: a tick, nothing else', await page.getByPlaceholder('As it appears on your ID').count(), 0)
+  t.ok('...the tick is made out to the debtor by name', await page.getByText('I, Mr Pompies, have read this payment arrangement').isVisible())
   await button.click()
-  t.ok('without a name it is refused, and says why', await page.getByText('Type your full name before accepting.').isVisible())
-  await page.getByPlaceholder('As it appears on your ID').fill('Piet Pompies')
-  await button.click()
-  t.ok('...without the tick, likewise', await page.getByText('Tick the box to confirm you accept the arrangement.').isVisible())
-  t.check('...and nothing was sent either time', calls.length, 0)
+  t.ok('without the tick it is refused, and says why', await page.getByText('Tick the box to confirm you accept the arrangement.').isVisible())
+  t.check('...and nothing was sent', calls.length, 0)
 
   await page.getByRole('checkbox').check()
   await button.click()
   await page.waitForTimeout(1500)
   const accepted = calls.find((c) => c[0] === 'accept')
-  t.ok('accepting calls signing_accept with the typed name', accepted?.[1]?.p_token === 'tok-arr' && accepted?.[1]?.p_name === 'Piet Pompies')
+  t.ok('accepting calls signing_accept, with no name typed', accepted?.[1]?.p_token === 'tok-arr' && accepted?.[1]?.p_name === '')
   t.ok('...never signing_sign', !calls.some((c) => c[0] === 'sign'))
   t.ok('...then the signed-copy route, which raises item 4(b) and emails the copy', calls.some((c) => c[0] === 'signed-copy' && c[1]?.token === 'tok-arr'))
   await t.shot(page, 'arrangement-accepted')
@@ -68,5 +68,5 @@ try {
   await browser.close()
   await stopServer(server)
 }
-const good = t.finish('A payment arrangement is confirmed and accepted with a typed name and a tick, and the acceptance is sent on to be charged and copied.')
+const good = t.finish('A payment arrangement is confirmed and accepted with a tick, and the acceptance is sent on to be charged and copied.')
 process.exit(good ? 0 : 1)

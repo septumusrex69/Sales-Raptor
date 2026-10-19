@@ -43960,3 +43960,43 @@ begin
 end;
 $$;
 revoke all on function public.mandate_on_signed() from public, anon;
+
+-- S9: Confirm and accept is a tick, identified by where the link was sent.
+alter table public.signing_requests add column if not exists sent_to text;
+comment on column public.signing_requests.sent_to is 'The email address or cellphone number the signing link was sent to (S9). On an acceptance it is the identification: the debtor ticks and types nothing, and the one link sent there was used.';
+
+create or replace function public.signing_accept(p_token text, p_name text, p_agent text)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  -- A TICK, NOT A TYPED NAME (the firm, 19 Oct: "They don't even have to type the name. They just
+  -- tick the box and it's to the email address that was sent"). The name is the one the request was
+  -- made out to, and what identifies the person is that the link sent to `sent_to` -- one link, one
+  -- address, used once -- was the one used; both are written into the document. A name the page
+  -- does send is kept, for the day somebody asks for one again.
+  v_typed text := trim(coalesce(p_name, ''));
+  v_rows integer;
+begin
+  update public.signing_requests r
+     set state = 'signed',
+         signed_at = now(),
+         signed_name = coalesce(nullif(v_typed, ''), r.signer_name),
+         signed_agent = left(coalesce(p_agent, ''), 400),
+         body = r.body || jsonb_build_array(jsonb_build_object(
+           'kind', 'paragraph',
+           'spans', jsonb_build_array(jsonb_build_object('text',
+             'Confirmed and accepted online'
+             || coalesce(' by ' || nullif(coalesce(nullif(v_typed, ''), r.signer_name), ''), '')
+             || coalesce(', from the link sent to ' || nullif(coalesce(r.sent_to, r.signer_email), ''), '')
+             || ', on ' || to_char(now() at time zone 'Africa/Johannesburg', 'FMDD FMMonth YYYY "at" HH24:MI'), 'bold', true))))
+   where r.token = p_token and r.state = 'sent' and r.mode = 'accept'
+     and (r.expires_at is null or r.expires_at > now());
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$$;
+revoke all on function public.signing_accept(text, text, text) from public;
+grant execute on function public.signing_accept(text, text, text) to anon, authenticated;

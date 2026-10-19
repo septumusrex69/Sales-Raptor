@@ -110,7 +110,7 @@ ok('a contact already on the client is not added twice', /if v_match is not null
 const same = sql.slice(sql.lastIndexOf('create or replace function public.mandate_same('))
 ok('mandate_same reads digits and letters only, and +27 as 0', /\[\^a-z0-9\]/.test(same) && /\^27\(\\d\{9\}\)\$/.test(same))
 const sign = readFileSync(new URL('../../src/pages/sign/SignPage.tsx', import.meta.url), 'utf8')
-ok('the signing page asks the signer\'s name once: the mandate\'s signatory IS the signer', /const signer = asksSignatory \? \(filled\[SIGNATORY\] \?\? ''\) : name/.test(sign) && /\{!asksSignatory && \(/.test(sign) && /name: signer/.test(sign))
+ok('the signing page asks the signer\'s name once: the mandate\'s signatory IS the signer', /const signer = asksSignatory \? \(filled\[SIGNATORY\] \?\? ''\) : name/.test(sign) && /\{!asksSignatory && request\?\.mode !== 'accept' && \(/.test(sign) && /name: signer/.test(sign))
 const modal = readFileSync(new URL('../../src/components/leads/SendMandateModal.tsx', import.meta.url), 'utf8')
 ok('the letterhead and fonts are fetched when the window opens, not when Prepare is pressed', /assets\.current = \(async/.test(modal) && !/await fetchLetterheads\(\)\)\?\.page/.test(modal.slice(modal.indexOf('async function prepare'))))
 ok('sending writes a "Mandate sent for signing" line for the notes', /Mandate sent for signing online/.test(modal))

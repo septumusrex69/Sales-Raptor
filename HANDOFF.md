@@ -88,7 +88,12 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        document; the signed-copy route raises item 4(b) R250 once (`fee_charged_at` claimed first)
        and emails the copy. Not an acknowledgement of debt (the firm's word). The firm also said:
        charge everything, no 4(a)/item 7 de-duplication; telephone acknowledgements dropped.
-       NOT yet on the SMS confirmation; the link uses VERCEL_BRANCH_URL on previews.
+       THEN (19 Oct, later): **a tick, no typed name** ("They just tick the box and it's to the email
+       address that was sent") -- `signing_accept` takes the name the request was made out to and
+       writes "Confirmed and accepted online by X, from the link sent to Y, on …" from the new
+       `signing_requests.sent_to`; and **the SMS confirmation carries the link ONLY where the debtor
+       has no email** (`acceptLink` in step.ts, one helper for both channels; the SMS is re-priced on
+       the text that leaves, link included). The link uses VERCEL_BRANCH_URL on previews.
    - **NOT BUILT, PROPOSED: a client report** (the firm sent their Excel "Collection dashboard" PDF
      and asked to discuss one). Their PDF's pie labels are wrong (298.95%, 100%), its ring is
      unlabelled and page 2 is blank. Proposed: a PDF off the client page on the letterhead -- issue
@@ -1019,6 +1024,7 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 - **S9's second migration**: `client_money_by_day(uuid)` (staging has it; end of schema.sql).
 - **S9's third**: `signing_requests.mode / promise_id / fee_charged_at`, `signing_document` (adds
   mode), `signing_accept(text, text, text)` (staging has them; end of schema.sql).
+- **S9's fifth**: `signing_requests.sent_to` and `signing_accept` (LAST definition: no typed name).
 - **S9's fourth**: `companies.other_details`, `mandate_same(text, text)` and `mandate_on_signed` (LAST
   definition: adds, never overwrites; the signed name wins) (staging has them; end of schema.sql).
 - **Deleting a debtor account on staging takes over a minute** (seen in S9 probes, without S9's

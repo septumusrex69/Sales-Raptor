@@ -219,7 +219,7 @@ ok('...and the runner no longer writes a fee row itself',
 ok('the fee is stamped with the action, not with the run', /at: new Date\(sentAt\)/.test(runner))
 /* SEGMENTS ARE THE QUANTITY -- one row at the segment rate, not one row per segment, because a
    statement is read by a debtor. An email is priced per message, so one. */
-ok('an SMS is charged by its segments', /quantity: plan\.charge\.segments \?\? 1/.test(runner))
+ok('an SMS is charged by its segments', /quantity: stepCharge\.segments \?\? 1/.test(runner))
 /*
  * AND THE NOTE NO LONGER REPORTS THE CHARGE AT ALL -- see the timeline section below for the
  * firm's rule and why this pair of assertions went with it.
@@ -359,7 +359,7 @@ ok('...carrying the message id the reply will quote', /message_id: sent\.message
 ok('...and the mailbox it actually left by', /our_address: sent\.from/.test(runner))
 /* A notice nobody typed must not read as somebody's own words. */
 ok('...named as the workflow rather than as the collector', /sent_by_name: 'Workflow'/.test(runner))
-ok('...with what it cost on it', /charged_excl_vat: plan\.charge\?\.rand \?\? 0/.test(runner))
+ok('...with what it cost on it', /charged_excl_vat: stepCharge\?\.rand \?\? 0/.test(runner))
 /*
  * AND FILING NEVER FAILS THE SEND. The message has gone and the fee is about to be raised; a red
  * error after a debtor has in fact been written to would be false.
@@ -587,7 +587,7 @@ ok('...and offered only on an account that has one',
 ok('the filed email is corrected to what was charged',
   /charged_excl_vat: fee\.exclVat/.test(runner))
 ok('...only where the tariff and the fee differ',
-  /fee\.exclVat !== \(plan\.charge\?\.rand \?\? 0\)/.test(runner))
+  /fee\.exclVat !== \(stepCharge\?\.rand \?\? 0\)/.test(runner))
 /* AND THE ROW'S ID IS KEPT FOR IT. Without it the correction has nothing to aim at and the whole
    branch is unreachable -- which would look exactly like working code. */
 ok('...against the row the send filed', /filedEmailId = \(filed\?\.id as string\) \?\? null/.test(runner))
