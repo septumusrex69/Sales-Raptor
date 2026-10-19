@@ -1854,9 +1854,10 @@ export function AccountDetail() {
         whatsAppMessage={whatsAppOpening({ firstName: account.debtorFirstName, senderName: currentUser?.name, caseNumber: account.caseNumber })}
         letterValues={letterContext.values as Record<string, string>}
         letterReference={letterContext.reference}
-        onWhatsApp={(number, count, about) => {
-          /* A charge that will not save is said on the page rather than lost. */
-          void recordWhatsApp({ accountId: account.id, number, count, about, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
+        onWhatsApp={(number, count, letter) => {
+          /* A charge that will not save is said on the page rather than lost. The balance is the
+             ledger's, as SigningPanel's 4(a) band is, for an acknowledgement of debt. */
+          void recordWhatsApp({ accountId: account.id, number, count, letter, claimAmount: statement?.breakdown?.balance ?? null, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
             .then(() => reload())
             .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
         }}
@@ -2638,7 +2639,7 @@ function ActionBar({ callNumber, callNumbers, whatsAppMessage, onWhatsApp, lette
   /** The opening line WhatsApp opens with (S9), and what is recorded once it is opened. */
   whatsAppMessage: string
   /** How many went, said on the way back from WhatsApp, and the letter if one went. */
-  onWhatsApp: (number: string, count: number, about: string | null) => void
+  onWhatsApp: (number: string, count: number, letter: { name: string; seedKey: string | null } | null) => void
   /** What a letter sent by WhatsApp is filled with, and its filename (S9). */
   letterValues: Record<string, string>
   letterReference: string | null

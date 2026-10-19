@@ -5,7 +5,7 @@
  *
  * Holds: the number is turned into the form wa.me needs (the leads list sent "0821234567" as typed
  * and reached nobody); only cellphones are offered; the opening line names the firm and our case
- * number; on a debtor's account the press is noted and charged under 1(c), on the sales side it is
+ * number; on a debtor's account the press is noted and charged under 1(a), on the sales side it is
  * noted and charged nothing; and every record page carries the button.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-whatsapp.mjs
@@ -59,13 +59,13 @@ ok('more than one and it asks which', /WhatsApp which number\?/.test(button))
 ok('the sales side notes it as a WhatsApp activity', /addActivity\(\{ type: 'WhatsApp'/.test(button))
 ok('...and charges nothing there', !/chargeItem/.test(button))
 
-/* ---------- the debtor's account: noted and charged 1(c), the firm's decision ---------- */
+/* ---------- the debtor's account: noted and charged 1(a), the firm's decision ---------- */
 const acct = strip(read('src/lib/accountWhatsApp.ts'))
-ok('on an account the press is charged under item 1(c)', /WHATSAPP_ITEM = '1c'/.test(read('src/lib/accountWhatsApp.ts')) && /itemId: WHATSAPP_ITEM/.test(acct))
+ok('on an account each message is correspondence, item 1(a) -- not 1(c)\'s R3.50 (the firm, 19 Oct)', /WHATSAPP_ITEM = '1a'/.test(read('src/lib/accountWhatsApp.ts')) && /itemId: WHATSAPP_ITEM/.test(acct))
 ok('...as Swordfish’s own action code', /WHATSAPP_ACTION_CODE = 'whatsapp'/.test(read('src/lib/accountWhatsApp.ts')))
 ok('...one per message sent, as the person says on the way back (the firm, 19 Oct)', /quantity: input\.count/.test(acct))
 ok('...nought sent charges nothing', /input\.count > 0 \? await chargeItem\(/.test(acct))
-ok('...and noted on the timeline, without the charge in the note', /body: input\.about && input\.count > 0 \? .* : whatsAppNote\(input\.number, input\.count\)/.test(acct) && !/R3|item|charge/i.test(acct.slice(acct.indexOf('body:'), acct.indexOf('authorName'))))
+ok('...and noted on the timeline, without the charge in the note', /body: about && input\.count > 0 \? .* : whatsAppNote\(input\.number, input\.count\)/.test(acct) && !/R3|item|charge/i.test(acct.slice(acct.indexOf('body:'), acct.indexOf('authorName'))))
 check('the note says how many', whatsAppNote('082 456 7890', 2), 'WhatsApp to 082 456 7890 · 2 messages')
 check('...and says so when nothing went', whatsAppNote('082 456 7890', 0), 'WhatsApp opened to 082 456 7890, nothing sent')
 ok('the question is put up the moment WhatsApp opens, so it is waiting on the way back',
@@ -78,13 +78,17 @@ const box = strip(read('src/pages/accounts/AccountWhatsApp.tsx'))
 ok('the account offers every library letter written for this debtor', /r\.kind === 'letter' && r\.format === 'document' && r\.active/.test(box) && /r\.audience === null \|\| r\.audience === audience/.test(box))
 ok('...drawn as the same PDF the email attaches, refused the same way', /letterPdfBytes\(\{ doc, scope: 'collections', values, filled: true/.test(box))
 ok('...then ONE press (the firm: "automatically ... copy the message and then open the person on WhatsApp ... download the PDF"): the download and the copy run inside the tap, before the link navigates',
-  /openWhatsApp\(ready\.text, chosen\.name, 'Send on WhatsApp', \(\) => \{\s*downloadBlob\(ready\.blob, ready\.filename, \{ sameTab: true \}\)\s*void navigator\.clipboard\?\.writeText\(ready\.text\)/.test(box)
+  /openWhatsApp\(ready\.text, \{ name: chosen\.name, seedKey: chosen\.seedKey \?\? null \}, 'Send on WhatsApp', \(\) => \{\s*downloadBlob\(ready\.blob, ready\.filename, \{ sameTab: true \}\)\s*void navigator\.clipboard\?\.writeText\(ready\.text\)/.test(box)
   && /onClick=\{\(\) => \{ before\?\.\(\); close\(\)/.test(box))
 ok('...the download in this tab, so the tap\'s one new tab is WhatsApp\'s', /if \(!opts\.sameTab\) a\.target = '_blank'/.test(read('src/lib/fileSave.ts')))
 ok('...and a Save button underneath for the device that still does not keep it', /<FileActions name=\{ready\.filename\}/.test(box))
-ok('...and the letter is named on the timeline with the count', /about && input\.count > 0 \? `\$\{whatsAppNote\(input\.number, input\.count\)\} · \$\{input\.about\}`/.test(strip(read('src/lib/accountWhatsApp.ts'))))
-ok('a letter by WhatsApp is ALSO a letter: item 1(a) once, beside the messages, only when something went (the firm, 19 Oct)',
-  /WHATSAPP_LETTER_ITEM = '1a'/.test(read('src/lib/accountWhatsApp.ts')) && /const letter = input\.about && input\.count > 0 \? await chargeItem\(\{[\s\S]*?itemId: WHATSAPP_LETTER_ITEM,[\s\S]*?quantity: 1,/.test(acct))
+ok('...and the letter is named on the timeline with the count', /about && input\.count > 0 \? `\$\{whatsAppNote\(input\.number, input\.count\)\} · \$\{about\}`/.test(strip(read('src/lib/accountWhatsApp.ts'))))
+ok('a letter by WhatsApp is in the message count, named on the charge, and not charged a second time',
+  /description: about \? `WhatsApp correspondence: \$\{about\}` : 'WhatsApp correspondence'/.test(acct) && (acct.match(/await chargeItem\(/g) ?? []).length === 1)
+ok('an acknowledgement of debt sent by WhatsApp also raises item 4(a), banded on the balance (the firm, 19 Oct)',
+  /letterKindOf\(input\.letter\?\.seedKey\) === 'aod' && input\.claimAmount != null\s*\? await chargeAcknowledgementOfDebt\(\{ accountId: input\.accountId, claimAmount: input\.claimAmount/.test(acct)
+  && /claimAmount: statement\?\.breakdown\?\.balance \?\? null/.test(detail))
+ok('...only when something went', /const aod = input\.count > 0 &&/.test(acct))
 ok('...and records the press through recordWhatsApp', /recordWhatsApp\(\{ accountId: account\.id, number/.test(detail))
 
 for (const [what, file] of [

@@ -4,7 +4,8 @@
  *
  * The press is a real link to wa.me on the debtor's cellphone, in the form WhatsApp needs (27..., not
  * the 082... on file), with the opening line typed in and our case number in it; and pressing it
- * notes the account and raises item 1(c), the firm's decision ("just charge everything").
+ * notes the account and raises item 1(a) per message, as correspondence (the firm, 19 Oct: "don't
+ * charge R3.50 ... charge the correspondence fee").
  *
  * Run: node scripts/qa/e2e/account-whatsapp.mjs
  */
@@ -105,10 +106,13 @@ try {
   await page.getByTestId('whatsapp-sent-save').click()
   await page.waitForTimeout(1500)
   t.ok('two messages: the account is noted', seen.some((s) => /POST \/rest\/v1\/account_notes/.test(s)))
-  t.ok('...and item 1(c) is raised for them', fees.some((f) => f.annexure_item === '1c'))
-  /* A LETTER BY WHATSAPP IS ALSO A LETTER (the firm, 19 Oct: "It's a WhatsApp, but it's a letter ...
-     it should charge them for that as well"): R25 under 1(a), once, beside the messages. */
-  t.check('...and the letter under item 1(a), once', fees.filter((f) => f.annexure_item === '1a').length, 1)
+  /* EACH MESSAGE IS CORRESPONDENCE (the firm, 19 Oct: "don't charge R3.50 for WhatsApp messages ...
+     charge the correspondence fee for this"): one 1(a) line for the two, the letter named on it and
+     not charged a second time. */
+  const one = fees.filter((f) => f.annexure_item === '1a')
+  t.check('...charged as correspondence: one item 1(a) line covering both messages', JSON.stringify(one.map((f) => [f.action_code, f.segments])), JSON.stringify([['whatsapp', 2]]))
+  t.ok(`...naming the letter that went (${one[0]?.description})`, /^WhatsApp correspondence: Section 129/.test(one[0]?.description ?? ''))
+  t.check('...and no 1(c) at R3.50, nor a separate letter charge', fees.filter((f) => f.annexure_item !== '1a').length, 0)
 } catch (e) {
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message : String(e)})`, false)
 } finally {

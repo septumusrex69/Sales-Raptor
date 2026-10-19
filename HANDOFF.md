@@ -60,8 +60,7 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        the company dashboard would take the same component if the firm wants them.
      - **WhatsApp by link** (`lib/whatsapp.ts`, `WhatsAppButton`): every record's action row opens
        WhatsApp on the cellphone (27… form) with an opening line; on the way back it asks how many
-       messages went. On an account each is charged R3.50 under 1(c) (the firm said "correspondence";
-       1(a)'s R25 is letter/fax/e-mail -- confirm with them if they meant R25). Sales side: noted, free.
+       messages went. On an account each is charged R25 under 1(a) as correspondence (decided 19 Oct). Sales side: noted, free.
        **A letter by WhatsApp** (`AccountWhatsApp`, `whatsappLetters.ts`): on an account, WhatsApp
        asks "a message, or a letter"; a letter is drawn as the email's PDF, then ONE tap ("Send on
        WhatsApp") downloads it (same tab, `downloadBlob(..., { sameTab: true })`), copies the
@@ -69,12 +68,12 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        a final notice with nothing attached under the old two-tap version. Works only because the
        PDF is drawn before the tap. NOT YET SEEN ON A REAL iPad: if Safari drops the download there,
        the Save button under it still works, and the fallback is the share sheet (no preset chat).
-       A LETTER BY WHATSAPP IS ALSO A LETTER (the firm, 19 Oct: "It's a WhatsApp, but it's a
-       letter ... it should charge them for that as well"): `recordWhatsApp` raises item 1(a) R25
-       once (action code `letter`, "Letter by WhatsApp: <name>") on top of 1(c) per message, only
-       when the count is above nought. OPEN: an acknowledgement of debt sent this way raises 1(a),
-       not 4(a) -- 4(a) is still raised only by SigningPanel. Ask the firm if a WhatsApped AOD
-       should carry 4(a) too. The nine short lines are MY DRAFTS in code: the firm should read them; making
+       CHARGING (the firm, 19 Oct, final): each WhatsApp message is CORRESPONDENCE, item 1(a) R25
+       (action `whatsapp`), not 1(c) R3.50. A letter goes inside one of the counted messages, so it
+       is named on that charge ("WhatsApp correspondence: Final notice") and not charged again. An
+       acknowledgement of debt (`letter-aod-*`) ALSO raises 4(a), banded on the ledger balance as
+       SigningPanel does -- every time, so an AOD issued for signing and then WhatsApped is charged
+       4(a) twice and left for a person to reverse ("if somebody queries it, we'll just remove it"). The nine short lines are MY DRAFTS in code: the firm should read them; making
        them editable in the Library is the next step if they want to change them themselves.
        Later: the full WhatsApp API (docs/whatsapp-integration.md); screenshots of arrangements.
      - **Confirm and accept a payment arrangement**: the workflow's arrangement-confirmed email

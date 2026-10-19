@@ -11,7 +11,7 @@ import { letterPdfBytes } from '../../lib/letterAttachment.ts'
 import { letterFilename } from '../../lib/letterPdf.ts'
 import { renderTemplate } from '../../lib/messageTemplates'
 import { whatsAppLink, whatsAppNumber } from '../../lib/whatsapp'
-import { letterNameForDebtor, whatsAppLetterTemplate } from '../../lib/whatsappLetters'
+import { letterKindOf, letterNameForDebtor, whatsAppLetterTemplate } from '../../lib/whatsappLetters'
 
 /**
  * WHATSAPP FROM A DEBTOR'S ACCOUNT: A MESSAGE, OR A LETTER (S9, 19 Oct). The firm: "it would say,
@@ -48,7 +48,7 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
   /** For the PDF's filename. */
   reference: string | null
   /** How many went, said on the way back, and which letter if one did. */
-  onSent: (number: string, count: number, about: string | null) => void
+  onSent: (number: string, count: number, letter: { name: string; seedKey: string | null } | null) => void
   className: string
 }) {
   const reachable = useMemo(() => numbers
@@ -63,7 +63,7 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
   const [ready, setReady] = useState<{ blob: Blob; filename: string; text: string } | null>(null)
   const [drawing, setDrawing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [asking, setAsking] = useState<{ number: string; about: string | null } | null>(null)
+  const [asking, setAsking] = useState<{ number: string; letter: { name: string; seedKey: string | null } | null } | null>(null)
 
   useEffect(() => {
     if (!open || letters) return
@@ -99,9 +99,9 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
   const close = () => { setOpen(false); setChosen(null); setReady(null); setError(null) }
   /* `before` runs inside the tap, ahead of the link's own navigation: whatever it starts is still a
      tap's doing. */
-  const openWhatsApp = (text: string, about: string | null, label: string, before?: () => void) => (
+  const openWhatsApp = (text: string, letter: { name: string; seedKey: string | null } | null, label: string, before?: () => void) => (
     <a href={whatsAppLink(number.wa, text)} target="_blank" rel="noopener noreferrer" data-testid="whatsapp-link" data-number={number.wa}
-      onClick={() => { before?.(); close(); setAsking({ number: number.value, about }) }}
+      onClick={() => { before?.(); close(); setAsking({ number: number.value, letter }) }}
       className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700">
       <MessageCircle size={14} /> {label}
     </a>
@@ -161,7 +161,7 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
                   <>
                     <div>
                       <p className="mb-2 rounded-lg bg-slate-50 p-2.5 text-[13px] text-slate-700" data-testid="whatsapp-letter-text">{ready.text}</p>
-                      {openWhatsApp(ready.text, chosen.name, 'Send on WhatsApp', () => {
+                      {openWhatsApp(ready.text, { name: chosen.name, seedKey: chosen.seedKey ?? null }, 'Send on WhatsApp', () => {
                         /* IN THIS ORDER, all before the link navigates: the file, then the line. */
                         downloadBlob(ready.blob, ready.filename, { sameTab: true })
                         void navigator.clipboard?.writeText(ready.text).catch(() => {})
@@ -186,10 +186,9 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
       )}
       {asking && (
         <WhatsAppSentModal number={asking.number}
-          charged={asking.about
-            ? `Each message is charged R3.50 under Annexure B item 1(c), and the ${asking.about} R25 under item 1(a), as a letter.`
-            : 'Each message is charged R3.50 under Annexure B item 1(c), like an SMS.'}
-          onDone={(count) => { onSent(asking.number, count, asking.about); setAsking(null) }}
+          charged={`Each message is charged R25 under Annexure B item 1(a), as correspondence${asking.letter ? `, the ${asking.letter.name} with it` : ''}.${
+            letterKindOf(asking.letter?.seedKey) === 'aod' ? ' The acknowledgement of debt is also charged under item 4(a).' : ''}`}
+          onDone={(count) => { onSent(asking.number, count, asking.letter); setAsking(null) }}
           onClose={() => setAsking(null)} />
       )}
     </>
