@@ -25,6 +25,7 @@
  *
  * Run: node scripts/qa/e2e/library.mjs
  */
+import { readFileSync } from 'node:fs'
 import {
   OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer,
 } from './harness.mjs'
@@ -804,19 +805,19 @@ try {
   await page.waitForTimeout(2500)
 
   /*
-   * THE BYTES ARE REAL AND ARE A PDF. Asserted on the blob the iframe was given rather than on
-   * the iframe rendering: whether a browser DRAWS a PDF inline is the browser's business -- Safari
-   * on the iPad the firm works on will not -- and a check that waited for a rendered page would be
+   * THE BYTES ARE REAL AND ARE A PDF -- read off the DOWNLOAD (19 Oct: every PDF Raptor makes has
+   * Open and Download), so this proves the press that saves it as well as the letter in it. Whether
+   * a browser DRAWS a PDF inline is the browser's business, and a check that waited for one would be
    * testing the viewer instead of the letter.
    */
-  const pdf = await page.getByRole('link', { name: 'Open it' }).first()
-    .evaluate(async (el) => {
-      const res = await fetch(el.getAttribute('href'))
-      const buf = new Uint8Array(await res.arrayBuffer())
-      return { head: String.fromCharCode(...buf.slice(0, 5)), bytes: buf.length }
-    })
-  t.check(`the preview is a real PDF (${pdf.bytes} bytes)`, pdf.head, '%PDF-')
-  t.ok('...with a letter actually in it', pdf.bytes > 2000)
+  const previewSave = page.getByTestId('preview-pdf').locator('[data-action="download"]')
+  const saved = page.waitForEvent('download', { timeout: 20000 })
+  await previewSave.click()
+  const file = await saved
+  const bytes = readFileSync(await file.path())
+  t.check(`the preview is a real PDF (${bytes.length} bytes)`, bytes.subarray(0, 5).toString('latin1'), '%PDF-')
+  t.ok(`...saved under its own name (${file.suggestedFilename()})`, /\.pdf$/.test(file.suggestedFilename()))
+  t.ok('...with a letter actually in it', bytes.length > 2000)
 
   /*
    * AND IT IS DRAWN, PAGE BY PAGE, rather than handed to an <iframe>. That was the obvious way
@@ -832,7 +833,7 @@ try {
   t.ok('...and every page of the letter, not only the first', drawn >= 2)
   /* The way out that always works, because an iframe does not on every browser. */
   t.ok('...and it can be opened in its own tab',
-    await page.getByRole('link', { name: 'Open it' }).first().isVisible())
+    await page.getByTestId('preview-pdf').locator('[data-action="open"]').isVisible())
   await t.shot(page, '68-library-letter-pdf')
   /* The modal's own close, not the "Close" elsewhere on the page behind it. */
   await page.locator('button[aria-label="Close"]').first().click()

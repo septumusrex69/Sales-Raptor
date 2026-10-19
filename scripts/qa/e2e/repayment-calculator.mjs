@@ -232,7 +232,7 @@ try {
      */
     const { context, page } = await openPromiseForm(browser)
     await offer(page, { shape: 'monthly', amount: 500, dueOn: '2026-10-05' })
-    const button = page.getByRole('button', { name: /Download it/ })
+    const button = page.getByRole('button', { name: /^Download / })
     t.ok('the schedule can be sent to the debtor', await button.isVisible())
     t.ok('...and is offered, not refused', await button.isEnabled())
 
@@ -333,7 +333,7 @@ try {
      */
     const { context, page } = await openPromiseForm(browser)
     await offer(page, { shape: 'monthly', amount: 150, dueOn: '2026-10-05' })
-    const button = page.getByRole('button', { name: /Download it/ })
+    const button = page.getByRole('button', { name: /^Download / })
     t.ok('the button is still on the screen', await button.isVisible())
     t.ok('...but cannot be pressed', await button.isDisabled())
     /* AND SO IS THE SEND, for the same reason and at the same moment. A page that cannot be drawn

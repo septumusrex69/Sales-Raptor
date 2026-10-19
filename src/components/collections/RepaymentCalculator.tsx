@@ -610,9 +610,12 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
                 label={<span className="font-medium text-navy-950">The simulation, as a PDF</span>}
                 fetchFile={simulationFile} testId="simulation-pdf" />
             ) : (
-              <span title={refusal} className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+              /* DRAWN AND DISABLED, the reason in the title, rather than absent: a collector who
+                 cannot find it once stops looking. */
+              <button type="button" disabled title={refusal} aria-label="Download the simulation"
+                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-300">
                 <FileDown size={11} /> The simulation, as a PDF
-              </span>
+              </button>
             )}
           </div>
           {/* WHAT THE PRESS COSTS, SAID BEFORE IT. Every other place in Raptor that raises an

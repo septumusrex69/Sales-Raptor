@@ -94,7 +94,9 @@ try {
   const text = await list.innerText()
   t.ok('...the revision named as such, newest first', /^Sent again \(2\)/.test(text.trim()))
   t.ok('...each with where it went', text.includes('finance@example.co.za') && text.includes('accounts@example.co.za'))
-  t.check('...and each opens its own PDF and schedule', await list.getByRole('button', { name: 'Statement (PDF)' }).count(), 2)
+  /* EACH COPY, OPEN OR DOWNLOAD (19 Oct): its statement and its schedule, two buttons apiece. */
+  t.check('...and each opens its own PDF and schedule', await list.getByText('Statement (PDF)').count(), 2)
+  t.check('...each with Open and Download', JSON.stringify([await list.locator('[data-action="open"]').count(), await list.locator('[data-action="download"]').count()]), '[4,4]')
   t.ok('a paid run offers Send again', await page.getByRole('button', { name: 'Send again' }).isVisible())
   t.check('...and not a first Email advice', await page.getByRole('button', { name: 'Email advice' }).count(), 0)
   await t.shot(page, 'payover-sends')
@@ -289,7 +291,7 @@ try {
   t.ok('...one on the statement says when', /Paid, on the statement 16 Sep 2026/.test(folder))
   t.ok('...a sent one is still owed', /Advice sent, not paid yet/.test(folder))
   t.ok('...with what it was paid with', folder.includes('reference BF PO-BPM-2610'))
-  t.ok('the copies sent sit under their run', (await runsOn.filter({ hasText: 'PO-BPM-2610' }).getByRole('button', { name: 'Statement (PDF)' }).count()) === 2)
+  t.ok('the copies sent sit under their run', (await runsOn.filter({ hasText: 'PO-BPM-2610' }).getByText('Statement (PDF)').count()) === 2)
   t.ok('paid out and still to pay are added up', /Paid out R 8 775\.00/.test(folder) && /Still to pay R 1 200\.00/.test(folder))
   await t.shot(page, 'client-payovers')
 
