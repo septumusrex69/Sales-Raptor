@@ -30,13 +30,18 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    - **Not proven against the live API from the session** (the sandbox cannot reach Supabase): the
      PostgREST order `account_balances(to_settle)` on a one-to-one embed. The e2e proves the request
      is made; press To settle on the preview to prove PostgREST takes it.
-   - **FOUND, NOT FIXED, ASK FIRST:** `api/_lib/workflow/step.ts` `ledgersFor` assembles the
-     balance a WORKFLOW NOTICE quotes by hand, without `annexure_item` / `payment_id` (so a receipt
-     fee that is a fee row is counted twice), dropping every cancelled fee (the imported Promise to
-     Pay exception lost), not dropping rejected receipts, and ignoring ended / prescription. A
-     section 129 can quote a different figure from the account page. The fix is to read through
-     `storedBalance.ts` (`fetchLedgerRows` + `balanceAccountFromRow`); it changes what notices say,
-     so the firm should hear it first.
+   - **FIXED, with the firm's go-ahead (19 Oct): a workflow notice quotes the account page's
+     balance.** `api/_lib/workflow/step.ts` had its own ledger reader (`ledgersFor`, now deleted)
+     and its own position: no `annexure_item` / `payment_id` (a receipt fee raised as a fee row
+     counted twice -- R846 instead of R823 in the check's example), every cancelled fee dropped (the
+     imported promise-to-pay exception lost), rejected receipts counted, no ended / prescription.
+     It now reads `fetchLedgerRows` and builds the position with `balanceInputFor(balanceAccountFromRow
+     (account))`, the page's own assembly; the repayment schedule rides on the same position, and
+     "payment received" is the newest LIVE payment by date. The interest start is `handover_date`
+     only, as on the page (it was `?? opening_as_at`; no account on staging or production lacks a
+     handover date). On staging 21 accounts carry an item 9 row -- including the one account in a
+     workflow -- 4 have rejected receipts, 5 are ended or prescribed. `check-notice-balance` (10,
+     break-tested); check-handover-date and check-workflow-transport updated.
    - Tests: new `check-stored-balance` (47, break-tested four ways), `e2e/accounts` +6 (148,
      break-tested); seven older source checks updated for the move.
 
@@ -92,8 +97,9 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      month with the rate line; handovers by month. Waiting on the firm's yes and its contents.
 
    **Open, in order:** 1. code by email for an Administrator on a new device; 2. "Held for
-   Swordfish payovers"; 3. the FNB template (waits on FNB); 4. the step.ts notice balance above;
-   5. the client report (above); 6. production has none of S8's or S9's migrations.
+   Swordfish payovers"; 3. the FNB template (waits on FNB: the firm has the CSV template, the
+   import GUIDE is still needed for line 3's second number, the date, account-type codes and NOTIFY);
+   4. the client report (above); 5. production has none of S8's or S9's migrations.
 
 00. **S8 · Cut-over, end of 18 Oct.** The afternoon was the firm testing on the preview and asking,
    one screenshot at a time. All of it is built, checked and pushed (each item is in §2 under S8):

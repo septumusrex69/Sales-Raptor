@@ -494,7 +494,7 @@ ok('...and builds it from the live arrangement', /const scheduleDoc = \(\(\) => 
  * people who would compare them are the debtor holding the schedule and the collector reading the
  * email.
  */
-ok('...off the same position the balance is', /const balance = computeBalance\(\{ \.\.\.position, accrueTo: today \}\)/.test(runner))
+ok('...off the same position the balance is', /const \{ accrueTo: _accrueTo, \.\.\.position \} = balanceInput/.test(runner) && /const balance = computeBalance\(balanceInput\)/.test(runner))
 ok('...and the ladder from the same position too',
   /settlementLadder\(\{ account: position, schedule: recurring \}, plan\)/.test(runner))
 /*

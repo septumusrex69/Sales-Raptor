@@ -63,8 +63,12 @@ ok('default_date reaches the account', /defaultDate: r\.default_date \?\? null/.
 /* ---------------- the letters and the interest ---------------- */
 
 const step = code('api/_lib/workflow/step.ts')
-check('the runner merges {{handover_date}} from the handed-over day, both places',
-  (step.match(/handoverDate: account\.handover_date \?\? account\.opening_as_at \?\? null/g) ?? []).length, 2)
+check('the runner merges {{handover_date}} from the handed-over day',
+  (step.match(/handoverDate: account\.handover_date \?\? account\.opening_as_at \?\? null/g) ?? []).length, 1)
+/* AND ITS BALANCE ACCRUES FROM WHERE THE ACCOUNT PAGE'S DOES (S9): the position is balanceInputFor's
+   off balanceAccountFromRow, the page's own assembly, not a second reading of the handover. */
+ok('...and the notice\'s balance reads the handover the way the account page does',
+  /balanceInputFor\(\{ account: balanceAccountFromRow\(account\)/.test(step) && /handoverDate: r\.handover_date \?\? null/.test(code('src/lib/storedBalance.ts')))
 /* ACCRUAL STILL STARTS AT THE HANDOVER AND ONLY THERE -- the fix was the date written, not the
    engine. Asserted so nobody "fixes" the engine to read the default instead. */
 const balance = code('src/lib/accountBalance.ts')

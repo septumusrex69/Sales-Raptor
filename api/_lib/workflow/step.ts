@@ -3,6 +3,8 @@ import { sendAsUser } from '../email/sendAsUser.js'
 import { sendSms, toMsisdn } from '../sms/connectMobile.js'
 import { accountMergeValues } from '../../../src/lib/accountMergeValues.js'
 import { computeBalance } from '../../../src/lib/accountBalance.js'
+import { balanceInputFor } from '../../../src/lib/balanceInput.js'
+import { balanceAccountFromRow, fetchLedgerRows } from '../../../src/lib/storedBalance.js'
 import { planSend, type StepTemplate } from '../../../src/lib/workflowSend.js'
 import { letterToPdf, letterFilename } from '../../../src/lib/letterPdf.js'
 import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
@@ -171,7 +173,7 @@ export async function runOneStep(
     admin.from('message_templates')
       .select('id, kind, subject, body, audience, name, attachment_id, attaches_schedule, seed_key')
       .in('id', [node.templateId, node.templateCompanyId].filter(Boolean) as string[]),
-    ledgersFor(admin, account.id),
+    fetchLedgerRows(admin, [account.id as string]),
     /* Did the step this one follows actually go? Only asked where the node says it follows one --
        `afterMinutes` is what carries that, and the handover SMS is the reason it exists. */
     node.afterMinutes === null
@@ -299,20 +301,23 @@ export async function runOneStep(
    * SAME position -- written out twice they would eventually disagree, and the two people who would
    * compare them are the debtor holding the schedule and the collector reading the notice.
    */
-  const position = {
-    capitalHandedOver: Number(account.capital_handed_over ?? 0),
-    handoverDate: account.handover_date ?? account.opening_as_at ?? null,
-    ledgers: ledgerRes,
-    /* IN DUPLUM IS NO LONGER PASSED, and this line is why the rest of the app was wrong. It said
-       `true` unconditionally -- correctly, because the ceiling has no exception -- while the
-       account screen passed the stored column, which is false on everything Raptor created. So a
-       section 129 quoted a capped balance and the screen beside it quoted an uncapped one. One
-       rule, applied in one place: see accountBalance. */
-    interestRateAnnual: account.interest_rate_annual ? Number(account.interest_rate_annual) : undefined,
-  }
-  /* THE BALANCE THE NOTICE QUOTES, through the one place that arithmetic lives. A second
-     implementation here would eventually disagree with the statement the debtor is holding. */
-  const balance = computeBalance({ ...position, accrueTo: today })
+  /*
+   * THROUGH THE SAME ASSEMBLY AS THE ACCOUNT PAGE (S9, 19 Oct, the firm's go-ahead). This was a
+   * hand-built copy -- its own ledger reader (`ledgersFor`) and its own position -- and it had
+   * drifted from the page in four ways, every one of which put a different figure in a statutory
+   * notice from the one on the debtor's account: no `annexure_item` / `payment_id`, so a receipt
+   * fee raised as a fee row was counted twice; every cancelled fee dropped, so the imported promise
+   * to pay -- the one cancelled fee that still stands -- went missing; rejected receipts left in as
+   * payments; and no ended / prescription, so a settled or prescribed account kept accruing. Now the
+   * ledgers are read with storedBalance's columns (fetchLedgerRows, the list's and the nightly job's
+   * reader) and the position is balanceInputFor's, which is what AccountDetail builds. One
+   * assembly, so the notice, the page, the list and the sort cannot disagree.
+   */
+  const ledgerRows = ledgerRes.get(account.id as string) ?? { payments: [], fees: [], accruals: [] }
+  const balanceInput = balanceInputFor({ account: balanceAccountFromRow(account), ledgers: ledgerRows, today })
+  const { accrueTo: _accrueTo, ...position } = balanceInput
+  void _accrueTo
+  const balance = computeBalance(balanceInput)
 
   /*
    * THE ACCOUNT'S OWN REPAYMENT SCHEDULE, where the wording being sent carries one.
@@ -446,10 +451,10 @@ export async function runOneStep(
     /*
      * WHAT A RECEIPT CONFIRMS: the newest unreversed payment, off the ledger the balance above it
      * already came from -- so the figure the debtor is thanked for and the balance under it cannot
-     * disagree. `ledgersFor` has already dropped the reversed ones, and they are ordered by
-     * received_at, so the last is the newest.
+     * disagree. balanceInputFor has already dropped the reversed and the rejected ones; the reader
+     * orders by id, so they are put in date order here and the last is the newest.
      */
-    paymentReceived: ledgerRes.payments.at(-1)?.amount ?? null,
+    paymentReceived: [...position.ledgers.payments].sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.amount ?? null,
     /*
      * THE DISPUTE, AND THE DATE ITS MESSAGES QUOTE.
      *
@@ -922,59 +927,6 @@ async function lettersFor(admin: SupabaseClient, rows: TemplateRow[]) {
     }
   }
   return out
-}
-
-/**
- * The three ledgers computeBalance reads, in the shape it reads them.
- *
- * COLUMN NAMES COPIED FROM accountBook's own select, not guessed. Seven of the first draft's were
- * wrong -- `paid_on` for `received_at`, `raised_at` for `incurred_at`, `period_from` for
- * `accrued_on`, `amount` for `amount_accrued` -- and PostgREST answers an unknown column with an
- * error rather than a null, so every one of them would have thrown on the first real morning.
- *
- * A REVERSED PAYMENT IS NOT A PAYMENT. Filtered here exactly as the account screen filters it, or
- * a notice quotes a balance that a reversal has already put back.
- */
-async function ledgersFor(admin: SupabaseClient, accountId: string) {
-  const [payments, fees, accruals] = await Promise.all([
-    admin.from('account_payments')
-      .select('received_at, amount, paid_to_client, reversed_at, receipt_fee_legacy')
-      .eq('account_id', accountId).order('received_at'),
-    admin.from('account_fees')
-      .select('incurred_at, description, amount_excl_vat, vat_amount, billed, segments, cancelled_at')
-      .eq('account_id', accountId).order('incurred_at'),
-    admin.from('account_interest_accruals')
-      .select('accrued_on, days, amount_accrued')
-      .eq('account_id', accountId).order('accrued_on'),
-  ])
-  return {
-    payments: (payments.data ?? [])
-      .filter((p) => !p.reversed_at)
-      .map((p) => ({
-        date: (p.received_at as string).slice(0, 10),
-        amount: Number(p.amount ?? 0),
-        paidToClient: Boolean(p.paid_to_client),
-        receiptFeeExclVat: p.receipt_fee_legacy === null ? null : Number(p.receipt_fee_legacy),
-      })),
-    fees: (fees.data ?? [])
-      /* A cancelled fee is one somebody took off the account. Left in, the notice quotes a
-         balance higher than the statement beside it. */
-      .filter((f) => !f.cancelled_at)
-      .map((f) => ({
-        date: (f.incurred_at as string).slice(0, 10),
-        at: f.incurred_at as string,
-        description: (f.description as string) ?? '',
-        exclVat: Number(f.amount_excl_vat ?? 0),
-        vat: Number(f.vat_amount ?? 0),
-        billed: Boolean(f.billed),
-        segments: f.segments === null ? undefined : Number(f.segments),
-      })),
-    interest: (accruals.data ?? []).map((i) => ({
-      from: i.accrued_on as string,
-      days: Number(i.days ?? 0),
-      amount: Number(i.amount_accrued ?? 0),
-    })),
-  }
 }
 
 /** The row PostgREST hands back, in the shape workflowBuilder describes. */
