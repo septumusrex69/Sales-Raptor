@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  ChevronDown, ChevronRight, Download, Loader2, Mail, MailOpen, MessageCircleQuestion, Paperclip,
+  ChevronDown, ChevronRight, Mail, MailOpen, MessageCircleQuestion, Paperclip,
   ShieldAlert,
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -12,7 +12,8 @@ import type { AccountEmail } from '../../lib/accountEmails'
 import { useEmailView } from '../../lib/emailView'
 import { EmailViewSwitcher } from '../../components/email/EmailViewSwitcher'
 import { ReadingPane } from '../../components/email/ReadingPane'
-import { downloadAttachment } from '../../lib/userMail'
+import { fetchAttachment } from '../../lib/userMail'
+import { FileActions } from '../../components/ui/FileActions'
 import { useAuth } from '../../store/AuthContext'
 import { AttachmentLabel } from '../../components/AttachmentKindTag'
 
@@ -291,23 +292,13 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
   onUnread: () => void
 }) {
   const { session } = useAuth()
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  async function download(filename: string) {
+  /* The bytes, for FileActions to open or save -- see fileSave.ts. */
+  async function attachment(filename: string): Promise<Blob> {
     const token = session?.access_token
-    if (!token) return
-    setBusy(filename)
-    setError(null)
-    try {
-      // accountEmailId, not mailId: this is the account's copy, and the file comes from whichever
-      // colleague's mailbox received it. See the route.
-      await downloadAttachment({ accountEmailId: email.id, filename, accessToken: token })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
+    if (!token) throw new Error('Signed out. Sign in again to fetch the file.')
+    // accountEmailId, not mailId: this is the account's copy, and the file comes from whichever
+    // colleague's mailbox received it. See the route.
+    return fetchAttachment({ accountEmailId: email.id, filename, accessToken: token })
   }
 
   const inbound = email.direction === 'in'
@@ -394,18 +385,12 @@ function EmailBody({ email, canSend, onReply, onReplyAll, onForward, onUnread, o
           */}
           <Paperclip size={11} className="text-slate-400" />
           {email.attachmentNames.map((name) => (
-            <button key={name} onClick={() => void download(name)} disabled={busy === name}
-              title={`Download ${name}`}
-              className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-              {busy === name
-                ? <Loader2 size={11} className="shrink-0 animate-spin" />
-                : <Download size={11} className="shrink-0" />}
-              <AttachmentLabel name={name} />
-            </button>
+            /* Open or Download, each its own press (the firm, 19 Oct) -- see FileActions. */
+            <FileActions key={name} name={name} label={<AttachmentLabel name={name} />}
+              fetchFile={() => attachment(name)} testId="account-email-attachment" />
           ))}
         </div>
       )}
-      {error && <p className="text-xs text-negative-700 mt-1.5">{error}</p>}
     </>
   )
 }

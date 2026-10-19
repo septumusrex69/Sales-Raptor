@@ -733,6 +733,12 @@ export async function uploadDocument(input: {
 export async function openDocument(
   doc: { id: string; accountId: string; storagePath: string; name?: string | null },
   by: string | null,
+  /**
+   * `inline` for OPEN, which shows the document in a tab; without it the address carries
+   * `attachment` and is what DOWNLOAD fetches (the firm, 19 Oct: "an option to open it or download
+   * it"). The fee is the same either way: both are reading the document.
+   */
+  opts: { inline?: boolean } = {},
 ): Promise<{ url: string; charge: ChargeResult | null }> {
   /*
    * A SIGNED DOCUMENT IS DRAWN THE FIRST TIME SOMEBODY OPENS IT, and is a file from then on.
@@ -768,7 +774,7 @@ export async function openDocument(
     }
     path = filed
   }
-  const url = await documentUrl(path, doc.name)
+  const url = await documentUrl(path, doc.name, { inline: opts.inline })
   return { url, charge: await chargePerusal({ accountId: doc.accountId, createdBy: by }) }
 }
 
@@ -796,9 +802,13 @@ export function signingPath(token: string): string {
  * THE NAME IS THE ROW'S, because that is the one somebody searches for later: a signed agreement
  * saved as a UUID is a signed agreement nobody finds again.
  */
-export async function documentUrl(storagePath: string, filename?: string | null): Promise<string> {
+export async function documentUrl(
+  storagePath: string, filename?: string | null, opts: { inline?: boolean } = {},
+): Promise<string> {
+  /* INLINE ONLY WHEN SOMEBODY PRESSED OPEN, which now opens a NEW TAB (FileActions) -- Raptor stays
+     behind it, which is what the firm's complaint above was really about. */
   const { data, error } = await supabase.storage.from(BUCKET)
-    .createSignedUrl(storagePath, 60, { download: filename || true })
+    .createSignedUrl(storagePath, 60, opts.inline ? undefined : { download: filename || true })
   if (error || !data?.signedUrl) throw new Error(error?.message ?? 'Could not open that document.')
   return data.signedUrl
 }

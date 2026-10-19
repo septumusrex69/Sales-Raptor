@@ -24,6 +24,7 @@
  * leading zero that way. A client correcting a sheet and sending it back must not have their
  * corrections eaten by the spreadsheet on the way.
  */
+import { saveFile } from './fileSave.ts'
 
 const enc = new TextEncoder()
 
@@ -266,17 +267,11 @@ export const XLSX_MIME =
  * Hand a file straight to the person, with no server in it.
  *
  * THE FIRM: "it should also be downloaded automatically for the user." The same shape as
- * downloadCsv next door -- a blob, an anchor, a click, and the URL revoked, because an object URL
- * left behind holds the bytes for the life of the tab.
+ * downloadCsv next door: both hand the file to saveFile (fileSave.ts), which is an ordinary download
+ * on a computer and the share sheet's "Save to Files" on an iPad.
  */
 export function downloadBytes(filename: string, bytes: Uint8Array, contentType: string) {
-  const blob = new Blob([bytes as BlobPart], { type: contentType })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  /* THROUGH saveFile, so an iPad gets "Save to Files" rather than the file drawn over Raptor
+     (the firm, 19 Oct). See fileSave.ts. */
+  void saveFile(new Blob([bytes as BlobPart], { type: contentType }), filename)
 }

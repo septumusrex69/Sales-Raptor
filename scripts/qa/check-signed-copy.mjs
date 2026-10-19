@@ -530,9 +530,11 @@ ok('...which takes words it did not write', /initialText\?: string/.test(read('s
  * attorney or attach to a summons.
  */
 const store = read('src/lib/accountWorkspace.ts')
+/* AND STILL DOES, unless somebody pressed OPEN (19 Oct), which shows it in a NEW tab -- Raptor stays
+   behind it, which was the complaint. Download, and every other caller, gets the file. */
 ok('a document arrives as a file rather than a view',
-  /createSignedUrl\(storagePath, 60, \{ download: filename \|\| true \}\)/.test(store))
-ok('...under the name the row carries', /documentUrl\(path, doc\.name\)/.test(store))
+  /createSignedUrl\(storagePath, 60, opts\.inline \? undefined : \{ download: filename \|\| true \}\)/.test(store))
+ok('...under the name the row carries', /documentUrl\(path, doc\.name, \{ inline: opts\.inline \}\)/.test(store))
 
 if (failures.length > 0) {
   console.error(`\ncheck-signed-copy: ${pass} passed, ${failures.length} failed\n`)

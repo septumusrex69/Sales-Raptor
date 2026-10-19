@@ -13,6 +13,7 @@ import { useAppStore } from '../store/AppStore'
 import { useAuth } from '../store/AuthContext'
 import type { ReactNode } from 'react'
 import type { Activity } from '../types'
+import { FileActions } from './ui/FileActions'
 import { AttachmentLabel } from './AttachmentKindTag'
 
 type Direction = 'sent' | 'received'
@@ -151,8 +152,6 @@ export function EmailActivityRow({
   const [selfOpen, setSelfOpen] = useState(false)
   const open = openProp ?? selfOpen
   const setOpen = (next: boolean) => (onToggleOpen ? onToggleOpen(next) : setSelfOpen(next))
-  const [downloading, setDownloading] = useState<string | null>(null)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
   const { userById, updateActivity, refreshSyncedData, deals } = useAppStore()
   const { session } = useAuth()
 
@@ -185,39 +184,25 @@ export function EmailActivityRow({
   }
 
   /**
-   * Pulls the file from the mailbox through the server rather than storing it in the CRM.
-   * Needs the auth header, so it can't be a plain link — fetch, then hand the browser a
-   * blob to save.
+   * Pulls the file from the mailbox through the server rather than storing it in the CRM. Needs
+   * the auth header, so it can't be a plain link -- the bytes are fetched and FileActions opens or
+   * saves them (the firm, 19 Oct: "an option to open it or download it").
    */
-  async function download(name: string) {
-    if (!session?.access_token) return
-    setDownloading(name)
-    setDownloadError(null)
-    try {
-      const res = await fetch('/api/email/attachment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ activityId: activity.id, filename: name }),
-      })
-      if (!res.ok) {
-        const errorBody = await res.json().catch(() => ({}))
-        setDownloadError(errorBody.error ?? 'Could not download that attachment.')
-        return
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = name
-      link.click()
-      URL.revokeObjectURL(url)
-      // The download is logged as an Activity server-side; pull it in so it shows straight away.
-      void refreshSyncedData()
-    } catch {
-      setDownloadError('Could not reach the server.')
-    } finally {
-      setDownloading(null)
+  async function attachment(name: string): Promise<Blob> {
+    if (!session?.access_token) throw new Error('Signed out. Sign in again to fetch the file.')
+    const res = await fetch('/api/email/attachment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ activityId: activity.id, filename: name }),
+    }).catch(() => { throw new Error('Could not reach the server.') })
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({}))
+      throw new Error(errorBody.error ?? 'Could not download that attachment.')
     }
+    const blob = await res.blob()
+    // The fetch is logged as an Activity server-side; pull it in so it shows straight away.
+    void refreshSyncedData()
+    return blob
   }
 
   return (
@@ -290,20 +275,11 @@ export function EmailActivityRow({
           {body && <p className="text-[15px] leading-relaxed text-slate-700 whitespace-pre-wrap max-w-[70ch]">{body}</p>}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             {attachments.map((name, i) => (
-              <button
-                key={`${name}-${i}`}
-                onClick={() => void download(name)}
-                disabled={downloading === name}
-                title="Download from the mailbox"
-                className="inline-flex items-center gap-1.5 text-xs text-slate-600 bg-white border border-slate-200 rounded-md px-2.5 py-1.5 max-w-[280px] hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
-              >
-                <Paperclip size={12} className="shrink-0" />
-                <AttachmentLabel name={name} />
-                {downloading === name && <span className="text-slate-400">…</span>}
-              </button>
+              <FileActions key={`${name}-${i}`} name={name}
+                label={<span className="inline-flex items-center gap-1.5"><Paperclip size={12} className="shrink-0" /><AttachmentLabel name={name} /></span>}
+                fetchFile={() => attachment(name)} testId="activity-attachment" />
             ))}
           </div>
-          {downloadError && <p className="text-xs text-red-600 mt-2">{downloadError}</p>}
         </div>
       )}
     </div>

@@ -8,6 +8,8 @@ import {
 } from '../../lib/traceCompare.ts'
 import { canRework, roundLine, traceRound } from '../../lib/traceRound.ts'
 import { Modal } from '../../components/ui/Modal'
+import { FileActions } from '../../components/ui/FileActions'
+import { blobFromUrl } from '../../lib/fileSave'
 import { PhoneLink } from '../../components/PhoneLink'
 import {
   TRACE_CATEGORIES, TRACE_OUTCOMES, TRACE_SORTS, canPromote, categoryById, categoryCounts,
@@ -248,26 +250,9 @@ export function TraceWorkspaceModal({
     } finally { setBusy(null) }
   }
 
-  const [opening, setOpening] = useState(false)
-  async function openReport() {
-    if (!trace.documentId) return
-    setOpening(true); setError(null)
-    try {
-      /*
-        noopener, because the signed URL must not be reachable by the tab it opens.
-
-        The URL is signed first and the window opened after, which is what the documents panel
-        does and is the only shape available while the signature costs a round trip. A strict
-        popup blocker can refuse a window opened after an await; if that turns out to bite, the
-        answer is to open the tab first and point it at the URL when it arrives, not to hand out
-        an address that is not signed.
-      */
-      /* THE ACCOUNT, so the perusal lands on it. The firm: "this includes a trace." */
-      window.open(await traceReportUrl(trace.documentId, trace.accountId), '_blank', 'noopener')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally { setOpening(false) }
-  }
+  /* THE ACCOUNT, so the perusal lands on it. The firm: "this includes a trace." Open and Download
+     are both reading it, and FileActions opens the tab on the press (fileSave.ts). */
+  const reportUrl = (inline: boolean) => traceReportUrl(trace.documentId!, trace.accountId, { inline })
 
   const subjectRole = trace.subjectKind === 'director'
     ? `Director of ${traces.find((t) => t.subjectKind === 'debtor')?.subjectName ?? 'the debtor'}`
@@ -288,11 +273,9 @@ export function TraceWorkspaceModal({
           to link to -- the URL is signed for sixty seconds when the button is pressed, exactly as
           the documents panel does it.
         */
-        <button type="button" onClick={() => void openReport()} disabled={opening}
-          className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052] hover:bg-gold-50 disabled:opacity-50">
-          {opening ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-          View report
-        </button>
+        <FileActions name={`Trace report - ${trace.subjectName ?? 'debtor'}.pdf`} testId="trace-report"
+          label={<span className="inline-flex items-center gap-1.5 font-medium"><FileText size={13} /> The report</span>}
+          openUrl={() => reportUrl(true)} fetchFile={async () => blobFromUrl(await reportUrl(false))} />
       )}
       footer={(
         <div className="flex items-center justify-between gap-3">

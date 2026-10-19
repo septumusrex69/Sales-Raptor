@@ -68,11 +68,22 @@ try {
   await rings.waitFor({ timeout: 15000 })
   const outcomes = (await page.getByTestId('client-ring-outcomes').innerText()).replace(/\s+/g, ' ')
   t.ok('recovered, active, closed with their shares', /Recovered 2 20%/.test(outcomes) && /Active 6 60%/.test(outcomes) && /Closed 2 20%/.test(outcomes))
-  t.ok('...and the recovery rate in the ring: R12 000 of R50 000', /24%/.test(outcomes) && /RECOVERY RATE/.test(outcomes))
+  /* THE RING COUNTS ACCOUNTS AND SAYS SO; the rate is rands, beside it, with its own bar (19 Oct). */
+  t.ok('...the ring’s centre is the accounts it counts', /^10 ACCOUNTS/.test(outcomes) && !/RECOVERY RATE/.test(outcomes))
+  const rate = (await page.getByTestId('client-recovery-rate').innerText()).replace(/\s+/g, ' ')
+  t.ok('...and the recovery rate beside it: R12 000 of R50 000', /Recovered 24%/.test(rate) && /R 12\s?000 collected of R 50\s?000 handed over/.test(rate.replace(/\u00a0/g, ' ')))
   const positions = (await page.getByTestId('client-ring-positions').innerText()).replace(/\s+/g, ' ')
   t.ok('the active accounts by where they stand, busiest first', /^6 ACTIVE/.test(positions) && positions.indexOf('In progress') < positions.indexOf('Arranged') && /Tracing 1 17%/.test(positions))
   await rings.scrollIntoViewIfNeeded()
   await t.shot(page, 'client-rings')
+  /* TWELVE MONTHS FIT THE CARD, AND THE SCALE CLIMBS IN EQUAL STEPS (19 Oct): the oldest month's name
+     was cut off at the left edge ("an 26") and the axis read 0, 8, 16, 24, 30. */
+  await page.getByTestId('client-handovers-months-12').click(); await page.waitForTimeout(700)
+  const fit = await page.getByTestId('client-handovers-scroll').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
+  t.check('twelve months fit the card, with nothing scrolled off', fit, true)
+  const yTicks = (await card.locator('.recharts-yAxis-tick-labels text').allTextContents()).map((v) => Number(v.replace(/\D/g, '')))
+  const steps = yTicks.slice(1).map((v, i) => v - yTicks[i])
+  t.ok(`...and the scale climbs in equal steps (${yTicks.join(', ')})`, yTicks.length === 5 && steps.every((d) => d === steps[0] && d > 0))
   /* ALL TIME, AND IT SLIDES ("an option to view the accounts for all time ... slide from left to right.
      Don't try to cram"). From the first handover, every month the same width, opened on the latest. */
   await page.getByTestId('client-handovers-months-all').click(); await page.waitForTimeout(700)

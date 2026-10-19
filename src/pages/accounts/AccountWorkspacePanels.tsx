@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { FileActions } from '../../components/ui/FileActions'
+import { blobFromUrl } from '../../lib/fileSave'
 import {
-  Building2, Check, Clock, Download, FileText, Globe, IdCard, Loader2, Mail, MapPin, MessageCircle,
+  Building2, Check, Clock, FileText, Globe, IdCard, Loader2, Mail, MapPin, MessageCircle,
   Phone, Plus, ShieldCheck, Smartphone, Trash2, Upload, User, X, Home
 } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
@@ -1086,7 +1088,6 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
   const [kind, setKind] = useState<string>(DOCUMENT_KINDS[0])
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [opening, setOpening] = useState<string | null>(null)
   /* WHAT THE LAST PERUSAL EARNED, or null. Shown only where something was actually charged: "no
      charge, it has already been charged once today" is the ordinary case and a line saying so on
      every document anybody opens is a line people stop reading. */
@@ -1118,19 +1119,14 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
   /*
    * OPENING A DOCUMENT IS A PERUSAL OF DOCUMENTS, once a day -- the firm's rule, and the same fee
    * saving one raises. openDocument signs the address and charges it; the cap is in the engine, so
-   * this press is refused most days and says so rather than going quiet.
+   * this press is refused most days and says so rather than going quiet. OPEN (a tab, `inline`) and
+   * DOWNLOAD (the file, `attachment`) are both reading it, so both go through here.
    */
-  async function open(doc: AccountDocument) {
-    setOpening(doc.id); setErr(null)
-    try {
-      const { url, charge } = await openDocument(doc, userId)
-      window.open(url, '_blank', 'noopener')
-      setCharged(charge && charge.reason === 'charged' ? chargeMessage(charge, PERUSAL_ITEM_ID) : null)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setOpening(null)
-    }
+  async function perused(doc: AccountDocument, inline: boolean): Promise<string> {
+    /* Errors go to FileActions, which shows them on the row they belong to. */
+    const { url, charge } = await openDocument(doc, userId, { inline })
+    setCharged(charge && charge.reason === 'charged' ? chargeMessage(charge, PERUSAL_ITEM_ID) : null)
+    return url
   }
 
   return (
@@ -1183,17 +1179,14 @@ export function DocumentsPanel({ accountId, documents, onChange, userId, userNam
               <FileText size={14} className="text-slate-300 shrink-0" />
               <div className="min-w-0 flex-1 truncate"
                 title={[d.name, d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName].filter(Boolean).join(' · ')}>
-                <button onClick={() => open(d)} className="text-slate-800 hover:text-brand-600 hover:underline text-left">
-                  {d.name}
-                </button>
+                <span className="text-slate-800">{d.name}</span>
                 <span className="text-[11px] text-slate-400">
                   {' · '}{[d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName].filter(Boolean).join(' · ')}
                 </span>
               </div>
-              <button onClick={() => open(d)} disabled={opening === d.id}
-                className="text-slate-400 hover:text-brand-600 shrink-0 disabled:opacity-50" title="Open">
-                {opening === d.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              </button>
+              {/* Open or Download, each its own press (the firm, 19 Oct). Both are a perusal. */}
+              <FileActions name={d.name} buttonsOnly testId="account-document"
+                openUrl={() => perused(d, true)} fetchFile={async () => blobFromUrl(await perused(d, false))} />
               {canDelete && (
                 // Always visible. This was hidden until hover, which on a tablet means hidden
                 // for ever — there is no hover on a touch screen, so the control did not exist

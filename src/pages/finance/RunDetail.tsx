@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { FileActions } from '../../components/ui/FileActions'
+import { blobFromUrl } from '../../lib/fileSave'
 import { Link, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Loader2, X } from 'lucide-react'
 import clsx from 'clsx'
@@ -17,7 +19,7 @@ import { paymentReference } from '../../lib/paymentsOut'
 import { fetchPayoutsStatementOnly } from '../../lib/trust'
 import { MarkPaidModal } from './MarkPaidModal'
 import { useBackLink, useRecordName } from '../../lib/backLink'
-import { fetchAdviceSends, openAdviceCopy, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
+import { fetchAdviceSends, adviceCopyName, adviceCopyUrl, sendRemittanceAdvice, type AdviceSend } from '../../lib/remittanceEmail'
 import { fetchClientPaymentsForRun, recordClientPayment } from '../../lib/clientStatement'
 import { canReversePayment, canViewBusiness, canViewFinance } from '../../lib/permissions'
 import { ReversePaymentModal } from '../../components/finance/ReversePaymentModal'
@@ -185,18 +187,15 @@ export function RunDetail() {
     return adviceFromRun(run, client, firm, rows)
   }, [run, client, firm, rows])
 
-  async function openPdf() {
-    if (!advice) return
-    setBusy(true); setError(null)
-    try {
-      const { bytes, problem } = await remittancePdf(advice)
-      if (problem) { setError(problem); return }
-      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
-      window.open(url, '_blank', 'noopener')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not draw the statement.')
-    } finally { setBusy(false) }
+  /*
+   * THE STATEMENT AS IT WOULD GO, for Open or Download (the firm, 19 Oct: every PDF Raptor makes gets
+   * both). Drawn from the same `advice` the email attaches, so what is read here is what is sent.
+   */
+  async function statementPdf(): Promise<Blob> {
+    if (!advice) throw new Error('Still reading the run.')
+    const { bytes, problem } = await remittancePdf(advice)
+    if (problem) throw new Error(problem)
+    return new Blob([bytes as BlobPart], { type: 'application/pdf' })
   }
 
   async function act(fn: () => Promise<void>) {
@@ -270,10 +269,10 @@ export function RunDetail() {
                 Approve early…
               </button>
             )}
-            <button type="button" disabled={busy || !advice} onClick={() => void openPdf()}
-              className="rounded-lg border border-slate-200 px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50">
-              Preview statement
-            </button>
+            {advice && (
+              <FileActions name={`${advice.run.invoiceNumber}.pdf`} testId="run-statement"
+                label={<span className="font-medium text-slate-700">Statement</span>} fetchFile={statementPdf} />
+            )}
             {scheduled && (
               <>
                 <span className="text-[12.5px] text-slate-500" data-testid="run-scheduled">
@@ -383,7 +382,7 @@ export function RunDetail() {
       </Card>
 
       {(sends.length > 0 || run.status === 'sent' || run.status === 'paid') && (
-        <SentCopies sends={sends} onError={setError} />
+        <SentCopies sends={sends} />
       )}
 
       <Card padded={false}>
@@ -753,8 +752,8 @@ function EmailAdviceModal({ advice, run, again, defaultTo, onClose, onSent }: {
  * WHAT WENT TO THE CLIENT, AS IT WENT. Each row opens the very PDF and spreadsheet attached that
  * day -- not a statement rebuilt now -- and nothing here can be edited or removed.
  */
-function SentCopies({ sends, onError }: { sends: AdviceSend[]; onError: (m: string) => void }) {
-  const open = (path: string) => { void openAdviceCopy(path).catch((e: unknown) => onError(e instanceof Error ? e.message : 'That copy could not be opened.')) }
+/* Each copy reports its own failure on its own buttons (FileActions). */
+function SentCopies({ sends }: { sends: AdviceSend[] }) {
   return (
     <Card>
       <h2 className="text-[13px] font-semibold text-slate-800">Sent to the client</h2>
@@ -772,8 +771,11 @@ function SentCopies({ sends, onError }: { sends: AdviceSend[]; onError: (m: stri
                 <span className="ml-2 tabular-nums text-slate-500">{rand(x.netPayover)}</span>
               </span>
               <span className="flex gap-3">
-                <button type="button" onClick={() => open(x.pdfPath)} className="font-medium text-navy-700 underline">Statement (PDF)</button>
-                <button type="button" onClick={() => open(x.xlsxPath)} className="font-medium text-navy-700 underline">Schedule</button>
+                {/* Open or Download, each its own press (the firm, 19 Oct). */}
+                <FileActions name={adviceCopyName(x.pdfPath)} label="Statement (PDF)" compact
+                  openUrl={() => adviceCopyUrl(x.pdfPath)} fetchFile={async () => blobFromUrl(await adviceCopyUrl(x.pdfPath))} />
+                <FileActions name={adviceCopyName(x.xlsxPath)} label="Schedule" compact
+                  openUrl={() => adviceCopyUrl(x.xlsxPath)} fetchFile={async () => blobFromUrl(await adviceCopyUrl(x.xlsxPath))} />
               </span>
             </li>
           ))}

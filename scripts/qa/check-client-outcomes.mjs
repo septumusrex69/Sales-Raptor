@@ -19,6 +19,9 @@ const r = outcomeRing([
 ])
 check('three slices in the firm\'s order, with shares', r.slices.map((s) => [s.key, s.accounts, s.pct]), [['recovered', 3, 30], ['active', 5, 50], ['closed', 2, 20]])
 check('...and the recovery rate: collected over capital', r.recoveryRate, 35)
+check('...with the rands it is made of, for the bar beside the ring (19 Oct)', [r.capital, r.collected], [100000, 35000])
+const rings = readFileSync(new URL('../../src/components/companies/ClientBookRings.tsx', import.meta.url), 'utf8')
+ok('the ring’s centre counts what the ring counts, accounts -- not the rate in rands', /centerLabel="ACCOUNTS"/.test(rings) && !/centerLabel="RECOVERY RATE"/.test(rings))
 check('nothing handed over: no rate', outcomeRing([]).recoveryRate, null)
 check('the active ones by rung, busiest first', positionRing([
   { status: 'Active', subStatus: 'Tracing' }, { status: 'Active', subStatus: null }, { status: 'Active', subStatus: null },

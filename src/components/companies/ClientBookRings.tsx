@@ -12,6 +12,7 @@ const POSITION_COLOUR: Record<ClientPosition, string> = Object.fromEntries(CLIEN
   '#047857', '#10b981', '#f59e0b', '#b91c1c', '#9ca3af', '#0ea5e9', '#1e3a5f',
   '#8b5cf6', '#e11d48', '#334155', '#a16207', '#64748b', '#cbd5e1',
 ][i]])) as Record<ClientPosition, string>
+const rand = (v: number) => `R ${Math.round(v).toLocaleString('en-ZA')}`
 const OUTCOME_COLOUR = { recovered: '#047857', active: '#c9a24a', closed: '#94a3b8' } as const
 
 /**
@@ -57,8 +58,8 @@ export function ClientBookRings({ clientId }: { clientId: string }) {
           <div className="flex items-start gap-4" data-testid="client-ring-outcomes">
             <div className="w-[150px] shrink-0">
               <RingDonut data={(ring?.slices ?? []).filter((s) => s.accounts > 0).map((s) => ({ name: s.label, value: s.accounts, color: OUTCOME_COLOUR[s.key] }))}
-                centerValue={ring?.recoveryRate === null || !ring ? '—' : `${ring.recoveryRate}%`} centerLabel="RECOVERY RATE"
-                caption={ring ? `Of ${ring.total} accounts` : 'Reading…'} legend={false} />
+                centerValue={ring ? ring.total.toLocaleString('en-ZA') : '…'} centerLabel="ACCOUNTS"
+                caption="What became of them" legend={false} />
             </div>
             <ul className="min-w-0 flex-1 space-y-1.5 pt-2 text-sm">
               {(ring?.slices ?? []).map((s) => (
@@ -69,7 +70,25 @@ export function ClientBookRings({ clientId }: { clientId: string }) {
                   <span className="w-10 text-right tabular-nums font-semibold text-slate-800">{s.pct}%</span>
                 </li>
               ))}
-              <li className="pt-1 text-xs text-slate-400">Recovery rate: collected against the capital handed over on these accounts.</li>
+              {/*
+                THE RECOVERY RATE, OUT OF THE RING'S CENTRE (19 Oct). The ring counts accounts and the
+                rate is rands; "27%" in the middle of a ring that was all Active read as a broken
+                chart. Here it is a bar of its own that fills to exactly the figure it states.
+              */}
+              {ring && ring.recoveryRate !== null && (
+                <li className="pt-2" data-testid="client-recovery-rate">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-slate-700">Recovered</span>
+                    <span className="font-semibold tabular-nums text-slate-800">{ring.recoveryRate}%</span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100" aria-hidden>
+                    <div className="h-full rounded-full" style={{ width: `${Math.min(100, ring.recoveryRate)}%`, background: OUTCOME_COLOUR.recovered }} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {rand(ring.collected)} collected of {rand(ring.capital)} handed over on these accounts.
+                  </p>
+                </li>
+              )}
             </ul>
           </div>
           <div className="flex items-start gap-4" data-testid="client-ring-positions">

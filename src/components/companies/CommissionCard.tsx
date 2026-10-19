@@ -31,7 +31,14 @@ const percent = (fraction: number) => `${(fraction * 100).toFixed(2).replace(/\.
  * AND THE SOURCE IS SHOWN WITH IT, where there is one. A rate with no mandate behind it is a rate
  * somebody typed, and the difference matters the day a client queries an invoice.
  */
-export function CommissionCard({ company: stored }: { company: Company }) {
+/*
+ * `bare` DRAWS IT WITHOUT A CARD OF ITS OWN, as the top half of "Commission and mandate" on the
+ * client page. The firm, 19 Oct: "we should just combine the collection commission and the mandate
+ * together" -- once a client is signed the mandate is not something anybody looks at every day, and
+ * two cards high on the page gave it the rank of the book itself. One card, the rate first because
+ * it is the number every account inherits, the mandate under it.
+ */
+export function CommissionCard({ company: stored, bare = false }: { company: Company; bare?: boolean }) {
   const { currentUser } = useAuth()
   /*
    * WHAT WAS JUST SAVED, laid over the store's copy. The store loaded companies once and the save
@@ -50,10 +57,11 @@ export function CommissionCard({ company: stored }: { company: Company }) {
      client is billed is a finance question, not a question of who may edit the client's address. */
   const mayEdit = canViewFinance(currentUser)
 
+  const Shell = bare ? 'div' : Card
   return (
-    <Card>
+    <Shell>
       <CardHeader
-        title="Collection commission"
+        title={bare ? 'Commission and mandate' : 'Collection commission'}
         subtitle={hasScale ? 'A sliding scale on the capital handed over' : undefined}
         action={mayEdit ? (
           <button type="button" onClick={() => setEditing(true)}
@@ -143,6 +151,6 @@ export function CommissionCard({ company: stored }: { company: Company }) {
           onSaved={(next) => { setSaved(next); setEditing(false) }}
         />
       )}
-    </Card>
+    </Shell>
   )
 }

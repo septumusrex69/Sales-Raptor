@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, FileText, Loader2, Pencil, Trash2, Upload } from 'lucide-react'
+import { FileText, Loader2, Pencil, Trash2, Upload } from 'lucide-react'
+import { FileActions } from '../ui/FileActions'
+import { blobFromUrl } from '../../lib/fileSave'
 import { Card } from '../ui/Card'
 import { formatDate } from '../../data/mockData'
 import {
@@ -51,9 +53,11 @@ const dateValue = (iso: string | undefined) => (iso ? new Date(iso).toISOString(
  * is collecting on.
  */
 export function MandateCard({
-  company, canEdit, canDelete, userId, userName, onSave,
+  company, canEdit, canDelete, userId, userName, onSave, bare = false,
 }: {
   company: Company
+  /** Drawn inside "Commission and mandate" rather than as a card of its own -- see CommissionCard. */
+  bare?: boolean
   canEdit: boolean
   canDelete: boolean
   userId: string | null
@@ -79,7 +83,6 @@ export function MandateCard({
       ? String(company.defaultInterestRateAnnual) : '')
   const [kind, setKind] = useState<string>(MANDATE_KIND)
   const [uploading, setUploading] = useState(false)
-  const [opening, setOpening] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<ClientDocument | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -152,19 +155,18 @@ export function MandateCard({
   }
 
   /* NO FEE IS RAISED BY OPENING ONE. An account's documents charge Annexure B item 3 on both
-     saving and opening; this is the client's own paper, and the sales side raises nothing. */
-  async function open(doc: ClientDocument) {
-    setOpening(doc.id); setErr(null)
-    try { window.open(await clientDocumentUrl(doc.storagePath), '_blank', 'noopener') }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
-    finally { setOpening(null) }
-  }
+     saving and opening; this is the client's own paper, and the sales side raises nothing. Open
+     loads the signed address in a tab; Download fetches it and saves it (FileActions). */
+  const docUrl = (doc: ClientDocument) => clientDocumentUrl(doc.storagePath)
 
+  const Shell = bare ? 'div' : Card
   return (
-    <Card>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <Shell className={bare ? 'mt-4 pt-4 border-t border-slate-100' : undefined}>
+      <div className={`flex flex-wrap items-start justify-between gap-3 ${bare ? 'mb-3' : 'mb-4'}`}>
         <div>
-          <h3 className="font-semibold text-[15px] text-slate-800">The mandate</h3>
+          {bare
+            ? <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">The mandate</h4>
+            : <h3 className="font-semibold text-[15px] text-slate-800">The mandate</h3>}
           <p className="text-xs text-slate-400 mt-0.5">
             The authority this firm collects on. No handover can be imported without it.
           </p>
@@ -342,20 +344,16 @@ export function MandateCard({
             <div key={d.id} className="flex items-center gap-2.5 py-1.5 text-[12.5px] whitespace-nowrap border-b border-slate-50 last:border-0 hover:bg-slate-50">
               <FileText size={14} className="text-slate-300 shrink-0" />
               <span className="min-w-0 flex-1 truncate" title={[d.name, d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName].filter(Boolean).join(' · ')}>
-                <button type="button" onClick={() => open(d)}
-                  className="text-slate-800 hover:text-brand-600 hover:underline text-left">
-                  {d.name}
-                </button>
+                <span className="text-slate-800">{d.name}</span>
                 <span className="text-slate-400">
                   {' · '}
                   {[d.kind, fileSize(d.sizeBytes), formatDate(d.createdAt), d.uploadedByName]
                     .filter(Boolean).join(' · ')}
                 </span>
               </span>
-              <button type="button" onClick={() => open(d)} disabled={opening === d.id}
-                className="text-slate-400 hover:text-brand-600 shrink-0 disabled:opacity-50" title="Open">
-                {opening === d.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-              </button>
+              {/* Open or Download, each its own press (the firm, 19 Oct). */}
+              <FileActions name={d.name} buttonsOnly testId="client-document"
+                openUrl={() => docUrl(d)} fetchFile={async () => blobFromUrl(await docUrl(d))} />
               {/* Always visible, never hover-only: the firm works on an iPad and there is no
                   hover on a touch screen, so a hidden control does not exist for them. */}
               {canDelete && (
@@ -379,7 +377,7 @@ export function MandateCard({
             catch (e) { setErr(e instanceof Error ? e.message : String(e)); setDeleting(null) }
           }} />
       )}
-    </Card>
+    </Shell>
   )
 }
 

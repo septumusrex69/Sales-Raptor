@@ -258,12 +258,16 @@ export async function promoteTraceItem(input: {
  * Signed for sixty seconds, like every other document in the app, because the bucket is private
  * and a permanent address to somebody's bureau profile is not a thing to hand out.
  */
-export async function traceReportUrl(documentId: string, accountId?: string | null): Promise<string> {
+export async function traceReportUrl(
+  documentId: string, accountId?: string | null,
+  /* `inline` for Open (a tab), without it the address saves as a file -- see documentUrl. */
+  opts: { inline?: boolean } = {},
+): Promise<string> {
   const { data, error } = await supabase.from('account_documents')
     .select('storage_path').eq('id', documentId).maybeSingle()
   if (error) throw new Error(error.message)
   if (!data?.storage_path) throw new Error('That report is no longer on the account.')
-  const url = await documentUrl(data.storage_path)
+  const url = await documentUrl(data.storage_path, null, { inline: opts.inline })
   /*
    * AND READING IT IS A PERUSAL OF DOCUMENTS, once a day. The firm named this one: "limited to one
    * a day... this includes a trace and everything else." It is the same action code the documents

@@ -50,6 +50,13 @@ export function ClientHandoverChart({ clientId }: { clientId: string }) {
      cram shit in"). Every month gets the same room; past what the card can hold the chart scrolls
      sideways, opened on the most recent months. */
   const PER_MONTH = 64
+  /*
+   * SIX AND TWELVE MONTHS FIT THE CARD; only All time slides (19 Oct). At twelve months on the iPad
+   * the chart came out a month wider than the card, opened scrolled to the newest, and the oldest
+   * month's name was cut at the left edge ("an 26") -- a chart that looked broken for want of
+   * forty pixels. Twelve bars fit an iPad card comfortably without cramming.
+   */
+  const slides = months === 'all' && bars.length > 12
   const scroller = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => { const el = scroller.current; if (el) el.scrollLeft = el.scrollWidth }, [bars.length, show, measure])
   const key = measure === 'accounts' ? 'accounts' : 'capital'
@@ -60,11 +67,18 @@ export function ClientHandoverChart({ clientId }: { clientId: string }) {
   const fmt = (v: number) => measure === 'accounts' ? v.toLocaleString('en-ZA') : shortRand(v)
   /* ONE SCALE FOR BOTH HALVES: the axis is drawn in its own narrow chart that does not scroll, so it
      has to be told the same top as the bars beside it. A round number a little above the tallest. */
-  const top = (() => {
+  /*
+   * FOUR EQUAL STEPS TO A ROUND TOP (19 Oct). The top used to be any round number a little above the
+   * tallest bar and the ticks were left to recharts, which split 30 into 0, 8, 16, 24, 30 -- a scale
+   * that climbs by eight and then by six. Now the step is chosen first (1, 2, 2.5 or 5 times a power
+   * of ten, never a fraction of an account) and the top is four of them, given as the ticks.
+   */
+  const { top, ticks } = (() => {
     const max = Math.max(0, ...data.map((d) => d.value ?? 0))
-    if (max <= 0) return 4
-    const step = 10 ** Math.floor(Math.log10(max))
-    return Math.ceil((max * 1.15) / step) * step
+    const raw = max <= 0 ? 1 : (max * 1.1) / 4
+    const pow = 10 ** Math.floor(Math.log10(raw))
+    const step = Math.max(1, [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= raw && (measure !== 'accounts' || Number.isInteger(s))) ?? 10 * pow)
+    return { top: step * 4, ticks: [0, step, step * 2, step * 3, step * 4] }
   })()
   const axisWidth = measure === 'accounts' ? 36 : 52
 
@@ -95,7 +109,7 @@ export function ClientHandoverChart({ clientId }: { clientId: string }) {
         <div className="h-44 shrink-0" style={{ width: axisWidth }} aria-hidden>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={data} margin={{ top: 16, right: 0, bottom: 0, left: 0 }}>
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth} domain={[0, top]} tickFormatter={fmt}
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth} domain={[0, top]} ticks={ticks} interval={0} tickFormatter={fmt}
                 tick={{ fontSize: 10, fill: 'var(--color-slate-400)' }} />
               <XAxis dataKey="label" tick={false} tickLine={false} axisLine={false} height={30} />
               {/* Invisible, and the reason the axis draws at all: recharts leaves an axis with no series blank. */}
@@ -104,7 +118,7 @@ export function ClientHandoverChart({ clientId }: { clientId: string }) {
           </ResponsiveContainer>
         </div>
         <div ref={scroller} className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain" data-testid="client-handovers-scroll">
-        <div className="h-44 [&_*:focus]:outline-none" style={{ minWidth: `${bars.length * PER_MONTH + 60}px` }}>
+        <div className="h-44 [&_*:focus]:outline-none" style={slides ? { minWidth: `${bars.length * PER_MONTH + 60}px` } : undefined}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={data} accessibilityLayer={false} margin={{ top: 16, right: 4, bottom: 0, left: 0 }} barCategoryGap="28%">
               <CartesianGrid vertical={false} stroke="var(--color-slate-100)" />

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, Ban, Check, CheckSquare, ChevronDown, ChevronRight, ExternalLink,
-  Inbox, Link2, Download, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
+  Inbox, Link2, Loader2, Mail as MailIcon, MoveRight, Paperclip, PenLine, Reply, RefreshCw,
   Forward as ForwardIcon,
   Search, ShieldAlert, Trash2, Undo2, X, CalendarDays, CalendarPlus, ReplyAll,
   Filter, Info, UserPlus,
@@ -22,6 +22,7 @@ import {
   acceptInvite, eventForInvite, fetchCalendarEvents, removeCalendarEvent, replyToInvite,
   type CalendarEvent,
 } from '../../lib/calendarEvents.ts'
+import { FileActions } from '../../components/ui/FileActions'
 import { useAuth } from '../../store/AuthContext'
 import { agoLabel, relativeDayLabel, timeOfDay } from '../../lib/dateLabels'
 import { chargeMessage } from '../../lib/accountCharges'
@@ -41,7 +42,7 @@ import { ZoomableImage } from '../../components/ui/ZoomableImage'
 import {
   blockedBy, blockSender,
   countUnreadByTab, debtorFileFor, deleteMail, fetchMailItem, fetchSenderRules, tabOf,
-  domainBlockProblem, domainOf, downloadAttachment, emptyJunk, fetchBlockedSenders, fetchMail,
+  domainBlockProblem, domainOf, emptyJunk, fetchAttachment, fetchBlockedSenders, fetchMail,
   isSharedDomain,
   fetchCachedBody, fetchMailBody, linkMailToAccount, linkMailToRecord, markMailRead, markMailUnread, moveFiledMail,
   saveAccountContacts, setJunk, unblockSender, unmatchMail,
@@ -954,24 +955,14 @@ export function MailPage() {
     setLinking(mail)
   }
 
-  /** Which attachment is being fetched, and why the last one failed. */
-  const [downloading, setDownloading] = useState<string | null>(null)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
-
-  async function download(mail: MailItem, filename: string) {
+  /**
+   * AN ATTACHMENT'S BYTES, for FileActions to open or save (the firm, 19 Oct: "an option to open it
+   * or download it"). The wait and any failure are shown on the file's own chip.
+   */
+  async function attachmentOf(mail: MailItem, filename: string): Promise<Blob> {
     const token = session?.access_token
-    if (!token) return
-    setDownloading(filename)
-    setDownloadError(null)
-    try {
-      await downloadAttachment({ mailId: mail.id, filename, accessToken: token })
-    } catch (e) {
-      // Beside the attachment rather than in the page's error line — it is about this one file,
-      // and the message itself is fine.
-      setDownloadError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setDownloading(null)
-    }
+    if (!token) throw new Error('Signed out. Sign in again to fetch the file.')
+    return fetchAttachment({ mailId: mail.id, filename, accessToken: token })
   }
 
   /** Moving a message that was filed on the wrong account. Administrators only. */
@@ -1614,8 +1605,7 @@ export function MailPage() {
                   onLink={() => startLink(m)}
                   onCreateLead={() => setCreatingLead(m)}
                   sticky
-                  onDownload={(f) => void download(m, f)}
-                  downloading={downloading} downloadError={downloadError} />
+                  fetchAttachment={(f) => attachmentOf(m, f)} />
               </div>
             )}
           />
@@ -1664,8 +1654,7 @@ export function MailPage() {
                   onMove={mayRefile ? () => setMoving(m) : null}
                   onUnread={() => void unreadOne(m)}
                   onCreateLead={() => setCreatingLead(m)}
-                  onDownload={(f) => void download(m, f)}
-                  downloading={downloading} downloadError={downloadError} />
+                  fetchAttachment={(f) => attachmentOf(m, f)} />
               ))}
             </ul>
           </>
@@ -2541,7 +2530,7 @@ function MailBody({
   mail, body, html, showPictures, onShowPictures,
   images, calendar, events, onAccept, onRespond, onRemoveEvent, skippedImages, loadingBody,
   bodyError, onBlock, onReply, onReplyAll, onForward, onJunk, onMove, onUnread,
-  onLink, onCreateLead, onDownload, downloading, downloadError, sticky,
+  onLink, onCreateLead, fetchAttachment, sticky,
 }: {
   mail: MailItem
   body?: string
@@ -2603,11 +2592,8 @@ function MailBody({
    * over whichever OTHER message happened to be under it.
    */
   sticky?: boolean
-  /** Pull one attachment out of the mailbox. */
-  onDownload: (filename: string) => void
-  /** The file currently being fetched, so its own button shows the wait. */
-  downloading: string | null
-  downloadError: string | null
+  /** Pull one attachment out of the mailbox, to be opened or saved. */
+  fetchAttachment: (filename: string) => Promise<Blob>
 }) {
   /*
    * THE OVERFLOW MENU, AND IT NOW CARRIES EVERY ANSWER, ALWAYS.
@@ -2751,18 +2737,13 @@ function MailBody({
           */}
           <Paperclip size={11} className="text-slate-400" />
           {mail.attachmentNames.map((name) => (
-            <button key={name} onClick={() => onDownload(name)} disabled={downloading === name}
-              title={`Download ${name}`}
-              className="inline-flex items-center gap-1 max-w-full text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50">
-              {downloading === name
-                ? <Loader2 size={11} className="shrink-0 animate-spin" />
-                : <Download size={11} className="shrink-0" />}
-              <AttachmentLabel name={name} />
-            </button>
+            /* OPEN OR DOWNLOAD, each its own press (the firm, 19 Oct). It used to be one press
+               that "downloaded" -- and on the iPad put the PDF over Raptor instead. */
+            <FileActions key={name} name={name} label={<AttachmentLabel name={name} />}
+              fetchFile={() => fetchAttachment(name)} testId="mail-attachment" />
           ))}
         </div>
       )}
-      {downloadError && <p className="text-xs text-negative-700 mt-1.5">{downloadError}</p>}
 
       {/* A rule under the controls, so the message reads as the message and not as more toolbar. */}
       <div className="border-b border-slate-100 mb-3" />
@@ -3213,7 +3194,7 @@ function MailRow({
   onRemoveEvent, skippedImages, loadingBody,
   bodyError, mine, onToggle, onChoose, onLink, onCreateLead, onBlock, onReply, onReplyAll,
   onForward, onJunk, onMove,
-  onUnread, onDownload, downloading, downloadError,
+  onUnread, fetchAttachment,
 }: {
   mail: MailItem
   /** The raw ICS where this was a meeting request. Passed through to MailBody. */
@@ -3254,9 +3235,7 @@ function MailRow({
   onCreateLead: () => void
   /** This agent's own addresses, so a recipient line can say "you" instead of naming them. */
   mine: (string | null | undefined)[]
-  onDownload: (filename: string) => void
-  downloading: string | null
-  downloadError: string | null
+  fetchAttachment: (filename: string) => Promise<Blob>
 }) {
   const unread = !mail.readAt
   return (
@@ -3315,8 +3294,7 @@ function MailRow({
             bodyError={bodyError} onBlock={onBlock} onReply={onReply} onReplyAll={onReplyAll}
             onForward={onForward} onJunk={onJunk}
             onMove={onMove} onUnread={onUnread}
-            onLink={onLink} onCreateLead={onCreateLead} onDownload={onDownload}
-            downloading={downloading} downloadError={downloadError} />
+            onLink={onLink} onCreateLead={onCreateLead} fetchAttachment={fetchAttachment} />
         </div>
       )}
     </li>

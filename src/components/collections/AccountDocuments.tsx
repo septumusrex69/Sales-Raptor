@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { FileDown, Loader2, Mail } from 'lucide-react'
+import { Loader2, Mail } from 'lucide-react'
+import { FileActions } from '../ui/FileActions'
 import { letterPdfBytes } from '../../lib/letterAttachment.ts'
 import { letterFilename, toBase64 } from '../../lib/letterPdf.ts'
 import { summaryOfAccount, statementOfAccount } from '../../lib/accountSummaryLetter.ts'
@@ -92,24 +93,19 @@ export function AccountDocuments({
     })
   }
 
-  async function download(kind: AccountDocKind) {
-    setBusy(`${kind}-pdf`); setFailed(null)
+  /*
+   * THE PDF, for Open or Download (the firm, 19 Oct: "an option to open it or download it ... the
+   * same should work for every single document and PDF, whatever is generated"). A failure is said
+   * here, beside the buttons, in full -- "{{firm_bank}} cannot be filled from this account" says what
+   * to go and fix -- and is also rethrown so the file's own buttons stop waiting.
+   */
+  async function pdfOf(kind: AccountDocKind): Promise<Blob> {
+    setFailed(null)
     try {
-      const bytes = await bytesFor(kind)
-      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = letterFilename(TITLES[kind], reference ?? null)
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      return new Blob([(await bytesFor(kind)) as BlobPart], { type: 'application/pdf' })
     } catch (e) {
-      /* The reason verbatim: "the summary of account was not attached: {{firm_bank}} cannot be
-         filled from this account" says what to go and fix; a generic failure does not. */
       setFailed(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
+      throw new Error('Could not be drawn -- see the reason below.')
     }
   }
 
@@ -167,17 +163,12 @@ export function AccountDocuments({
                 {TITLES[kind]}
               </button>
             )}
-            <button type="button" disabled={busy !== null}
-              onClick={() => { void download(kind) }}
-              aria-label={`Download the ${kind} of account as a PDF`}
-              title={`Download the ${kind} as a PDF`}
-              className={`inline-flex items-center px-2 py-1.5 text-slate-500 hover:bg-slate-50 disabled:opacity-40 ${
-                onEmail ? 'border-l border-slate-200 rounded-r-lg' : 'gap-1.5 rounded-lg text-xs font-medium'}`}>
-              {busy === `${kind}-pdf`
-                ? <Loader2 size={13} className="animate-spin" />
-                : <FileDown size={13} />}
-              {!onEmail && TITLES[kind]}
-            </button>
+            {/* OPEN OR DOWNLOAD, each its own press -- see FileActions. */}
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 ${onEmail ? 'border-l border-slate-200' : ''}`}>
+              {!onEmail && <span className="pl-1 text-xs font-medium text-slate-600">{TITLES[kind]}</span>}
+              <FileActions name={letterFilename(TITLES[kind], reference ?? null)} buttonsOnly
+                fetchFile={() => pdfOf(kind)} testId={`account-doc-${kind}`} />
+            </span>
           </span>
         ))}
       </div>

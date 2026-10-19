@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, ChevronDown, FileDown, Info, Loader2, Mail, Maximize2 } from 'lucide-react'
+import { FileActions } from '../ui/FileActions'
 import { Modal } from '../ui/Modal'
 import { letterPdfBytes } from '../../lib/letterAttachment.ts'
 import { letterFilename, toBase64 } from '../../lib/letterPdf.ts'
@@ -101,7 +102,6 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
   }) => void
 }) {
   const [showAll, setShowAll] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
   /*
@@ -217,26 +217,17 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
     })
   }
 
-  async function download() {
-    if (!plan || !values) return
-    setSaving(true); setFailed(null)
+  /* THE PDF, for Open or Download (the firm, 19 Oct) -- the reason a draw failed said in full,
+     beside the buttons, as it always was. */
+  async function simulationFile(): Promise<Blob> {
+    setFailed(null)
     try {
-      const bytes = await simulationPdf()
-      if (!bytes) return
-      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = letterFilename('Payment simulation', reference ?? null)
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const bytes = plan && values ? await simulationPdf() : null
+      if (!bytes) throw new Error('Nothing to draw yet.')
+      return new Blob([bytes as BlobPart], { type: 'application/pdf' })
     } catch (e) {
-      /* The reason verbatim: "the payment simulation was not attached: {{firm_bank}} cannot be
-         filled from this account" says what to go and fix, and a generic failure does not. */
       setFailed(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
+      throw new Error('Could not be drawn -- see the reason below.')
     }
   }
 
@@ -602,7 +593,7 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
           */}
           <div className="flex flex-wrap items-center gap-1.5">
             {onEmail && (
-              <button type="button" onClick={() => { void emailIt() }} disabled={sending || saving || refusal !== null}
+              <button type="button" onClick={() => { void emailIt() }} disabled={sending || refusal !== null}
                 title={refusal ?? 'Opens an email to the debtor with the simulation attached'}
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
                   refusal !== null
@@ -612,15 +603,17 @@ export function RepaymentCalculator({ account, amount, schedule, money, values, 
                 Email the simulation
               </button>
             )}
-            <button type="button" onClick={() => { void download() }} disabled={saving || sending || refusal !== null}
-              title={refusal ?? 'A PDF on the firm’s letterhead, to send the debtor'}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
-                refusal !== null
-                  ? 'cursor-not-allowed border-dashed border-slate-200 text-slate-300'
-                  : 'border-[#c9a052] bg-white text-navy-950 hover:bg-gold-100'}`}>
-              {saving ? <Loader2 size={11} className="animate-spin" /> : <FileDown size={11} />}
-              Download it
-            </button>
+            {/* OPEN OR DOWNLOAD (the firm, 19 Oct). Not offered while the plan cannot be drawn:
+                a button offered and then refused is worse than one that is not there. */}
+            {refusal === null ? (
+              <FileActions name={letterFilename('Payment simulation', reference ?? null)}
+                label={<span className="font-medium text-navy-950">The simulation, as a PDF</span>}
+                fetchFile={simulationFile} testId="simulation-pdf" />
+            ) : (
+              <span title={refusal} className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-300">
+                <FileDown size={11} /> The simulation, as a PDF
+              </span>
+            )}
           </div>
           {/* WHAT THE PRESS COSTS, SAID BEFORE IT. Every other place in Raptor that raises an
               Annexure B fee says so on the control, because a collector deciding whether to send

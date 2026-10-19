@@ -799,12 +799,16 @@ export async function raiseTicketFromEmail(input: {
   }
 }
 
-export async function downloadAttachment(input: {
+/**
+ * AN ATTACHMENT'S BYTES, out of the mailbox on demand. What happens to them -- a new tab or the
+ * device -- is FileActions' business (fileSave.ts): the firm asked for both, everywhere.
+ */
+export async function fetchAttachment(input: {
   mailId?: string
   accountEmailId?: string
   filename: string
   accessToken: string
-}): Promise<void> {
+}): Promise<Blob> {
   const res = await fetch('/api/email/attachment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.accessToken}` },
@@ -818,16 +822,7 @@ export async function downloadAttachment(input: {
     const body = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(body.error ?? 'Could not download that attachment.')
   }
-  const url = URL.createObjectURL(await res.blob())
-  try {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = input.filename
-    link.click()
-  } finally {
-    // Revoked whatever happened, so a failed save does not leak the blob for the page's life.
-    URL.revokeObjectURL(url)
-  }
+  return res.blob()
 }
 
 export async function markMailRead(ids: string[]): Promise<void> {

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { FileActions } from '../ui/FileActions'
+import { blobFromUrl } from '../../lib/fileSave'
 import { FileText, Loader2, Mail, Paperclip } from 'lucide-react'
 import { Card } from '../ui/Card'
 import { Modal, FormField, inputClass } from '../ui/Modal'
@@ -281,11 +283,12 @@ function ProofLine({ settlementId }: { settlementId: string }) {
         </>
       )}
       {proof.document && (
-        <button type="button"
-          onClick={() => { void documentUrl(proof.document!.storagePath, proof.document!.name).then((u) => { window.location.href = u }) }}
-          className="inline-flex items-center gap-1 font-medium text-[var(--c-steel)] hover:underline">
-          <FileText size={12} /> The client&rsquo;s acceptance: {proof.document.name}
-        </button>
+        /* Open or Download, each its own press (the firm, 19 Oct). It used to send this page itself
+           to the file. */
+        <FileActions name={proof.document.name} testId="settlement-acceptance"
+          label={<span className="inline-flex items-center gap-1 font-medium text-[var(--c-steel)]"><FileText size={12} /> The client&rsquo;s acceptance: {proof.document.name}</span>}
+          openUrl={() => documentUrl(proof.document!.storagePath, proof.document!.name, { inline: true })}
+          fetchFile={async () => blobFromUrl(await documentUrl(proof.document!.storagePath, proof.document!.name))} />
       )}
     </div>
   )

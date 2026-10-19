@@ -239,20 +239,21 @@ ok('...a signed copy that will not draw still opens, and is still perused',
   /url: signingPath\(token\),[\s\S]{0,400}?charge: await chargePerusal\(/.test(open))
 ok('...and the drawn one falls through to the file branch, which charges',
   /path = filed/.test(open)
-  && /const url = await documentUrl\(path, doc\.name\)[\s\S]{0,120}chargePerusal\(/.test(open))
+  && /const url = await documentUrl\(path, doc\.name, \{ inline: opts\.inline \}\)[\s\S]{0,120}chargePerusal\(/.test(open))
 /* AND THE DRAWING HAPPENS BEFORE EITHER FEE. A PDF that failed to draw has not been perused --
    the same rule as the signed address above, applied to the thing that replaced it. */
 const atFile = open.indexOf('fileSignedCopy(')
 ok('...with the PDF drawn before anything is charged',
   atFile >= 0 && atFile < open.indexOf('chargePerusal('))
-ok('the documents panel opens through it', /await openDocument\(doc, userId\)/.test(panels))
+/* Open (inline, a tab) and Download (the file) both go through it, 19 Oct: both are reading it. */
+ok('the documents panel opens through it', /await openDocument\(doc, userId, \{ inline \}\)/.test(panels))
 /* AND SAYS WHAT IT EARNED, where it earned anything -- and only then: "no charge, already charged
    today" on every document anybody opens is a line people stop reading. */
 ok('...and says what was charged', /charge\.reason === 'charged' \? chargeMessage\(charge, PERUSAL_ITEM_ID\)/.test(panels))
 
 /* AND A TRACE, WHICH THE FIRM NAMED. */
 ok('reading a trace report raises it', /if \(accountId\) await chargePerusal\(\{ accountId \}\)/.test(traceData))
-ok('...on the account the trace is of', /traceReportUrl\(trace\.documentId, trace\.accountId\)/.test(read('src/pages/accounts/TraceWorkspaceModal.tsx')))
+ok('...on the account the trace is of', /traceReportUrl\(trace\.documentId!?, trace\.accountId/.test(read('src/pages/accounts/TraceWorkspaceModal.tsx')))
 
 console.log(`\ncheck-perusal: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)

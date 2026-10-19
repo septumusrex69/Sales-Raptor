@@ -135,13 +135,19 @@ export async function fetchAdviceSends(by: { runId?: string; companyId?: string 
   }))
 }
 
-/** Opens a kept copy. A short-lived link: the bucket is private, and stays so. */
-export async function openAdviceCopy(path: string): Promise<void> {
-  const win = window.open('', '_blank')
+/**
+ * A kept copy's address, for Open (a tab) or Download (fetched and saved) -- FileActions does both
+ * (the firm, 19 Oct). A short-lived link: the bucket is private, and stays so.
+ */
+export async function adviceCopyUrl(path: string): Promise<string> {
   const { data, error } = await supabase.storage.from('payover-advice').createSignedUrl(path, 120)
-  if (error || !data) { win?.close(); throw new Error(error?.message ?? 'That copy could not be opened.') }
-  if (win) win.location.href = data.signedUrl
-  else window.location.href = data.signedUrl
+  if (error || !data) throw new Error(error?.message ?? 'That copy could not be opened.')
+  return data.signedUrl
+}
+
+/** The name a kept copy is saved under: the one it was attached with, which is its path's last part. */
+export function adviceCopyName(path: string): string {
+  return decodeURIComponent(path.split('/').pop() || path)
 }
 
 /** Bytes to base64 without blowing the stack on a long statement. */

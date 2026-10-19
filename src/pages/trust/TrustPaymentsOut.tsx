@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { saveFile } from '../../lib/fileSave'
 import { Link, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { Check, Copy, Download, Loader2 } from 'lucide-react'
@@ -79,11 +80,8 @@ export function TrustPaymentsOut() {
   function download() {
     if (!rows) return
     const csv = bankFileCsv(rows, ticked)
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-    a.download = `trust-payments-${clockToday()}.csv`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+    /* Saved, not drawn over the page, on an iPad too (fileSave.ts). */
+    void saveFile(new Blob([csv], { type: 'text/csv' }), `trust-payments-${clockToday()}.csv`)
   }
 
   async function copy(ref: string) {

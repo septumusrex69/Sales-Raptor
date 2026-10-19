@@ -905,21 +905,25 @@ export function CompanyDetail() {
             </div>
           )}
           side={[
-            /* THE FIRM: "I don't see anywhere where their collection commission is displayed.
-               They're signing what they're signed on." It was stored and never shown — the one
-               number every account on this book inherits. */
-            <CommissionCard key="commission" company={company} />,
             /*
-              THE MANDATE, directly under what it entitles the firm to charge -- they are the same
-              question asked twice: on whose authority, and on what terms.
+              ONE CARD, COMMISSION AND MANDATE (the firm, 19 Oct: "we should just combine the
+              collection commission and the mandate together"). The rate first -- "they're signing
+              what they're signed on", the one number every account on this book inherits -- and
+              the mandate under it, the same piece of paper read for its authority. Two cards here
+              gave a document nobody opens once the client is signed the rank of the book itself.
             */
-            <MandateCard key="mandate" company={company}
-              canEdit={canEditOwned(currentUser, company.accountOwnerId)}
-              canDelete={currentUser?.role === 'Administrator' || currentUser?.role === 'Sales Manager'
-                || currentUser?.role === 'Liaison Manager'}
-              userId={currentUser?.id ?? null}
-              userName={currentUser?.name ?? null}
-              onSave={(patch) => updateCompany(company.id, patch)} />,
+            <Card key="commission-mandate">
+              <div data-testid="commission-mandate">
+                <CommissionCard company={company} bare />
+                <MandateCard company={company} bare
+                  canEdit={canEditOwned(currentUser, company.accountOwnerId)}
+                  canDelete={currentUser?.role === 'Administrator' || currentUser?.role === 'Sales Manager'
+                    || currentUser?.role === 'Liaison Manager'}
+                  userId={currentUser?.id ?? null}
+                  userName={currentUser?.name ?? null}
+                  onSave={(patch) => updateCompany(company.id, patch)} />
+              </div>
+            </Card>,
             <ClientBookCard key="book" companyId={company.id} />,
             /* Beside the handover book, because these are the two things a liaison opens this
                page for: what came in, and what is stuck. */

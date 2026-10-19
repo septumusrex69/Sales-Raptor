@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { saveFile } from '../lib/fileSave'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Download, Loader2, Search } from 'lucide-react'
 import { Card } from '../components/ui/Card'
@@ -1057,15 +1058,8 @@ function ExportButton({ rows, today, users, teams, pace, asAt, period, targetFor
     /* A BOM, so Excel opens it as UTF-8. Without it "Keamogetse" is fine and every R sign and
        every en dash in a team name arrives as mojibake. */
     const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    try {
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `collections-${dayKey(asAt)}.csv`
-      a.click()
-    } finally {
-      URL.revokeObjectURL(url)
-    }
+    /* Saved, not drawn over the page, on an iPad too (fileSave.ts). */
+    void saveFile(blob, `collections-${dayKey(asAt)}.csv`)
   }
 
   return (

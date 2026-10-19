@@ -219,6 +219,12 @@ ok('the client page shows the commission', /<CommissionCard/.test(page))
 /* The element itself, not merely the two strings somewhere in the file: `company={company}`
    appears on half the cards on this page, so matching it loose proves nothing. */
 ok('...handed the company rather than an account', /<CommissionCard[^>]*company=\{company\}/.test(page))
+/* ONE CARD, the rate then the mandate (the firm, 19 Oct: "just combine the collection commission
+   and the mandate together") -- both drawn bare inside it, in that order. */
+const combined = page.slice(page.indexOf('<Card key="commission-mandate">'))
+ok('commission and mandate are one card', page.indexOf('<Card key="commission-mandate">') > 0
+  && /^<Card key="commission-mandate">[\s\S]*?<CommissionCard company=\{company\} bare \/>[\s\S]*?<MandateCard company=\{company\} bare[\s\S]*?<\/Card>/.test(combined))
+ok('...titled for both', /bare \? 'Commission and mandate'/.test(card))
 ok('the card shows a fixed rate', /of everything collected/.test(card))
 ok('...and every tier of a scale', /bands\.map/.test(card))
 /* The SAME boundary the form uses. A card that drew its own "from" would be the second

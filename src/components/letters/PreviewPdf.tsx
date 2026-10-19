@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ExternalLink, FileText, Loader2 } from 'lucide-react'
+import { FileText, Loader2 } from 'lucide-react'
+import { FileActions } from '../ui/FileActions'
 import { Modal } from '../ui/Modal'
 import { letterPdfBytes } from '../../lib/letterAttachment.ts'
 import type { LetterDocument } from '../../lib/letterDocument.ts'
@@ -52,6 +53,8 @@ export function PreviewPdf({ doc, scope, values, name, label }: {
    */
   const [filled, setFilled] = useState(false)
   const [url, setUrl] = useState<string | null>(null)
+  /* The drawn PDF itself, for Open and Download (the firm, 19 Oct) -- the same bytes the sheets are. */
+  const drawn = useRef<Blob | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const sheets = useRef<HTMLDivElement>(null)
@@ -73,6 +76,7 @@ export function PreviewPdf({ doc, scope, values, name, label }: {
          * whole of it.
          */
         const blob = new Blob([new Uint8Array(bytes).slice().buffer], { type: 'application/pdf' })
+        drawn.current = blob
         const next = URL.createObjectURL(blob)
         if (made.current) URL.revokeObjectURL(made.current)
         made.current = next
@@ -124,12 +128,12 @@ export function PreviewPdf({ doc, scope, values, name, label }: {
                 below is the convenience and this is the thing that always works.
               */}
               {url && (
-                <a href={url} target="_blank" rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5
-                    rounded-lg border border-slate-200 text-slate-600 hover:border-[#c9a052]
-                    hover:bg-gold-50">
-                  <ExternalLink size={12} /> Open it
-                </a>
+                /* AND DOWNLOAD BESIDE IT (the firm, 19 Oct: every PDF Raptor makes, both). */
+                <FileActions name={`${name}.pdf`} buttonsOnly testId="preview-pdf"
+                  fetchFile={async () => {
+                    if (!drawn.current) throw new Error('Still drawing.')
+                    return drawn.current
+                  }} />
               )}
             </div>
           }>

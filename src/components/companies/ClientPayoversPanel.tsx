@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { FileActions } from '../ui/FileActions'
+import { blobFromUrl } from '../../lib/fileSave'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import clsx from 'clsx'
@@ -6,7 +8,7 @@ import { Card } from '../ui/Card'
 import { rand } from '../../lib/money'
 import { supabase } from '../../lib/supabase'
 import { payoverStage, payoverTotals, type ClientPayover } from '../../lib/clientPayovers'
-import { fetchAdviceSends, openAdviceCopy, type AdviceSend } from '../../lib/remittanceEmail'
+import { fetchAdviceSends, adviceCopyName, adviceCopyUrl, type AdviceSend } from '../../lib/remittanceEmail'
 
 /**
  * EVERY PAYOVER TO THIS CLIENT, AND THE PAPERS THAT WENT WITH IT.
@@ -72,9 +74,6 @@ export function ClientPayoversPanel({ companyId }: { companyId: string }) {
   if (error) return <Card><p className="text-sm text-negative-700">{error}</p></Card>
 
   const totals = payoverTotals(runs)
-  const open = (path: string) => {
-    void openAdviceCopy(path).catch((e: unknown) => setError(e instanceof Error ? e.message : 'That copy could not be opened.'))
-  }
 
   return (
     <Card padded={false}>
@@ -125,8 +124,11 @@ export function ClientPayoversPanel({ companyId }: { companyId: string }) {
                         <span key={x.id} className="inline-flex items-center gap-2" title={`To ${x.sentTo}`}>
                           {i > 0 && <span className="text-slate-300">|</span>}
                           <span>{x.version === 1 ? 'Sent' : `Sent again (${x.version})`} {fmtStamp(x.sentAt)}</span>
-                          <button type="button" onClick={() => open(x.pdfPath)} className="font-medium text-navy-700 underline">Statement (PDF)</button>
-                          <button type="button" onClick={() => open(x.xlsxPath)} className="mr-2 font-medium text-navy-700 underline">Schedule</button>
+                          {/* Open or Download, each its own press (the firm, 19 Oct). */}
+                          <FileActions name={adviceCopyName(x.pdfPath)} label="Statement (PDF)" compact
+                            openUrl={() => adviceCopyUrl(x.pdfPath)} fetchFile={async () => blobFromUrl(await adviceCopyUrl(x.pdfPath))} />
+                          <FileActions name={adviceCopyName(x.xlsxPath)} label="Schedule" compact
+                            openUrl={() => adviceCopyUrl(x.xlsxPath)} fetchFile={async () => blobFromUrl(await adviceCopyUrl(x.xlsxPath))} />
                         </span>
                       )) : (r.status === 'sent' || r.status === 'paid')
                         ? <span className="text-slate-400" title="Sent before copies were kept">No copy kept</span>

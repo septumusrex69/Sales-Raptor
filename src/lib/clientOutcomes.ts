@@ -14,7 +14,15 @@ import { CLIENT_POSITION_ORDER, CLIENT_POSITIONS, clientPosition, type ClientPos
 export interface OutcomeRow { outcome: string; accounts: number; capital: number; collected: number }
 export interface OutcomeSlice { key: 'recovered' | 'active' | 'closed'; label: string; accounts: number; pct: number }
 
-export function outcomeRing(rows: OutcomeRow[]): { slices: OutcomeSlice[]; total: number; recoveryRate: number | null } {
+/*
+ * THE MONEY TRAVELS WITH THE COUNTS (19 Oct): `capital` and `collected` over the same accounts, so the
+ * recovery rate can be drawn as what it is -- rands against rands -- beside a ring that counts
+ * ACCOUNTS. It sat in the ring's centre, where "27%" over a ring that was all one colour read as a
+ * chart that had gone wrong.
+ */
+export function outcomeRing(rows: OutcomeRow[]): {
+  slices: OutcomeSlice[]; total: number; recoveryRate: number | null; capital: number; collected: number
+} {
   const of = (k: string) => rows.filter((r) => r.outcome === k)
   const n = (k: string) => of(k).reduce((t, r) => t + r.accounts, 0)
   const total = rows.reduce((t, r) => t + r.accounts, 0)
@@ -23,7 +31,7 @@ export function outcomeRing(rows: OutcomeRow[]): { slices: OutcomeSlice[]; total
   const pct = (v: number) => (total ? Math.round((v / total) * 100) : 0)
   const slices = ([['recovered', 'Recovered'], ['active', 'Active'], ['closed', 'Closed']] as const)
     .map(([key, label]) => ({ key, label, accounts: n(key), pct: pct(n(key)) }))
-  return { slices, total, recoveryRate: capital > 0 ? Math.round((collected / capital) * 100) : null }
+  return { slices, total, recoveryRate: capital > 0 ? Math.round((collected / capital) * 100) : null, capital, collected }
 }
 
 export interface PositionSlice { position: ClientPosition; label: string; accounts: number; pct: number }
