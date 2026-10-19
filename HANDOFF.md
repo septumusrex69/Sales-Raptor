@@ -54,6 +54,10 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        icons on the tabs) before building it.
      - **The client ring** counts accounts in its centre; the recovery rate is a bar beside it.
        Twelve months of handovers fit the card; the scale climbs in equal steps.
+     - **The Communications dashboard has the three arrangements** (`DashboardPanes`: one column,
+       three columns, wide two-thirds + one-third; the record pages' switcher and memory). Figure
+       rows stay across the page. Only Communications so far -- Sales, the collections floor and
+       the company dashboard would take the same component if the firm wants them.
    - **NOT BUILT, PROPOSED: a client report** (the firm sent their Excel "Collection dashboard" PDF
      and asked to discuss one). Their PDF's pie labels are wrong (298.95%, 100%), its ring is
      unlabelled and page 2 is blank. Proposed: a PDF off the client page on the letterhead -- issue

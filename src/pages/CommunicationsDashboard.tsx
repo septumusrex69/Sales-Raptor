@@ -10,6 +10,7 @@ import { StatTile } from '../components/ui/StatTile'
 import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../components/ui/CompareSelector'
 import { RingDonut, type RingDonutSlice } from '../components/ui/RingDonut'
+import { DashboardPanes } from '../components/dashboard/DashboardPanes'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { ActivityBreakdownChart } from '../components/dashboard/ActivityBreakdownChart'
 import { formatCurrency, timeAgo, TODAY } from '../data/mockData'
@@ -344,349 +345,356 @@ export function CommunicationsDashboard() {
         </Card>
       )}
 
-      {/* ---------- the clients' work, first ---------- */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="comms-row">
-        <StatTile size="secondary" label="Handed over by existing clients"
-          value={intake === null || !thisMonth ? '…' : `${thisMonth.existingAccounts.toLocaleString('en-ZA')} · ${formatCurrency(thisMonth.existingCapital)}`}
-          hint="Accounts and capital this month from clients past their first three months -- the relationship Communications keeps." />
-        <StatTile size="secondary" label="Clients sending work" value={books === null ? '…' : myBooks.filter((b) => b.periodAccounts > 0).length.toLocaleString('en-ZA')}
-          hint="Clients in scope with at least one account handed over this month." />
-        <StatTile size="secondary" label="Clients touched" value={touched.touched.toLocaleString('en-ZA')}
-          hint="Unique clients with any call, meeting, email or note logged this month by the people in scope." />
-        <StatTile size="secondary" label="Courtesy calls" value={touched.courtesy.toLocaleString('en-ZA')}
-          hint="Unique clients who had a courtesy call logged this month." />
-      </div>
-
-      <MonthTrackCard kind="existing" rows={track} months={months} onMonths={setMonths} testId="comms-existing-handovers"
-        title="Handovers from existing clients, month by month" subtitle="The firm's intake from clients past their first three months" />
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        {books !== null && <TopClientsCard books={myBooks} periodLabel={period.label} />}
-        {books !== null && <GoneQuietCard books={myBooks} todayIso={clockToday()} />}
-      </div>
-
-      {/* PATTERNS IN WHEN WORK ARRIVES (the firm, 18 Oct: "3 then 1"): who is late against their own
-          rhythm, and when in the month existing clients hand over. */}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <LatePatternCard todayIso={clockToday()} owners={scope === 'all' ? null : scopedIdSet} />
-        <TypicalMonthCard intake={intake} fromIso={intakeFrom} toIso={clockToday()} />
-      </div>
-
-      {awaiting !== null && myAwaiting.length > 0 && (
-        <Card className="border-gold-300 bg-gold-50/60" >
-          <div data-testid="awaiting-first-handover">
-            <CardHeader title={`Signed, nothing handed over yet · ${myAwaiting.length}`}
-              subtitle="A mandate is on record and not one account has arrived. The longer it waits, the colder it gets." />
-            <ul className="divide-y divide-gold-200/70">
-              {myAwaiting.map((c) => (
-                <li key={c.companyId} className="flex items-center gap-3 py-2 text-sm">
-                  <Link to={`/companies/${c.companyId}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
-                  <span className="shrink-0 text-xs text-slate-500">signed {c.signedOn.split('-').reverse().join('/')}</span>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${c.days > 30 ? 'bg-rose-100 text-rose-700' : 'bg-white text-slate-600'}`}>
-                    {c.days === 1 ? '1 day' : `${c.days} days`}
-                  </span>
-                </li>
-              ))}
-            </ul>
+      {/*
+        THE PANES, IN WHICHEVER OF THE THREE ARRANGEMENTS IS CHOSEN (S9, 19 Oct: "the one under the
+        other, the three panes, and that one that's left that's bigger and small on the right").
+        Figure rows stay across the page; charts and tables are wide; lists are narrow. See
+        DashboardPanes for where each kind goes in each arrangement.
+      */}
+      <DashboardPanes layoutKey="raptor.dashboard.communications.layout" panes={[
+        /* ---------- the clients' work, first ---------- */
+        { id: 'figures', kind: 'full', node: (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="comms-row">
+            <StatTile size="secondary" label="Handed over by existing clients"
+              value={intake === null || !thisMonth ? '…' : `${thisMonth.existingAccounts.toLocaleString('en-ZA')} · ${formatCurrency(thisMonth.existingCapital)}`}
+              hint="Accounts and capital this month from clients past their first three months -- the relationship Communications keeps." />
+            <StatTile size="secondary" label="Clients sending work" value={books === null ? '…' : myBooks.filter((b) => b.periodAccounts > 0).length.toLocaleString('en-ZA')}
+              hint="Clients in scope with at least one account handed over this month." />
+            <StatTile size="secondary" label="Clients touched" value={touched.touched.toLocaleString('en-ZA')}
+              hint="Unique clients with any call, meeting, email or note logged this month by the people in scope." />
+            <StatTile size="secondary" label="Courtesy calls" value={touched.courtesy.toLocaleString('en-ZA')}
+              hint="Unique clients who had a courtesy call logged this month." />
           </div>
-        </Card>
-      )}
-
-      <Card>
-        <div className="flex items-start justify-between mb-4 gap-3">
-          <CardHeader title="Recovery Rate" subtitle="Payments vs. handover amount for the clients in scope, and this period's meeting format split" />
-          <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{period.label}</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-start">
-          {scope.startsWith('member:') && bookCoefficient !== undefined && teamCoefficient !== undefined ? (
-            <ComparisonGauge individualPct={bookCoefficient} teamPct={teamCoefficient} />
-          ) : recoveryDonut.length > 0 ? (
-            <RingDonut
-              data={recoveryDonut}
-              centerValue={`${Math.round(bookCoefficient ?? 0)}%`}
-              centerColor={OUTCOME_VALUE}
-              centerLabel={coefficientScopeLabel}
-              caption="Paid to date ÷ handover amount"
-            />
-          ) : (
-            <p className="text-sm text-slate-400">No handover data for this selection yet.</p>
-          )}
-          {meetingDonut.length > 0 ? (
-            <RingDonut data={meetingDonut} centerValue={kpis.curr.meetings.toString()} centerLabel="MEETINGS HELD" caption="This period's format split" />
-          ) : (
-            <p className="text-sm text-slate-400">No meetings scheduled this period.</p>
-          )}
-          <div className="flex flex-col gap-2.5">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">This period's servicing activity</span>
-            {[
-              { label: 'Courtesy Calls Made', value: kpis.curr.courtesyCalls, color: 'var(--c-navy)', bg: 'var(--tint-steel)', to: buildDrilldownUrl('/activities', { type: 'Courtesy Call', [SALES_MONTH_PARAM]: periodParam }) },
-              { label: 'Handovers Received', value: kpis.curr.handovers, color: 'var(--c-gold-deep)', bg: 'var(--tint-gold-deep)', to: buildDrilldownUrl('/activities', { type: 'Handover Received', [SALES_MONTH_PARAM]: periodParam }) },
-              { label: 'Deals Closed by Communications', value: kpis.curr.dealsWon, color: 'var(--c-green)', bg: 'var(--tint-green)', to: buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' }) },
-            ].map((p) => (
-              <Link key={p.label} to={p.to} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-slate-100 hover:bg-slate-50/60">
-                <span className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-extrabold shrink-0" style={{ backgroundColor: p.bg, color: p.color }}>
-                  {p.value}
-                </span>
-                <span className="flex-1 min-w-0">
-                  <span className="block text-lg font-extrabold text-slate-800 leading-tight">{p.value}</span>
-                  <span className="block text-[11.5px] text-slate-400">{p.label}</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
-          <span>Collections Coefficient = Paid to Date ÷ Handover Amount · excludes undisclosed fee recoveries</span>
-          <span className="font-semibold text-slate-600 shrink-0">
-            {kpis.curr.clientsTouched} of {clients.length} active clients contacted this period
-          </span>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatTile
-          label="Courtesy Calls"
-          value={kpis.curr.courtesyCalls.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.courtesyCalls, kpis.prev.courtesyCalls) : undefined}
-          to={buildDrilldownUrl('/activities', { type: 'Courtesy Call', [SALES_MONTH_PARAM]: periodParam })}
-          icon={<Phone size={14} className="text-slate-300" />}
-        />
-        <StatTile
-          label="Handovers Received"
-          value={kpis.curr.handovers.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.handovers, kpis.prev.handovers) : undefined}
-          to={buildDrilldownUrl('/activities', { type: 'Handover Received', [SALES_MONTH_PARAM]: periodParam })}
-          icon={<Inbox size={14} className="text-slate-300" />}
-        />
-        <StatTile
-          label="Meetings Held"
-          value={kpis.curr.meetings.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.meetings, kpis.prev.meetings) : undefined}
-          to={buildDrilldownUrl('/tasks', { view: 'All' })}
-          icon={<Users2 size={14} className="text-slate-300" />}
-        />
-        <StatTile
-          label="Deals Closed"
-          value={kpis.curr.dealsWon.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.dealsWon, kpis.prev.dealsWon) : undefined}
-          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' })}
-          icon={<Handshake size={14} className="text-slate-300" />}
-        />
-        <StatTile
-          label="Clients Touched"
-          value={`${kpis.curr.clientsTouched} / ${clients.length}`}
-          icon={<ClipboardCheck size={14} className="text-slate-300" />}
-        />
-        <StatTile
-          label={scope.startsWith('member:') ? 'Your Collections Coefficient' : scope.startsWith('team:') ? 'Team Collections Coefficient' : 'Collections Coefficient'}
-          value={bookCoefficient !== undefined ? `${bookCoefficient.toFixed(1)}%` : '—'}
-          accent="gold"
-          icon={<Percent size={14} className="text-slate-300" />}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatTile label="Avg. Days Since Last Contact" value={secondary.avgDaysSinceContact !== undefined ? secondary.avgDaysSinceContact.toString() : '—'} size="secondary" />
-        <StatTile label="Clients Never Contacted" value={secondary.neverContactedCount.toString()} size="secondary" />
-        <StatTile label="Overdue Follow-ups" value={secondary.overdueTasksCount.toString()} size="secondary" to={buildDrilldownUrl('/tasks', { view: 'Overdue' })} />
-        <StatTile label="Meetings This Week" value={secondary.meetingsThisWeekCount.toString()} size="secondary" to={buildDrilldownUrl('/tasks', { view: 'All' })} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2">
-          <CardHeader title="Collections Coefficient by Client" subtitle="Paid to date as a share of handover amount — lowest first" />
-          {rankedByCoefficient.length === 0 ? (
-            <p className="text-sm text-slate-400">No Swordfish client data yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {rankedByCoefficient.map(({ company, rollup }) => (
-                <CoefficientBar key={company.id} company={company} rollup={rollup} />
-              ))}
-            </div>
-          )}
-          {clientRollups.length > 0 && (
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-xs">
-              <span className="text-slate-500">Total: {clientRollups.reduce((s, r) => s + (r.rollup.accountCount ?? 0), 0).toLocaleString()} accounts</span>
-              <span className="font-semibold text-slate-700">{bookCoefficient !== undefined ? `${bookCoefficient.toFixed(1)}% overall` : '—'}</span>
-            </div>
-          )}
-        </Card>
-        <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
-      </div>
-
-      {rankedByCoefficient.length > 0 && (
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader title="Needs a Courtesy Call" subtitle="Lowest collections coefficient — most likely to need attention" />
-          </div>
-          <div className="px-5 pb-5 divide-y divide-slate-50">
-            {rankedByCoefficient.slice(0, 3).map(({ company, rollup }) => {
-              const pct = collectionsCoefficient(rollup) ?? 0
-              return (
-                <Link key={company.id} to={`/companies/${company.id}`} className="flex items-center justify-between gap-3 py-1.5 text-[12.5px] whitespace-nowrap hover:bg-slate-50 -mx-1 px-1 rounded-md">
-                  <p className="min-w-0 truncate" title={company.name}>
-                    <span className="font-medium text-slate-700">{company.name}</span>
-                    <span className="text-slate-400"> &middot; {(rollup.accountCount ?? 0).toLocaleString()} accounts</span>
-                  </p>
-                  <span className="shrink-0 font-bold tabular-nums" style={{ color: TONE_HEX[coefficientTone(pct)] }}>
-                    {pct.toFixed(1)}%
-                  </span>
-                </Link>
-              )
-            })}
-          </div>
-        </Card>
-      )}
-
-      <Card padded={false}>
-        <div className="p-5 pb-0">
-          <CardHeader title="Communications Team" subtitle="Click a column to sort" />
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full list-table whitespace-nowrap">
-            <thead>
-              <tr className="text-left border-y border-slate-100 text-slate-400">
-                <th className="font-medium px-3 py-2">Team Member</th>
-                {(
-                  [
-                    { key: 'courtesyCalls', label: 'Courtesy Calls' },
-                    { key: 'meetings', label: 'Meetings' },
-                    { key: 'handovers', label: 'Handovers Logged' },
-                    { key: 'dealsWon', label: 'Deals Won' },
-                    { key: 'revenueWon', label: 'Revenue Won' },
-                  ] as const
-                ).map((c) => (
-                  <th
-                    key={c.key}
-                    onClick={() => setSortKey(c.key)}
-                    className="font-medium px-2 py-2 text-right cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
-                  >
-                    {c.label}
-                    {sortKey === c.key ? ' ▼' : ''}
-                  </th>
+        ) },
+        { id: 'existing-handovers', kind: 'wide', node: (
+          <MonthTrackCard kind="existing" rows={track} months={months} onMonths={setMonths} testId="comms-existing-handovers"
+            title="Handovers from existing clients, month by month" subtitle="The firm's intake from clients past their first three months" />
+        ) },
+        books !== null && { id: 'top-clients', kind: 'wide', node: <TopClientsCard books={myBooks} periodLabel={period.label} /> },
+        books !== null && { id: 'gone-quiet', node: <GoneQuietCard books={myBooks} todayIso={clockToday()} /> },
+        /* PATTERNS IN WHEN WORK ARRIVES (the firm, 18 Oct: "3 then 1"): who is late against their
+           own rhythm, and when in the month existing clients hand over. */
+        { id: 'late-pattern', node: <LatePatternCard todayIso={clockToday()} owners={scope === 'all' ? null : scopedIdSet} /> },
+        { id: 'typical-month', kind: 'wide', node: <TypicalMonthCard intake={intake} fromIso={intakeFrom} toIso={clockToday()} /> },
+        awaiting !== null && myAwaiting.length > 0 && { id: 'awaiting-first-handover', node: (
+          <Card className="border-gold-300 bg-gold-50/60" >
+            <div data-testid="awaiting-first-handover">
+              <CardHeader title={`Signed, nothing handed over yet · ${myAwaiting.length}`}
+                subtitle="A mandate is on record and not one account has arrived. The longer it waits, the colder it gets." />
+              <ul className="divide-y divide-gold-200/70">
+                {myAwaiting.map((c) => (
+                  <li key={c.companyId} className="flex items-center gap-3 py-2 text-sm">
+                    <Link to={`/companies/${c.companyId}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
+                    <span className="shrink-0 text-xs text-slate-500">signed {c.signedOn.split('-').reverse().join('/')}</span>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${c.days > 30 ? 'bg-rose-100 text-rose-700' : 'bg-white text-slate-600'}`}>
+                      {c.days === 1 ? '1 day' : `${c.days} days`}
+                    </span>
+                  </li>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedLeaderboard.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center text-slate-400 py-6 whitespace-normal">
-                    No Communications team members yet.
-                  </td>
-                </tr>
+              </ul>
+            </div>
+          </Card>
+        ) },
+        { id: 'recovery-rate', kind: 'wide', node: (
+          <Card>
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <CardHeader title="Recovery Rate" subtitle="Payments vs. handover amount for the clients in scope, and this period's meeting format split" />
+              <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">{period.label}</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-[176px_176px_1fr] gap-6 items-start">
+              {scope.startsWith('member:') && bookCoefficient !== undefined && teamCoefficient !== undefined ? (
+                <ComparisonGauge individualPct={bookCoefficient} teamPct={teamCoefficient} />
+              ) : recoveryDonut.length > 0 ? (
+                <RingDonut
+                  data={recoveryDonut}
+                  centerValue={`${Math.round(bookCoefficient ?? 0)}%`}
+                  centerColor={OUTCOME_VALUE}
+                  centerLabel={coefficientScopeLabel}
+                  caption="Paid to date ÷ handover amount"
+                />
               ) : (
-                sortedLeaderboard.map((r, i) => (
-                  <tr key={r.memberId} className={i === 0 ? 'border-b border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-b border-slate-50 hover:bg-slate-50'}>
-                    <td className="px-3 py-1.5">
-                      <span className="flex items-center gap-2 font-medium text-slate-700">
-                        <UserAvatar userId={r.memberId} size={18} />
-                        {r.name}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.courtesyCalls}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.meetings}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.handovers}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.dealsWon}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{formatCurrency(r.revenueWon)}</td>
+                <p className="text-sm text-slate-400">No handover data for this selection yet.</p>
+              )}
+              {meetingDonut.length > 0 ? (
+                <RingDonut data={meetingDonut} centerValue={kpis.curr.meetings.toString()} centerLabel="MEETINGS HELD" caption="This period's format split" />
+              ) : (
+                <p className="text-sm text-slate-400">No meetings scheduled this period.</p>
+              )}
+              <div className="flex flex-col gap-2.5">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">This period's servicing activity</span>
+                {[
+                  { label: 'Courtesy Calls Made', value: kpis.curr.courtesyCalls, color: 'var(--c-navy)', bg: 'var(--tint-steel)', to: buildDrilldownUrl('/activities', { type: 'Courtesy Call', [SALES_MONTH_PARAM]: periodParam }) },
+                  { label: 'Handovers Received', value: kpis.curr.handovers, color: 'var(--c-gold-deep)', bg: 'var(--tint-gold-deep)', to: buildDrilldownUrl('/activities', { type: 'Handover Received', [SALES_MONTH_PARAM]: periodParam }) },
+                  { label: 'Deals Closed by Communications', value: kpis.curr.dealsWon, color: 'var(--c-green)', bg: 'var(--tint-green)', to: buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' }) },
+                ].map((p) => (
+                  <Link key={p.label} to={p.to} className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl border border-slate-100 hover:bg-slate-50/60">
+                    <span className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-extrabold shrink-0" style={{ backgroundColor: p.bg, color: p.color }}>
+                      {p.value}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-lg font-extrabold text-slate-800 leading-tight">{p.value}</span>
+                      <span className="block text-[11.5px] text-slate-400">{p.label}</span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-xs text-slate-400">
+              <span>Collections Coefficient = Paid to Date ÷ Handover Amount · excludes undisclosed fee recoveries</span>
+              <span className="font-semibold text-slate-600 shrink-0">
+                {kpis.curr.clientsTouched} of {clients.length} active clients contacted this period
+              </span>
+            </div>
+          </Card>
+        ) },
+        { id: 'kpis', kind: 'full', node: (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <StatTile
+              label="Courtesy Calls"
+              value={kpis.curr.courtesyCalls.toString()}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.courtesyCalls, kpis.prev.courtesyCalls) : undefined}
+              to={buildDrilldownUrl('/activities', { type: 'Courtesy Call', [SALES_MONTH_PARAM]: periodParam })}
+              icon={<Phone size={14} className="text-slate-300" />}
+            />
+            <StatTile
+              label="Handovers Received"
+              value={kpis.curr.handovers.toString()}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.handovers, kpis.prev.handovers) : undefined}
+              to={buildDrilldownUrl('/activities', { type: 'Handover Received', [SALES_MONTH_PARAM]: periodParam })}
+              icon={<Inbox size={14} className="text-slate-300" />}
+            />
+            <StatTile
+              label="Meetings Held"
+              value={kpis.curr.meetings.toString()}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.meetings, kpis.prev.meetings) : undefined}
+              to={buildDrilldownUrl('/tasks', { view: 'All' })}
+              icon={<Users2 size={14} className="text-slate-300" />}
+            />
+            <StatTile
+              label="Deals Closed"
+              value={kpis.curr.dealsWon.toString()}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.dealsWon, kpis.prev.dealsWon) : undefined}
+              to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table' })}
+              icon={<Handshake size={14} className="text-slate-300" />}
+            />
+            <StatTile
+              label="Clients Touched"
+              value={`${kpis.curr.clientsTouched} / ${clients.length}`}
+              icon={<ClipboardCheck size={14} className="text-slate-300" />}
+            />
+            <StatTile
+              label={scope.startsWith('member:') ? 'Your Collections Coefficient' : scope.startsWith('team:') ? 'Team Collections Coefficient' : 'Collections Coefficient'}
+              value={bookCoefficient !== undefined ? `${bookCoefficient.toFixed(1)}%` : '—'}
+              accent="gold"
+              icon={<Percent size={14} className="text-slate-300" />}
+            />
+          </div>
+        ) },
+        { id: 'secondary', kind: 'full', node: (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatTile label="Avg. Days Since Last Contact" value={secondary.avgDaysSinceContact !== undefined ? secondary.avgDaysSinceContact.toString() : '—'} size="secondary" />
+            <StatTile label="Clients Never Contacted" value={secondary.neverContactedCount.toString()} size="secondary" />
+            <StatTile label="Overdue Follow-ups" value={secondary.overdueTasksCount.toString()} size="secondary" to={buildDrilldownUrl('/tasks', { view: 'Overdue' })} />
+            <StatTile label="Meetings This Week" value={secondary.meetingsThisWeekCount.toString()} size="secondary" to={buildDrilldownUrl('/tasks', { view: 'All' })} />
+          </div>
+        ) },
+        { id: 'coefficient-by-client', kind: 'wide', node: (
+          <Card>
+            <CardHeader title="Collections Coefficient by Client" subtitle="Paid to date as a share of handover amount — lowest first" />
+            {rankedByCoefficient.length === 0 ? (
+              <p className="text-sm text-slate-400">No Swordfish client data yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {rankedByCoefficient.map(({ company, rollup }) => (
+                  <CoefficientBar key={company.id} company={company} rollup={rollup} />
+                ))}
+              </div>
+            )}
+            {clientRollups.length > 0 && (
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 text-xs">
+                <span className="text-slate-500">Total: {clientRollups.reduce((s, r) => s + (r.rollup.accountCount ?? 0), 0).toLocaleString()} accounts</span>
+                <span className="font-semibold text-slate-700">{bookCoefficient !== undefined ? `${bookCoefficient.toFixed(1)}% overall` : '—'}</span>
+              </div>
+            )}
+          </Card>
+        ) },
+        { id: 'activity-breakdown', node: <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} /> },
+        rankedByCoefficient.length > 0 && { id: 'needs-courtesy-call', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Needs a Courtesy Call" subtitle="Lowest collections coefficient — most likely to need attention" />
+            </div>
+            <div className="px-5 pb-5 divide-y divide-slate-50">
+              {rankedByCoefficient.slice(0, 3).map(({ company, rollup }) => {
+                const pct = collectionsCoefficient(rollup) ?? 0
+                return (
+                  <Link key={company.id} to={`/companies/${company.id}`} className="flex items-center justify-between gap-3 py-1.5 text-[12.5px] whitespace-nowrap hover:bg-slate-50 -mx-1 px-1 rounded-md">
+                    <p className="min-w-0 truncate" title={company.name}>
+                      <span className="font-medium text-slate-700">{company.name}</span>
+                      <span className="text-slate-400"> &middot; {(rollup.accountCount ?? 0).toLocaleString()} accounts</span>
+                    </p>
+                    <span className="shrink-0 font-bold tabular-nums" style={{ color: TONE_HEX[coefficientTone(pct)] }}>
+                      {pct.toFixed(1)}%
+                    </span>
+                  </Link>
+                )
+              })}
+            </div>
+          </Card>
+        ) },
+        { id: 'team', kind: 'wide', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Communications Team" subtitle="Click a column to sort" />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full list-table whitespace-nowrap">
+                <thead>
+                  <tr className="text-left border-y border-slate-100 text-slate-400">
+                    <th className="font-medium px-3 py-2">Team Member</th>
+                    {(
+                      [
+                        { key: 'courtesyCalls', label: 'Courtesy Calls' },
+                        { key: 'meetings', label: 'Meetings' },
+                        { key: 'handovers', label: 'Handovers Logged' },
+                        { key: 'dealsWon', label: 'Deals Won' },
+                        { key: 'revenueWon', label: 'Revenue Won' },
+                      ] as const
+                    ).map((c) => (
+                      <th
+                        key={c.key}
+                        onClick={() => setSortKey(c.key)}
+                        className="font-medium px-2 py-2 text-right cursor-pointer select-none hover:text-slate-600 whitespace-nowrap"
+                      >
+                        {c.label}
+                        {sortKey === c.key ? ' ▼' : ''}
+                      </th>
+                    ))}
                   </tr>
+                </thead>
+                <tbody>
+                  {sortedLeaderboard.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center text-slate-400 py-6 whitespace-normal">
+                        No Communications team members yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    sortedLeaderboard.map((r, i) => (
+                      <tr key={r.memberId} className={i === 0 ? 'border-b border-slate-50 bg-gold-300/25 hover:bg-gold-300/35' : 'border-b border-slate-50 hover:bg-slate-50'}>
+                        <td className="px-3 py-1.5">
+                          <span className="flex items-center gap-2 font-medium text-slate-700">
+                            <UserAvatar userId={r.memberId} size={18} />
+                            {r.name}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.courtesyCalls}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.meetings}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.handovers}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{r.dealsWon}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{formatCurrency(r.revenueWon)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) },
+        { id: 'recent-deals', kind: 'wide', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Recent Deals Closed" action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full list-table whitespace-nowrap">
+                <thead>
+                  <tr className="text-left border-y border-slate-100 text-slate-400">
+                    <th className="font-medium px-3 py-2">Deal</th>
+                    <th className="font-medium px-2 py-2">Client</th>
+                    <th className="font-medium px-2 py-2 text-right">Value</th>
+                    <th className="font-medium px-2 py-2">Closed By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentDeals.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="text-center text-slate-400 py-6 whitespace-normal">
+                        No deals closed yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    recentDeals.map((d) => (
+                      <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="px-3 py-1.5">
+                          <Link to={`/deals/${d.id}`} title={d.name}
+                            className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
+                            {d.name}
+                          </Link>
+                        </td>
+                        <td className="px-2 py-1.5 text-slate-500">{companyById(d.companyId)?.name}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-700">{formatCurrency(d.value)}</td>
+                        <td className="px-2 py-1.5 text-slate-500">{userById(d.ownerId)?.name}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) },
+        { id: 'recent-activity', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Recent Activity" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
+            </div>
+            <div className="px-5 pb-5 divide-y divide-slate-50 max-h-80 overflow-y-auto">
+              {recentActivities.length === 0 ? (
+                <p className="text-sm text-slate-400">No activity recorded yet.</p>
+              ) : (
+                recentActivities.map((a) => (
+                  <div key={a.id} className="flex items-center gap-2 py-1.5 text-[12.5px] whitespace-nowrap">
+                    <UserAvatar userId={a.userId} size={18} />
+                    <p className="min-w-0 flex-1 truncate text-slate-700" title={a.subject}>{a.subject}</p>
+                    <p className="shrink-0 text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
+                  </div>
                 ))
               )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2" padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader title="Recent Deals Closed" action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>} />
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full list-table whitespace-nowrap">
-              <thead>
-                <tr className="text-left border-y border-slate-100 text-slate-400">
-                  <th className="font-medium px-3 py-2">Deal</th>
-                  <th className="font-medium px-2 py-2">Client</th>
-                  <th className="font-medium px-2 py-2 text-right">Value</th>
-                  <th className="font-medium px-2 py-2">Closed By</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentDeals.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="text-center text-slate-400 py-6 whitespace-normal">
-                      No deals closed yet.
-                    </td>
-                  </tr>
-                ) : (
-                  recentDeals.map((d) => (
-                    <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="px-3 py-1.5">
-                        <Link to={`/deals/${d.id}`} title={d.name}
-                          className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
-                          {d.name}
-                        </Link>
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-500">{companyById(d.companyId)?.name}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-700">{formatCurrency(d.value)}</td>
-                      <td className="px-2 py-1.5 text-slate-500">{userById(d.ownerId)?.name}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader title="Recent Activity" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
-          </div>
-          <div className="px-5 pb-5 divide-y divide-slate-50 max-h-80 overflow-y-auto">
-            {recentActivities.length === 0 ? (
-              <p className="text-sm text-slate-400">No activity recorded yet.</p>
-            ) : (
-              recentActivities.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 py-1.5 text-[12.5px] whitespace-nowrap">
-                  <UserAvatar userId={a.userId} size={18} />
-                  <p className="min-w-0 flex-1 truncate text-slate-700" title={a.subject}>{a.subject}</p>
-                  <p className="shrink-0 text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
+            </div>
+          </Card>
+        ) },
+        { id: 'meetings-due', kind: 'wide', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Meetings & Follow-ups Due" subtitle="Overdue, due today, and this week" action={<Link to="/tasks" className="text-xs font-medium text-brand-600 hover:underline">View all tasks</Link>} />
+            </div>
+            <div className="px-5 pb-5 divide-y divide-slate-50">
+              {tasksDue.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
+                  <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
+                    <Circle size={15} />
+                  </button>
+                  <p className="min-w-0 flex-1 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
+                    <span className="font-medium text-slate-700">{t.title}</span>
+                    <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
+                  </p>
+                  <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{daysAgoLabel(t.dueDate)}</span>
+                  <UserAvatar userId={t.ownerId} size={18} />
+                  <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
+                    Reschedule
+                  </button>
                 </div>
-              ))
-            )}
-          </div>
-        </Card>
-      </div>
-
-      <Card padded={false}>
-        <div className="p-5 pb-0">
-          <CardHeader title="Meetings & Follow-ups Due" subtitle="Overdue, due today, and this week" action={<Link to="/tasks" className="text-xs font-medium text-brand-600 hover:underline">View all tasks</Link>} />
-        </div>
-        <div className="px-5 pb-5 divide-y divide-slate-50">
-          {tasksDue.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
-                <Circle size={15} />
-              </button>
-              <p className="min-w-0 flex-1 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
-                <span className="font-medium text-slate-700">{t.title}</span>
-                <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
-              </p>
-              <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>{daysAgoLabel(t.dueDate)}</span>
-              <UserAvatar userId={t.ownerId} size={18} />
-              <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
-                Reschedule
-              </button>
+              ))}
+              {tasksDue.length === 0 && (
+                <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
+                  <CheckCircle2 size={22} className="text-[var(--c-green)]" />
+                  All caught up — no tasks due.
+                </div>
+              )}
             </div>
-          ))}
-          {tasksDue.length === 0 && (
-            <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
-              All caught up — no tasks due.
-            </div>
-          )}
-        </div>
-      </Card>
+          </Card>
+        ) },
+      ]} />
 
       {rescheduleTask && (
         <RescheduleTaskModal

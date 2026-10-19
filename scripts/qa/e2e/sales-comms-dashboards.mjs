@@ -8,7 +8,7 @@
  *
  * Run: node scripts/qa/e2e/sales-comms-dashboards.mjs
  */
-import { PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
+import { OUT, PORT, chromium, makeRunner, signedInPage, startServer, stopServer } from './harness.mjs'
 import { PROFILE } from './fixtures.mjs'
 
 const t = makeRunner('sales-comms-dashboards')
@@ -153,6 +153,28 @@ try {
   t.ok('...and not the client keeping to theirs', !/On Time Ltd/.test(late) && /1 more are keeping to theirs/.test(late))
   t.ok('a typical month: a bar a day of the month', (await page.getByTestId('typical-month').locator('.recharts-xAxis-tick-labels text').count()) === 31)
   await t.shot(page, 'communications-dashboard')
+
+  /* THE THREE ARRANGEMENTS (S9, 19 Oct): "the one under the other, the three panes, and that one
+     that's left that's bigger and small on the right". Each pressed, each measured. */
+  await page.setViewportSize({ width: 1366, height: 3600 })
+  const panes = page.getByTestId('dashboard-panes')
+  const leftOf = async (id) => (await panes.locator(`[data-pane="${id}"]`).boundingBox())?.x ?? -1
+  const widthOf = async (id) => (await panes.locator(`[data-pane="${id}"]`).boundingBox())?.width ?? -1
+  await panes.getByRole('button', { name: 'One column' }).click(); await page.waitForTimeout(300)
+  t.ok('one column: the lists under each other, as wide as the chart',
+    Math.abs((await widthOf('late-pattern')) - (await widthOf('existing-handovers'))) < 2)
+  await page.screenshot({ path: `${OUT}/comms-layout-stacked.png` })
+  await panes.getByRole('button', { name: 'Three columns' }).click(); await page.waitForTimeout(300)
+  t.ok('three columns: the lists side by side, a third each',
+    (await leftOf('late-pattern')) > (await leftOf('gone-quiet')) && (await widthOf('gone-quiet')) < (await widthOf('existing-handovers')) / 2.5)
+  await page.screenshot({ path: `${OUT}/comms-layout-columns.png` })
+  await panes.getByRole('button', { name: 'Wide' }).click(); await page.waitForTimeout(300)
+  t.ok('wide: the charts two thirds on the left, the lists down the right',
+    (await leftOf('late-pattern')) > (await leftOf('existing-handovers')) + (await widthOf('existing-handovers')) - 5)
+  t.ok('...the figure rows still across the page in every arrangement',
+    (await widthOf('figures')) > (await widthOf('existing-handovers')) * 1.3)
+  await page.screenshot({ path: `${OUT}/comms-layout-wide.png` })
+  t.check('...and the choice is remembered', await page.evaluate(() => localStorage.getItem('raptor.dashboard.communications.layout')), 'wide')
   await context.close()
 
   /* THE SALES PAGE FOLLOWS THE STAGING CLOCK (the firm, 18 Oct: staging on 11 Sep, the page opened on
