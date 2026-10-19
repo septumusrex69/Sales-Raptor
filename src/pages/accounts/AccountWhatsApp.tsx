@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { FileText, Loader2, MessageCircle } from 'lucide-react'
 import { Modal } from '../../components/ui/Modal'
 import { FileActions } from '../../components/ui/FileActions'
+import { downloadBlob } from '../../lib/fileSave'
 import { RecordAction } from '../../components/record/RecordShell'
 import { WhatsAppSentModal } from '../../components/record/WhatsAppButton'
 import { fetchLibrary, type LibraryTemplate } from '../../lib/templateLibrary.ts'
@@ -19,13 +20,20 @@ import { letterNameForDebtor, whatsAppLetterTemplate } from '../../lib/whatsappL
  *
  * One box: the number (asked only where there is more than one cellphone), then what to send -- a
  * message, or any letter in the library written for this debtor. A letter is drawn as the same PDF
- * the email would attach, and then TWO PRESSES, in order: save the PDF (on an iPad the share sheet,
- * which can hand it straight to WhatsApp), and open WhatsApp on the number with the letter's short
- * covering line typed in (whatsappLetters.ts).
+ * the email would attach the moment the letter is chosen, and then ONE PRESS does the rest: the PDF
+ * downloads, the letter's short covering line (whatsappLetters.ts) is copied, and WhatsApp opens on
+ * the debtor's number with that line typed in. The firm, after a first version that asked for two
+ * presses and so sent a final notice with nothing attached: "automatically, you should copy the
+ * message and then open the person on WhatsApp ... and it should download the PDF so you can just
+ * attach it."
  *
- * TWO PRESSES AND NOT ONE, because both have to be taps: Safari opens neither a download nor another
- * app from the end of an `await`, and drawing the PDF is one. Done for them in a single press, one of
- * the two would silently not happen on the iPad the firm works on.
+ * ONE PRESS IS POSSIBLE ONLY BECAUSE THE PDF IS ALREADY DRAWN. Safari starts neither a download nor
+ * another app from the end of an `await`, so all three happen synchronously inside the tap, on a
+ * blob made before it. The download is a plain `download` link in THIS tab -- not the share sheet,
+ * which is a modal the WhatsApp link would close, and not a new tab, which Safari would count as a
+ * second popup and block -- and the WhatsApp link is the real `<a>` the tap landed on, so the one
+ * navigation Safari allows a tap is WhatsApp's. The Save button stays underneath for the device
+ * that still does not keep the file.
  *
  * And on the way back, how many messages went -- the same question as a plain WhatsApp, charged the
  * same way by the page (recordWhatsApp), with the letter named on the timeline.
@@ -89,9 +97,11 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
   }
 
   const close = () => { setOpen(false); setChosen(null); setReady(null); setError(null) }
-  const openWhatsApp = (text: string, about: string | null, label: string) => (
+  /* `before` runs inside the tap, ahead of the link's own navigation: whatever it starts is still a
+     tap's doing. */
+  const openWhatsApp = (text: string, about: string | null, label: string, before?: () => void) => (
     <a href={whatsAppLink(number.wa, text)} target="_blank" rel="noopener noreferrer" data-testid="whatsapp-link" data-number={number.wa}
-      onClick={() => { close(); setAsking({ number: number.value, about }) }}
+      onClick={() => { before?.(); close(); setAsking({ number: number.value, about }) }}
       className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700">
       <MessageCircle size={14} /> {label}
     </a>
@@ -150,13 +160,20 @@ export function AccountWhatsApp({ numbers, opening, values, audience, reference,
                 {ready && (
                   <>
                     <div>
-                      <p className="mb-1.5 text-xs font-medium text-slate-500">1. Save the PDF, to attach in WhatsApp</p>
-                      <FileActions name={ready.filename} fetchFile={async () => ready.blob} testId="whatsapp-letter-pdf" />
+                      <p className="mb-2 rounded-lg bg-slate-50 p-2.5 text-[13px] text-slate-700" data-testid="whatsapp-letter-text">{ready.text}</p>
+                      {openWhatsApp(ready.text, chosen.name, 'Send on WhatsApp', () => {
+                        /* IN THIS ORDER, all before the link navigates: the file, then the line. */
+                        downloadBlob(ready.blob, ready.filename, { sameTab: true })
+                        void navigator.clipboard?.writeText(ready.text).catch(() => {})
+                      })}
+                      <p className="mt-2 text-xs text-slate-500">
+                        Downloads the PDF, copies this message and opens WhatsApp on {number.value}. In the chat, attach the
+                        PDF with + then Document (on an iPad it is in Files, under Downloads).
+                      </p>
                     </div>
                     <div>
-                      <p className="mb-1.5 text-xs font-medium text-slate-500">2. Open WhatsApp, with this typed in</p>
-                      <p className="mb-2 rounded-lg bg-slate-50 p-2.5 text-[13px] text-slate-700" data-testid="whatsapp-letter-text">{ready.text}</p>
-                      {openWhatsApp(ready.text, chosen.name, 'Open WhatsApp')}
+                      <p className="mb-1.5 text-xs font-medium text-slate-500">The PDF did not download? Save it here</p>
+                      <FileActions name={ready.filename} fetchFile={async () => ready.blob} testId="whatsapp-letter-pdf" />
                     </div>
                   </>
                 )}

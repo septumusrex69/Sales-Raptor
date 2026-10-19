@@ -75,17 +75,20 @@ try {
   await ready.getByTestId('whatsapp-letter-pdf').waitFor({ timeout: 20000 })
   const line = await ready.getByTestId('whatsapp-letter-text').innerText()
   t.ok(`the letter's short covering line, not the letter ("${line}")`, /Attached is a Section 129 notice/.test(line) && /BF-004321/.test(line) && line.length < 300)
-  const saved = page.waitForEvent('download', { timeout: 20000 })
-  await ready.getByTestId('whatsapp-letter-pdf').locator('[data-action="download"]').click()
-  const file = await saved
-  t.check('the PDF is saved, to attach in WhatsApp', readFileSync(await file.path()).subarray(0, 5).toString('latin1'), '%PDF-')
   const letterHref = (await ready.getByTestId('whatsapp-link').getAttribute('href')) ?? ''
   t.ok('...and WhatsApp opens with that line typed in', decodeURIComponent(letterHref.split('text=')[1] ?? '') === line)
 
+  /* ONE PRESS (the firm, 19 Oct: "automatically, you should copy the message and then open the person
+     on WhatsApp ... it should download the PDF so you can just attach it"). */
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   seen.length = 0
+  const saved = page.waitForEvent('download', { timeout: 20000 }).catch(() => null)
   const opened = context.waitForEvent('page', { timeout: 10000 }).catch(() => null)
   await ready.getByTestId('whatsapp-link').click()
-  t.ok('pressing it opens WhatsApp', !!(await opened))
+  const file = await saved
+  t.check('one press downloads the PDF, to attach in WhatsApp', file ? readFileSync(await file.path()).subarray(0, 5).toString('latin1') : '(no download)', '%PDF-')
+  t.ok('...opens WhatsApp', !!(await opened))
+  t.check('...and copies the message', await page.evaluate(() => navigator.clipboard.readText()).catch(() => '(nothing copied)'), line)
   await page.bringToFront()
   /* ON THE WAY BACK, HOW MANY WENT (the firm, 19 Oct). Nothing is recorded until it is answered. */
   const asked = page.getByTestId('whatsapp-sent')

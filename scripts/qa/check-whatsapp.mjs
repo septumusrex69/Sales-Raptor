@@ -77,8 +77,11 @@ ok('the account’s WhatsApp is no longer "not built yet"', !/label="WhatsApp" t
 const box = strip(read('src/pages/accounts/AccountWhatsApp.tsx'))
 ok('the account offers every library letter written for this debtor', /r\.kind === 'letter' && r\.format === 'document' && r\.active/.test(box) && /r\.audience === null \|\| r\.audience === audience/.test(box))
 ok('...drawn as the same PDF the email attaches, refused the same way', /letterPdfBytes\(\{ doc, scope: 'collections', values, filled: true/.test(box))
-ok('...then two presses, both taps: save the PDF, open WhatsApp (Safari opens neither after an await)',
-  /<FileActions name=\{ready\.filename\}/.test(box) && /openWhatsApp\(ready\.text, chosen\.name/.test(box))
+ok('...then ONE press (the firm: "automatically ... copy the message and then open the person on WhatsApp ... download the PDF"): the download and the copy run inside the tap, before the link navigates',
+  /openWhatsApp\(ready\.text, chosen\.name, 'Send on WhatsApp', \(\) => \{\s*downloadBlob\(ready\.blob, ready\.filename, \{ sameTab: true \}\)\s*void navigator\.clipboard\?\.writeText\(ready\.text\)/.test(box)
+  && /onClick=\{\(\) => \{ before\?\.\(\); close\(\)/.test(box))
+ok('...the download in this tab, so the tap\'s one new tab is WhatsApp\'s', /if \(!opts\.sameTab\) a\.target = '_blank'/.test(read('src/lib/fileSave.ts')))
+ok('...and a Save button underneath for the device that still does not keep it', /<FileActions name=\{ready\.filename\}/.test(box))
 ok('...and the letter is named on the timeline with the count', /about && input\.count > 0 \? `\$\{whatsAppNote\(input\.number, input\.count\)\} · \$\{input\.about\}`/.test(strip(read('src/lib/accountWhatsApp.ts'))))
 ok('...and records the press through recordWhatsApp', /recordWhatsApp\(\{ accountId: account\.id, number/.test(detail))
 

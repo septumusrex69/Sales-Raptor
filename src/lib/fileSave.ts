@@ -83,13 +83,17 @@ export async function saveFile(blob: Blob, filename: string, opts: { fromTap?: b
  * A NEW TAB AS ITS TARGET: a browser that ignores `download` (old Safari) opens the file beside
  * Raptor instead of over it. REVOKED A MINUTE LATER, not on the next line: Safari reads the blob
  * after the click returns, and a URL already revoked is a download of nothing.
+ *
+ * `sameTab` FOR A TAP THAT IS ABOUT TO OPEN SOMETHING ELSE (S9, the letter sent by WhatsApp: one tap
+ * downloads the PDF and opens the chat). Safari allows a tap one new tab; the chat must have it, and
+ * a second would be blocked as a popup, taking either the file or the chat with it.
  */
-export function downloadBlob(blob: Blob, filename: string): void {
+export function downloadBlob(blob: Blob, filename: string, opts: { sameTab?: boolean } = {}): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
-  a.target = '_blank'
+  if (!opts.sameTab) a.target = '_blank'
   a.rel = 'noopener'
   a.style.display = 'none'
   document.body.appendChild(a)
