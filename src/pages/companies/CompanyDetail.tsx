@@ -595,7 +595,8 @@ export function CompanyDetail() {
                 </span>
               )
             })()}
-            <button onClick={() => setOwnerOpen(true)} className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
+            <button onClick={() => setOwnerOpen(true)} aria-label="Reassign the liaison" title="Reassign the liaison"
+              className="p-1 rounded-lg text-slate-300 hover:text-slate-600 hover:bg-slate-100">
               <Pencil size={12} />
             </button>
           </dd>

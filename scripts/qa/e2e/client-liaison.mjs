@@ -100,7 +100,8 @@ try {
        who the liaison is and a warning only inside the Reassign box never reaches them. */
     t.ok('...and flags that they should not be', /not a liaison/i.test(await panelOwner(page)))
 
-    await page.locator('dd button').first().click()
+    /* By name: Class sits in the same panel since S9, and its picker is a button too. */
+    await page.getByRole('button', { name: 'Reassign the liaison' }).click()
     await page.waitForTimeout(400)
     const sel = await selectState(page)
     t.ok('the reassign box opened', !!sel)
@@ -138,7 +139,8 @@ try {
     t.ok('a liaison owner reads correctly on the panel', /^Nicole Loder/.test(await panelOwner(page)))
     /* NOTHING FLAGGED WHERE NOTHING IS WRONG. */
     t.ok('...with no warning beside it', !/not a liaison/i.test(await panelOwner(page)))
-    await page.locator('dd button').first().click()
+    /* By name: Class sits in the same panel since S9, and its picker is a button too. */
+    await page.getByRole('button', { name: 'Reassign the liaison' }).click()
     await page.waitForTimeout(400)
     const sel = await selectState(page)
     t.check('...and the box holds them', sel.value, 'u-nicole')
@@ -164,7 +166,8 @@ try {
   {
     const saves = []
     const { context, page } = await openDetail(browser, COMPANY, saves)
-    await page.locator('dd button').first().click()
+    /* By name: Class sits in the same panel since S9, and its picker is a button too. */
+    await page.getByRole('button', { name: 'Reassign the liaison' }).click()
     await page.waitForTimeout(400)
     await page.locator('form select').first().selectOption({ label: 'Nicole Loder' })
     await page.getByRole('button', { name: 'Save' }).click()
@@ -185,7 +188,8 @@ try {
   {
     const saves = []
     const { context, page } = await openDetail(browser, COMPANY, saves)
-    await page.locator('dd button').first().click()
+    /* By name: Class sits in the same panel since S9, and its picker is a button too. */
+    await page.getByRole('button', { name: 'Reassign the liaison' }).click()
     await page.waitForTimeout(400)
     await page.getByRole('button', { name: 'Save' }).click()
     await page.waitForTimeout(600)
