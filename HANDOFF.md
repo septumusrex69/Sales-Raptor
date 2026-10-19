@@ -245,8 +245,10 @@ field (reg/ID, VAT, tel, email, address, the four bank fields, contact person): 
 the same detail written another way (`mandate_same`: letters and digits only, lower-cased, a
 leading 27 read as 0) -> left alone; different -> KEPT, and a "The signed mandate differs from the
 client information" Note lists each one, with a line to confirm banking by phone before any
-remittance (a signed form replacing the payout account is the fraud path). A different name is
-noted only where neither name holds the other ("X" vs "X (Pty) Ltd" is the same). Contacts: matched
+remittance (a signed form replacing the payout account is the fraud path). THE NAME IS THE EXCEPTION
+(the firm: "we need to take the name on the document ... We can't just use the one that the
+salesperson used"): the client's name becomes the mandate's `mandate_client_name` whenever it is
+filled and differs, and the old name goes into the Deal Won note ("now as signed: X (was Y)"). Contacts: matched
 on email, number or full name; a match gets its blanks filled, a new person is added. Commission
 is NOT merged -- the signed mandate is the agreement, so it still replaces the rate. Probed on
 staging in a rolled-back transaction; check-mandate (44, break-tested).

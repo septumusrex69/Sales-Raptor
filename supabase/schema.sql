@@ -43779,6 +43779,8 @@ declare
   v_fill jsonb := '{}'::jsonb;
   v_differs text[] := '{}';
   v_bank_differs boolean := false;
+  v_signed_name text;
+  v_renamed_from text;
   -- The firm's clock, not the machine's: on staging the client must read as signed on the staging
   -- day, or it is a client from the future on every dashboard (check-staging-clock).
   v_signed timestamptz := public.raptor_now();
@@ -43837,16 +43839,21 @@ begin
       if v_field[1] like 'bank%' then v_bank_differs := true; end if;
     end if;
   end loop;
-  -- The name is never filled (a client always has one) but a different one is worth saying -- and
-  -- "Probe Traders" against "Probe Traders (Pty) Ltd" is not different, it is the same client
-  -- written out in full, so one name holding the other is the same name.
-  if v_co.name is not null and nullif(btrim(f ->> 'mandate_client_name'), '') is not null
-     and position(regexp_replace(lower(v_co.name), '[^a-z0-9]', '', 'g') in regexp_replace(lower(f ->> 'mandate_client_name'), '[^a-z0-9]', '', 'g')) = 0
-     and position(regexp_replace(lower(f ->> 'mandate_client_name'), '[^a-z0-9]', '', 'g') in regexp_replace(lower(v_co.name), '[^a-z0-9]', '', 'g')) = 0 then
-    v_differs := v_differs || ('Name: the mandate gives ' || btrim(f ->> 'mandate_client_name') || ' (kept: ' || v_co.name || ')');
+  -- THE NAME IS THE ONE ON THE DOCUMENT (the firm, 19 Oct: "we need to take the name on the
+  -- document. That's important. We can't just use the one that the salesperson used"). Unlike every
+  -- detail above, the name is not kept: what the closer typed on the lead is a label, what the client
+  -- wrote on the mandate they signed is who the agreement is with -- "Probe Traders (Pty) Ltd", not
+  -- "Probe Traders" -- and every statement, invoice and payover says it. The old one is written into
+  -- the notes, so the client can still be recognised by it.
+  v_signed_name := nullif(nullif(btrim(f ->> 'mandate_client_name'), ''), g);
+  if v_signed_name is not null and v_co.name is distinct from v_signed_name then
+    v_renamed_from := v_co.name;
+  else
+    v_signed_name := null;
   end if;
 
   update public.companies set
+    name = coalesce(v_signed_name, name),
     registration_number = coalesce(v_fill ->> 'registration_number', registration_number),
     vat_number = coalesce(v_fill ->> 'vat_number', vat_number),
     phone = coalesce(v_fill ->> 'phone', phone),
@@ -43918,7 +43925,8 @@ begin
             'Mandate signed online by ' || coalesce(nullif(nullif(btrim(f ->> 'mandate_signatory_name'), ''), g), new.signer_name, 'the client')
               || coalesce(' (' || nullif(nullif(btrim(f ->> 'mandate_signatory_designation'), ''), g) || ')', ''),
             'Commission: ' || case when v_bands is not null then 'sliding scale' else coalesce(round(v_rate * 100, 2)::text || '%', '') end
-              || '. The signed agreement is filed under The mandate.',
+              || '. The signed agreement is filed under The mandate.'
+              || case when v_renamed_from is not null then ' The client''s name is now as signed: ' || v_signed_name || ' (was ' || v_renamed_from || ').' else '' end,
             v_signed);
     if cardinality(v_differs) > 0 then
       insert into public.activities (type, user_id, company_id, lead_id, deal_id, subject, notes, activity_date)
