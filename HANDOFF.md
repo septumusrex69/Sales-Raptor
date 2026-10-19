@@ -239,21 +239,23 @@ on a blob revoked on the next line, which Safari on an iPad draws over the page.
   `window.open` for a file. The e2e for the letter preview and the simulation read real downloads.
 
 **A signed mandate ADDS to the client sheet (19 Oct).** The firm: "if there's duplicate information,
-it ignores it. But if there is new information, it accepts it." Before, `mandate_on_signed` wrote
-every filled mandate field OVER the company and always inserted its two contacts. Now, field by
-field (reg/ID, VAT, tel, email, address, the four bank fields, contact person): empty -> filled;
-the same detail written another way (`mandate_same`: letters and digits only, lower-cased, a
-leading 27 read as 0) -> left alone; different -> KEPT, and a "The signed mandate differs from the
-client information" Note lists each one, with a line to confirm banking by phone before any
-remittance (a signed form replacing the payout account is the fraud path). THE NAME IS THE EXCEPTION
-(the firm: "we need to take the name on the document ... We can't just use the one that the
-salesperson used"): the client's name becomes the mandate's `mandate_client_name` whenever it is
-filled and differs, and the old name goes into the Deal Won note ("now as signed: X (was Y)"). Contacts: matched
-on email, number or full name; a match gets its blanks filled, a new person is added. Commission
-is NOT merged -- the signed mandate is the agreement, so it still replaces the rate. Probed on
-staging in a rolled-back transaction; check-mandate (44, break-tested).
-**Decision for the firm:** a differing detail is kept and noted, not taken -- say if the mandate's
-should win for some fields (e.g. email).
+it ignores it. But if there is new information, it accepts it" -- then "always add the information
+from the mandate. Don't replace stuff. If the closer [has] put up some information and it's
+important, they might need it." Before, `mandate_on_signed` wrote every filled mandate field OVER
+the company and always inserted its two contacts. Now, field by field (reg/ID, VAT, tel, email,
+address, the four bank fields, contact person): empty -> filled; the same detail written another
+way (`mandate_same`: letters and digits only, lower-cased, a leading 27 read as 0) -> ignored;
+different -> the one on file STAYS and the mandate's is ADDED beside it in the new
+`companies.other_details` jsonb ([{label, value, source, at}], default `[]`), drawn as "Also on
+file" under Client information with its source. An "Added from the signed mandate" Note lists them;
+a second bank account adds "Remittance still goes to the one on file: confirm by telephone" (payovers
+read only `bank_account_number`). THE NAME is the one exception the firm asked for: the client takes
+the mandate's `mandate_client_name`, and the closer's name goes into other_details as "Entered by
+Sales" (and into the Deal Won note). Contacts: matched on email, number or full name; a match gets
+its blanks filled, a new person is added. Commission is NOT merged -- the signed mandate is the
+agreement. Probed on staging in rolled-back transactions; check-mandate (50), e2e client-mandate
+(22), both break-tested. Not done: other_details cannot be edited or promoted to the main field from
+the screen yet (the closer edits the main field by hand).
 
 **The client page (19 Oct, the firm's mock).** Band tags (Active, services); figures: Accounts ·
 Capital handed over · Recovery rate (MiniRing, from `client_account_outcomes`) · Commission
@@ -1003,8 +1005,8 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 - **S9's second migration**: `client_money_by_day(uuid)` (staging has it; end of schema.sql).
 - **S9's third**: `signing_requests.mode / promise_id / fee_charged_at`, `signing_document` (adds
   mode), `signing_accept(text, text, text)` (staging has them; end of schema.sql).
-- **S9's fourth**: `mandate_same(text, text)` and `mandate_on_signed` (LAST definition: adds, never
-  overwrites) (staging has them; end of schema.sql).
+- **S9's fourth**: `companies.other_details`, `mandate_same(text, text)` and `mandate_on_signed` (LAST
+  definition: adds, never overwrites; the signed name wins) (staging has them; end of schema.sql).
 - **Deleting a debtor account on staging takes over a minute** (seen in S9 probes, without S9's
   triggers too). Not investigated.
 

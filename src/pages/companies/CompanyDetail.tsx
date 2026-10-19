@@ -611,6 +611,28 @@ export function CompanyDetail() {
           absence, sets the date and takes the signed mandate itself.
         */}
         <Field label="Created" value={formatDate(company.createdAt)} />
+        {/*
+          ALSO ON FILE (S9): what a signed mandate ADDED beside a detail that was already here, and
+          the closer's name for the client once the signed name took over -- the firm: "Don't
+          replace stuff." Shown with where it came from, because two telephone numbers with no
+          source are a guess about which to ring.
+        */}
+        {(company.otherDetails ?? []).length > 0 && (
+          <div className="pt-3 border-t border-slate-100" data-testid="client-other-details">
+            <dt className="text-xs font-medium text-slate-500 mb-2">Also on file</dt>
+            <dd className="space-y-2">
+              {(company.otherDetails ?? []).map((d, i) => (
+                <div key={`${d.label}-${i}`} className="flex justify-between gap-3">
+                  <span className="text-slate-400">{d.label}</span>
+                  <span className="text-right">
+                    <span className="block text-slate-700 font-medium break-all">{d.value}</span>
+                    <span className="block text-[11px] text-slate-400">{d.source}{d.at ? `, ${formatDate(d.at)}` : ''}</span>
+                  </span>
+                </div>
+              ))}
+            </dd>
+          </div>
+        )}
       </dl>
     </Card>
   )

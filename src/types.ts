@@ -330,6 +330,14 @@ export interface Company {
   accountCount?: number
   handoverAmount?: number
   paymentsToDate?: number
+  /**
+   * DETAILS KEPT BESIDE THE CLIENT INFORMATION, NOT OVER IT (S9). The firm, of a signed mandate whose
+   * number, email or bank account differs from the one on file: "always add the information from the
+   * mandate. Don't replace stuff. If the closer [has] put up some information and it's important,
+   * they might need it." Written by mandate_on_signed; the closer's name for the client lands here
+   * too when the signed name takes over. Never empty in the database (default `[]`).
+   */
+  otherDetails?: { label: string; value: string; source: string; at: string }[]
   /** Name of the closer who originally signed this client (Swordfish's "Marketing Agent"), where known. */
   marketingAgent?: string
   /** Swordfish's client classification (A/B/C/D), where known. Set at the level a Swordfish code actually exists — a parent container invented by us has none of its own. */

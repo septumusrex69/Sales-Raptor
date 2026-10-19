@@ -228,6 +228,27 @@ try {
     t.ok('...and no refusal either', !/No mandate on record/.test(text))
     await context.close()
   }
+
+  /* ---------- what a signed mandate added beside the client information (S9) ---------- */
+  {
+    /* "Don't replace stuff": a different number from the mandate sits beside the one on file. */
+    const { context, page } = await openDetail(browser, {
+      ...COMPANY, other_details: [
+        { label: 'Telephone', value: '021 555 0000', source: 'Signed mandate', at: '2026-10-19T09:00:00Z' },
+        { label: 'Name', value: 'Rinda Roo', source: 'Entered by Sales', at: '2026-10-19T09:00:00Z' },
+      ],
+    })
+    const box = await page.getByTestId('client-other-details').innerText({ timeout: 15000 }).catch(() => '(not drawn)')
+    t.ok('what the mandate added is on the client page, under Client information', /Also on file/.test(box) && /021 555 0000/.test(box))
+    t.ok('...each with where it came from', /Signed mandate/.test(box) && /Entered by Sales/.test(box))
+    await context.close()
+  }
+  /* AND NOTHING WHERE NOTHING WAS ADDED: an empty heading reads as something missing. */
+  {
+    const { context, page } = await openDetail(browser, { ...COMPANY, other_details: [] })
+    t.check('no "Also on file" for a client with nothing beside its details', await page.getByTestId('client-other-details').count(), 0)
+    await context.close()
+  }
 } finally {
   await browser.close()
   await stopServer(server)

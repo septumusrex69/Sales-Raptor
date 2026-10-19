@@ -43734,6 +43734,8 @@ revoke all on function public.signing_accept(text, text, text) from public;
 grant execute on function public.signing_accept(text, text, text) to anon, authenticated;
 
 -- S9: a signed mandate ADDS to the client's information, it does not overwrite it.
+alter table public.companies add column if not exists other_details jsonb not null default '[]'::jsonb;
+comment on column public.companies.other_details is 'Details kept BESIDE the client information rather than over it (S9): [{label, value, source, at}]. A signed mandate that gives a different number, email, address or bank account adds it here, and the closer''s name for the client lands here when the signed name takes over.';
 create or replace function public.mandate_same(p_a text, p_b text)
 returns boolean
 language sql
@@ -43780,6 +43782,7 @@ declare
   v_differs text[] := '{}';
   v_bank_differs boolean := false;
   v_signed_name text;
+  v_extra jsonb := '[]'::jsonb;
   v_renamed_from text;
   -- The firm's clock, not the machine's: on staging the client must read as signed on the staging
   -- day, or it is a client from the future on every dashboard (check-staging-clock).
@@ -43804,16 +43807,17 @@ begin
   end if;
 
   -- WHAT THE MANDATE ADDS (the firm, 19 Oct: "something that adds that information ... if there's
-  -- duplicate information, it ignores it. But if there is new information, it accepts it."). Until
-  -- now every detail the client typed into the mandate was written OVER the client sheet, so a lead
-  -- that was already a client lost the number the liaison had been calling. Now, field by field:
-  -- an empty field takes the mandate's; the same detail written another way is left alone
-  -- (mandate_same); and a DIFFERENT detail is kept as it was and the mandate's is written into the
-  -- client's notes, for the liaison to choose. Not overwritten, because a field holds one value and
-  -- the one in it may be the one that works -- and above all for the bank account, where a signed
-  -- form quietly replacing the account remittance is paid into is exactly how money goes to the
-  -- wrong place. The commission is not on this list: the signed mandate IS the agreement, so its
-  -- rate replaces the old one, as before.
+  -- duplicate information, it ignores it. But if there is new information, it accepts it" -- and
+  -- then, of a first version that kept a differing detail and only NOTED the mandate's: "always add
+  -- the information from the mandate. Don't replace stuff. If the closer [has] put up some
+  -- information and it's important, they might need it"). Field by field: an empty field takes the
+  -- mandate's; the same detail written another way is left alone (mandate_same); and a DIFFERENT
+  -- detail is kept where it is and the mandate's is ADDED beside it, in `other_details`, which the
+  -- client page draws under Client information. Nothing the closer typed is lost and nothing the
+  -- client signed is lost. Above all for the bank account: a signed form quietly replacing the
+  -- account remittance is paid into is how money goes to the wrong place, so the one remittance
+  -- pays into stays put and the note says to confirm by telephone. The commission is not on this
+  -- list: the signed mandate IS the agreement, so its rate replaces the old one, as before.
   select * into v_co from public.companies where id = v_company;
   foreach v_field slice 1 in array array[
     array['registration_number', case when v_party = 'company' then 'mandate_reg_no' else 'mandate_id_no' end,
@@ -43834,20 +43838,25 @@ begin
       continue;
     elsif v_old is null then
       v_fill := v_fill || jsonb_build_object(v_field[1], v_new);
-    else
-      v_differs := v_differs || (v_field[3] || ': the mandate gives ' || v_new || ' (kept: ' || v_old || ')');
+    elsif not exists (select 1 from jsonb_array_elements(coalesce(v_co.other_details, '[]'::jsonb)) d
+                       where d ->> 'label' = v_field[3] and public.mandate_same(d ->> 'value', v_new)) then
+      v_extra := v_extra || jsonb_build_object('label', v_field[3], 'value', v_new, 'source', 'Signed mandate', 'at', v_signed);
+      v_differs := v_differs || (v_field[3] || ': ' || v_new || ' (beside ' || v_old || ')');
       if v_field[1] like 'bank%' then v_bank_differs := true; end if;
     end if;
   end loop;
   -- THE NAME IS THE ONE ON THE DOCUMENT (the firm, 19 Oct: "we need to take the name on the
-  -- document. That's important. We can't just use the one that the salesperson used"). Unlike every
-  -- detail above, the name is not kept: what the closer typed on the lead is a label, what the client
-  -- wrote on the mandate they signed is who the agreement is with -- "Probe Traders (Pty) Ltd", not
-  -- "Probe Traders" -- and every statement, invoice and payover says it. The old one is written into
-  -- the notes, so the client can still be recognised by it.
+  -- document. That's important. We can't just use the one that the salesperson used"). What the
+  -- client wrote on the mandate they signed is who the agreement is with -- "Probe Traders (Pty)
+  -- Ltd", not "Probe Traders" -- and every statement, invoice and payover says it. The closer's name
+  -- is not thrown away either ("don't replace stuff"): it goes into other_details, so the client can
+  -- still be recognised, and found, by it.
   v_signed_name := nullif(nullif(btrim(f ->> 'mandate_client_name'), ''), g);
   if v_signed_name is not null and v_co.name is distinct from v_signed_name then
     v_renamed_from := v_co.name;
+    if v_renamed_from is not null then
+      v_extra := v_extra || jsonb_build_object('label', 'Name', 'value', v_renamed_from, 'source', 'Entered by Sales', 'at', v_signed);
+    end if;
   else
     v_signed_name := null;
   end if;
@@ -43864,6 +43873,7 @@ begin
     bank_account_number = coalesce(v_fill ->> 'bank_account_number', bank_account_number),
     bank_branch_code = coalesce(v_fill ->> 'bank_branch_code', bank_branch_code),
     contact_person = coalesce(v_fill ->> 'contact_person', contact_person),
+    other_details = coalesce(other_details, '[]'::jsonb) || v_extra,
     mandate_signed_at = v_signed,
     -- Waiting for Sales to give it a liaison (the welcome flow, S8): the sales dashboard lists it.
     liaison_needed = true,
@@ -43931,10 +43941,10 @@ begin
     if cardinality(v_differs) > 0 then
       insert into public.activities (type, user_id, company_id, lead_id, deal_id, subject, notes, activity_date)
       values ('Note', coalesce(v_owner, new.created_by), v_company, new.lead_id, v_deal.id,
-              'The signed mandate differs from the client information',
+              'Added from the signed mandate, beside what was on file',
               array_to_string(v_differs, E'\n')
-                || E'\nThe client information was not changed. Edit it if the mandate''s is the right one.'
-                || case when v_bank_differs then E'\nThe banking differs: confirm it with the client by telephone before any remittance is paid.' else '' end,
+                || E'\nNothing on file was replaced: both are under Client information.'
+                || case when v_bank_differs then E'\nA second bank account was added. Remittance still goes to the one on file: confirm with the client by telephone which is right before any remittance is paid.' else '' end,
               v_signed);
     end if;
   end if;
@@ -43943,7 +43953,7 @@ begin
     v_day := to_char(v_signed at time zone 'Africa/Johannesburg', 'DD Mon');
     insert into public.notifications (user_id, type, message, link)
     values (v_owner, 'mandate_signed', v_name || ' signed the mandate on ' || v_day || '. Assign them a liaison.'
-              || case when cardinality(v_differs) > 0 then ' Some details differ from the client information: see the notes.' else '' end,
+              || case when cardinality(v_differs) > 0 then ' Some of its details were added beside what was on file: see the notes.' else '' end,
             '/companies/' || v_company);
   end if;
   return new;
