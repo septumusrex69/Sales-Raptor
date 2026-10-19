@@ -40,9 +40,30 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
    - Tests: new `check-stored-balance` (47, break-tested four ways), `e2e/accounts` +6 (148,
      break-tested); seven older source checks updated for the move.
 
+   - **Later on 19 Oct, the firm on the iPad preview** (all in §2 under S9):
+     - **Open or Download on every file** (`src/lib/fileSave.ts`, `FileActions`): "it opens it in
+       Raptor ... it asks you where to save it". Download on an iPad is the share sheet's Save to
+       Files; Open is a new tab opened on the press. Mail attachments, account and client
+       documents, generated PDFs, payover copies, trace reports, the letter preview, exports.
+     - **Commission and mandate are one card**, lower on the page; its gaps go to **Attention
+       required** at the top.
+     - **The client page after the firm's mock**: tags in the band, five figures with marks,
+       Collections performance (new `client_money_by_day`), Attention required, Upcoming payover
+       (trust only), Recent activity. The firm said "take from it what you think could be
+       helpful"; ask whether the rest of the mock is wanted (Documents / Accounts / Handovers tabs,
+       icons on the tabs) before building it.
+     - **The client ring** counts accounts in its centre; the recovery rate is a bar beside it.
+       Twelve months of handovers fit the card; the scale climbs in equal steps.
+   - **NOT BUILT, PROPOSED: a client report** (the firm sent their Excel "Collection dashboard" PDF
+     and asked to discuss one). Their PDF's pie labels are wrong (298.95%, 100%), its ring is
+     unlabelled and page 2 is blank. Proposed: a PDF off the client page on the letterhead -- issue
+     date and range; At a glance (handovers received, handed over, excl. withdrawn, recovered,
+     still in process, % recovered); accounts by status with count, rand and %; collections by
+     month with the rate line; handovers by month. Waiting on the firm's yes and its contents.
+
    **Open, in order:** 1. code by email for an Administrator on a new device; 2. "Held for
    Swordfish payovers"; 3. the FNB template (waits on FNB); 4. the step.ts notice balance above;
-   5. production has none of S8's or S9's migrations.
+   5. the client report (above); 6. production has none of S8's or S9's migrations.
 
 00. **S8 · Cut-over, end of 18 Oct.** The afternoon was the firm testing on the preview and asking,
    one screenshot at a time. All of it is built, checked and pushed (each item is in §2 under S8):
@@ -176,6 +197,35 @@ Capital and Paid already sorted; the balance did not, because the only SQL balan
   the list's figures and the stored figures are read with the same columns. `balanceInput.ts` and
   `dateLabels.ts` import with `.js` now (an API route reaches them).
 - Not done: a stored "collected" sort -- Paid already sorts by `payments_to_date`.
+
+**Open or Download, everywhere (19 Oct).** The firm: "When I want to download an attachment, it
+opens it in Raptor ... I should see an option to open it or download it ... it asks you where to
+save it. The same should work for every single document and PDF." Cause: a detached `<a download>`
+on a blob revoked on the next line, which Safari on an iPad draws over the page.
+- `src/lib/fileSave.ts`: `saveFile` (iPad/iPhone -> `navigator.share({ files })`, i.e. Save to
+  Files; AbortError = cancelled; NotAllowedError after a slow fetch -> `needs-tap`, and the chip
+  offers "Save <name>" with the file in hand; elsewhere `downloadBlob`, in the page, revoked a minute
+  later), `openPending` (the tab opened on the press, before any await), `blobFromUrl`.
+- `src/components/ui/FileActions.tsx`: Open + Download, always shown (no hover on an iPad);
+  `buttonsOnly` for rows that already name the file; `openUrl` for signed storage addresses.
+- Used on: mail reader, account Emails tab, activity rows, client documents (MandateCard), account
+  documents (both presses are a perusal: `openDocument(doc, by, { inline })`), summary/statement
+  of account, payment simulation, payover statement + kept copies (RunDetail, client Payovers),
+  trace report, letter preview, settlement acceptance. Exports (csv, xlsx, floor csv, trust bank
+  file) save through `saveFile`. `documentUrl` / `traceReportUrl` take `{ inline }` for Open.
+- `check-file-actions` (46, break-tested three ways) forbids any other `<a download>` or
+  `window.open` for a file. The e2e for the letter preview and the simulation read real downloads.
+
+**The client page (19 Oct, the firm's mock).** Band tags (Active, services); figures: Accounts ·
+Capital handed over · Recovery rate (MiniRing, from `client_account_outcomes`) · Commission
+(`ruleKind`) · Deals won (Class moved to Client information; Paid to date / Coefficient removed).
+Overview opens with two independent columns: Collections performance (`ClientCollectionsCard`,
+`client_money_by_day` + `clientCollections.ts`: sales months, the rate is the whole book to each
+month's end, withdrawn out), Handovers month by month, The book at a glance | Attention required
+(`ClientAttentionCard`), Upcoming payover (`ClientUpcomingPayover`, trust only), Recent activity.
+Below, RecordLayout as before with Client information first and Commission and mandate (one card)
+lower. `RecordFigure` takes an optional `icon` / `aside`. Checks: check-client-collections (15),
+e2e/client-handovers (28, with `client-overview-ipad.png`), client-mandate updated.
 
 ### S8 · Cut-over (18 Oct)
 
@@ -911,6 +961,7 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   `set lock_timeout` they went straight in. Production also needs the cron (vercel.json) and one run
   of `/api/workflow/balances` to fill the table (~24 000 accounts; it says `more: true` if the
   budget runs out -- run it again).
+- **S9's second migration**: `client_money_by_day(uuid)` (staging has it; end of schema.sql).
 - **Deleting a debtor account on staging takes over a minute** (seen in S9 probes, without S9's
   triggers too). Not investigated.
 
