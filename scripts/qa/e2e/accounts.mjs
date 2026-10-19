@@ -74,6 +74,12 @@ const handlers = [
   [(u) => u.includes('/rest/v1/companies'), () => ({ body: [COMPANY] })],
   [(u) => u.includes('/rest/v1/teams'), () => ({ body: [TEAM] })],
   [(u) => u.includes('/rpc/book_summary'), () => ({ body: [BOOK_SUMMARY] })],
+  /* THE STORED BALANCE (S9): nothing stale to catch up, three accounts the order is behind on, and
+     whatever the list writes back is accepted. */
+  [(u) => u.includes('/rpc/accounts_needing_balance'), () => ({ body: [] })],
+  [(u) => u.includes('/rpc/balance_sort_state'), () => ({ body: [{ out_of_date: 3, oldest: '2026-10-01' }] })],
+  [(u) => u.includes('/rpc/record_account_balances'), () => ({ body: 1 })],
+  [(u) => u.includes('/rest/v1/account_balances'), () => ({ body: [] })],
   [(u) => u.includes('/rpc/book_facets'), () => ({ body: FACETS })],
   [(u) => u.includes('/rpc/account_view_counts'), () => ({ body: [VIEW_COUNTS] })],
   [(u) => u.includes('/rpc/nav_counts'), () => ({ body: { mail: 0, tasks: 0, disputes: 0, diary: 0 } })],
@@ -1060,6 +1066,29 @@ try {
   await page.waitForTimeout(800)
   t.ok('...pressed again, lowest first', /sort=capital\.asc/.test(page.url()))
   t.check('...and the heading says which way', await page.getByTestId('sort-capital').getAttribute('aria-sort'), 'ascending')
+  /*
+   * AND BY BALANCE (S9) -- "To settle", the figure the column draws, by its stored computeBalance
+   * twin. The stored figures are caught up BEFORE the page is asked for, the order is the
+   * database's, and where some are still behind the list says so rather than imply an order.
+   */
+  seen.length = 0
+  await page.getByTestId('sort-balance').click()
+  await page.waitForTimeout(1200)
+  t.ok('pressing To settle sorts by it, highest first, in the address', /sort=balance\.desc/.test(page.url()))
+  const sortedAt = seen.findIndex((r) => /debtor_accounts\?.*order=account_balances\(to_settle\)\.desc\.nullslast,account_number\.asc/.test(decodeURIComponent(r)))
+  t.ok('...by the stored balance, in the request to the database', sortedAt >= 0)
+  const caughtUpAt = seen.findIndex((r) => r.includes('/rpc/accounts_needing_balance'))
+  t.ok('...after catching the stored figures up', caughtUpAt >= 0 && caughtUpAt < sortedAt)
+  t.ok('...and the list says how many are placed by an older balance',
+    /3 accounts are placed by an older balance \(from 01 Oct 2026\)/.test(await page.getByTestId('balance-sort-lag').innerText().catch(() => '')))
+  /* A FRESH PAGE, because the figures already drawn were written back when they were first drawn
+     -- what matters is that a row the stored key disagrees with is written back once, from the
+     row's own version. */
+  seen.length = 0
+  await page.goto(`http://localhost:${PORT}/accounts?who=nobody&sort=balance.desc`)
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15000 })
+  await page.waitForTimeout(1500)
+  t.ok('the figures it drew are written back as the sort key', seen.some((r) => r.includes('/rpc/record_account_balances')))
   await page.goto(`http://localhost:${PORT}/accounts?who=nobody`)
   await page.locator('table tbody tr').first().waitFor({ timeout: 15000 })
   const debtorWidth = async () => Math.round((await debtorTh.boundingBox())?.width ?? 0)

@@ -29,8 +29,8 @@
  * server's -- see firmToday.
  */
 
-import type { BalanceInput } from './accountBalance.ts'
-import { firmDay } from './dateLabels.ts'
+import type { BalanceInput } from './accountBalance.js'
+import { firmDay } from './dateLabels.js'
 
 /**
  * An account's ledger ROWS as accountBook hands them over.

@@ -715,7 +715,9 @@ const inserts = (seedBlock.match(/insert into public\.message_templates/g) ?? []
 const guarded = (seedBlock.match(/on conflict \(seed_key\) do nothing;/g) ?? []).length
 ok(`there are seed inserts to guard (${inserts})`, inserts >= 3)
 check('every one of them leaves an edited row alone', guarded, inserts)
-ok('...and none of them writes over the body', !/do update set/.test(seedBlock))
+/* PER INSERT INTO message_templates: the block runs to the end of schema.sql, so a later migration's
+   own upsert (S9's record_account_balances) is not a seed writing over the firm's wording. */
+ok('...and none of them writes over the body', !/insert into public\.message_templates[^;]*do update set/.test(seedBlock))
 ok('...and the reason is written down',
   /A seed that overwrites edits is a\n-- seed that quietly reverts the attorney/.test(seedBlock))
 

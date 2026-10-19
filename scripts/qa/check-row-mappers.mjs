@@ -146,6 +146,8 @@ auditMapper({
     balance: 'derived from the three ledgers',
     /* A join, not a column on debtor_accounts. */
     companyName: 'joined from companies',
+    /* A join too: account_balances, the stored computeBalance figure the list sorts by (S9). */
+    storedBalance: 'joined from account_balances',
     clientName: 'joined from companies',
     assignedToName: 'joined from profiles',
   },

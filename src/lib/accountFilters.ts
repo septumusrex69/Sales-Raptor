@@ -17,8 +17,8 @@ import { clockNow } from './clock.ts'
 
 /** The columns the account list may be sorted on, in the database (see AccountQuery.sort). Here, not in
     accountBook, so a check can read it without the Supabase client. */
-export type AccountSort = 'account' | 'debtor' | 'client' | 'handed' | 'capital' | 'paid'
-export const ACCOUNT_SORTS: readonly AccountSort[] = ['account', 'debtor', 'client', 'handed', 'capital', 'paid']
+export type AccountSort = 'account' | 'debtor' | 'client' | 'handed' | 'capital' | 'paid' | 'balance'
+export const ACCOUNT_SORTS: readonly AccountSort[] = ['account', 'debtor', 'client', 'handed', 'capital', 'paid', 'balance']
 
 /** Relative windows, because nobody asks "since 17 July". They ask "in the last two months". */
 export const QUIET_CHOICES = [

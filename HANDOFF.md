@@ -1,22 +1,48 @@
 # Handoff — where Raptor stands
 
-> **This session: S8 · Cut-over** — branch `claude/s08-cut-over`, from `claude/s07-clean-break` at `cdfa927`.
+> **This session: S9 · Balance Sort** — branch `claude/s09-balance-sort`, from `claude/s08-cut-over` at `5f4d67e`.
 > **Sessions so far:** S1 Row Cap · S2 Sliding Scale · S3 Settlements · S4 Trust Split (`claude/new-session-ecohkn`) ·
 > S5 Staging Clock (`claude/staging-clock`) · S6 Payout Day (`claude/payout-day`) · S7 Clean Break (`claude/s07-clean-break`) ·
-> S8 Cut-over (`claude/s08-cut-over`).
+> S8 Cut-over (`claude/s08-cut-over`) · S9 Balance Sort (`claude/s09-balance-sort`).
 > **Every new session names itself here first** (`S<n> · Theme`, branch `claude/s0<n>-theme`), so the firm can say "S5 broke that".
 
 **Read this instead of the previous session's transcript.** CLAUDE.md is the law and does not
 change often; this file is the moving part. It says what shipped, what the firm has not yet
 decided, what is still open, and which tools lie to you in this repo.
 
-Last updated: **18 October 2026**, S8 · Cut-over, on `claude/s08-cut-over` (branched from
-`claude/s07-clean-break` at `cdfa927`). Its section is the first under §2.
+Last updated: **19 October 2026**, S9 · Balance Sort, on `claude/s09-balance-sort` (branched from
+`claude/s08-cut-over` at `5f4d67e`). Its section is the first under §2.
 Everything is committed and pushed, and **the same commit is pushed to
 `claude/sales-raptor-review-p1pzx2`** (a fast-forward) because that is the preview the firm opens:
 https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.app
 
 ### Start here tomorrow
+
+000. **S9 · Balance Sort, 19 Oct. Accounts sort by "To settle"**, highest first, across the whole
+   book (§2 under S9). The figure it sorts by is computeBalance's own, stored in `account_balances`
+   -- NOT a SQL balance -- and kept current three ways: a version bumped by triggers on every ledger
+   and balance input, the list catching up what moved before it sorts and writing back every row it
+   draws, and a nightly job (`/api/workflow/balances`, 00:05 Johannesburg). Where some accounts are
+   still placed by an older figure the list says how many above the rows.
+   - **Staging has the migration; production has none of it** (§5, S9 list). Staging's table is
+     EMPTY until something fills it: the first sort by balance catches up ~750 accounts, or an
+     Administrator can POST `/api/workflow/balances` once the preview has it, or wait for the cron.
+   - **Not proven against the live API from the session** (the sandbox cannot reach Supabase): the
+     PostgREST order `account_balances(to_settle)` on a one-to-one embed. The e2e proves the request
+     is made; press To settle on the preview to prove PostgREST takes it.
+   - **FOUND, NOT FIXED, ASK FIRST:** `api/_lib/workflow/step.ts` `ledgersFor` assembles the
+     balance a WORKFLOW NOTICE quotes by hand, without `annexure_item` / `payment_id` (so a receipt
+     fee that is a fee row is counted twice), dropping every cancelled fee (the imported Promise to
+     Pay exception lost), not dropping rejected receipts, and ignoring ended / prescription. A
+     section 129 can quote a different figure from the account page. The fix is to read through
+     `storedBalance.ts` (`fetchLedgerRows` + `balanceAccountFromRow`); it changes what notices say,
+     so the firm should hear it first.
+   - Tests: new `check-stored-balance` (47, break-tested four ways), `e2e/accounts` +6 (148,
+     break-tested); seven older source checks updated for the move.
+
+   **Open, in order:** 1. code by email for an Administrator on a new device; 2. "Held for
+   Swordfish payovers"; 3. the FNB template (waits on FNB); 4. the step.ts notice balance above;
+   5. production has none of S8's or S9's migrations.
 
 00. **S8 · Cut-over, end of 18 Oct.** The afternoon was the firm testing on the preview and asking,
    one screenshot at a time. All of it is built, checked and pushed (each item is in §2 under S8):
@@ -122,6 +148,34 @@ own and is green: `workspace-split` (124), `payover-sends` (42), `client-stateme
 ---
 
 ## 2. What shipped this session
+
+### S9 · Balance Sort (19 Oct)
+
+**The firm (18 Oct): "sort ... highest number to lowest number, collected or outstanding balance."**
+Capital and Paid already sorted; the balance did not, because the only SQL balance
+(`engine_balances`) disagrees with the account page (RRC00005: R817,01 vs R760,00).
+
+- **`account_balances`** (one row per account): `balance`, `to_settle` (computeBalance's
+  `settlement`, the column's figure), `as_at`, `ledger_version`, `computed_version`. Written ONLY by
+  computeBalance through `src/lib/storedBalance.ts` (`refreshBalances`, `record_account_balances`).
+  Never drawn on a screen.
+- **Stale is a version, not a flag.** Triggers on `account_payments`, `account_fees`,
+  `account_interest_accruals` (insert/update/delete) and on `debtor_accounts` (update of exactly the
+  seven columns balanceInputFor reads) call `bump_balance_version` (security definer; skips an
+  account that no longer exists, or a cascade delete would be refused). A writer records the version
+  it read BEFORE reading the ledgers, so a payment landing mid-way leaves the row stale. Current =
+  `computed_version = ledger_version and as_at = raptor_today()`.
+- **The list**: To settle is a sort (`?sort=balance.desc`, order `account_balances(to_settle)`).
+  Before reading a balance-sorted page, `readyBalanceSort` catches up what changed (≤500) and a bit
+  of anything else (≤250, 8 s), then `balance_sort_state()` says how many are left -- shown above the
+  rows when not nil. Every row drawn whose stored key disagrees is written back.
+- **The nightly job**: `/api/workflow/balances` (a route in the workflow function, no new file),
+  cron `5 22 * * *` UTC = 00:05 SAST, CRON_SECRET or an Administrator, 240 s budget,
+  `accounts_needing_balance` is the cursor.
+- **One mapping**: `fetchLedgersForAccounts` now delegates to `storedBalance.fetchLedgerRows`, so
+  the list's figures and the stored figures are read with the same columns. `balanceInput.ts` and
+  `dateLabels.ts` import with `.js` now (an API route reaches them).
+- Not done: a stored "collected" sort -- Paid already sorts by `payments_to_date`.
 
 ### S8 · Cut-over (18 Oct)
 
@@ -848,6 +902,17 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 ---
 
 ## 5. Known gaps and things still outstanding
+
+- **S9's migration, for production when the firm says go** (staging has it; end of schema.sql):
+  `account_balances` + its three policies, `bump_balance_version`, `mark_balance_stale` and its
+  three ledger triggers, `mark_account_balance_stale` and its `debtor_accounts` trigger,
+  `record_account_balances`, `accounts_needing_balance`, `balance_sort_state`. On staging the
+  trigger statements hung when applied together through apply_migration; one at a time with
+  `set lock_timeout` they went straight in. Production also needs the cron (vercel.json) and one run
+  of `/api/workflow/balances` to fill the table (~24 000 accounts; it says `more: true` if the
+  budget runs out -- run it again).
+- **Deleting a debtor account on staging takes over a minute** (seen in S9 probes, without S9's
+  triggers too). Not investigated.
 
 - **S8's migrations, for production when the firm says go** (all on staging, all in schema.sql in
   this order):

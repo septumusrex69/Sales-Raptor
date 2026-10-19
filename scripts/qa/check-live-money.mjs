@@ -59,8 +59,11 @@ check('...and ends on the balance', st.lines[st.lines.length - 1]?.balance, 5415
 const book = read('src/lib/accountBook.ts')
 ok('the account ledger asks for rejected_at and drops those rows',
   /reversal_reason,receipt_fee_legacy,rejected_at'\)/.test(book) && /const live = \(\(payments \?\? \[\]\) as any\[\]\)\.filter\(\(r\) => !r\.rejected_at\)/.test(book))
+/* The page of accounts (and the stored balance the book is sorted by) read through storedBalance. */
+const stored = read('src/lib/storedBalance.ts')
 ok('...as does the ledger for a page of accounts',
-  /receipt_fee_legacy,rejected_at'\)/.test(book) && /if \(r\.rejected_at\) continue/.test(book))
+  /receipt_fee_legacy,rejected_at'/.test(stored) && /if \(r\.rejected_at\) continue/.test(stored)
+  && /return fetchLedgerRows\(supabase, accountIds\)/.test(book))
 ok('the ledger total counts live money only', /paid: live\.filter\(\(r\) => !r\.reversed_at\)/.test(book))
 ok('the balance input leaves out reversed and rejected', /\.filter\(\(p\) => !p\.reversedAt && !p\.rejectedAt\)/.test(read('src/lib/balanceInput.ts')))
 ok('Collected counts the payments that stand', /const livePayments = \(ledgers\?\.payments \?\? \[\]\)\.filter\(\(p\) => !p\.reversedAt\)\.length/.test(read('src/pages/accounts/AccountDetail.tsx')))

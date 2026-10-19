@@ -1,4 +1,4 @@
-import { clockNow } from './clock.ts'
+import { clockNow } from './clock.js'
 /**
  * How a date reads in a list.
  *

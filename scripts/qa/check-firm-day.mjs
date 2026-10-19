@@ -93,7 +93,7 @@ ok('...and the statement is struck on it', /asAt=\{firmToday\(\)\}/.test(page))
 /* AND THE LIST STRIKES ITS OWN ROWS ON THE SAME DAY, or the book and the account would quote
    interest to two different dates. */
 ok('...and so is every row of the book',
-  /today: firmToday\(\)/.test(read('src/pages/accounts/AccountsList.tsx')))
+  /const today = firmToday\(\)[\s\S]*balanceInputFor\(\{[\s\S]*?\n\s*today,\n/.test(read('src/pages/accounts/AccountsList.tsx')))
 
 /* ---------------- and the receipt fee is not dated a second early ---------------- */
 

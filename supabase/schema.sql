@@ -43433,3 +43433,196 @@ as $$
 $$;
 revoke all on function public.client_handover_days(date) from public, anon;
 grant execute on function public.client_handover_days(date) to authenticated;
+
+
+-- S9 · Balance Sort: a STORED COPY of computeBalance's answer, so the accounts list can be ordered
+-- by what each account owes.
+--
+-- THE FIRM, 18 Oct: "we should be able to sort, for example, highest number to lowest number,
+-- collected or outstanding balance". The book is paged in the database, so the order must be too,
+-- and the database had no balance that agreed with the account page: engine_balances caps in duplum
+-- on the interest alone and says R817,01 on RRC00005 where the page says R760,00.
+--
+-- SO THIS IS NOT A SECOND ARITHMETIC. Nothing in SQL works a balance out. The figure is written
+-- by computeBalance itself (src/lib/storedBalance.ts), in the browser for the rows somebody is
+-- looking at and in the nightly job (api/_lib/workflow/balances.ts) for the rest; the database only
+-- remembers it, and knows when it has stopped being true:
+--   * `as_at` -- interest runs daily, so a figure is true on ONE day. Older than raptor_today() is
+--     out of date without anything having been written.
+--   * `ledger_version` -- a ledger row or an input to the balance changed since. Bumped by the
+--     triggers below, so it cannot be forgotten by whichever of the forty writers touched it.
+-- It is a SORT KEY AND NEVER A FIGURE ON A SCREEN: the list still draws the live computeBalance
+-- answer, and writes it back here wherever the two differ.
+create table if not exists public.account_balances (
+  account_id uuid primary key references public.debtor_accounts(id) on delete cascade,
+  -- What is owed (computeBalance's `balance`) and what settling in full costs (`settlement`, the
+  -- list's "To settle" column and the order). Null until computeBalance has been asked once.
+  balance numeric(14,2),
+  to_settle numeric(14,2),
+  -- The firm's day the figure is true on: interest runs daily.
+  as_at date,
+  -- A COUNTER, NOT A FLAG, because of a race a flag loses. The list reads an account, then its
+  -- ledgers, then writes the figure; a payment committed in between would be marked stale by its
+  -- trigger and then marked fresh again by the write, which carries a figure without that payment.
+  -- So every ledger change bumps `ledger_version`, the writer says which version it read BEFORE
+  -- reading the ledgers, and a figure is current only while the two are equal. A write that
+  -- arrives late leaves the row stale, which costs one recomputation and never a wrong order.
+  ledger_version bigint not null default 0,
+  computed_version bigint,
+  computed_at timestamptz
+);
+create index if not exists account_balances_to_settle on public.account_balances (to_settle);
+
+alter table public.account_balances enable row level security;
+-- WHOEVER MAY SEE THE ACCOUNT MAY SEE AND WRITE ITS SORT KEY. Writing is what the list does for the
+-- rows on its screen; the figure is the caller's own computeBalance over ledgers RLS already showed
+-- them. At worst a wrong key puts a row out of order -- the figure drawn is always worked out live.
+create policy account_balances_select on public.account_balances for select to authenticated
+  using (exists (select 1 from public.debtor_accounts d where d.id = account_id));
+create policy account_balances_insert on public.account_balances for insert to authenticated
+  with check (exists (select 1 from public.debtor_accounts d where d.id = account_id));
+create policy account_balances_update on public.account_balances for update to authenticated
+  using (exists (select 1 from public.debtor_accounts d where d.id = account_id))
+  with check (exists (select 1 from public.debtor_accounts d where d.id = account_id));
+grant select, insert, update on public.account_balances to authenticated;
+
+-- AN ACCOUNT'S BALANCE MAY HAVE MOVED: bump its version.
+-- SECURITY DEFINER, and that is the stated reason: the importer, allocate_payment, the charge
+-- engine and a reversal all write these ledgers, some as a role with no policy on this table, and a
+-- trigger that failed for them would refuse a payment over a sort key.
+create or replace function public.bump_balance_version(p_account uuid)
+returns void
+language sql
+security definer
+set search_path to 'public'
+as $$
+  -- ONLY FOR AN ACCOUNT THAT STILL EXISTS. Deleting an account cascades to its ledgers, whose
+  -- triggers land here after the account has gone; inserting then would refuse the delete.
+  insert into public.account_balances (account_id, ledger_version)
+  select p_account, 1 where exists (select 1 from public.debtor_accounts where id = p_account)
+  on conflict (account_id) do update set ledger_version = public.account_balances.ledger_version + 1;
+$$;
+revoke all on function public.bump_balance_version(uuid) from public, anon, authenticated;
+
+-- A LEDGER ROW MOVED (account_payments, account_fees, account_interest_accruals).
+create or replace function public.mark_balance_stale()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') and old.account_id is not null then
+    perform public.bump_balance_version(old.account_id);
+  end if;
+  -- A row moved to another account changes both; an ordinary update changes the one, once.
+  if tg_op <> 'DELETE' and new.account_id is not null
+     and (tg_op = 'INSERT' or new.account_id is distinct from old.account_id) then
+    perform public.bump_balance_version(new.account_id);
+  end if;
+  return null;
+end;
+$$;
+revoke all on function public.mark_balance_stale() from public, anon, authenticated;
+
+drop trigger if exists account_payments_balance_stale on public.account_payments;
+create trigger account_payments_balance_stale after insert or update or delete on public.account_payments
+  for each row execute function public.mark_balance_stale();
+drop trigger if exists account_fees_balance_stale on public.account_fees;
+create trigger account_fees_balance_stale after insert or update or delete on public.account_fees
+  for each row execute function public.mark_balance_stale();
+drop trigger if exists account_interest_accruals_balance_stale on public.account_interest_accruals;
+create trigger account_interest_accruals_balance_stale after insert or update or delete on public.account_interest_accruals
+  for each row execute function public.mark_balance_stale();
+
+-- THE ACCOUNT'S OWN INPUTS to computeBalance (balanceInputFor reads exactly these), changed.
+create or replace function public.mark_account_balance_stale()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  perform public.bump_balance_version(new.id);
+  return null;
+end;
+$$;
+revoke all on function public.mark_account_balance_stale() from public, anon, authenticated;
+
+drop trigger if exists debtor_accounts_balance_stale on public.debtor_accounts;
+create trigger debtor_accounts_balance_stale
+  after update of capital_handed_over, handover_date, interest_rate_annual, ended_as, ended_on, prescribed, prescription_date
+  on public.debtor_accounts
+  for each row execute function public.mark_account_balance_stale();
+
+-- THE WRITE. One row per account: [{account_id, version, balance, to_settle, as_at}].
+-- A figure older than the one already stored (a lower version, or an earlier day at the same
+-- version) is dropped rather than written over it, so two screens finishing out of order cannot
+-- put the older answer back. Returns how many were written.
+create or replace function public.record_account_balances(p_rows jsonb)
+returns integer
+language sql
+security invoker
+set search_path to 'public'
+as $$
+  with r as (
+    select (x->>'account_id')::uuid as account_id, (x->>'version')::bigint as version,
+           (x->>'balance')::numeric as balance, (x->>'to_settle')::numeric as to_settle,
+           (x->>'as_at')::date as as_at
+      from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) x
+  ), w as (
+    insert into public.account_balances as b (account_id, balance, to_settle, as_at, ledger_version, computed_version, computed_at)
+    select account_id, balance, to_settle, as_at, version, version, public.raptor_now() from r
+    on conflict (account_id) do update
+       set balance = excluded.balance, to_settle = excluded.to_settle, as_at = excluded.as_at,
+           computed_version = excluded.computed_version, computed_at = public.raptor_now()
+     where b.computed_version is null
+        or excluded.computed_version > b.computed_version
+        or (excluded.computed_version = b.computed_version and excluded.as_at >= b.as_at)
+    returning 1
+  )
+  select count(*)::integer from w;
+$$;
+revoke all on function public.record_account_balances(jsonb) from public, anon;
+grant execute on function public.record_account_balances(jsonb) to authenticated, service_role;
+
+-- WHICH ACCOUNTS' STORED FIGURE IS NOT computeBalance's TODAY: never worked out, a ledger moved
+-- since, or worked out on an earlier day. Oldest-first is not needed; any order brings the book up to date.
+-- `p_only_stale` is the browser's question (what changed since this morning, a handful); the
+-- nightly job asks for everything.
+create or replace function public.accounts_needing_balance(p_limit integer, p_only_stale boolean default false)
+returns setof uuid
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select a.id
+    from public.debtor_accounts a
+    left join public.account_balances b on b.account_id = a.id
+   where case when p_only_stale
+              then b.to_settle is not null and b.computed_version is distinct from b.ledger_version
+              else b.to_settle is null or b.computed_version is distinct from b.ledger_version
+                   or b.as_at < public.raptor_today() end
+   order by a.id
+   limit greatest(p_limit, 0);
+$$;
+revoke all on function public.accounts_needing_balance(integer, boolean) from public, anon;
+grant execute on function public.accounts_needing_balance(integer, boolean) to authenticated, service_role;
+
+-- HOW MUCH OF THE BOOK THE ORDER CAN BE TRUSTED ON, for the list to say so rather than imply it.
+create or replace function public.balance_sort_state()
+returns table (out_of_date integer, oldest date)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select count(*) filter (where b.to_settle is null or b.computed_version is distinct from b.ledger_version
+                                or b.as_at < public.raptor_today())::integer,
+         min(b.as_at)
+    from public.debtor_accounts a
+    left join public.account_balances b on b.account_id = a.id;
+$$;
+revoke all on function public.balance_sort_state() from public, anon;
+grant execute on function public.balance_sort_state() to authenticated, service_role;

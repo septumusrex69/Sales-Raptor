@@ -127,7 +127,8 @@ function fake(rows, calls = { n: 0 }) {
 const book = read('src/lib/accountBook.ts')
 const queries = read('src/lib/accountQueries.ts')
 for (const [what, src, fn] of [
-  ["the list's ledgers", book, 'fetchLedgersForAccounts'],
+  /* The list's ledgers, and the stored balance the book is sorted by, are read here (S9). */
+  ["the list's ledgers", read('src/lib/storedBalance.ts'), 'fetchLedgerRows'],
   ["the account page's ledgers", book, 'fetchLedgers'],
   ['the next account number', book, 'fetchAccountReferences'],
   ["the import's duplicate check", book, 'fetchExistingAccounts'],

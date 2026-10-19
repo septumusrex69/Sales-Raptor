@@ -21,6 +21,15 @@ import type { ExistingAccount } from './handoverImport.ts'
 import { debtorKey, type OtherAccount } from './sameDebtor.ts'
 import { isWrittenOff } from './accountStatus.ts'
 import { fetchAllRows } from './fetchAll.ts'
+import { fetchLedgerRows, refreshOutOfDate } from './storedBalance.ts'
+
+/** What `account_balances` holds for one account, as the list reads it. */
+export interface StoredBalance {
+  toSettle: number | null
+  asAt: string | null
+  ledgerVersion: number
+  computedVersion: number | null
+}
 import type { Book, BookChoice, ClosureKind, HoldReason } from './accountBooks.ts'
 import type { ClientCommission } from './commissionRule.ts'
 import type { CommissionBand } from './commission.ts'
@@ -57,6 +66,12 @@ export interface DebtorAccount {
    * account page already has the client from its own query.
    */
   companyName: string | null
+  /**
+   * THE STORED BALANCE THE BOOK IS SORTED BY (storedBalance.ts), embedded by the list and null
+   * everywhere else. Never drawn: the list draws the live computeBalance figure and writes this back
+   * where the two differ, which is what it is here for.
+   */
+  storedBalance: StoredBalance | null
   clientReference: string | null
   debtorFirstName: string | null
   debtorSurname: string | null
@@ -225,6 +240,16 @@ export const toAccount = (r: any): DebtorAccount => ({
      not embed, so this is absent rather than wrong there -- and the account page has the client
      from its own query. */
   companyName: (r.companies?.name as string | undefined) ?? null,
+  /* ONE-TO-ONE, so PostgREST hands it over as an object -- or null where the account has never had
+     a figure stored, and absent where the read did not embed it. */
+  storedBalance: r.account_balances
+    ? {
+        toSettle: r.account_balances.to_settle === null ? null : Number(r.account_balances.to_settle),
+        asAt: r.account_balances.as_at ?? null,
+        ledgerVersion: Number(r.account_balances.ledger_version ?? 0),
+        computedVersion: r.account_balances.computed_version === null ? null : Number(r.account_balances.computed_version),
+      }
+    : null,
   clientReference: r.client_reference,
   debtorFirstName: r.debtor_first_name,
   debtorSurname: r.debtor_surname,
@@ -390,8 +415,8 @@ export interface AccountQuery {
    * to lowest number, collected or outstanding balance"). Done in the DATABASE, because the book is
    * paged there: sorting a page in the browser would order a hundred rows and call it the book.
    * Only columns the database holds as the list shows them. The balance is computed per row by
-   * computeBalance (in duplum, fees, receipts) and has no stored twin that agrees with it to the
-   * cent, so it is not offered as a sort until one exists.
+   * computeBalance (in duplum, fees, receipts), so its sort is by the STORED copy of that same
+   * answer (`account_balances`, S9) -- see storedBalance.ts for how it is kept current.
    */
   sort?: { by: AccountSort; dir: 'asc' | 'desc' }
   handedOverFrom?: string
@@ -549,6 +574,33 @@ export function applyAccountFilters<T>(query: T, q: AccountQuery): T {
 const SORT_COLUMN: Record<AccountSort, string> = {
   account: 'account_number', debtor: 'debtor_surname', client: 'companies(name)',
   handed: 'handover_date', capital: 'capital_handed_over', paid: 'payments_to_date',
+  /* THE STORED computeBalance FIGURE (storedBalance.ts), "To settle" as the column draws it. An
+     account never worked out has none and sorts last either way. */
+  balance: 'account_balances(to_settle)',
+}
+
+/**
+ * HOW FAR THE BALANCE ORDER CAN BE TRUSTED, after bringing what it can up to date.
+ *
+ * CALLED BEFORE A PAGE SORTED BY BALANCE IS READ. The nightly job works the whole book out at
+ * midnight; what moved since -- a payment, a fee, a reversal -- is a handful of accounts on a working
+ * day, and this catches them up through computeBalance before the database is asked for the order,
+ * so the account somebody was just paid on is not still sorted where it stood this morning. Then
+ * a little more of whatever else is out of date (a job that did not run, a staging clock that
+ * moved), within a few seconds -- a sort that never answers is worse than one that says what it
+ * could not do.
+ *
+ * `outOfDate` is what is LEFT, and the list says so above the rows rather than imply an order it
+ * does not have.
+ */
+export async function readyBalanceSort(today: string): Promise<{ outOfDate: number; oldest: string | null }> {
+  const until = Date.now() + 8_000
+  await refreshOutOfDate(supabase, today, { limit: 500, onlyStale: true, until })
+  await refreshOutOfDate(supabase, today, { limit: 250, until })
+  const { data, error } = await supabase.rpc('balance_sort_state')
+  if (error) throw new Error(error.message)
+  const row = (Array.isArray(data) ? data[0] : data) as { out_of_date?: number; oldest?: string | null } | null
+  return { outOfDate: Number(row?.out_of_date ?? 0), oldest: row?.oldest ?? null }
 }
 
 export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> {
@@ -576,7 +628,8 @@ export async function fetchAccounts(q: AccountQuery = {}): Promise<AccountPage> 
        * `*` STAYS. PostgREST takes the embed alongside it, so no column is lost from the row
        * itself -- and losing one here would be silent, because toAccount names every field by hand.
        */
-      .select('*, companies(name)', counted ? { count: 'exact' } : undefined)
+      /* AND ITS STORED BALANCE, which the order may be by and which the list writes back to. */
+      .select('*, companies(name), account_balances(to_settle,as_at,ledger_version,computed_version)', counted ? { count: 'exact' } : undefined)
       /* The asked-for order first, nulls last either way, then the account number, so a page of
          equal capitals is in the same order every time it is read and paging neither repeats nor
          skips a row. */
@@ -728,13 +781,8 @@ export interface AccountLedgers {
 export async function fetchLedgersForAccounts(
   accountIds: readonly string[],
 ): Promise<Map<string, LedgerRows>> {
-  const out = new Map<string, LedgerRows>()
-  if (accountIds.length === 0) return out
-  const ids = [...new Set(accountIds)]
-  for (const id of ids) out.set(id, { payments: [], fees: [], accruals: [] })
-
-  /* THE SAME COLUMNS fetchLedgers ASKS FOR, because the same function reads them. A shorter list
-     here would be a balance computed from less than the account page had. */
+  /* THE SAME COLUMNS AND THE SAME MAPPING the nightly job uses to store the balance the book is
+     sorted by (storedBalance.ts): two copies would sort the book by one figure and draw another. */
   /*
    * PAGED, BECAUSE POSTGREST STOPS AT A THOUSAND ROWS AND SAYS NOTHING.
    *
@@ -749,57 +797,7 @@ export async function fetchLedgersForAccounts(
    * page fetches ONE account, stays under the cap and was right, while the list beside it was
    * wrong. `fetchAllRows` reads until a short page comes back, and refuses rather than truncating.
    */
-  const [payments, fees, accruals] = await Promise.all([
-    fetchAllRows(() => supabase.from('account_payments')
-      .select('account_id,id,received_at,amount,paid_to_client,reversed_at,receipt_fee_legacy,rejected_at')
-      .in('account_id', ids).order('id'), { table: 'payments' }),
-    fetchAllRows(() => supabase.from('account_fees')
-      .select('account_id,incurred_at,description,amount_excl_vat,vat_amount,billed,segments,cancelled_at,annexure_item,payment_id,legacy_name')
-      .in('account_id', ids).order('id'), { table: 'fees' }),
-    fetchAllRows(() => supabase.from('account_interest_accruals')
-      .select('account_id,accrued_on,days,amount_accrued')
-      .in('account_id', ids).order('id'), { table: 'interest' }),
-  ])
-
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  for (const r of (payments ?? []) as any[]) {
-    /* A REJECTED RECEIPT WAS NEVER THE DEBTOR'S PAYMENT (prompt 11) -- above all the copy a reversal
-       leaves behind on its way to Needs an account. It counted R1 100 on KLR/1006 after the money
-       had been placed on another debtor. It is in no total, on no screen. */
-    if (r.rejected_at) continue
-    out.get(r.account_id)?.payments.push({
-      id: r.id,
-      receivedAt: r.received_at,
-      amount: Number(r.amount),
-      paidToClient: !!r.paid_to_client,
-      reversedAt: r.reversed_at,
-      receiptFeeLegacy: r.receipt_fee_legacy === null || r.receipt_fee_legacy === undefined
-        ? null : Number(r.receipt_fee_legacy),
-    })
-  }
-  for (const r of (fees ?? []) as any[]) {
-    out.get(r.account_id)?.fees.push({
-      incurredAt: r.incurred_at,
-      description: r.description ?? '',
-      amountExclVat: Number(r.amount_excl_vat ?? 0),
-      vatAmount: Number(r.vat_amount ?? 0),
-      billed: r.billed !== false,
-      segments: r.segments ?? undefined,
-      annexureItem: r.annexure_item ?? null,
-      paymentId: r.payment_id ?? null,
-      cancelledAt: r.cancelled_at ?? null,
-      legacyName: r.legacy_name ?? null,
-    })
-  }
-  for (const r of (accruals ?? []) as any[]) {
-    out.get(r.account_id)?.accruals.push({
-      accruedOn: r.accrued_on,
-      days: Number(r.days ?? 1),
-      amountAccrued: Number(r.amount_accrued ?? 0),
-    })
-  }
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-  return out
+  return fetchLedgerRows(supabase, accountIds)
 }
 
 /**

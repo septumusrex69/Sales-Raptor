@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import advance from '../_lib/workflow/advance.js'
+import balances from '../_lib/workflow/balances.js'
 import clock from '../_lib/workflow/clock.js'
 import release from '../_lib/workflow/release.js'
 import run from '../_lib/workflow/run.js'
@@ -18,6 +19,9 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* `clock` is the staging clock's jump (prompt 10) -- staging only, Administrator only. Here for
      the reason `advance` is: a route in this file costs nothing, a file costs a twelfth. */
   run, release, start, advance, clock,
+  /* `balances` is the nightly balance (S9): every account's stored computeBalance figure for the
+     new day, which the accounts list sorts by. A cron, so a route here rather than a file. */
+  balances,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

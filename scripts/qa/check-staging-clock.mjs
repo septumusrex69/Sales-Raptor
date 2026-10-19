@@ -209,6 +209,9 @@ const ALLOWED = new Set([
   'src/lib/reminderTime.ts', 'src/lib/calendarEvents.ts', 'src/pages/mail/MailPage.tsx',
   'src/pages/settings/SettingsPage.tsx', 'src/store/AppStore.tsx', 'src/lib/swordfishImport.ts',
   'src/lib/accountQueries.ts', 'src/pages/accounts/CallButton.tsx', 'src/pages/accounts/AccountDetail.tsx',
+  /* S9: a TIME BUDGET, not a date -- how long the balance catch-up may run before the list sorts
+     anyway. The day the balances are struck on is passed in (firmToday). */
+  'src/lib/accountBook.ts', 'src/lib/storedBalance.ts',
 ])
 const walk = (dir) => readdirSync(new URL(dir, root)).flatMap((n) => {
   const p = join(dir, n)
@@ -220,7 +223,7 @@ check('no other file reads the machine\'s clock', offenders, [])
 /* The allowed files' remaining reads are the real-world ones, counted so a new one is looked at. */
 const realReads = [...ALLOWED].filter((f) => f !== 'src/lib/clock.ts')
   .reduce((n, f) => n + (stripTs(read(f)).match(/new Date\(\)|Date\.now\(\)/g) ?? []).length, 0)
-check('...and the allowed files keep exactly their real-world reads', realReads, 48)
+check('...and the allowed files keep exactly their real-world reads', realReads, 50)
 
 /* ---------- 7. the arithmetic ---------- */
 

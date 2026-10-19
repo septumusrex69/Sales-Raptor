@@ -10,7 +10,7 @@ import { ClientPicker } from '../../components/ui/ClientPicker'
 import { useAuth } from '../../store/AuthContext'
 import {
   fetchAccounts, fetchBookFacets, fetchBookSummary, fetchLedgersForAccounts, fetchViewCounts,
-  hasCommissionDrift,
+  hasCommissionDrift, readyBalanceSort,
   type BookFacets, type BookSummary, type DebtorAccount,
 } from '../../lib/accountBook'
 import { clockNow } from '../../lib/clock.ts'
@@ -18,6 +18,8 @@ import { clockNow } from '../../lib/clock.ts'
    `balances` below. */
 import { computeBalance, type BalanceBreakdown } from '../../lib/accountBalance.ts'
 import { balanceInputFor } from '../../lib/balanceInput.ts'
+import { recordBalances, storedAgrees, storedRow, type StoredBalanceRow } from '../../lib/storedBalance.ts'
+import { supabase } from '../../lib/supabase'
 import { accountEnded, isWrittenOff } from '../../lib/accountStatus.ts'
 import { firmToday } from '../../lib/dateLabels.ts'
 import { clearedFilters, filterChips, queryFromParams, type AccountSort } from '../../lib/accountFilters'
@@ -96,6 +98,8 @@ export function AccountsList() {
   /** Appending, not replacing: pages beyond the first are added to what is already on screen. */
   const [loadingMore, setLoadingMore] = useState(false)
   const [total, setTotal] = useState(0)
+  /* What the balance order could not bring up to date (readyBalanceSort). Null when not sorted by it. */
+  const [sortLag, setSortLag] = useState<{ outOfDate: number; oldest: string | null } | null>(null)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
@@ -194,12 +198,12 @@ export function AccountsList() {
    * starts highest first, a name A to Z; pressing again turns it round.
    */
   const sortNow = query.sort ?? { by: 'account' as AccountSort, dir: 'asc' as const }
-  const sortBy = (by: AccountSort, label: string) => {
+  const sortBy = (by: AccountSort, label: string, title?: string) => {
     const on = sortNow.by === by
-    const numeric = by === 'capital' || by === 'paid' || by === 'handed'
+    const numeric = by === 'capital' || by === 'paid' || by === 'handed' || by === 'balance'
     const next = on ? (sortNow.dir === 'asc' ? 'desc' : 'asc') : numeric ? 'desc' : 'asc'
     return (
-      <button type="button" data-testid={`sort-${by}`} aria-sort={on ? (sortNow.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      <button type="button" data-testid={`sort-${by}`} title={title} aria-sort={on ? (sortNow.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
         onClick={() => setParam('sort', by === 'account' && next === 'asc' ? null : `${by}.${next}`)}
         className={`inline-flex items-center gap-1 hover:text-slate-700 ${on ? 'text-slate-700' : ''}`}>
         {label}
@@ -249,6 +253,18 @@ export function AccountsList() {
     setLoading(true); setError(null); setPage(0)
     void (async () => {
       try {
+        /*
+         * SORTED BY BALANCE, the stored figures are caught up first (readyBalanceSort), so the order
+         * read next is computeBalance's as of now. IT CANNOT FAIL THE LIST: a catch-up that will not
+         * answer still sorts, by what is stored, and says so -- the book is what the person came for.
+         */
+        if (query.sort?.by === 'balance') {
+          const lag = await readyBalanceSort(firmToday()).catch(() => ({ outOfDate: -1, oldest: null }))
+          if (cancelled) return
+          setSortLag(lag)
+        } else {
+          setSortLag(null)
+        }
         const [res, sum] = await Promise.all([
           fetchAccounts({ ...query, page: 0, pageSize }),
           fetchBookSummary(query.companyId, query.book),
@@ -286,28 +302,52 @@ export function AccountsList() {
       try {
         const rows = await fetchLedgersForAccounts(missing)
         if (cancelled) return
+        const today = firmToday()
+        /*
+         * WORKED OUT HERE AND MERGED BELOW, not inside the state updater: React may run an updater
+         * later, at render, and the write-back after it needs the figures now.
+         */
+        const computed = new Map<string, BalanceBreakdown>()
+        /* Figures the stored sort key does not agree with, to write back below. */
+        const drifted: StoredBalanceRow[] = []
+        for (const a of accounts) {
+          const ledgers = rows.get(a.id)
+          if (!ledgers) continue
+          const b = computeBalance(balanceInputFor({
+            account: {
+              capitalHandedOver: a.capitalHandedOver,
+              handoverDate: a.handoverDate,
+              interestRateAnnual: a.interestRateAnnual,
+              status: a.status,
+              lastActionAt: a.lastActionAt,
+              endedAs: a.endedAs, prescribed: a.prescribed, prescriptionDate: a.prescriptionDate,
+              endedOn: a.endedOn,
+            },
+            ledgers,
+            today,
+            writtenOff: isWrittenOff,
+          }))
+          computed.set(a.id, b)
+          /*
+           * AND WHERE THE STORED SORT KEY SAYS SOMETHING ELSE, THIS IS THE FIGURE IT SHOULD SAY.
+           * The version is the one read WITH THE ROW, before these ledgers were -- so a payment
+           * landing in between leaves the key stale rather than marked current without it. See
+           * storedBalance.ts.
+           */
+          const stored = a.storedBalance
+          if (!storedAgrees(stored && {
+            to_settle: stored.toSettle, as_at: stored.asAt,
+            computed_version: stored.computedVersion, ledger_version: stored.ledgerVersion,
+          }, b, today)) drifted.push(storedRow(a.id, stored?.ledgerVersion ?? 0, b, today))
+        }
         setBalances((prev) => {
           const next = new Map(prev)
-          for (const a of accounts) {
-            const ledgers = rows.get(a.id)
-            if (!ledgers) continue
-            next.set(a.id, computeBalance(balanceInputFor({
-              account: {
-                capitalHandedOver: a.capitalHandedOver,
-                handoverDate: a.handoverDate,
-                interestRateAnnual: a.interestRateAnnual,
-                status: a.status,
-                lastActionAt: a.lastActionAt,
-                endedAs: a.endedAs, prescribed: a.prescribed, prescriptionDate: a.prescriptionDate,
-                endedOn: a.endedOn,
-              },
-              ledgers,
-              today: firmToday(),
-              writtenOff: isWrittenOff,
-            })))
-          }
+          for (const [id, b] of computed) next.set(id, b)
           return next
         })
+        /* Quietly, like the figures themselves: a sort key that will not save costs the order a
+           row, never the page. */
+        if (drifted.length > 0) void recordBalances(supabase, drifted).catch(() => {})
       } catch {
         /* Deliberately silent -- see above. The columns show a dash and the book is unaffected. */
       }
@@ -672,6 +712,24 @@ export function AccountsList() {
         )}
 
         {/*
+          AN ORDER IT DOES NOT HAVE IS NOT IMPLIED. Sorted by balance, some accounts may still be
+          ordered by an older figure (readyBalanceSort could not catch them all up). The figures in
+          the column are always today's; it is only their PLACE in the list that may be behind, and
+          a person reading "highest first" is owed the difference. Silent when there is none.
+        */}
+        {sortLag && sortLag.outOfDate !== 0 && (
+          <div data-testid="balance-sort-lag" className="px-4 py-2 text-xs text-amber-800 bg-amber-50/60 flex items-start gap-2">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+            <span>
+              {sortLag.outOfDate < 0
+                ? 'The balances could not be brought up to date just now, so the order may be behind. The figures shown are today’s.'
+                : `${sortLag.outOfDate.toLocaleString('en-ZA')} account${sortLag.outOfDate === 1 ? ' is' : 's are'} placed by an older balance`
+                  + `${sortLag.oldest && sortLag.oldest < firmToday() ? ` (from ${formatDate(sortLag.oldest)})` : ''} until they are brought up to date overnight. The figures shown are today’s.`}
+            </span>
+          </div>
+        )}
+
+        {/*
           WHAT IS ON SCREEN AND WHY, said out loud. Without this line a filter left set from an
           hour ago looks exactly like a small book, and the only clue is a number on a button
           somebody has to notice. It is the sentence that answers "is this everything?" before
@@ -822,7 +880,7 @@ export function AccountsList() {
                       thing"): everything added to the capital, receipt fees included. */}
                   <ResizableTh label="Fees and interest" width={widths.fees} onWidth={(px) => setWidth('fees', px)} className="px-2 py-1.5 font-medium text-right">Fees &amp; interest</ResizableTh>
                   <ResizableTh label="Paid" width={widths.paid} onWidth={(px) => setWidth('paid', px)} className="px-2 py-1.5 font-medium text-right">{sortBy('paid', 'Paid')}</ResizableTh>
-                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-2 py-1.5 font-medium text-right"><span title="What settling in full today costs: the balance plus the receipt fee on it">To settle</span></ResizableTh>
+                  <ResizableTh label="Balance" width={widths.balance} onWidth={(px) => setWidth('balance', px)} className="px-2 py-1.5 font-medium text-right">{sortBy('balance', 'To settle', 'What settling in full today costs: the balance plus the receipt fee on it')}</ResizableTh>
                   <ResizableTh label="Rate" width={widths.rate} onWidth={(px) => setWidth('rate', px)} className="px-2 py-1.5 font-medium text-right">Rate</ResizableTh>
                   <ResizableTh label="Position" width={widths.position} onWidth={(px) => setWidth('position', px)} className="px-2 py-1.5 font-medium">Position</ResizableTh>
                   <ResizableTh label="Desk" width={widths.desk} onWidth={(px) => setWidth('desk', px)} className="px-2 py-1.5 font-medium">Desk</ResizableTh>
