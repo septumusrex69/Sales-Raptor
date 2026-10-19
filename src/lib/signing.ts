@@ -61,7 +61,22 @@ export async function openSigningRequest(token: string): Promise<SigningRequest 
     signaturePng: (row.signature_png ?? null) as string | null,
     initialsPng: (row.initials_png ?? null) as string | null,
     signedName: (row.signed_name ?? null) as string | null,
+    mode: row.mode === 'accept' ? 'accept' : 'sign',
   }
+}
+
+/**
+ * CONFIRM AND ACCEPT A PAYMENT ARRANGEMENT (S9): a typed name, no drawn signature. False where the
+ * link was already used, as with signDocument. The database writes the acceptance into the document.
+ */
+export async function acceptDocument(input: { token: string; name: string }): Promise<boolean> {
+  const { data, error } = await supabase.rpc('signing_accept', {
+    p_token: input.token,
+    p_name: input.name,
+    p_agent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
+  })
+  if (error) throw new Error(error.message)
+  return data === true
 }
 
 /**

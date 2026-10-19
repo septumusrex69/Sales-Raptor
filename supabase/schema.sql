@@ -43661,3 +43661,74 @@ as $$
 $$;
 revoke all on function public.client_money_by_day(uuid) from public, anon;
 grant execute on function public.client_money_by_day(uuid) to authenticated;
+
+-- S9: A PAYMENT ARRANGEMENT THE DEBTOR CONFIRMS AND ACCEPTS (the firm, 19 Oct: "they should just
+-- click here to confirm and accept ... it's a signed document in terms of 4B ... 250"). The workflow's
+-- arrangement-confirmed email carries a link to a request in mode 'accept': the debtor reads the
+-- arrangement, types their name, ticks, and presses Confirm and accept -- no drawn signature. It is
+-- NOT an acknowledgement of debt (the firm's word); it is filed as a signed document and charged
+-- Annexure B item 4(b) once, by the signed-copy route, which claims `fee_charged_at` first.
+alter table public.signing_requests
+  add column if not exists mode text not null default 'sign',
+  add column if not exists promise_id uuid references public.promises_to_pay(id) on delete set null,
+  add column if not exists fee_charged_at timestamptz;
+alter table public.signing_requests drop constraint if exists signing_requests_mode_check;
+alter table public.signing_requests add constraint signing_requests_mode_check check (mode in ('sign', 'accept'));
+comment on column public.signing_requests.mode is 'sign: a drawn signature (signing_sign). accept: typed name and a tick (signing_accept) -- the payment arrangement (S9).';
+comment on column public.signing_requests.promise_id is 'The promise to pay an accept-mode payment arrangement was drawn from.';
+comment on column public.signing_requests.fee_charged_at is 'When item 4(b) was raised for an accepted arrangement; claimed before charging, so it is raised once.';
+
+-- THE PAGE READS THE MODE, so it can ask for a tick rather than a signature.
+create or replace function public.signing_document(p_token text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select to_jsonb(x) from (
+    select r.title, r.body, r.page_setup, r.blanks, r.filled, r.signer_name, r.state, r.signed_at,
+           r.signature_png, r.initials_png, r.signed_name, r.mode
+      from public.signing_requests r
+     where r.token = p_token and (r.expires_at is null or r.expires_at > now())
+  ) x;
+$$;
+revoke all on function public.signing_document(text) from public;
+grant execute on function public.signing_document(text) to anon, authenticated;
+
+-- CONFIRM AND ACCEPT. SECURITY DEFINER for the reason signing_sign is: the debtor is not signed in,
+-- and the token is the whole of their authority. A typed name is required (ECTA s13 wants a method
+-- that identifies as well as one that assents); the acceptance is WRITTEN INTO THE DOCUMENT as its
+-- last paragraph, so the filed PDF and the debtor's copy both carry who accepted and when -- an
+-- accepted page with nothing on it saying so is a page anybody could have printed.
+create or replace function public.signing_accept(p_token text, p_name text, p_agent text)
+returns boolean
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+declare
+  v_name text := trim(coalesce(p_name, ''));
+  v_rows integer;
+begin
+  if v_name = '' then
+    raise exception 'Type your full name before accepting.' using errcode = '22023';
+  end if;
+  update public.signing_requests r
+     set state = 'signed',
+         signed_at = now(),
+         signed_name = v_name,
+         signed_agent = left(coalesce(p_agent, ''), 400),
+         body = r.body || jsonb_build_array(jsonb_build_object(
+           'kind', 'paragraph',
+           'spans', jsonb_build_array(jsonb_build_object('text',
+             'Confirmed and accepted online by ' || v_name || ' on '
+             || to_char(now() at time zone 'Africa/Johannesburg', 'FMDD FMMonth YYYY "at" HH24:MI'), 'bold', true))))
+   where r.token = p_token and r.state = 'sent' and r.mode = 'accept'
+     and (r.expires_at is null or r.expires_at > now());
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$$;
+revoke all on function public.signing_accept(text, text, text) from public;
+grant execute on function public.signing_accept(text, text, text) to anon, authenticated;

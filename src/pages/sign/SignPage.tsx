@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Check, Loader2, ShieldCheck } from 'lucide-react'
 import { SignaturePad } from '../../components/ui/SignaturePad'
 import {
-  isOpen, openSigningRequest, signDocument, SIGNING_CLOSED, type SigningRequest,
+  acceptDocument, isOpen, openSigningRequest, signDocument, SIGNING_CLOSED, type SigningRequest,
 } from '../../lib/signing.ts'
 import {
   A4_LETTERHEAD, blankLetter, letterCss, letterToHtml,
@@ -63,7 +63,9 @@ export default function SignPage() {
       const r = await openSigningRequest(token)
       setRequest(r)
       setMissing(r === null)
-      if (r?.signerName && !name) setName(r.signerName)
+      /* NOT on an acceptance (S9): the typed name IS the acceptance's identification, so the
+         debtor types it rather than ticking under one we wrote for them. */
+      if (r?.signerName && !name && r.mode !== 'accept') setName(r.signerName)
       /* WHAT THE FIRM ALREADY KNEW, OFFERED AS THE STARTING ANSWER (S8: a mandate goes out with the
          client's name and email in), so the signer corrects rather than retypes. Their typing wins. */
       if (r?.state === 'sent' && r.filled && Object.keys(r.filled).length) setFilled((f) => ({ ...r.filled, ...f }))
@@ -152,14 +154,17 @@ export default function SignPage() {
       setProblem(`Fill in: ${short.map((b) => b.label.toLowerCase()).join(', ')}.`)
       return
     }
-    if (!signature) { setProblem('Sign in the box before submitting.'); return }
-    if (!signer.trim()) { setProblem('Type your full name before submitting.'); return }
-    if (!agreed) { setProblem('Tick the box to confirm you intend to sign.'); return }
+    /* CONFIRM AND ACCEPT (S9) asks for no drawing -- "they should just click here to confirm and
+       accept" -- only the typed name and the tick, which together still identify and assent. */
+    const accepting = request?.mode === 'accept'
+    if (!accepting && !signature) { setProblem('Sign in the box before submitting.'); return }
+    if (!signer.trim()) { setProblem(accepting ? 'Type your full name before accepting.' : 'Type your full name before submitting.'); return }
+    if (!agreed) { setProblem(accepting ? 'Tick the box to confirm you accept the arrangement.' : 'Tick the box to confirm you intend to sign.'); return }
     setBusy(true)
     try {
-      const done = await signDocument({
-        token, signaturePng: signature, initialsPng: initials, name: signer, filled,
-      })
+      const done = accepting
+        ? await acceptDocument({ token, name: signer })
+        : await signDocument({ token, signaturePng: signature!, initialsPng: initials, name: signer, filled })
       /*
        * FALSE IS NOT AN ERROR. The link was already used -- a second tab, a double tap, a colleague
        * who signed first. Reloading shows the signed copy, which is the honest answer and the one
@@ -425,6 +430,7 @@ export default function SignPage() {
               ))}
             </div>
           )}
+          {request?.mode !== 'accept' && (<>
           <SignaturePad label="Your signature" onChange={setSignature} />
           {/*
             INITIALS ARE THEIR OWN MARK, at the firm's request: "make space for where there can be
@@ -434,6 +440,7 @@ export default function SignPage() {
           */}
           <SignaturePad label="Your initials — these go at the foot of every page" height={110}
             onChange={setInitials} />
+          </>)}
 
 {!asksSignatory && (
           <label className="block">
@@ -456,7 +463,9 @@ export default function SignPage() {
             <input type="checkbox" className="mt-1 shrink-0" checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)} />
             <span>
-              I have read this document and I intend my signature above to be my signature on it.
+              {request?.mode === 'accept'
+                ? 'I have read this payment arrangement and I confirm and accept it.'
+                : 'I have read this document and I intend my signature above to be my signature on it.'}
             </span>
           </label>
 
@@ -467,9 +476,9 @@ export default function SignPage() {
               className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg
                 bg-navy-900 text-white disabled:opacity-50">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-              {busy ? 'Submitting…' : 'Sign this document'}
+              {busy ? 'Submitting…' : request?.mode === 'accept' ? 'Confirm and accept' : 'Sign this document'}
             </button>
-            <span className="text-[11px] text-slate-400">It can only be signed once.</span>
+            <span className="text-[11px] text-slate-400">{request?.mode === 'accept' ? 'It can only be accepted once.' : 'It can only be signed once.'}</span>
           </div>
         </div>
       )}

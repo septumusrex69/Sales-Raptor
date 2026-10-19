@@ -55,6 +55,11 @@ export interface SigningRequest {
   signaturePng: string | null
   initialsPng: string | null
   signedName: string | null
+  /**
+   * HOW IT IS SIGNED (S9). 'sign' draws a signature; 'accept' is the payment arrangement, confirmed
+   * with a typed name and a tick (the firm: "they should just click here to confirm and accept").
+   */
+  mode: 'sign' | 'accept'
 }
 
 /**

@@ -8,6 +8,8 @@ import { fetchCharter, isCharter } from '../../../src/lib/charter.js'
 import { withFilled } from '../../../src/lib/signingBlanks.js'
 import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
 import type { SignedMark } from '../../../src/lib/signedMark.js'
+import { chargeItemWith, type ChargeDb } from '../../../src/lib/chargeEngine.js'
+import { DOCUMENT_SIGNED_ACTION, DOCUMENT_SIGNED_ITEM } from '../../../src/lib/arrangementDocument.js'
 
 /**
  * THE SIGNED COPY, BACK TO THE DEBTOR AND TO THE COLLECTOR, THE MOMENT IT IS SIGNED.
@@ -87,12 +89,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     initials_png: string | null
     signed_name: string | null
     copy_sent_at: string | null
+    /* S9: an accepted payment arrangement, and whether its 4(b) has been raised. */
+    mode: string | null
+    fee_charged_at: string | null
   }
 
   const { data: found } = await admin
     .from('signing_requests')
     .select('id, account_id, company_id, created_by, title, body, page_setup, blanks, filled, state, signed_at, '
-      + 'signature_png, initials_png, signed_name, copy_sent_at')
+      + 'signature_png, initials_png, signed_name, copy_sent_at, mode, fee_charged_at')
     .eq('token', token)
     .maybeSingle()
   const request = found as RequestRow | null
@@ -103,6 +108,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * this is reachable by anybody, so it must not confirm which tokens exist. The signing page
    * ignores the answer either way.
    */
+  /*
+   * AN ACCEPTED PAYMENT ARRANGEMENT IS A SIGNED DOCUMENT UNDER ITEM 4(b) (S9, the firm, 19 Oct: "it's
+   * a signed document in terms of 4B ... 250"). Raised here because this route is what the signing
+   * page calls the moment it is accepted, and the page cannot charge: the debtor is not signed in.
+   * BEFORE the copy, and on its own claim -- `fee_charged_at` is taken conditionally, so a second
+   * call, or the copy failing, never charges twice and never skips the charge.
+   */
+  if (request && request.state === 'signed' && request.mode === 'accept' && request.account_id && !request.fee_charged_at) {
+    const { data: claimedFee } = await admin.from('signing_requests')
+      .update({ fee_charged_at: new Date().toISOString() })
+      .eq('id', request.id).is('fee_charged_at', null).select('id')
+    if (claimedFee && claimedFee.length > 0) {
+      try {
+        await chargeItemWith(admin as unknown as ChargeDb, {
+          accountId: request.account_id, itemId: DOCUMENT_SIGNED_ITEM, actionCode: DOCUMENT_SIGNED_ACTION,
+          description: 'Document signed: payment arrangement', at: request.signed_at ? new Date(request.signed_at) : undefined,
+        })
+      } catch (e) {
+        /* Released so the next call tries again, rather than a charge that silently never happened. */
+        await admin.from('signing_requests').update({ fee_charged_at: null }).eq('id', request.id)
+        console.error('payment arrangement 4(b) not raised', e)
+      }
+    }
+  }
+
   if (!request || request.state !== 'signed' || request.copy_sent_at) {
     res.status(200).json({ sent: false })
     return

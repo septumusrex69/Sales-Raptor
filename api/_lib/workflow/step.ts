@@ -9,6 +9,9 @@ import { emailBodyHtml } from '../../../src/lib/emailStyle.js'
 import type { LetterDocument } from '../../../src/lib/letterDocument.js'
 import { charterFor } from './fonts.js'
 import { letterheadFor } from './letterhead.js'
+import { siteOrigin } from './siteOrigin.js'
+import { ARRANGEMENT_TITLE, arrangementDocument } from '../../../src/lib/arrangementDocument.js'
+import { newToken, signingButtonHtml, signingLink } from '../../../src/lib/signingRules.js'
 import { moneyZa } from './locale.js'
 import { toSettings as toFirmSettings } from '../../../src/lib/firmSettingsRow.js'
 import { notifyHeld } from './notify.js'
@@ -166,7 +169,7 @@ export async function runOneStep(
       ? admin.from('profiles').select('id, name, phone, email, whatsapp').eq('id', account.companies.account_owner_id).maybeSingle()
       : Promise.resolve({ data: null }),
     admin.from('message_templates')
-      .select('id, kind, subject, body, audience, name, attachment_id, attaches_schedule')
+      .select('id, kind, subject, body, audience, name, attachment_id, attaches_schedule, seed_key')
       .in('id', [node.templateId, node.templateCompanyId].filter(Boolean) as string[]),
     ledgersFor(admin, account.id),
     /* Did the step this one follows actually go? Only asked where the node says it follows one --
@@ -195,7 +198,7 @@ export async function runOneStep(
      * SMS that go out in that window must still be able to quote the instalment that was missed.
      */
     admin.from('promises_to_pay')
-      .select('amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, instalments_kept, total_promised')
+      .select('id, amount, due_on, arrangement, day_of_month, on_last_day, day_of_week, instalments_kept, total_promised')
       .eq('account_id', account.id).in('status', ['open', 'defaulted'])
       .order('created_at', { ascending: false }).limit(1).maybeSingle(),
     /*
@@ -571,13 +574,46 @@ export async function runOneStep(
         contentType: 'application/pdf',
       })
     }
+    /*
+     * CONFIRM AND ACCEPT, ON THE ARRANGEMENT CONFIRMATION (S9, 19 Oct). The firm: "once a promise
+     * has been made and it's been captured ... they should just click here to confirm and accept."
+     * A signing request in mode 'accept' holding the arrangement as a one-page document
+     * (arrangementDocument), the button under the firm's wording, and the address in the text too
+     * so the filed email keeps it. Accepting it is a signed document under item 4(b), charged once
+     * by the signed-copy route when the debtor accepts -- never here, where nothing has been signed.
+     *
+     * NEVER STOPS THE CONFIRMATION. A request that will not save, or an arrangement that cannot be
+     * stated, sends the email as it always went: the confirmation is the notice, the button is extra.
+     */
+    let bodyText = plan.body ?? ''
+    let acceptHtml = ''
+    const chosen = rows.find((t) => t.id === plan.template?.id)
+    const origin = siteOrigin()
+    const promiseRow = promiseRes.data as { id?: string } | null
+    if (chosen?.seed_key?.startsWith('email-ptp-confirmed') && promiseRow?.id && origin) {
+      const blocks = arrangementDocument(values)
+      if (blocks) {
+        const token = newToken()
+        const paper = await letterheadFor(admin)
+        const { error: reqError } = await admin.from('signing_requests').insert({
+          token, account_id: account.id, title: ARRANGEMENT_TITLE, body: blocks, page_setup: paper.page,
+          mode: 'accept', promise_id: promiseRow.id, signer_name: values.debtor_name ?? null,
+          signer_email: pickContact(contacts, 'email'),
+        })
+        if (!reqError) {
+          const url = signingLink(token, origin)
+          bodyText = `${bodyText.replace(/\s+$/, '')}\n\nPlease confirm and accept this arrangement here:\n${url}`
+          acceptHtml = signingButtonHtml(url, 'Confirm and accept')
+        }
+      }
+    }
     const sent = await sendAsUser(admin, collector!.id, {
       to: pickContact(contacts, 'email')!,
       subject: plan.subject ?? '',
       /* THE FIRM'S PARAGRAPHING. A blank line is a paragraph and a single newline is a line --
          emailBodyHtml is the one place that is decided, and it escapes, which matters on a
-         debtor called "Smit & Seun". */
-      bodyHtml: emailBodyHtml(plan.body),
+         debtor called "Smit & Seun". The button is the one piece of markup added after it. */
+      bodyHtml: emailBodyHtml(bodyText) + acceptHtml,
       attachments: files,
     })
     if (!sent.ok) {
@@ -611,7 +647,7 @@ export async function runOneStep(
       debtor_address: pickContact(contacts, 'email'),
       our_address: sent.from,
       subject: plan.subject ?? '',
-      body: plan.body,
+      body: bodyText,
       message_id: sent.messageId,
       /*
        * WHICH NOTICE THIS WAS, so a bounce can find its way back to it.
@@ -857,6 +893,8 @@ interface TemplateRow {
   subject: string | null; body: string
   audience: 'individual' | 'company' | null
   name: string; attachment_id: string | null
+  /** The library's own key, where the row was seeded: how the arrangement confirmation is known. */
+  seed_key?: string | null
   /** True where this wording carries the account's own repayment schedule. See the column's own
       comment: it is built per account, so there is no template to point `attachment_id` at. */
   attaches_schedule: boolean | null

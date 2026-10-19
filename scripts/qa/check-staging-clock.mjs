@@ -88,7 +88,9 @@ for (const n of names) {
  */
 check('only the named audit and real-world functions read the real clock', stillReal.sort(), [
   'clear_staging', 'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
-  'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance', 'signing_document',
+  'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',
+  /* signing_accept (S9): the moment the debtor accepted, a real-world stamp like signing_sign's. */
+  'signing_accept', 'signing_document',
   'signing_open', 'signing_sign', 'step_staging_clock', 'touch_message_template', 'workflow_publish',
 ])
 ok('...and set_trust_opening_balance only for its updated_at',

@@ -30,6 +30,8 @@ export type ActionCode =
   | 'consultation'
   | 'perusal'
   | 'acknowledgement_of_debt'
+  /* S9: a document the debtor signed or accepted online -- the payment arrangement. Item 4(b). */
+  | 'document_signed'
   | 'promise_to_pay'
   | 'trace'
   | 'whatsapp'
@@ -77,6 +79,7 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   { code: 'consultation', label: 'Consultation' },
   { code: 'perusal', label: 'Perusal of Documents' },
   { code: 'acknowledgement_of_debt', label: 'Acknowledgement of Debt' },
+  { code: 'document_signed', label: 'Document Signed' },
   { code: 'promise_to_pay', label: 'Promise to Pay' },
   { code: 'trace', label: 'Trace' },
   { code: 'whatsapp', label: 'WhatsApp Correspondence' },

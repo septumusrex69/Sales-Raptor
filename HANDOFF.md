@@ -58,6 +58,21 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        three columns, wide two-thirds + one-third; the record pages' switcher and memory). Figure
        rows stay across the page. Only Communications so far -- Sales, the collections floor and
        the company dashboard would take the same component if the firm wants them.
+     - **WhatsApp by link** (`lib/whatsapp.ts`, `WhatsAppButton`): every record's action row opens
+       WhatsApp on the cellphone (27… form) with an opening line; on the way back it asks how many
+       messages went. On an account each is charged R3.50 under 1(c) (the firm said "correspondence";
+       1(a)'s R25 is letter/fax/e-mail -- confirm with them if they meant R25). Sales side: noted, free.
+       NEXT, asked for: "send a letter by WhatsApp" -- a short WhatsApp version of every letter, the PDF
+       downloaded to attach, WhatsApp opened with the short text. The short texts need drafting and
+       the firm's review. Later: the full WhatsApp API (docs/whatsapp-integration.md).
+     - **Confirm and accept a payment arrangement**: the workflow's arrangement-confirmed email
+       (`email-ptp-confirmed-*`) now carries a Confirm and accept button to a `signing_requests` row
+       in mode `accept` (`arrangementDocument.ts`). The debtor types a name and ticks; `signing_accept`
+       writes "Confirmed and accepted online by … on …" into the document, which files as a signed
+       document; the signed-copy route raises item 4(b) R250 once (`fee_charged_at` claimed first)
+       and emails the copy. Not an acknowledgement of debt (the firm's word). The firm also said:
+       charge everything, no 4(a)/item 7 de-duplication; telephone acknowledgements dropped.
+       NOT yet on the SMS confirmation; the link uses VERCEL_BRANCH_URL on previews.
    - **NOT BUILT, PROPOSED: a client report** (the firm sent their Excel "Collection dashboard" PDF
      and asked to discuss one). Their PDF's pie labels are wrong (298.95%, 100%), its ring is
      unlabelled and page 2 is blank. Proposed: a PDF off the client page on the letterhead -- issue
@@ -966,6 +981,8 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
   of `/api/workflow/balances` to fill the table (~24 000 accounts; it says `more: true` if the
   budget runs out -- run it again).
 - **S9's second migration**: `client_money_by_day(uuid)` (staging has it; end of schema.sql).
+- **S9's third**: `signing_requests.mode / promise_id / fee_charged_at`, `signing_document` (adds
+  mode), `signing_accept(text, text, text)` (staging has them; end of schema.sql).
 - **Deleting a debtor account on staging takes over a minute** (seen in S9 probes, without S9's
   triggers too). Not investigated.
 
