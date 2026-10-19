@@ -63,9 +63,17 @@ try {
   const opened = context.waitForEvent('page', { timeout: 10000 }).catch(() => null)
   await wa.first().click()
   t.ok('pressing it opens WhatsApp', !!(await opened))
+  await page.bringToFront()
+  /* ON THE WAY BACK, HOW MANY WENT (the firm, 19 Oct). Nothing is recorded until it is answered. */
+  const asked = page.getByTestId('whatsapp-sent')
+  await asked.waitFor({ timeout: 5000 }).catch(() => {})
+  t.ok('back in Raptor, it asks how many messages were sent', await asked.isVisible())
+  t.ok('...and nothing is charged before it is answered', !seen.some((s) => /POST \/rest\/v1\/account_fees/.test(s)))
+  await page.getByRole('button', { name: 'One more' }).click()
+  await page.getByTestId('whatsapp-sent-save').click()
   await page.waitForTimeout(1500)
-  t.ok('...and notes the account', seen.some((s) => /POST \/rest\/v1\/account_notes/.test(s)))
-  t.ok('...and raises item 1(c)', seen.some((s) => /POST \/rest\/v1\/account_fees/.test(s)))
+  t.ok('two messages: the account is noted', seen.some((s) => /POST \/rest\/v1\/account_notes/.test(s)))
+  t.ok('...and item 1(c) is raised for them', seen.some((s) => /POST \/rest\/v1\/account_fees/.test(s)))
 } catch (e) {
   t.ok(`the run finished without throwing (${e instanceof Error ? e.message : String(e)})`, false)
 } finally {

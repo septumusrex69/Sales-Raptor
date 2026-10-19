@@ -56,3 +56,9 @@ export function whatsAppOpening(input: { firstName?: string | null; senderName?:
     ? `${hello}, ${who}, regarding your account ${input.caseNumber}.`
     : `${hello}, ${who}.`
 }
+
+/** The timeline's line for what was sent: one wording on an account and on a client. */
+export function whatsAppNote(number: string, count: number): string {
+  return count === 0 ? `WhatsApp opened to ${number}, nothing sent`
+    : `WhatsApp to ${number} · ${count === 1 ? '1 message' : `${count} messages`}`
+}

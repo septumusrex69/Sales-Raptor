@@ -1852,10 +1852,9 @@ export function AccountDetail() {
         callNumber={callContact?.value}
         callNumbers={smsNumbers}
         whatsAppMessage={whatsAppOpening({ firstName: account.debtorFirstName, senderName: currentUser?.name, caseNumber: account.caseNumber })}
-        onWhatsApp={(number) => {
-          /* Recorded beside the press, never before it: WhatsApp has already opened. A charge
-             that will not save is said on the page rather than lost. */
-          void recordWhatsApp({ accountId: account.id, number, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
+        onWhatsApp={(number, count) => {
+          /* A charge that will not save is said on the page rather than lost. */
+          void recordWhatsApp({ accountId: account.id, number, count, actor: { id: currentUser?.id ?? null, name: currentUser?.name ?? null } })
             .then(() => reload())
             .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
         }}
@@ -2636,7 +2635,8 @@ function ActionBar({ callNumber, callNumbers, whatsAppMessage, onWhatsApp, onEma
   callNumbers: { label: string; value: string }[]
   /** The opening line WhatsApp opens with (S9), and what is recorded once it is opened. */
   whatsAppMessage: string
-  onWhatsApp: (number: string) => void
+  /** How many went, said on the way back from WhatsApp. */
+  onWhatsApp: (number: string, count: number) => void
   onEmail?: () => void
   onNote: () => void
   onPromise: () => void
@@ -2702,7 +2702,8 @@ function ActionBar({ callNumber, callNumbers, whatsAppMessage, onWhatsApp, onEma
       {/* WHATSAPP (S9, 19 Oct): opens WhatsApp on the debtor's cellphone with the opening line
           typed in. Free to send; recorded and charged under 1(c) on the press -- see
           accountWhatsApp.ts. */}
-      <WhatsAppButton numbers={callNumbers} message={whatsAppMessage} onOpened={onWhatsApp}
+      <WhatsAppButton numbers={callNumbers} message={whatsAppMessage} onSent={onWhatsApp}
+        chargeNote="Each message is charged R3.50 under Annexure B item 1(c), like an SMS."
         className={`${ACTION_BASE} ${ACTION_ENABLED}`} />
       {/* The number the SMS goes to is the same one Call rings: one number on file, one thing
           that happens when you reach for it. */}

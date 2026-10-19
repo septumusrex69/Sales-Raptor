@@ -11,7 +11,7 @@
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-whatsapp.mjs
  */
 import { readFileSync } from 'node:fs'
-import { whatsAppLink, whatsAppNumber, whatsAppOpening } from '../../src/lib/whatsapp.ts'
+import { whatsAppLink, whatsAppNote, whatsAppNumber, whatsAppOpening } from '../../src/lib/whatsapp.ts'
 
 let pass = 0
 const failures = []
@@ -52,7 +52,13 @@ ok('...and charges nothing there', !/chargeItem/.test(button))
 const acct = strip(read('src/lib/accountWhatsApp.ts'))
 ok('on an account the press is charged under item 1(c)', /WHATSAPP_ITEM = '1c'/.test(read('src/lib/accountWhatsApp.ts')) && /itemId: WHATSAPP_ITEM/.test(acct))
 ok('...as Swordfish’s own action code', /WHATSAPP_ACTION_CODE = 'whatsapp'/.test(read('src/lib/accountWhatsApp.ts')))
-ok('...and noted on the timeline, without the charge in the note', /body: `WhatsApp to \$\{input\.number\}`/.test(acct))
+ok('...one per message sent, as the person says on the way back (the firm, 19 Oct)', /quantity: input\.count/.test(acct))
+ok('...nought sent charges nothing', /input\.count > 0 \? await chargeItem\(/.test(acct))
+ok('...and noted on the timeline, without the charge in the note', /body: whatsAppNote\(input\.number, input\.count\)/.test(acct))
+check('the note says how many', whatsAppNote('082 456 7890', 2), 'WhatsApp to 082 456 7890 · 2 messages')
+check('...and says so when nothing went', whatsAppNote('082 456 7890', 0), 'WhatsApp opened to 082 456 7890, nothing sent')
+ok('the question is put up the moment WhatsApp opens, so it is waiting on the way back',
+  /onClick=\{\(\) => \{ setChoosing\(false\); setAsking\(n\.value\) \}\}/.test(button))
 const detail = strip(read('src/pages/accounts/AccountDetail.tsx'))
 ok('the account’s WhatsApp is no longer "not built yet"', !/label="WhatsApp" title=\{soon\}/.test(detail) && /<WhatsAppButton numbers=\{callNumbers\}/.test(detail))
 ok('...and records the press through recordWhatsApp', /recordWhatsApp\(\{ accountId: account\.id, number/.test(detail))

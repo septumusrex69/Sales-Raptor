@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { MessageCircle } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { RecordAction, ACTION_BASE, ACTION_ENABLED } from './RecordShell'
-import { whatsAppLink, whatsAppNumber, whatsAppOpening } from '../../lib/whatsapp'
+import { whatsAppLink, whatsAppNote, whatsAppNumber, whatsAppOpening } from '../../lib/whatsapp'
 import { useAppStore } from '../../store/AppStore'
 import { useAuth } from '../../store/AuthContext'
 
@@ -17,18 +17,33 @@ import { useAuth } from '../../store/AuthContext'
  * never be delivered.
  *
  * A REAL LINK, NOT A SCRIPT: the press itself opens WhatsApp, so nothing is waited for first and no
- * browser can call it a pop-up. What the page records about it (`onOpened`) runs beside it.
+ * browser can call it a pop-up.
+ *
+ * AND ON THE WAY BACK, HOW MANY WERE SENT (the firm, 19 Oct: "when you go back to Raptor, it should
+ * ask you how many messages were sent. And that should also be ... correspondence"). Raptor cannot
+ * see WhatsApp, so the person says. The question is put up the moment WhatsApp opens, so it is
+ * waiting whichever way they come back -- the iPad's app switcher, another browser tab, the desktop
+ * app -- with nothing to detect. `onSent` is what the page records for that count.
  */
-export function WhatsAppButton({ numbers, message, onOpened, className }: {
+export function WhatsAppButton({ numbers, message, onSent, chargeNote, className }: {
   /** Every number that could reach them, primary first. */
   numbers: { label: string; value: string }[]
   /** The opening line, typed into WhatsApp for the person to edit. */
   message?: string | null
-  /** After WhatsApp was opened on this number -- what the page records about the press. */
-  onOpened?: (number: string) => void
+  /** How many messages went to this number, as the person says on the way back. 0 is recorded too. */
+  onSent?: (number: string, count: number) => void
+  /** Said in the question where each message is charged -- a debtor's account. */
+  chargeNote?: string
   className?: string
 }) {
   const [choosing, setChoosing] = useState(false)
+  /* The number WhatsApp was just opened on, waiting for the count. */
+  const [asking, setAsking] = useState<string | null>(null)
+  const ask = asking && onSent ? (
+    <WhatsAppSentModal number={asking} charged={chargeNote}
+      onDone={(count) => { onSent(asking, count); setAsking(null) }}
+      onClose={() => setAsking(null)} />
+  ) : null
   const reachable = numbers
     .map((n) => ({ ...n, wa: whatsAppNumber(n.value) }))
     .filter((n): n is typeof n & { wa: string } => !!n.wa)
@@ -43,14 +58,18 @@ export function WhatsAppButton({ numbers, message, onOpened, className }: {
   const link = (n: (typeof reachable)[number], cls: string, children: React.ReactNode) => (
     <a href={whatsAppLink(n.wa, message)} target="_blank" rel="noopener noreferrer" className={cls}
       data-testid="whatsapp-link" data-number={n.wa}
-      onClick={() => { setChoosing(false); onOpened?.(n.value) }}>
+      onClick={() => { setChoosing(false); setAsking(n.value) }}>
       {children}
     </a>
   )
 
   if (reachable.length === 1) {
-    return link(reachable[0], className ?? `${ACTION_BASE} ${ACTION_ENABLED}`,
-      <><MessageCircle size={14} /> WhatsApp</>)
+    return (
+      <>
+        {link(reachable[0], className ?? `${ACTION_BASE} ${ACTION_ENABLED}`, <><MessageCircle size={14} /> WhatsApp</>)}
+        {ask}
+      </>
+    )
   }
 
   return (
@@ -80,7 +99,45 @@ export function WhatsAppButton({ numbers, message, onOpened, className }: {
           </p>
         </Modal>
       )}
+      {ask}
     </>
+  )
+}
+
+/**
+ * HOW MANY WHATSAPP MESSAGES WENT, asked on the way back from WhatsApp. One by default -- the usual
+ * answer -- and nought is an answer too ("opened it, sent nothing"), recorded as such rather than
+ * left as a press nobody can explain. Closing the box records nothing.
+ */
+export function WhatsAppSentModal({ number, onDone, onClose, charged }: {
+  number: string
+  onDone: (count: number) => void
+  onClose: () => void
+  /** Said under the count where each message is charged (a debtor's account). */
+  charged?: string
+}) {
+  const [count, setCount] = useState(1)
+  return (
+    <Modal title="How many WhatsApp messages did you send?" onClose={onClose} width={400}>
+      <div data-testid="whatsapp-sent">
+        <p className="text-sm text-slate-600">To {number}.</p>
+        <div className="mt-3 flex items-center gap-2">
+          <button type="button" onClick={() => setCount((c) => Math.max(0, c - 1))} aria-label="One fewer"
+            className="h-9 w-9 rounded-lg border border-slate-200 text-lg text-slate-600 hover:bg-slate-50">−</button>
+          <input type="number" min={0} max={50} value={count} aria-label="Messages sent"
+            onChange={(e) => setCount(Math.max(0, Math.min(50, Math.floor(Number(e.target.value) || 0))))}
+            className="h-9 w-16 rounded-lg border border-slate-200 text-center text-lg font-semibold tabular-nums" />
+          <button type="button" onClick={() => setCount((c) => Math.min(50, c + 1))} aria-label="One more"
+            className="h-9 w-9 rounded-lg border border-slate-200 text-lg text-slate-600 hover:bg-slate-50">+</button>
+        </div>
+        {charged && count > 0 && <p className="mt-2 text-xs text-slate-500">{charged}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={() => onDone(0)} className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100">None sent</button>
+          <button type="button" onClick={() => onDone(count)} data-testid="whatsapp-sent-save"
+            className="rounded-lg bg-navy-900 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-navy-950">Record {count === 1 ? '1 message' : `${count} messages`}</button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -102,6 +159,6 @@ export function CrmWhatsAppButton({ numbers, to, subject, firstName }: {
   return (
     <WhatsAppButton numbers={numbers}
       message={whatsAppOpening({ firstName, senderName: currentUser?.name })}
-      onOpened={(number) => { void addActivity({ type: 'WhatsApp', subject: `WhatsApp — ${subject}`, notes: `WhatsApp to ${number}`, ...to }) }} />
+      onSent={(number, count) => { void addActivity({ type: 'WhatsApp', subject: `WhatsApp — ${subject}`, notes: whatsAppNote(number, count), ...to }) }} />
   )
 }
