@@ -43732,3 +43732,213 @@ end;
 $$;
 revoke all on function public.signing_accept(text, text, text) from public;
 grant execute on function public.signing_accept(text, text, text) to anon, authenticated;
+
+-- S9: a signed mandate ADDS to the client's information, it does not overwrite it.
+create or replace function public.mandate_same(p_a text, p_b text)
+returns boolean
+language sql
+immutable
+security invoker
+set search_path to 'public'
+as $$
+  -- THE SAME DETAIL WRITTEN TWO WAYS IS THE SAME DETAIL (S9). "011 234 5678" and "0112345678", an
+  -- email in capitals, "+27 82..." and "082...": compared on letters and digits only, lower-cased, a
+  -- leading 27 read as the 0 it stands for. Wrong in the safe direction -- two details it cannot tell
+  -- apart are kept as one and the other is noted, never written over.
+  select case when n.a = '' or n.b = '' then false else n.a = n.b end
+    from (select regexp_replace(regexp_replace(lower(coalesce(p_a, '')), '[^a-z0-9]', '', 'g'), '^27(\d{9})$', '0\1') as a,
+                 regexp_replace(regexp_replace(lower(coalesce(p_b, '')), '[^a-z0-9]', '', 'g'), '^27(\d{9})$', '0\1') as b) n;
+$$;
+revoke all on function public.mandate_same(text, text) from public, anon;
+grant execute on function public.mandate_same(text, text) to authenticated;
+
+create or replace function public.mandate_on_signed()
+returns trigger language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  f jsonb := coalesce(new.filled, '{}'::jsonb);
+  t jsonb := new.mandate;
+  v_lead public.leads%rowtype;
+  v_deal public.deals%rowtype;
+  v_co public.companies%rowtype;
+  v_company uuid;
+  v_owner uuid;
+  v_name text;
+  v_party text;
+  v_rate numeric;
+  v_bands jsonb;
+  v_contact text;
+  v_c_email text;
+  v_c_tel text;
+  v_match uuid;
+  v_suffix text;
+  v_first text; v_last text;
+  v_field text[];
+  v_new text;
+  v_old text;
+  v_fill jsonb := '{}'::jsonb;
+  v_differs text[] := '{}';
+  v_bank_differs boolean := false;
+  -- The firm's clock, not the machine's: on staging the client must read as signed on the staging
+  -- day, or it is a client from the future on every dashboard (check-staging-clock).
+  v_signed timestamptz := public.raptor_now();
+  v_day text;
+  g text := chr(8212);
+begin
+  if t is null or new.state <> 'signed' or coalesce(old.state, '') = 'signed' then return new; end if;
+  if new.lead_id is not null then select * into v_lead from public.leads where id = new.lead_id; end if;
+  if new.deal_id is not null then select * into v_deal from public.deals where id = new.deal_id; end if;
+  v_owner := coalesce(v_deal.owner_id, v_lead.owner_id, new.created_by);
+  v_party := coalesce(t ->> 'party', 'company');
+  v_name := coalesce(nullif(btrim(f ->> 'mandate_client_name'), ''), t ->> 'clientName', v_lead.company_name);
+  v_company := coalesce(v_deal.company_id, v_lead.company_id);
+  if v_company is null then
+    insert into public.companies (name, account_owner_id) values (v_name, v_owner) returning id into v_company;
+  end if;
+  if t -> 'commission' ->> 'kind' = 'scale' then
+    v_bands := t -> 'commission' -> 'bands'; v_rate := null;
+  else
+    v_rate := (t -> 'commission' ->> 'rate')::numeric; v_bands := null;
+  end if;
+
+  -- WHAT THE MANDATE ADDS (the firm, 19 Oct: "something that adds that information ... if there's
+  -- duplicate information, it ignores it. But if there is new information, it accepts it."). Until
+  -- now every detail the client typed into the mandate was written OVER the client sheet, so a lead
+  -- that was already a client lost the number the liaison had been calling. Now, field by field:
+  -- an empty field takes the mandate's; the same detail written another way is left alone
+  -- (mandate_same); and a DIFFERENT detail is kept as it was and the mandate's is written into the
+  -- client's notes, for the liaison to choose. Not overwritten, because a field holds one value and
+  -- the one in it may be the one that works -- and above all for the bank account, where a signed
+  -- form quietly replacing the account remittance is paid into is exactly how money goes to the
+  -- wrong place. The commission is not on this list: the signed mandate IS the agreement, so its
+  -- rate replaces the old one, as before.
+  select * into v_co from public.companies where id = v_company;
+  foreach v_field slice 1 in array array[
+    array['registration_number', case when v_party = 'company' then 'mandate_reg_no' else 'mandate_id_no' end,
+          case when v_party = 'company' then 'Registration number' else 'ID number' end],
+    array['vat_number', 'mandate_vat_no', 'VAT number'],
+    array['phone', 'mandate_tel', 'Telephone'],
+    array['email', 'mandate_email', 'Email'],
+    array['address', 'mandate_address', 'Address'],
+    array['bank_name', 'mandate_bank_name', 'Bank'],
+    array['bank_account_holder', 'mandate_bank_holder', 'Account holder'],
+    array['bank_account_number', 'mandate_bank_account', 'Account number'],
+    array['bank_branch_code', 'mandate_bank_branch', 'Branch code'],
+    array['contact_person', 'mandate_contact_one_name', 'Contact person']
+  ] loop
+    v_new := nullif(nullif(btrim(f ->> v_field[2]), ''), g);
+    v_old := nullif(btrim(to_jsonb(v_co) ->> v_field[1]), '');
+    if v_new is null or public.mandate_same(v_old, v_new) then
+      continue;
+    elsif v_old is null then
+      v_fill := v_fill || jsonb_build_object(v_field[1], v_new);
+    else
+      v_differs := v_differs || (v_field[3] || ': the mandate gives ' || v_new || ' (kept: ' || v_old || ')');
+      if v_field[1] like 'bank%' then v_bank_differs := true; end if;
+    end if;
+  end loop;
+  -- The name is never filled (a client always has one) but a different one is worth saying -- and
+  -- "Probe Traders" against "Probe Traders (Pty) Ltd" is not different, it is the same client
+  -- written out in full, so one name holding the other is the same name.
+  if v_co.name is not null and nullif(btrim(f ->> 'mandate_client_name'), '') is not null
+     and position(regexp_replace(lower(v_co.name), '[^a-z0-9]', '', 'g') in regexp_replace(lower(f ->> 'mandate_client_name'), '[^a-z0-9]', '', 'g')) = 0
+     and position(regexp_replace(lower(f ->> 'mandate_client_name'), '[^a-z0-9]', '', 'g') in regexp_replace(lower(v_co.name), '[^a-z0-9]', '', 'g')) = 0 then
+    v_differs := v_differs || ('Name: the mandate gives ' || btrim(f ->> 'mandate_client_name') || ' (kept: ' || v_co.name || ')');
+  end if;
+
+  update public.companies set
+    registration_number = coalesce(v_fill ->> 'registration_number', registration_number),
+    vat_number = coalesce(v_fill ->> 'vat_number', vat_number),
+    phone = coalesce(v_fill ->> 'phone', phone),
+    email = coalesce(v_fill ->> 'email', email),
+    address = coalesce(v_fill ->> 'address', address),
+    bank_name = coalesce(v_fill ->> 'bank_name', bank_name),
+    bank_account_holder = coalesce(v_fill ->> 'bank_account_holder', bank_account_holder),
+    bank_account_number = coalesce(v_fill ->> 'bank_account_number', bank_account_number),
+    bank_branch_code = coalesce(v_fill ->> 'bank_branch_code', bank_branch_code),
+    contact_person = coalesce(v_fill ->> 'contact_person', contact_person),
+    mandate_signed_at = v_signed,
+    -- Waiting for Sales to give it a liaison (the welcome flow, S8): the sales dashboard lists it.
+    liaison_needed = true,
+    commission_rate = v_rate,
+    commission_bands = v_bands,
+    commission_bands_source = case when v_bands is not null then 'Mandate signed online' else commission_bands_source end,
+    commission_bands_dated = case when v_bands is not null then (v_signed at time zone 'Africa/Johannesburg')::date else commission_bands_dated end
+  where id = v_company;
+
+  -- THE CONTACT PEOPLE, likewise: somebody already on the client -- the same email, the same number,
+  -- or the same name -- is not added a second time; what the mandate knows about them that the
+  -- contact does not (an email, a number) is filled in. Somebody new is added.
+  foreach v_suffix in array array['one', 'two'] loop
+    v_contact := nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_name')), ''), g);
+    v_c_email := nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_email')), ''), g);
+    v_c_tel := nullif(nullif(btrim(f ->> ('mandate_contact_' || v_suffix || '_tel')), ''), g);
+    if v_contact is not null then
+      select c.id into v_match from public.contacts c
+       where c.company_id = v_company
+         and (public.mandate_same(c.email, v_c_email)
+              or public.mandate_same(c.phone, v_c_tel) or public.mandate_same(c.mobile, v_c_tel)
+              or public.mandate_same(c.first_name || ' ' || c.last_name, v_contact))
+       order by c.created_at limit 1;
+      if v_match is not null then
+        update public.contacts set
+          email = coalesce(nullif(btrim(email), ''), v_c_email),
+          phone = case when nullif(btrim(phone), '') is null and nullif(btrim(mobile), '') is null then v_c_tel else phone end
+         where id = v_match;
+      else
+        v_first := split_part(v_contact, ' ', 1);
+        v_last := nullif(btrim(substr(v_contact, length(v_first) + 1)), '');
+        insert into public.contacts (first_name, last_name, company_id, email, phone, owner_id, lead_id, notes)
+        values (v_first, coalesce(v_last, g), v_company, v_c_email, v_c_tel, v_owner, new.lead_id, 'From the signed mandate');
+      end if;
+    end if;
+  end loop;
+  if v_deal.id is not null then
+    update public.deals set stage = 'Won', won_at = v_signed, company_id = v_company where id = v_deal.id and stage <> 'Won';
+  else
+    insert into public.deals (name, company_id, owner_id, stage, value, expected_close_date, service, source, kind, won_at, lead_id, mandate_sent_at)
+    values (v_name || ' - collections mandate', v_company, v_owner, 'Won', 0, v_signed, 'Debt Collection',
+            coalesce(v_lead.source, 'Website'), 'Handover', v_signed, new.lead_id, new.created_at)
+    returning * into v_deal;
+  end if;
+  if v_lead.id is not null then
+    update public.leads set status = 'Converted', company_id = v_company, converted_deal_id = coalesce(converted_deal_id, v_deal.id)
+     where id = v_lead.id;
+  end if;
+  -- THE CLIENT'S NOTES SAY WHAT HAPPENED (the firm, 18 Oct: "it doesn't make it that notes that a
+  -- mandate was sent or that the mandate was signed"). The lead's history comes across -- the email
+  -- that sent the mandate and its "sent for signing" line were filed on the lead, before there was a
+  -- client to file them on -- and the signature itself is written as a line of its own.
+  if v_lead.id is not null then
+    update public.activities set company_id = v_company where lead_id = v_lead.id and company_id is null;
+  end if;
+  if coalesce(v_owner, new.created_by) is not null then
+    insert into public.activities (type, user_id, company_id, lead_id, deal_id, subject, notes, activity_date)
+    values ('Deal Won', coalesce(v_owner, new.created_by), v_company, new.lead_id, v_deal.id,
+            'Mandate signed online by ' || coalesce(nullif(nullif(btrim(f ->> 'mandate_signatory_name'), ''), g), new.signer_name, 'the client')
+              || coalesce(' (' || nullif(nullif(btrim(f ->> 'mandate_signatory_designation'), ''), g) || ')', ''),
+            'Commission: ' || case when v_bands is not null then 'sliding scale' else coalesce(round(v_rate * 100, 2)::text || '%', '') end
+              || '. The signed agreement is filed under The mandate.',
+            v_signed);
+    if cardinality(v_differs) > 0 then
+      insert into public.activities (type, user_id, company_id, lead_id, deal_id, subject, notes, activity_date)
+      values ('Note', coalesce(v_owner, new.created_by), v_company, new.lead_id, v_deal.id,
+              'The signed mandate differs from the client information',
+              array_to_string(v_differs, E'\n')
+                || E'\nThe client information was not changed. Edit it if the mandate''s is the right one.'
+                || case when v_bank_differs then E'\nThe banking differs: confirm it with the client by telephone before any remittance is paid.' else '' end,
+              v_signed);
+    end if;
+  end if;
+  new.company_id := v_company;
+  if v_owner is not null then
+    v_day := to_char(v_signed at time zone 'Africa/Johannesburg', 'DD Mon');
+    insert into public.notifications (user_id, type, message, link)
+    values (v_owner, 'mandate_signed', v_name || ' signed the mandate on ' || v_day || '. Assign them a liaison.'
+              || case when cardinality(v_differs) > 0 then ' Some details differ from the client information: see the notes.' else '' end,
+            '/companies/' || v_company);
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.mandate_on_signed() from public, anon;

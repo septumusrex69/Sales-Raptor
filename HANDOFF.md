@@ -238,6 +238,21 @@ on a blob revoked on the next line, which Safari on an iPad draws over the page.
 - `check-file-actions` (46, break-tested three ways) forbids any other `<a download>` or
   `window.open` for a file. The e2e for the letter preview and the simulation read real downloads.
 
+**A signed mandate ADDS to the client sheet (19 Oct).** The firm: "if there's duplicate information,
+it ignores it. But if there is new information, it accepts it." Before, `mandate_on_signed` wrote
+every filled mandate field OVER the company and always inserted its two contacts. Now, field by
+field (reg/ID, VAT, tel, email, address, the four bank fields, contact person): empty -> filled;
+the same detail written another way (`mandate_same`: letters and digits only, lower-cased, a
+leading 27 read as 0) -> left alone; different -> KEPT, and a "The signed mandate differs from the
+client information" Note lists each one, with a line to confirm banking by phone before any
+remittance (a signed form replacing the payout account is the fraud path). A different name is
+noted only where neither name holds the other ("X" vs "X (Pty) Ltd" is the same). Contacts: matched
+on email, number or full name; a match gets its blanks filled, a new person is added. Commission
+is NOT merged -- the signed mandate is the agreement, so it still replaces the rate. Probed on
+staging in a rolled-back transaction; check-mandate (44, break-tested).
+**Decision for the firm:** a differing detail is kept and noted, not taken -- say if the mandate's
+should win for some fields (e.g. email).
+
 **The client page (19 Oct, the firm's mock).** Band tags (Active, services); figures: Accounts ·
 Capital handed over · Recovery rate (MiniRing, from `client_account_outcomes`) · Commission
 (`ruleKind`) · Deals won (Class moved to Client information; Paid to date / Coefficient removed).
@@ -986,6 +1001,8 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 - **S9's second migration**: `client_money_by_day(uuid)` (staging has it; end of schema.sql).
 - **S9's third**: `signing_requests.mode / promise_id / fee_charged_at`, `signing_document` (adds
   mode), `signing_accept(text, text, text)` (staging has them; end of schema.sql).
+- **S9's fourth**: `mandate_same(text, text)` and `mandate_on_signed` (LAST definition: adds, never
+  overwrites) (staging has them; end of schema.sql).
 - **Deleting a debtor account on staging takes over a minute** (seen in S9 probes, without S9's
   triggers too). Not investigated.
 
