@@ -44073,3 +44073,12 @@ comment on function public.workflow_test_advance(uuid, integer) is
 
 revoke all on function public.workflow_test_advance(uuid, integer) from public;
 revoke all on function public.workflow_test_advance(uuid, integer) from authenticated;
+
+-- S9: an attachment filed off a debtor's email is a document of source 'email'. The ticket route
+-- (api/_lib/email/ticket.ts) has written that since it was built and the check never allowed it,
+-- so every dispute raised from an email with a PDF on it raised the dispute and lost the PDF
+-- ("new row ... violates check constraint account_documents_source_check", the firm, 20 Oct).
+alter table public.account_documents drop constraint if exists account_documents_source_check;
+alter table public.account_documents add constraint account_documents_source_check
+  check (source in ('manual', 'filename-match', 'generated', 'email'));
+comment on column public.account_documents.source is 'Where the file came from: manual (uploaded), filename-match (a handover''s PDFs), generated (drawn by Raptor), email (an attachment filed off a debtor''s email when a ticket is raised from it, S9).';

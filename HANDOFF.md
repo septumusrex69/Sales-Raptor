@@ -94,6 +94,12 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        `signing_requests.sent_to`; and **the SMS confirmation carries the link ONLY where the debtor
        has no email** (`acceptLink` in step.ts, one helper for both channels; the SMS is re-priced on
        the text that leaves, link included). The link uses VERCEL_BRANCH_URL on previews.
+   - **A dispute raised from an email lost its PDF (20 Oct).** "Could not file ... violates check
+     constraint account_documents_source_check": the ticket route files attachments with
+     `source: 'email'` and the check allowed only manual / filename-match / generated. The dispute
+     itself was raised. Widened on staging (end of schema.sql); **production has no such constraint
+     yet -- include it in the production deploy.** New `check-document-sources` holds every
+     `account_documents` insert's source against the constraint.
    - **THE TEST CLOCK ON EVERY STAGING ACCOUNT, FOR EVERYBODY (20 Oct). DO NOT REMOVE until the firm
      says so.** The firm: "my forward to the next workflow function for testing has been gone. Don't
      remove it until I give you ... the authority ... everybody, and even ... the debt collectors,
