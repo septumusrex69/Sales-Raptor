@@ -1,3 +1,4 @@
+import { DashboardPanes } from '../components/dashboard/DashboardPanes'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
@@ -163,9 +164,15 @@ export function CompanyDashboard() {
         bar a day with the sales tiles under it, and the book as a ring -- then the departments as one
         row. The hero above is untouched (CLAUDE.md: it moved house and did not change).
       */}
-      <div className="grid gap-4 lg:grid-cols-5">
-        {/* ---------- what came in ---------- */}
-        <Panel className="lg:col-span-3" title="Work coming in" why={`Handed to us in ${month.period.label}`}
+      {/*
+        IN THE THREE ARRANGEMENTS (S9, 20 Oct), like every department dashboard: Work coming in is a
+        chart and wide, The book a ring and narrow, the departments a row across the page in all
+        three. It OPENS in Wide, because Wide is the firm's own mock -- the two cards side by side --
+        and nobody should find the drawing they asked for undone until they choose otherwise.
+      */}
+      <DashboardPanes layoutKey="raptor.dashboard.company.layout" initial="wide" panes={[
+        { id: 'work-coming-in', kind: 'wide', node: (
+        <Panel title="Work coming in" why={`Handed to us in ${month.period.label}`}
           to={handedOver(isoDay(month.period.start), isoDay(month.period.end))} testId="work-coming-in">
           {/*
             SAID IN WORDS, ONCE, because a six-figure number on a dashboard is read as the firm's
@@ -244,9 +251,11 @@ export function CompanyDashboard() {
               hint="Service deals won this period. Mandates are counted beside them, not in here." />
           </div>
         </Panel>
+        ) },
 
-        {/* ---------- what we are holding ---------- */}
-        <Panel className="lg:col-span-2" title="The book" why="What the firm is holding right now" to={accountsLink(viewParams('whole_book', null))} testId="the-book">
+        /* ---------- what we are holding ---------- */
+        { id: 'the-book', kind: 'narrow', node: (
+        <Panel title="The book" why="What the firm is holding right now" to={accountsLink(viewParams('whole_book', null))} testId="the-book">
           <Figures loading={book === null} error={bookError} plain>
             {book && <BookRing book={book} links={{
               worked: accountsLink(new URLSearchParams({ book: 'active' })),
@@ -279,9 +288,10 @@ export function CompanyDashboard() {
             </p>
           )}
         </Panel>
-      </div>
+        ) },
 
-      {/* ---------- the departments ---------- */}
+        /* ---------- the departments: a row across the page in every arrangement ---------- */
+        { id: 'departments', kind: 'full', node: (
       <Section title="Departments" why="Everybody sees everybody's headline. Yours opens in full.">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="departments">
           {DEPARTMENTS.filter((d) => d.id !== 'Other').map((d) => (
@@ -298,6 +308,8 @@ export function CompanyDashboard() {
           ))}
         </div>
       </Section>
+        ) },
+      ]} />
 
       <p className="border-t border-slate-200 pt-3 text-xs text-slate-400">
         Everyone in the firm lands here. Commission and Annexure B income are deliberately not on

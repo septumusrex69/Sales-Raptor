@@ -201,7 +201,7 @@ ok('...and the headline is the company’s',
  * the thing that was missing was any way to tell whose each block was.
  */
 ok('the floor’s level is named', /<Level title="The floor"/.test(board))
-ok('...the team’s is named after the team', /<Level title=\{`Your team — \$\{myTeam\.name\}`\}/.test(board))
+ok('...the team’s is named after the team', /<Level title=\{`Your team — \$\{myTeam!?\.name\}`\}/.test(board))
 ok('...and the person’s own', /<Level title="You"/.test(board))
 
 /*
@@ -218,7 +218,7 @@ ok('...and it is the signed-in person’s team, not the picker’s',
  * and belongs to none; a panel of dashes reads as a screen that failed rather than as a record
  * that was never set.
  */
-ok('...and nothing is drawn at all without one', /\{myTeam && teamStats && teamLine && \(/.test(board))
+ok('...and nothing is drawn at all without one -- the heading, the figures and the list each conditional', (board.match(/!!\(myTeam && teamStats && teamLine\) && \{ id: 'level-team'|!!\(myTeam && teamStats && teamLine\) && \{ id: 'team-summary'|!!\(myTeam && teamStats && teamLine\) && \{ id: 'team-list'/g) ?? []).length === 3)
 /* The person's own measures are scored by the same function the floor's are. */
 ok('the person’s measures come from the shared scorer',
   /const myScore = mine \? scoreCollector\(mine\) : null/.test(board))

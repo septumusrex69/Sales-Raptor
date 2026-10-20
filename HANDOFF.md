@@ -112,8 +112,12 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
      check-add-client +5.
    - **Sales dashboard: the three pane arrangements** (DashboardPanes, `raptor.dashboard.sales.layout`),
      Mandates and Deals narrow so they stay side by side in Three columns; Needs attention wide.
-     e2e sales-comms-dashboards +6. The collections floor and the company dashboard are next (asked
-     20 Oct, "Pane layouts on dashboards"); not started.
+     e2e sales-comms-dashboards +6. **Then the company dashboard** (`raptor.dashboard.company.layout`,
+     opens in Wide because Wide IS the firm's mock -- `DashboardPanes initial`, `useRecordLayout(key,
+     fallback)`) and **the collections floor** (`raptor.dashboard.collections.layout`: each level's
+     heading is a full-width pane so a level never borrows a column from the next; team summary wide
+     beside its list). e2e company-dashboard +5, performance +4 (its team-list lookup now by
+     data-pane), check-collector-profile updated. Administration (AdminOverview) is not converted.
    - **BUILT: the client report** (the firm: their Excel "Collection dashboard" was "just ... a
      reference ... you can fix all of that"). **Client report** in the client page's action row
      (clients only, like Upload a batch) opens Open / Download of a two-page A4 landscape PDF in the

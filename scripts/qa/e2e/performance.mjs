@@ -666,15 +666,27 @@ try {
    * signed-in leader and one colleague on Pre-legal and leaves a third collector unteamed, so a
    * section reading off the whole floor rather than the team fails here.
    */
-  const teamPanel = page.locator('h2', { hasText: 'Your team' })
-    /* The heading is an h2 inside the level's own div, so the cards are the PARENT's siblings:
-       [1] is the team's figures and [2] is the list of its people. */
-    .locator('xpath=../following-sibling::div[2]')
+  /* The team's people are their own pane since the floor took the three arrangements (S9, 20 Oct),
+     so the list is found by what it is rather than by where it sits under the heading. */
+  t.ok('the team level is headed as such', await page.locator('h2', { hasText: 'Your team' }).count() === 1)
+  const teamPanel = page.locator('[data-pane="team-list"]')
   t.ok('the team\u2019s people are listed', (await teamPanel.locator('li').count()) > 0)
   const teamNames = (await teamPanel.locator('li').allInnerTexts()).join(' | ')
   t.ok(`...the person themselves among them (${teamNames.replace(/\n/g, ' ').slice(0, 80)})`,
     teamNames.includes(PROFILE.name) && teamNames.includes('(you)'))
   t.ok('...and their teammate', teamNames.includes(COLLEAGUE.name))
+  /* THE THREE ARRANGEMENTS ON THE FLOOR (S9, 20 Oct): in Wide the team's summary sits beside its list. */
+  {
+    const panes = page.getByTestId('dashboard-panes')
+    await panes.getByRole('button', { name: 'Wide' }).click(); await page.waitForTimeout(300)
+    const sum = await page.locator('[data-pane="team-summary"]').boundingBox()
+    const list = await page.locator('[data-pane="team-list"]').boundingBox()
+    t.ok('wide: the team\u2019s figures on the left, its people down the right', Boolean(sum && list && list.x > sum.x + sum.width - 5))
+    const figs = await page.locator('[data-pane="floor-figures"]').boundingBox()
+    t.ok('...the floor\u2019s four figures still across the page', Boolean(figs && sum && figs.width > sum.width * 1.3))
+    t.check('...remembered for the floor', await page.evaluate(() => localStorage.getItem('raptor.dashboard.collections.layout')), 'wide')
+    await panes.getByRole('button', { name: 'Three columns' }).click(); await page.waitForTimeout(300)
+  }
   t.check('...and nobody from outside the team', teamNames.includes(LOOSE.name), false)
 
   /* ---------- the clerk sheet ---------- */

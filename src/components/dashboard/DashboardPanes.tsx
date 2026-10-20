@@ -29,13 +29,15 @@ export interface DashboardPane {
   node: ReactNode
 }
 
-export function DashboardPanes({ layoutKey, panes }: {
+export function DashboardPanes({ layoutKey, panes, initial }: {
   /** Where the choice is remembered, per dashboard. */
   layoutKey: string
+  /** The arrangement before anybody has chosen one: the page's own drawing, where it had one. */
+  initial?: RecordLayoutId
   /** In reading order. `false`/`null` entries are skipped, so a pane can be conditional inline. */
   panes: (DashboardPane | false | null | undefined)[]
 }) {
-  const [layout, choose] = useRecordLayout(layoutKey)
+  const [layout, choose] = useRecordLayout(layoutKey, initial)
   const list = panes.filter((p): p is DashboardPane => !!p)
   /* Stretches between the full-width rows. */
   const stretches: (DashboardPane | DashboardPane[])[] = []

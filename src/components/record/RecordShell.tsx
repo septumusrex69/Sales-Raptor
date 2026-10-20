@@ -426,13 +426,13 @@ export const RECORD_LAYOUTS: { id: RecordLayoutId; label: string; icon: LucideIc
  * a client. Separate keys per page because the right arrangement genuinely differs — an account
  * has a long timeline to give width to, a lead has not.
  */
-export function useRecordLayout(key: string): [RecordLayoutId, (next: RecordLayoutId) => void] {
+export function useRecordLayout(key: string, fallback: RecordLayoutId = 'columns'): [RecordLayoutId, (next: RecordLayoutId) => void] {
   const [layout, setLayout] = useState<RecordLayoutId>(() => {
     try {
       const saved = localStorage.getItem(key)
       if (RECORD_LAYOUTS.some((l) => l.id === saved)) return saved as RecordLayoutId
     } catch { /* private browsing, or storage switched off. The default is fine. */ }
-    return 'columns'
+    return fallback
   })
   const choose = (next: RecordLayoutId) => {
     setLayout(next)

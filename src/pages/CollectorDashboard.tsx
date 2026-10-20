@@ -1,3 +1,4 @@
+import { DashboardPanes } from '../components/dashboard/DashboardPanes'
 import { useEffect, useMemo, useState } from 'react'
 import { saveFile } from '../lib/fileSave'
 import { Link } from 'react-router-dom'
@@ -323,121 +324,115 @@ export function CollectorDashboard() {
         </Card>
       ) : (
         <>
-          {/* ============================ 1. THE DEPARTMENT ============================ */}
-
           {/*
-            THREE LEVELS, NAMED, AND IN THIS ORDER. The firm, of every department in the firm:
-            "their own statistics is important, their team statistics is important, and their
-            department statistics is important for them to see."
+            THE THREE LEVELS -- the floor, your team, you -- and then the detail, in the order and for
+            the reasons the firm gave ("their own statistics is important, their team statistics is
+            important, and their department statistics is important"). Why each level is where it is
+            is said where the levels are drawn (Level, below).
 
-            THE DEPARTMENT LEADS because that is how the firm reads the floor — and because the
-            screen above it is the company's. The person's own month is not buried by that: it
-            has a level of its own further down with its own measures, which it did not have
-            before. What it had was the FLOOR's measures drawn in the shape of somebody's own,
-            with nothing on the page saying whose they were.
+            IN THE THREE ARRANGEMENTS (S9, 20 Oct), like every department dashboard. Each level's
+            heading is a row across the page, so a level is arranged on its own and never borrows a
+            column from the next: in Wide the floor's fair measures sit beside its counts, the team's
+            summary beside its ranked list, your summary beside your activity. The four figures and
+            the month bar stay across the page in all three.
+
+            THE TEAM ONLY WHERE THERE IS ONE, AND IT DOES NOT FOLLOW THE TEAM PICKER: the call centre
+            manager leads every team and belongs to none, and a leader looking at another team must
+            not find their own section describing somebody else's people.
           */}
-          <Level title="The floor" why={teamId
-            ? `${teams.find((t) => t.id === teamId)?.name ?? 'One team'}, ${period.label}`
-            : `Every collector, ${period.label}`} />
-
-          {/*
-            THE SAME FOUR FIGURES THE COMPANY DASHBOARD LEADS WITH, repeated here at the firm's
-            instruction — "we can repeat the same figures". They come off the same hook, so the
-            two screens cannot drift; what changes is only how they are drawn, because a tile
-            over a photograph and a tile on a page are the same fact in two frames.
-          */}
-          <div data-qa="collections-figures" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatTile size="secondary" label={month.figures.todayLabel}
-              value={moneyText(month.figures.today)}
-              pctChange={month.figures.changeOnPrevious === null
-                ? undefined : month.figures.changeOnPrevious * 100}
-              compareLabel={month.figures.previousLabel ? `vs ${month.figures.previousLabel}` : undefined}
-              hint="What came in on the day being read." />
-            <StatTile size="secondary" label="Collected this period"
-              value={moneyText(month.figures.collected)}
-              hint={month.figures.target === null
-                ? 'No target set for this period.'
-                : `${pctText(month.figures.achieved)} of ${moneyText(month.figures.target)}.`} />
-            <StatTile size="secondary"
-              label={month.figures.againstPace === null ? 'Against pace'
-                : month.figures.againstPace >= 0 ? 'Ahead of pace' : 'Behind pace'}
-              value={month.figures.againstPace === null ? '—' : moneyText(Math.abs(month.figures.againstPace))}
-              hint={month.figures.expectedByNow === null
-                ? 'Nothing to measure against yet.'
-                : `Expected by now ${moneyText(month.figures.expectedByNow)}.`} />
-            <StatTile size="secondary" label="Needed per working day"
-              value={moneyText(month.figures.neededADay)}
-              hint={month.figures.stillNeeded === null
-                ? 'No target set for this period.'
-                : `${moneyText(month.figures.stillNeeded)} still to find.`} />
-          </div>
-
-          {/*
-            THE MONTH BAR, a card of its own now that there is no panel for it to sit inside. The
-            same element the company dashboard draws in the hero's glass, in its light colours —
-            one implementation, because a second "how far through the month are we" is a second
-            answer to that question.
-          */}
-          <MonthProgress pace={pace} line={line} measured={measured}
-            note={floor.withTarget < floor.members
-              ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
-              : undefined} />
-
-          {/*
-            The card that compares people fairly, and it says so. Kept apart from the money above
-            rather than mixed in with it, because the two answer different questions and a
-            collector should be able to tell which is which. THE FLOOR'S, and now labelled as the
-            floor's — the same four appear again under "You" with the person's own figures in
-            them, and until the levels were named nothing distinguished the two.
-          */}
-          <Measures score={score} caption="Across the whole floor. These compare fairly over
-            unlike books; rand collected does not — it measures the book as much as the collector." />
-
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatTile size="secondary" label="Payments"
-              value={score.payments.toLocaleString('en-ZA')}
-              compareLabel={`vs ${getPreviousSalesMonth(period).label}`}
-              pctChange={pct(score.payments, priorScore?.payments)}
-              hint="How many debtors actually paid, regardless of size." />
-            <StatTile size="secondary" label="Average payment"
-              value={score.averagePayment === null ? '—' : formatCurrency(score.averagePayment)}
-              hint="Collected divided by the number of payments." />
-            <StatTile size="secondary" label="Accounts"
-              value={score.inPlayAccounts.toLocaleString('en-ZA')}
-              hint="In play right now. Written-off and frozen accounts do not count against a book." />
-            <StatTile size="secondary" label="Book value"
-              value={formatCurrency(score.inPlayValue)}
-              hint="Capital outstanding across the accounts in play." />
-          </div>
-
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatTile size="secondary" label="Calls" value={score.calls.toLocaleString('en-ZA')} />
-            <StatTile size="secondary" label="Emails" value={score.emailsSent.toLocaleString('en-ZA')} />
-            <StatTile size="secondary" label="SMS" value={score.smsSent.toLocaleString('en-ZA')} />
-            <StatTile size="secondary" label="Notes written" value={score.notesWritten.toLocaleString('en-ZA')}
-              hint="Work somebody typed. Notes Raptor composes itself are not counted." />
-          </div>
-
-          {/* ============================== 2. YOUR TEAM ============================== */}
-
-          {/*
-            ONLY WHERE THERE IS ONE, and quietly absent otherwise. The call centre manager leads
-            every team and belongs to none, and a collector whose team was never set would get a
-            panel of dashes — which reads as a broken screen rather than as a missing record.
-            What is wrong in that case is a profile, and Settings is where it is fixed.
-
-            IT DOES NOT FOLLOW THE TEAM PICKER. My team is my team whatever the filter above is
-            set to: a leader looking at another team's figures should not find their own section
-            quietly describing somebody else's.
-          */}
-          {myTeam && teamStats && teamLine && (
-            <>
-              <Level title={`Your team — ${myTeam.name}`}
-                /* The place is only said where there is something to be placed against: "1st of
-                   1" on a floor with one team is not a standing, it is arithmetic about nothing. */
-                why={`${teamPeople.length === 1 ? '1 collector' : `${teamPeople.length} collectors`}${
-                  teamPlace && teamPlace.outOf > 1
-                    ? ` · ${placeLabel(teamPlace)} on rand collected` : ''}`} />
+          <DashboardPanes layoutKey="raptor.dashboard.collections.layout" panes={[
+            /* ============================ 1. THE DEPARTMENT ============================ */
+            { id: 'level-floor', kind: 'full', node: (
+              <Level title="The floor" why={teamId
+              ? `${teams.find((t) => t.id === teamId)?.name ?? 'One team'}, ${period.label}`
+              : `Every collector, ${period.label}`} />
+            ) },
+            /* THE SAME FOUR FIGURES THE COMPANY DASHBOARD LEADS WITH ("we can repeat the same figures"),
+               off the same hook (useCollectionsMonth), so the two screens cannot drift. */
+            /* THE SAME FOUR FIGURES THE COMPANY DASHBOARD LEADS WITH ("we can repeat the same figures"),
+               off the same hook (useCollectionsMonth), so the two screens cannot drift. */
+            { id: 'floor-figures', kind: 'full', node: (
+              <div data-qa="collections-figures" className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatTile size="secondary" label={month.figures.todayLabel}
+                  value={moneyText(month.figures.today)}
+                  pctChange={month.figures.changeOnPrevious === null
+                    ? undefined : month.figures.changeOnPrevious * 100}
+                  compareLabel={month.figures.previousLabel ? `vs ${month.figures.previousLabel}` : undefined}
+                  hint="What came in on the day being read." />
+                <StatTile size="secondary" label="Collected this period"
+                  value={moneyText(month.figures.collected)}
+                  hint={month.figures.target === null
+                    ? 'No target set for this period.'
+                    : `${pctText(month.figures.achieved)} of ${moneyText(month.figures.target)}.`} />
+                <StatTile size="secondary"
+                  label={month.figures.againstPace === null ? 'Against pace'
+                    : month.figures.againstPace >= 0 ? 'Ahead of pace' : 'Behind pace'}
+                  value={month.figures.againstPace === null ? '—' : moneyText(Math.abs(month.figures.againstPace))}
+                  hint={month.figures.expectedByNow === null
+                    ? 'Nothing to measure against yet.'
+                    : `Expected by now ${moneyText(month.figures.expectedByNow)}.`} />
+                <StatTile size="secondary" label="Needed per working day"
+                  value={moneyText(month.figures.neededADay)}
+                  hint={month.figures.stillNeeded === null
+                    ? 'No target set for this period.'
+                    : `${moneyText(month.figures.stillNeeded)} still to find.`} />
+              </div>
+            ) },
+            /* THE MONTH BAR: the company dashboard's own element in its light colours -- one answer to
+               "how far through the month are we". */
+            /* THE MONTH BAR: the company dashboard's own element in its light colours -- one answer to
+               "how far through the month are we". */
+            { id: 'floor-progress', kind: 'full', node: (
+              <MonthProgress pace={pace} line={line} measured={measured}
+              note={floor.withTarget < floor.members
+                ? `${floor.members - floor.withTarget} of ${floor.members} have no target, so the total is short by their share.`
+                : undefined} />
+            ) },
+            /* The fair measures, THE FLOOR'S and labelled so; the same four appear under "You" with the
+               person's own figures in them. */
+            /* The fair measures, THE FLOOR'S and labelled so; the same four appear under "You" with the
+               person's own figures in them. */
+            { id: 'floor-measures', kind: 'wide', node: (
+              <Measures score={score} caption="Across the whole floor. These compare fairly over
+              unlike books; rand collected does not — it measures the book as much as the collector." />
+            ) },
+            { id: 'floor-counts', node: (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatTile size="secondary" label="Payments"
+                  value={score.payments.toLocaleString('en-ZA')}
+                  compareLabel={`vs ${getPreviousSalesMonth(period).label}`}
+                  pctChange={pct(score.payments, priorScore?.payments)}
+                  hint="How many debtors actually paid, regardless of size." />
+                <StatTile size="secondary" label="Average payment"
+                  value={score.averagePayment === null ? '—' : formatCurrency(score.averagePayment)}
+                  hint="Collected divided by the number of payments." />
+                <StatTile size="secondary" label="Accounts"
+                  value={score.inPlayAccounts.toLocaleString('en-ZA')}
+                  hint="In play right now. Written-off and frozen accounts do not count against a book." />
+                <StatTile size="secondary" label="Book value"
+                  value={formatCurrency(score.inPlayValue)}
+                  hint="Capital outstanding across the accounts in play." />
+              </div>
+            ) },
+            { id: 'floor-activity', node: (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatTile size="secondary" label="Calls" value={score.calls.toLocaleString('en-ZA')} />
+                <StatTile size="secondary" label="Emails" value={score.emailsSent.toLocaleString('en-ZA')} />
+                <StatTile size="secondary" label="SMS" value={score.smsSent.toLocaleString('en-ZA')} />
+                <StatTile size="secondary" label="Notes written" value={score.notesWritten.toLocaleString('en-ZA')}
+                  hint="Work somebody typed. Notes Raptor composes itself are not counted." />
+              </div>
+            ) },
+            /* ============================== 2. YOUR TEAM ============================== */
+            !!(myTeam && teamStats && teamLine) && { id: 'level-team', kind: 'full', node: (
+              <Level title={`Your team — ${myTeam!.name}`}
+              /* The place is only said where there is something to be placed against: "1st of
+                 1" on a floor with one team is not a standing, it is arithmetic about nothing. */
+              why={`${teamPeople.length === 1 ? '1 collector' : `${teamPeople.length} collectors`}${
+                teamPlace && teamPlace.outOf > 1
+                  ? ` · ${placeLabel(teamPlace)} on rand collected` : ''}`} />
+            ) },
+            !!(myTeam && teamStats && teamLine) && { id: 'team-summary', kind: 'wide', node: (
               <Card padded={false}>
                 <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
                   <Fact label="Collected" value={formatCurrency(teamStats.collected)} />
@@ -459,9 +454,8 @@ export function CollectorDashboard() {
                   </p>
                 )}
               </Card>
-
-              {/* The team, ranked on rand like the floor is — short enough to read as a list
-                  rather than a table, and the person's own row marked. */}
+            ) },
+            !!(myTeam && teamStats && teamLine) && { id: 'team-list', node: (
               <Card padded={false}>
                 <ul className="divide-y divide-slate-100">
                   {teamPeople.map(({ row, name, line: theirs }, i) => (
@@ -484,20 +478,16 @@ export function CollectorDashboard() {
                   ))}
                 </ul>
               </Card>
-            </>
-          )}
-
-          {/* ================================= 3. YOU ================================= */}
-
-          {/*
-            THE PERSON READING IT, with their own measures rather than the floor's. The firm
-            wanted both on one screen rather than behind a toggle — "they should see their own
-            thing, but they should also be able to see the entire company's performance, and
-            where they stand relative to everybody else."
-          */}
-          {mine && myLine && myScore ? (
-            <>
+            ) },
+            /* ================================= 3. YOU ================================= */
+            /* THE PERSON READING IT, with their own measures: "they should see their own thing, but they
+               should also be able to see the entire company's performance". */
+            /* THE PERSON READING IT, with their own measures: "they should see their own thing, but they
+               should also be able to see the entire company's performance". */
+            !!(mine && myLine && myScore) && { id: 'level-you', kind: 'full', node: (
               <Level title="You" why={`Your own month · ${period.label}`} />
+            ) },
+            !!(mine && myLine && myScore) && { id: 'you-summary', kind: 'wide', node: (
               <Card padded={false}>
                 <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
                   <Fact label="Collected" value={formatCurrency(mine.collected)} />
@@ -513,10 +503,12 @@ export function CollectorDashboard() {
                   </Link>
                 </div>
               </Card>
-
+            ) },
+            !!(mine && myLine && myScore) && { id: 'you-measures', kind: 'wide', node: (
               <Measures score={myScore} caption="Yours, on the same four measures the floor is read
-                on above — so the comparison is like for like rather than two different sums." />
-
+              on above — so the comparison is like for like rather than two different sums." />
+            ) },
+            !!(mine && myLine && myScore) && { id: 'you-activity', node: (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatTile size="secondary" label="Your calls" value={myScore.calls.toLocaleString('en-ZA')} />
                 <StatTile size="secondary" label="Your emails" value={myScore.emailsSent.toLocaleString('en-ZA')} />
@@ -524,35 +516,29 @@ export function CollectorDashboard() {
                 <StatTile size="secondary" label="Your notes" value={myScore.notesWritten.toLocaleString('en-ZA')}
                   hint="Your own words. Notes Raptor composes itself are not counted." />
               </div>
-            </>
-          ) : (
-            /* A leader or a manager with no book of their own. Said once, plainly, rather than
-               drawing an empty level that looks like a screen that failed to load. */
-            <p className="px-1 text-xs text-slate-400">
-              You have no accounts of your own this period, so there is no personal level to show.
-            </p>
-          )}
-
-          {/* ========================= THE FLOOR, IN DETAIL ========================= */}
-
-          {/*
-            LAST, because it is reference rather than reading. Every collector and every team is
-            already summed above; this is where somebody goes to find one person's row. It stayed
-            on the screen rather than moving behind a link at the firm's instruction that everyone
-            can see everyone: "they should also be able to see where they stand relative to
-            everybody else."
-          */}
-          {shownRows.length > 0 && (
-            <>
+            ) },
+            /* A leader or a manager with no book of their own: said once, plainly. */
+            !(mine && myLine && myScore) && { id: 'no-book-of-your-own', kind: 'full', node: (
+              <p className="px-1 text-xs text-slate-400">
+                You have no accounts of your own this period, so there is no personal level to show.
+              </p>
+            ) },
+            /* ========================= THE FLOOR, IN DETAIL: reference, so last ========================= */
+            shownRows.length > 0 && { id: 'level-detail', kind: 'full', node: (
               <Level title="The floor, in detail" why="Every team and every collector, ranked" />
+            ) },
+            shownRows.length > 0 && { id: 'team-table', kind: 'wide', node: (
               <TeamTable rows={shownRows} users={users} teams={teams} targets={targets}
-                periodKey={period.key} pace={pace} targetFor={targetFor} />
+              periodKey={period.key} pace={pace} targetFor={targetFor} />
+            ) },
+            shownRows.length > 0 && { id: 'clerk-table', kind: 'wide', node: (
               <ClerkTable rows={shownRows} today={shownToday} users={users} teams={teams}
-                pace={pace} targetFor={targetFor} me={currentUser?.id ?? null} />
-            </>
-          )}
-
-          {shownRows.length > 0 && <FairTable rows={shownRows} users={users} />}
+              pace={pace} targetFor={targetFor} me={currentUser?.id ?? null} />
+            ) },
+            shownRows.length > 0 && { id: 'fair-table', kind: 'wide', node: (
+              <FairTable rows={shownRows} users={users} />
+            ) },
+          ]} />
         </>
       )}
     </div>

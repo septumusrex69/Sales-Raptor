@@ -67,6 +67,18 @@ try {
   t.ok('Work coming in and The book are both drawn', Boolean(work && bk))
   t.ok('...side by side at a laptop\'s width', Boolean(work && bk && Math.abs(work.y - bk.y) < 4 && bk.x > work.x + work.width - 4))
   t.ok('...Work coming in the wider of the two, as in the mock-up', Boolean(work && bk && work.width > bk.width))
+  /* THE THREE ARRANGEMENTS (S9, 20 Oct), opening in Wide -- the mock above -- until somebody chooses. */
+  {
+    const panes = page.getByTestId('dashboard-panes')
+    t.check('it opens in Wide, the firm’s own mock', await panes.getAttribute('data-layout'), 'wide')
+    const deps = async () => (await page.getByTestId('departments').boundingBox())?.width ?? 0
+    await panes.getByRole('button', { name: 'One column' }).click(); await page.waitForTimeout(300)
+    const [w1, b1] = [await page.getByTestId('work-coming-in').boundingBox(), await page.getByTestId('the-book').boundingBox()]
+    t.ok('one column: The book under Work coming in, as wide', Boolean(w1 && b1 && b1.y > w1.y + w1.height - 4 && Math.abs(w1.width - b1.width) < 4))
+    t.ok('...the departments still across the page', (await deps()) >= (w1?.width ?? 0) - 40)
+    await panes.getByRole('button', { name: 'Wide' }).click(); await page.waitForTimeout(300)
+    t.check('...and the choice is remembered', await page.evaluate(() => localStorage.getItem('raptor.dashboard.company.layout')), 'wide')
+  }
 
   /* ---------- Work coming in ---------- */
   const line = await page.getByTestId('intake-line').innerText()
