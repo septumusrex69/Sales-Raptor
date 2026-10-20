@@ -445,6 +445,14 @@ longer case number is a price rise on every SMS, paid by the debtor, under item 
 | Staging | `kvkajxpremantdkhmjvb` | Work here. Data is disposable and the firm has said so. |
 | Production | `qcvesjzoiznrvunjrqpv` | **Do not write to it casually.** It is behind staging and carries real client money. |
 
+**EVERY ACCOUNT ON STAGING IS A TEST ACCOUNT.** The firm, 20 Oct: everybody testing -- collectors
+included -- needs the workflow test clock ("Next step now") on any account, until they say they are
+live. So `isTestAccount(account, { staging })` answers yes for every account wherever the database's
+own `deployment.kind` is 'staging', and the panel, the advance endpoint and `workflow_test_advance`
+all read that same row. Nothing is marked per account: a book reloaded onto staging is testable the
+moment it lands. Production's row says 'production' and has no write policy, so none of this reaches
+live money. **Do not narrow it back to the `is_test_account` flag without the firm's say-so.**
+
 **This GitHub repo is public.** Real client data must never be committed — no CSV exports, no
 screenshots of the book, no database dumps.
 
