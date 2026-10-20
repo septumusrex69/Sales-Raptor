@@ -392,6 +392,8 @@ export function EscalateModal({
         /* On a link, only where the ticket has nobody on it -- see the picker's own note. */
         ownerId: linkedTo && linkedTo.ownerId ? null : ownerId,
         chaseOn: linkedTo ? null : (chaseOn || null),
+        /* Kept rather than escalated: it stays on this desk (see the box below). */
+        keep: !linkedTo && keepIt,
       })
       setBusy(false)
       if (!result.ok) { setError(result.problem); return }
@@ -411,7 +413,10 @@ export function EscalateModal({
         kind,
         category,
         ownerId: ownerId,
-        stage: stageForAssignee(users.find((u) => u.id === ownerId)?.role, !!ownerId && ownerId === clientLiaison?.id),
+        /* KEPT IS ON YOUR OWN DESK, whoever you are (the firm, 20 Oct: "it says it's waiting for the
+           liaison, but I said that I want to deal with it myself" -- they were also that client's
+           liaison, so the rule below read them as the liaison it was being handed to). */
+        stage: keepIt ? 'agent' : stageForAssignee(users.find((u) => u.id === ownerId)?.role, !!ownerId && ownerId === clientLiaison?.id),
         chaseOn: chaseOn || null,
         raisedBy: actor.id,
         raisedByName: actor.name,

@@ -131,6 +131,16 @@ check('...offering every kind a person may raise', ESCALATION_KIND_ORDER.length,
 /* AND NOT `import`, which is raised by the handover import and never by a person. */
 ok('...and not the one the import raises', !ESCALATION_KIND_ORDER.includes('import'))
 
+/* KEPT IS ON YOUR OWN DESK (the firm, 20 Oct: "it says it's waiting for the liaison, but I said that I
+   want to deal with it myself"). They were also that client's liaison, so "who holds it" alone read
+   them as the liaison it was handed to -- on the email route it was simply any owner at all. */
+ok('raised on the account page, a kept dispute stays on the raiser\'s desk', /stage: keepIt \? 'agent' : stageForAssignee\(/.test(modal))
+ok('raised from an email, the box says it was kept', /keep: !linkedTo && keepIt,/.test(modal))
+const ticket = code('api/_lib/email/ticket.ts')
+ok('...and the server leaves a kept one on the desk, and works out an escalated one by the same rule',
+  /if \(body\.ownerId && body\.keep !== true\) \{/.test(ticket) && /stage = stageForAssignee\(/.test(ticket) && /^\s+stage,$/m.test(ticket))
+ok('...never "any owner means the liaison" again', !/stage: body\.ownerId \? 'liaison' : 'agent'/.test(ticket))
+
 console.log(`\ncheck-raise-not-escalate: ${pass} passed, ${failures.length} failed`)
 for (const f of failures) console.log(`  ✗ ${f}`)
 process.exit(failures.length ? 1 : 0)

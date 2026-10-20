@@ -4,6 +4,7 @@ import { credentialsKeyProblem } from '../crypto.js'
 import { adminClient, requireCaller } from '../auth.js'
 import { fetchAttachment } from '../emailSync.js'
 import { attachmentLeaf } from '../mime.js'
+import { stageForAssignee, type DisputeStage } from '../../../src/lib/disputeCategories.js'
 import { chargeItemWith } from '../../../src/lib/chargeEngine.js'
 import {
   escalationNote, escalationChargeable,
@@ -94,6 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ownerId?: string | null
     chaseOn?: string | null
     queryId?: string | null
+    keep?: boolean
   }
   const accountEmailId = typeof body.accountEmailId === 'string' ? body.accountEmailId : ''
   /*
@@ -300,6 +302,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (markError) { res.status(500).json({ error: markError.message }); return }
     }
   } else {
+    /*
+     * WHERE IT LANDS FOLLOWS WHO IT WAS GIVEN TO, by the same rule the account page's own box uses
+     * (stageForAssignee). This said `ownerId ? 'liaison' : 'agent'` -- so an agent who chose "Keep
+     * it, I will deal with it myself" was the owner, and the dispute read "Awaiting liaison" (the
+     * firm, 20 Oct: "it says it's waiting for the liaison, but I said that I want to deal with it
+     * myself"). Worked out here from the owner's role and the client's liaison, not taken from the
+     * browser: where a dispute sits decides who is waiting on whom.
+     */
+    let stage: DisputeStage = 'agent'
+    /* KEPT -- "I will deal with it myself" -- is on the raiser's own desk, even where the raiser is
+       also the client's liaison, which is exactly the case the firm hit. */
+    if (body.ownerId && body.keep !== true) {
+      const [{ data: owner }, { data: acct }] = await Promise.all([
+        admin.from('profiles').select('role').eq('id', body.ownerId).maybeSingle(),
+        admin.from('debtor_accounts').select('companies(account_owner_id)').eq('id', accountId).maybeSingle(),
+      ])
+      const liaisonId = (acct as { companies?: { account_owner_id?: string | null } | null } | null)?.companies?.account_owner_id ?? null
+      stage = stageForAssignee((owner?.role as string | undefined) ?? undefined, body.ownerId === liaisonId)
+    }
     const { data: created, error: ticketError } = await admin
       .from('account_queries')
       .insert({
@@ -309,8 +330,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         category: kind === 'dispute' ? (category || null) : null,
         request_for: requestFor,
         owner_id: body.ownerId || null,
-        /* Where it lands follows who it was given to; unassigned, it sits with the desk it came to. */
-        stage: body.ownerId ? 'liaison' : 'agent',
+        /* Unassigned, it sits with the desk it came to. */
+        stage,
         chase_on: body.chaseOn || null,
         raised_by: caller.id,
         alleged_on: kind === 'dispute' ? today : null,

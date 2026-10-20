@@ -736,6 +736,8 @@ export async function raiseTicketFromEmail(input: {
   category?: string | null
   ownerId?: string | null
   chaseOn?: string | null
+  /** "Keep it -- I will deal with it myself": it stays on the raiser's desk, never with the liaison. */
+  keep?: boolean
   /**
    * ADD IT TO A TICKET THAT IS ALREADY OPEN instead of raising a new one.
    *
@@ -772,6 +774,7 @@ export async function raiseTicketFromEmail(input: {
       category: input.category ?? null,
       ownerId: input.ownerId ?? null,
       chaseOn: input.chaseOn ?? null,
+      keep: input.keep === true,
       queryId: input.queryId ?? null,
     }),
   })
