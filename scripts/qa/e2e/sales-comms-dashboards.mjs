@@ -137,6 +137,27 @@ try {
   t.ok('...and the picker offers closers and liaisons', (await page.locator('option').allTextContents()).some((x) => /All closers and liaisons/.test(x)))
   await t.shot(page, 'sales-dashboard')
 
+  /* THE SAME THREE ARRANGEMENTS ON SALES (S9, 20 Oct: "proceed making that dashboard thing"). */
+  {
+    await page.setViewportSize({ width: 1366, height: 4200 })
+    const sp = page.getByTestId('dashboard-panes')
+    const box = async (id) => (await sp.locator(`[data-pane="${id}"]`).boundingBox()) ?? { x: -1, y: -1, width: -1 }
+    t.ok('the sales page has the arrangement switcher', await sp.getByRole('button', { name: 'One column' }).isVisible())
+    await sp.getByRole('button', { name: 'One column' }).click(); await page.waitForTimeout(300)
+    const [m1, d1] = [await box('mandates'), await box('deals')]
+    t.ok('one column: deals under mandates, as wide', Math.abs(m1.x - d1.x) < 2 && d1.y > m1.y && Math.abs(m1.width - d1.width) < 2)
+    await sp.getByRole('button', { name: 'Wide' }).click(); await page.waitForTimeout(300)
+    const [w1, n1, r1] = [await box('track-pipeline'), await box('mandates'), await box('results')]
+    t.ok('wide: the charts on the left two thirds, mandates down the right', n1.x > w1.x + w1.width - 5 && w1.width > n1.width * 1.5)
+    t.ok('...the figure rows still across the page', r1.width > w1.width * 1.3)
+    await page.screenshot({ path: `${OUT}/sales-layout-wide.png` })
+    await sp.getByRole('button', { name: 'Three columns' }).click(); await page.waitForTimeout(300)
+    const [m3, d3] = [await box('mandates'), await box('deals')]
+    t.ok('three columns: mandates and deals side by side again', Math.abs(m3.y - d3.y) < 2 && d3.x > m3.x + m3.width - 5)
+    t.check('...remembered for the sales page on its own', await page.evaluate(() => localStorage.getItem('raptor.dashboard.sales.layout')), 'columns')
+    await page.setViewportSize({ width: 1440, height: 900 })
+  }
+
   await page.goto(`http://localhost:${PORT}/dashboard/communications`)
   await page.getByTestId('top-clients').waitFor({ timeout: 15000 })
   t.ok('Communications: existing-client handovers this month, 4 accounts', /4 · R\s?50[\s,]000/.test(await page.getByTestId('comms-row').innerText()))

@@ -216,7 +216,7 @@ export function CompaniesList() {
                     {search
                       ? 'No client matches that.'
                       : 'No clients yet. A company lands here once it has a client code — which '
-                        + '"Add client" gives it — or once one of its deals is marked Won.'}
+                        + '"Add client" gives it — once its mandate is signed, or once one of its deals is marked Won.'}
                   </td>
                 </tr>
               )}

@@ -1,14 +1,24 @@
 import type { Company, ID } from '../types'
 
 /**
- * A top-level company is a "client" once it has a Won deal of its own, or
- * it's a Swordfish-sourced record (has a code — either a real prefix on a
- * standalone/sub-account, or an internal code on a parent container).
- * Shared by CompaniesList and the Communications Dashboard so both agree
- * on what counts as a client to service.
+ * A top-level company is a "client" once it has a Won deal of its own, it's a Swordfish-sourced
+ * record (has a code — either a real prefix on a standalone/sub-account, or an internal code on a
+ * parent container), or ITS MANDATE IS SIGNED.
+ *
+ * THE MANDATE HALF (S9, 20 Oct). The firm converted a lead, recorded the mandate as signed, left
+ * both deals open -- converting lets each deal keep its own outcome -- and the client vanished:
+ * "I created a client, but it's gone. Can't see it." A signed mandate is the agreement that makes a
+ * company a client; whether a deal row was also moved to Won is bookkeeping about the sale.
+ *
+ * Shared by CompaniesList, the Communications Dashboard and the client page (`isClientCompany`) so
+ * all three agree on what counts as a client to service.
  */
+export function isClientCompany(c: Pick<Company, 'code' | 'mandateSignedAt'>, hasWonDeal: boolean): boolean {
+  return hasWonDeal || !!c.code || !!c.mandateSignedAt
+}
+
 export function topLevelClients(companies: Company[], hasWonDeal: (companyId: ID) => boolean): Company[] {
-  return companies.filter((c) => !c.parentCompanyId && (hasWonDeal(c.id) || !!c.code))
+  return companies.filter((c) => !c.parentCompanyId && isClientCompany(c, hasWonDeal(c.id)))
 }
 
 export interface ClientRollup {

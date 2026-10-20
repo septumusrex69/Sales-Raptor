@@ -12,6 +12,7 @@ import { SalesMonthPicker } from '../components/ui/SalesMonthPicker'
 import { CompareSelector, type CompareMode } from '../components/ui/CompareSelector'
 import { SalesFunnelChart } from '../components/dashboard/SalesFunnelChart'
 import { WinRateCard } from '../components/dashboard/WinRateCard'
+import { DashboardPanes } from '../components/dashboard/DashboardPanes'
 import { DashboardHero } from '../components/dashboard/DashboardHero'
 import { MonthTrackCard } from '../components/dashboard/MonthTrackCard'
 import { MandateOutcomeCard } from '../components/dashboard/MandateOutcomeCard'
@@ -513,305 +514,310 @@ export function Dashboard() {
           different things ... how many mandates has been signed? Because that's the most important
           thing, and then deals are secondary ... the line graph as well and the stack graph. So
           that's the secondary thing that you see." Mandates, deals, the track record, then what
-          to act on, then the detail. */}
-      {/* ---------- 1 and 2. MANDATES, then DEALS: side by side ("fit these guys in next to each
-          other"), mandates on the left where the eye starts. A mandate is never a deal here. ---------- */}
-      {/* From iPad width up (lg), not only on a wide screen: the firm drew the split on their iPad. */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
-          newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
-          periodLabel={period.label} periodParam={periodParam} />
+          to act on, then the detail.
 
-        <WinRateCard
-          showLeadPipeline={false}
-          cohort={cohort}
-          newLeads={kpis.curr.newLeads}
-          qualified={kpis.curr.qualified}
-          converted={kpis.curr.converted}
-          periodLabel={period.label}
-          periodParam={periodParam}
-        />
-      </div>
-
-      {/* SIGNED, WAITING FOR A LIAISON (the firm, 18 Oct: "it should show up in the salesperson's dashboard
-          and it should be allocated to a liaison"). Straight under Mandates and Deals once there is one: a client
-          who signed and hears nothing is the first thing to put right. Each opens the client, where
-          the Assign box is. */}
-      {waitingForLiaison.length > 0 && (
-        <Card className="border-gold-300 bg-gold-50/60">
-          <div data-testid="waiting-for-liaison">
-            <CardHeader title={`Signed, waiting for a liaison · ${waitingForLiaison.length}`}
-              subtitle="Assign each one: the welcome email goes from the liaison and a welcome call goes on her list." />
-            <ul className="divide-y divide-gold-200/70">
-              {waitingForLiaison.map((c) => (
-                <li key={c.id} className="flex items-center gap-3 py-2 text-sm">
-                  <Link to={`/companies/${c.id}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
-                  <span className="shrink-0 text-xs text-slate-500">signed {(c.mandateSignedAt ?? '').slice(0, 10).split('-').reverse().join('/')}</span>
-                  <Link to={`/companies/${c.id}`} className="shrink-0 rounded-lg bg-navy-900 px-3 py-1 text-xs font-semibold text-white">Assign</Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </Card>
-      )}
-
-      {/* ---------- 3. THE TRACK RECORD: the line and the stacked bars ---------- */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <MonthTrackCard kind="pipeline" rows={track} months={months} onMonths={setMonths} testId="sales-track"
+          IN THE THREE ARRANGEMENTS (S9, 20 Oct): the firm asked for Communications' one column / three
+          columns / wide-and-narrow on the other dashboards too. DashboardPanes decides where each
+          kind goes; the order here is still the firm's, and Mandates and Deals are both narrow so
+          they stay side by side in Three columns -- "fit these guys in next to each other". */}
+      <DashboardPanes layoutKey="raptor.dashboard.sales.layout" panes={[
+        { id: 'mandates', node: (
+          <MandateOutcomeCard leads={thisMonth?.leads ?? 0} mandates={thisMonth?.mandates ?? 0} closingRate={thisMonth?.closingRate ?? null}
+            newAccounts={thisMonth?.newAccounts ?? 0} newCapital={thisMonth?.newCapital ?? 0} loadingHandovers={intake === null}
+            periodLabel={period.label} periodParam={periodParam} />
+        ) },
+        { id: 'deals', node: (
+          <WinRateCard
+            showLeadPipeline={false}
+            cohort={cohort}
+            newLeads={kpis.curr.newLeads}
+            qualified={kpis.curr.qualified}
+            converted={kpis.curr.converted}
+            periodLabel={period.label}
+            periodParam={periodParam}
+          />
+        ) },
+        /* SIGNED, WAITING FOR A LIAISON (the firm, 18 Oct: "it should show up in the salesperson's
+           dashboard and it should be allocated to a liaison"). Straight under Mandates and Deals once
+           there is one: a client who signed and hears nothing is the first thing to put right. */
+        waitingForLiaison.length > 0 && { id: 'waiting-for-liaison', node: (
+          <Card className="border-gold-300 bg-gold-50/60">
+            <div data-testid="waiting-for-liaison">
+              <CardHeader title={`Signed, waiting for a liaison · ${waitingForLiaison.length}`}
+                subtitle="Assign each one: the welcome email goes from the liaison and a welcome call goes on her list." />
+              <ul className="divide-y divide-gold-200/70">
+                {waitingForLiaison.map((c) => (
+                  <li key={c.id} className="flex items-center gap-3 py-2 text-sm">
+                    <Link to={`/companies/${c.id}`} className="min-w-0 flex-1 truncate font-semibold text-slate-800 hover:underline">{c.name}</Link>
+                    <span className="shrink-0 text-xs text-slate-500">signed {(c.mandateSignedAt ?? '').slice(0, 10).split('-').reverse().join('/')}</span>
+                    <Link to={`/companies/${c.id}`} className="shrink-0 rounded-lg bg-navy-900 px-3 py-1 text-xs font-semibold text-white">Assign</Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </Card>
+        ) },
+        { id: 'track-pipeline', kind: 'wide', node: (
+          <MonthTrackCard kind="pipeline" rows={track} months={months} onMonths={setMonths} testId="sales-track"
           title="Leads and mandates, month by month" subtitle="Each bar is the leads; the navy part was signed. The % is the closing rate." />
-        <MonthTrackCard kind="new" rows={track} months={months} onMonths={setMonths} testId="sales-new-handovers"
+        ) },
+        { id: 'track-new', kind: 'wide', node: (
+          <MonthTrackCard kind="new" rows={track} months={months} onMonths={setMonths} testId="sales-new-handovers"
           title="Handovers from new clients" subtitle="Clients in their first three months of handovers" />
-      </div>
-
-      {/* ---------- 4. WHAT TO DO ABOUT IT: chase, who is selling, what is slipping ---------- */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <MandateToHandoverCard rows={toHandover} spanLabel={spanLabel} />
-        <LeadSourcesCard rows={sources} spanLabel={spanLabel} />
-      </div>
-
-      <RepLeaderboard rows={leaderboardRows} />
-
-      <NeedsAttention items={attentionItems} />
-
-      <Card padded={false}>
-        <div className="p-5 pb-0">
-          <CardHeader title="Tasks Due" subtitle="Overdue, due today, and this week" action={<Link to="/tasks" className="text-xs font-medium text-brand-600 hover:underline">View all tasks</Link>} />
-        </div>
-        <div className="px-5 pb-5 divide-y divide-slate-50">
-          {tasksDue.map((t) => (
-            /* One line a task, the checking-list look: what it is about trails the title in grey. */
-            <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
-              <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
-                <Circle size={15} />
-              </button>
-              <p className="min-w-0 flex-1 flex items-center gap-1.5">
-                <span className="min-w-0 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
-                  <span className="font-medium text-slate-700">{t.title}</span>
-                  <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
-                </span>
-                {t.autoRescheduledFrom && (
-                  <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
-                    Auto-moved
+        ) },
+        { id: 'mandate-to-handover', node: (
+          <MandateToHandoverCard rows={toHandover} spanLabel={spanLabel} />
+        ) },
+        { id: 'lead-sources', node: (
+          <LeadSourcesCard rows={sources} spanLabel={spanLabel} />
+        ) },
+        { id: 'leaderboard', kind: 'wide', node: (
+          <RepLeaderboard rows={leaderboardRows} />
+        ) },
+        { id: 'needs-attention', kind: 'wide', node: (
+          <NeedsAttention items={attentionItems} />
+        ) },
+        { id: 'tasks-due', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Tasks Due" subtitle="Overdue, due today, and this week" action={<Link to="/tasks" className="text-xs font-medium text-brand-600 hover:underline">View all tasks</Link>} />
+            </div>
+            <div className="px-5 pb-5 divide-y divide-slate-50">
+              {tasksDue.map((t) => (
+                /* One line a task, the checking-list look: what it is about trails the title in grey. */
+                <div key={t.id} className="flex items-center gap-3 py-1.5 text-[12.5px] whitespace-nowrap">
+                  <button onClick={() => updateTask(t.id, { status: 'Completed', completedAt: clockNow().toISOString() })} className="text-slate-300 hover:text-[var(--c-green)] shrink-0">
+                    <Circle size={15} />
+                  </button>
+                  <p className="min-w-0 flex-1 flex items-center gap-1.5">
+                    <span className="min-w-0 truncate" title={`${t.title} · ${t.relatedToLabel ?? t.type}`}>
+                      <span className="font-medium text-slate-700">{t.title}</span>
+                      <span className="text-slate-400"> &middot; {t.relatedToLabel ?? t.type}</span>
+                    </span>
+                    {t.autoRescheduledFrom && (
+                      <span title={`Missed — originally due ${formatDate(t.autoRescheduledFrom)}`} className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--c-gold)] bg-[var(--tint-gold)] px-1 py-0.5 rounded">
+                        Auto-moved
+                      </span>
+                    )}
+                  </p>
+                  <PriorityBadge priority={t.priority} />
+                  <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
+                    {daysAgoLabel(t.dueDate)}
                   </span>
-                )}
-              </p>
-              <PriorityBadge priority={t.priority} />
-              <span className={`text-[12px] font-medium w-20 text-right shrink-0 ${new Date(t.dueDate) < TODAY ? 'text-[var(--c-rust-deep)]' : 'text-slate-500'}`}>
-                {daysAgoLabel(t.dueDate)}
-              </span>
-              <UserAvatar userId={t.ownerId} size={18} />
-              <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
-                Reschedule
-              </button>
+                  <UserAvatar userId={t.ownerId} size={18} />
+                  <button onClick={() => setRescheduleTask(t)} className="text-[12px] font-medium text-brand-600 hover:underline shrink-0">
+                    Reschedule
+                  </button>
+                </div>
+              ))}
+              {tasksDue.length === 0 && (
+                <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
+                  <CheckCircle2 size={22} className="text-[var(--c-green)]" />
+                  All caught up — no tasks due.
+                </div>
+              )}
             </div>
-          ))}
-          {tasksDue.length === 0 && (
-            <div className="py-6 text-center text-sm text-slate-400 flex flex-col items-center gap-2">
-              <CheckCircle2 size={22} className="text-[var(--c-green)]" />
-              All caught up — no tasks due.
-            </div>
-          )}
-        </div>
-      </Card>
-
-      <TargetsCard
-        title="Targets"
-        subtitle={
-          scope.startsWith('rep:')
-            ? `${userById(scope.slice(4))?.name ?? 'This closer'}'s targets for ${period.label} — the marker shows how far through the month we are`
-            : `Targets for ${period.label} — the marker shows how far through the month we are`
-        }
-        items={targetProgressItems}
-        elapsed={elapsed}
-      />
-
-      {/* ---------- 5. THE DETAIL, for whoever wants to dig ---------- */}
-
-      {/* The month's results, in secondary size. They sit below the outcome and target cards
-          because those answer "how are we doing" — these are the components of that answer,
-          and giving them the page's largest type made the page a scoreboard with no verdict. */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatTile
-          size="secondary"
-          label="Revenue Won"
-          value={formatCurrency(kpis.curr.revenueWon)}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Fees on won service deals. Handovers are excluded — a signed book earns nothing at signature."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
-            not money earned — the commission only arrives as accounts are collected. */}
-        <StatTile
-          size="secondary"
-          label="Book Signed"
-          value={formatCurrency(kpis.curr.bookSigned)}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Total handover value on mandates signed this month. Not revenue — it becomes revenue only as it is collected."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          size="secondary"
-          label="Accounts Signed"
-          value={kpis.curr.accountsSigned.toLocaleString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Number of debtor accounts handed over on mandates signed this month."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          size="secondary"
-          label="Deals Won"
-          value={kpis.curr.won.toString()}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Every deal marked Won in this sales month — service deals and mandates together."
-          to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          size="secondary"
-          label="Win Rate"
-          value={`${kpis.curr.winRate}%`}
-          pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Of the deals that closed this month, the share that were won. Open deals are not counted."
-          accent="gold"
-        />
-        <StatTile
-          size="secondary"
-          label="Pipeline"
-          value={formatCurrency(pipeline.value)}
-          hint={`Open service deals, right now — ${pipeline.count} open deals, of which ${formatCurrency(pipeline.book)} is handover book carrying no fee until collected. Not a monthly figure, so it has no comparison.`}
-          to={buildDrilldownUrl('/deals', { view: 'table' })}
-        />
-      </div>
-
-      {/* How the month is being worked, as distinct from what it produced. Secondary size on
-          purpose — these are rhythm, not results. */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatTile
-          label="New Leads"
-          value={kpis.curr.newLeads.toString()}
-          size="secondary"
-          pctChange={kpis.prev ? pctDelta(kpis.curr.newLeads, kpis.prev.newLeads) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Activities Logged"
-          value={kpis.curr.activities.toString()}
-          size="secondary"
-          pctChange={kpis.prev ? pctDelta(kpis.curr.activities, kpis.prev.activities) : undefined}
-          compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
-          hint="Calls, meetings, emails and notes that move work forward. Automatic system entries and status changes are not counted."
-          to={buildDrilldownUrl('/activities', { [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Leads Touched"
-          value={`${secondary.touchedPct}%`}
-          size="secondary"
-          hint="Share of active leads that had at least one call, meeting or email logged against them in this sales month."
-          to={buildDrilldownUrl('/leads', { touched: '1', [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Avg Response Time"
-          value={secondary.avgResponseMins !== undefined ? minutesToLabel(secondary.avgResponseMins) : '—'}
-          size="secondary"
-          hint="Average time between a lead being created and the first call, meeting or email logged against it."
-          to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
-        />
-        <StatTile
-          label="Tasks On Time"
-          value={`${secondary.onTimePct}%`}
-          size="secondary"
-          hint="Share of tasks due in this sales month that were completed on or before their due date."
-          to={buildDrilldownUrl('/tasks', { view: 'Completed' })}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2">
-          <SalesFunnelChart deals={scopedDeals} />
-        </div>
-        <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <WinRateByKind
-          serviceWinRate={kpis.curr.serviceWinRate}
-          serviceClosed={kpis.curr.serviceClosed}
-          handoverWinRate={kpis.curr.handoverWinRate}
-          handoverClosed={kpis.curr.handoverClosed}
-          periodLabel={period.label}
-        />
-        <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
-      </div>
-
-      <Suspense fallback={<div className="card h-72" aria-hidden />}>
-        <SalesTrendCard deals={scopedDeals} leads={scopedLeads} referenceDate={TODAY} />
-      </Suspense>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-2" padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader
-              title="Largest Open Deals"
-              subtitle="Still to be closed — service deals by fee, mandates by book"
-              action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>}
+          </Card>
+        ) },
+        { id: 'targets', node: (
+          <TargetsCard
+            title="Targets"
+            subtitle={
+              scope.startsWith('rep:')
+                ? `${userById(scope.slice(4))?.name ?? 'This closer'}'s targets for ${period.label} — the marker shows how far through the month we are`
+                : `Targets for ${period.label} — the marker shows how far through the month we are`
+            }
+            items={targetProgressItems}
+            elapsed={elapsed}
+          />
+        ) },
+        /* THE DETAIL, for whoever wants to dig. The month's results in secondary size, then how the
+           month is being worked: figure rows, so across the page in every arrangement. */
+        { id: 'results', kind: 'full', node: (
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <StatTile
+              size="secondary"
+              label="Revenue Won"
+              value={formatCurrency(kpis.curr.revenueWon)}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.revenueWon, kpis.prev.revenueWon) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              hint="Fees on won service deals. Handovers are excluded — a signed book earns nothing at signature."
+              to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+            />
+            {/* Deliberately its own figure rather than part of revenue. A signed book is work won,
+                not money earned — the commission only arrives as accounts are collected. */}
+            <StatTile
+              size="secondary"
+              label="Book Signed"
+              value={formatCurrency(kpis.curr.bookSigned)}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.bookSigned, kpis.prev.bookSigned) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              hint="Total handover value on mandates signed this month. Not revenue — it becomes revenue only as it is collected."
+              to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              size="secondary"
+              label="Accounts Signed"
+              value={kpis.curr.accountsSigned.toLocaleString()}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.accountsSigned, kpis.prev.accountsSigned) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              hint="Number of debtor accounts handed over on mandates signed this month."
+              to={buildDrilldownUrl('/deals', { stage: 'Won', service: 'Debt Collection', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              size="secondary"
+              label="Deals Won"
+              value={kpis.curr.won.toString()}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.won, kpis.prev.won) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              hint="Every deal marked Won in this sales month — service deals and mandates together."
+              to={buildDrilldownUrl('/deals', { stage: 'Won', view: 'table', [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              size="secondary"
+              label="Win Rate"
+              value={`${kpis.curr.winRate}%`}
+              pctChange={kpis.prev ? pctDelta(kpis.curr.winRate, kpis.prev.winRate) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              hint="Of the deals that closed this month, the share that were won. Open deals are not counted."
+              accent="gold"
+            />
+            <StatTile
+              size="secondary"
+              label="Pipeline"
+              value={formatCurrency(pipeline.value)}
+              hint={`Open service deals, right now — ${pipeline.count} open deals, of which ${formatCurrency(pipeline.book)} is handover book carrying no fee until collected. Not a monthly figure, so it has no comparison.`}
+              to={buildDrilldownUrl('/deals', { view: 'table' })}
             />
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full list-table whitespace-nowrap">
-              <thead>
-                <tr className="text-left border-y border-slate-100 text-slate-400">
-                  <th className="font-medium px-3 py-2">Deal</th>
-                  <th className="font-medium px-2 py-2">Company</th>
-                  <th className="font-medium px-2 py-2 text-right">Size</th>
-                  <th className="font-medium px-2 py-2">Stage</th>
-                  <th className="font-medium px-2 py-2">Close Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topDeals.map((d) => (
-                  <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className="px-3 py-1.5">
-                      <Link to={`/deals/${d.id}`} title={d.name}
-                        className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
-                        {d.name}
-                      </Link>
-                    </td>
-                    <td className="px-2 py-1.5 text-slate-500">{companyById(d.companyId)?.name}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-700 whitespace-nowrap">
-                      {formatCurrency(dealSize(d))}
-                      <span className="ml-1.5 text-[10.5px] font-normal text-slate-400">{dealSizeLabel(d)}</span>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <StageBadge stage={d.stage} />
-                    </td>
-                    <td className="px-2 py-1.5 text-slate-500">{formatDate(d.expectedCloseDate)}</td>
+        ) },
+        { id: 'rhythm', kind: 'full', node: (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <StatTile
+              label="New Leads"
+              value={kpis.curr.newLeads.toString()}
+              size="secondary"
+              pctChange={kpis.prev ? pctDelta(kpis.curr.newLeads, kpis.prev.newLeads) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              label="Activities Logged"
+              value={kpis.curr.activities.toString()}
+              size="secondary"
+              pctChange={kpis.prev ? pctDelta(kpis.curr.activities, kpis.prev.activities) : undefined}
+              compareLabel={compareMode === 'previous' ? `vs ${previousPeriod.label}` : undefined}
+              hint="Calls, meetings, emails and notes that move work forward. Automatic system entries and status changes are not counted."
+              to={buildDrilldownUrl('/activities', { [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              label="Leads Touched"
+              value={`${secondary.touchedPct}%`}
+              size="secondary"
+              hint="Share of active leads that had at least one call, meeting or email logged against them in this sales month."
+              to={buildDrilldownUrl('/leads', { touched: '1', [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              label="Avg Response Time"
+              value={secondary.avgResponseMins !== undefined ? minutesToLabel(secondary.avgResponseMins) : '—'}
+              size="secondary"
+              hint="Average time between a lead being created and the first call, meeting or email logged against it."
+              to={buildDrilldownUrl('/leads', { [SALES_MONTH_PARAM]: periodParam })}
+            />
+            <StatTile
+              label="Tasks On Time"
+              value={`${secondary.onTimePct}%`}
+              size="secondary"
+              hint="Share of tasks due in this sales month that were completed on or before their due date."
+              to={buildDrilldownUrl('/tasks', { view: 'Completed' })}
+            />
+          </div>
+        ) },
+        { id: 'funnel', kind: 'wide', node: (
+          <SalesFunnelChart deals={scopedDeals} />
+        ) },
+        { id: 'activity-breakdown', node: (
+          <ActivityBreakdownChart activities={scopedActivities.filter((a) => isWithinPeriod(a.activityDate, period))} />
+        ) },
+        { id: 'win-rate-by-kind', node: (
+          <WinRateByKind
+            serviceWinRate={kpis.curr.serviceWinRate}
+            serviceClosed={kpis.curr.serviceClosed}
+            handoverWinRate={kpis.curr.handoverWinRate}
+            handoverClosed={kpis.curr.handoverClosed}
+            periodLabel={period.label}
+          />
+        ) },
+        { id: 'loss-reasons', node: (
+          <LossReasonsCard leads={rejectedLeads} deals={rejectedDeals} periodLabel={period.label} />
+        ) },
+        { id: 'sales-trend', kind: 'wide', node: (
+          <Suspense fallback={<div className="card h-72" aria-hidden />}>
+            <SalesTrendCard deals={scopedDeals} leads={scopedLeads} referenceDate={TODAY} />
+          </Suspense>
+        ) },
+        { id: 'largest-open-deals', kind: 'wide', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader
+                title="Largest Open Deals"
+                subtitle="Still to be closed — service deals by fee, mandates by book"
+                action={<Link to="/deals" className="text-xs font-medium text-brand-600 hover:underline">View all deals</Link>}
+              />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full list-table whitespace-nowrap">
+                <thead>
+                  <tr className="text-left border-y border-slate-100 text-slate-400">
+                    <th className="font-medium px-3 py-2">Deal</th>
+                    <th className="font-medium px-2 py-2">Company</th>
+                    <th className="font-medium px-2 py-2 text-right">Size</th>
+                    <th className="font-medium px-2 py-2">Stage</th>
+                    <th className="font-medium px-2 py-2">Close Date</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader title="Recent Activities" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
-          </div>
-          <div className="px-5 pb-5 divide-y divide-slate-50 max-h-80 overflow-y-auto">
-            {recentActivities.map((a) => (
-              <div key={a.id} className="flex items-center gap-2 py-1.5 text-[12.5px] whitespace-nowrap">
-                <UserAvatar userId={a.userId} size={18} />
-                <p className="min-w-0 flex-1 truncate text-slate-700" title={a.subject}>{a.subject}</p>
-                <p className="shrink-0 text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+                </thead>
+                <tbody>
+                  {topDeals.map((d) => (
+                    <tr key={d.id} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-3 py-1.5">
+                        <Link to={`/deals/${d.id}`} title={d.name}
+                          className="block max-w-[16rem] truncate font-medium text-slate-700 hover:text-brand-600">
+                          {d.name}
+                        </Link>
+                      </td>
+                      <td className="px-2 py-1.5 text-slate-500">{companyById(d.companyId)?.name}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-medium text-slate-700 whitespace-nowrap">
+                        {formatCurrency(dealSize(d))}
+                        <span className="ml-1.5 text-[10.5px] font-normal text-slate-400">{dealSizeLabel(d)}</span>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <StageBadge stage={d.stage} />
+                      </td>
+                      <td className="px-2 py-1.5 text-slate-500">{formatDate(d.expectedCloseDate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        ) },
+        { id: 'recent-activities', node: (
+          <Card padded={false}>
+            <div className="p-5 pb-0">
+              <CardHeader title="Recent Activities" action={<Link to="/activities" className="text-xs font-medium text-brand-600 hover:underline">View all</Link>} />
+            </div>
+            <div className="px-5 pb-5 divide-y divide-slate-50 max-h-80 overflow-y-auto">
+              {recentActivities.map((a) => (
+                <div key={a.id} className="flex items-center gap-2 py-1.5 text-[12.5px] whitespace-nowrap">
+                  <UserAvatar userId={a.userId} size={18} />
+                  <p className="min-w-0 flex-1 truncate text-slate-700" title={a.subject}>{a.subject}</p>
+                  <p className="shrink-0 text-[11px] text-slate-400">{timeAgo(a.activityDate)}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ) },
+      ]} />
 
       {rescheduleTask && (
         <RescheduleTaskModal

@@ -94,6 +94,15 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        `signing_requests.sent_to`; and **the SMS confirmation carries the link ONLY where the debtor
        has no email** (`acceptLink` in step.ts, one helper for both channels; the SMS is re-priced on
        the text that leaves, link included). The link uses VERCEL_BRANCH_URL on previews.
+   - **A SIGNED MANDATE MAKES A CLIENT (20 Oct).** The firm converted a lead ("Aapcom", staging),
+     recorded the mandate signed, left both deals at New Deal -- and the client vanished from Clients,
+     whose rule was "a Won deal or a code". `isClientCompany` (companyRollup.ts) adds "or its mandate
+     is signed"; topLevelClients, the client page's `isClient` and Communications all use it.
+     check-add-client +5.
+   - **Sales dashboard: the three pane arrangements** (DashboardPanes, `raptor.dashboard.sales.layout`),
+     Mandates and Deals narrow so they stay side by side in Three columns; Needs attention wide.
+     e2e sales-comms-dashboards +6. The collections floor and the company dashboard are next (asked
+     20 Oct, "Pane layouts on dashboards"); not started.
    - **BUILT: the client report** (the firm: their Excel "Collection dashboard" was "just ... a
      reference ... you can fix all of that"). **Client report** in the client page's action row
      (clients only, like Upload a batch) opens Open / Download of a two-page A4 landscape PDF in the

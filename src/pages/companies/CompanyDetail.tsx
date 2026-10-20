@@ -18,6 +18,7 @@ import {
 } from '../../components/record/RecordShell'
 import { CrmCallButton } from '../../components/record/CrmCallButton'
 import { CrmWhatsAppButton } from '../../components/record/WhatsAppButton'
+import { isClientCompany } from '../../lib/companyRollup'
 import { ClientReportButton } from '../../components/companies/ClientReportButton'
 import { CrmSmsModal } from '../../components/record/CrmSmsModal'
 import {
@@ -180,7 +181,8 @@ export function CompanyDetail() {
   const openDeals = companyDeals.filter((d) => d.stage !== 'Won' && d.stage !== 'Rejected')
   const wonDeals = companyDeals.filter((d) => d.stage === 'Won')
   const subAccounts = useMemo(() => companies.filter((c) => c.parentCompanyId === id), [companies, id])
-  const isClient = wonDeals.length > 0 || !!company?.code
+  /* The same rule as the Clients list (isClientCompany), signed mandate included. */
+  const isClient = !!company && isClientCompany(company, wonDeals.length > 0)
   /*
    * Every number that could reach this client.
    *

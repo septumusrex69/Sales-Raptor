@@ -53,6 +53,21 @@ ok('...opening the form built for it', /<AddClientModal/.test(list))
  * find it, and reasonably read a rule as a bug.
  */
 ok('the empty state names the code half of the rule', /client code/.test(list))
+ok('...and the signed-mandate half', /once its mandate is signed/.test(list))
+/* A SIGNED MANDATE MAKES A CLIENT (S9, 20 Oct): the firm converted a lead with the mandate signed and
+   both deals left open, and "Aapcom" disappeared from the list. */
+{
+  const { topLevelClients } = await import('../../src/lib/companyRollup.ts')
+  const listed = topLevelClients([
+    { id: 'aap', name: 'Aapcom', mandateSignedAt: '2026-10-20T07:30:14Z' },
+    { id: 'lead-only', name: 'Just a prospect' },
+    { id: 'sub', name: 'A sub-account', parentCompanyId: 'aap', mandateSignedAt: '2026-10-20T07:30:14Z' },
+  ], () => false).map((c) => c.id)
+  ok(`a company whose mandate is signed is a client, with no deal Won (${listed.join(', ')})`, listed.includes('aap'))
+  ok('...a prospect with nothing signed is not', !listed.includes('lead-only'))
+  ok('...and a sub-account still sits under its parent, not on the list', !listed.includes('sub'))
+  ok('the client page uses the same rule', /isClientCompany\(company, wonDeals\.length > 0\)/.test(readFileSync(new URL('../../src/pages/companies/CompanyDetail.tsx', import.meta.url), 'utf8')))
+}
 ok('...as well as the won-deal half', /marked Won/.test(list))
 /* And a search that matches nothing says so, rather than claiming there are no clients at all. */
 ok('...and a search with no matches is told apart from an empty book',
