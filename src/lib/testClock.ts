@@ -66,8 +66,22 @@ export const TEST_ACCOUNT_PREFIX = 'BF-TEST'
  */
 export function isTestAccount(
   account: { accountNumber?: string | null; isTestAccount?: boolean | null } | null | undefined,
+  /** The database says it is staging (`deployment.kind`), read by the caller. */
+  where: { staging?: boolean } = {},
 ): boolean {
   if (!account) return false
+  /*
+   * ON STAGING, EVERY ACCOUNT IS A TEST ACCOUNT (S9, 20 Oct). The firm: "my forward to the next
+   * workflow function for testing has been gone ... you can add this for every single person that
+   * is going to be testing ... in the staging environment ... when we go live, then we will take it
+   * off ... everybody, and even ... the debt collectors, need that function because we're all
+   * testing still." It had gone because staging's book was reloaded and not one of its 918 accounts
+   * carried the flag. Staging's data is disposable at the firm's own word (CLAUDE.md), so the flag
+   * there protects nothing; on PRODUCTION `staging` is false -- the deployment row says so and has
+   * no write policy -- and the rule below is the only one that applies. Going live switches it off
+   * with nothing to remember.
+   */
+  if (where.staging === true) return true
   if (account.isTestAccount === true) return true
   const number = account.accountNumber
   return typeof number === 'string' && number.startsWith(TEST_ACCOUNT_PREFIX)

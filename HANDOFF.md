@@ -94,6 +94,17 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
        `signing_requests.sent_to`; and **the SMS confirmation carries the link ONLY where the debtor
        has no email** (`acceptLink` in step.ts, one helper for both channels; the SMS is re-priced on
        the text that leaves, link included). The link uses VERCEL_BRANCH_URL on previews.
+   - **THE TEST CLOCK ON EVERY STAGING ACCOUNT, FOR EVERYBODY (20 Oct). DO NOT REMOVE until the firm
+     says so.** The firm: "my forward to the next workflow function for testing has been gone. Don't
+     remove it until I give you ... the authority ... everybody, and even ... the debt collectors,
+     need that function because we're all testing still." It vanished because staging's book was
+     reloaded and none of its 918 accounts carried `is_test_account`. Now `isTestAccount(acct,
+     { staging })` is true for every account where the database's `deployment.kind` is 'staging' --
+     the panel (firmClockState().staging), the advance endpoint (reads `deployment`) and
+     `workflow_test_advance` (same row) all agree. Production says 'production' and the row has no
+     write policy, so going live turns it off with nothing to remember. The whole-database staging
+     clock bar is still Administrator-only (staging_clock_guard): one person's jump moves everybody's
+     day. check-test-clock (53), new e2e test-clock-staging (2), both break-tested.
    - **A SIGNED MANDATE MAKES A CLIENT (20 Oct).** The firm converted a lead ("Aapcom", staging),
      recorded the mandate signed, left both deals at New Deal -- and the client vanished from Clients,
      whose rule was "a Won deal or a code". `isClientCompany` (companyRollup.ts) adds "or its mandate

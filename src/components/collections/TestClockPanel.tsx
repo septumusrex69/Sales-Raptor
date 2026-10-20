@@ -4,6 +4,7 @@ import { Card, CardHeader } from '../ui/Card'
 import { useAuth } from '../../store/AuthContext'
 import { advanceTestClock } from '../../lib/accountRun.ts'
 import { isTestAccount } from '../../lib/testClock.ts'
+import { firmClockState } from '../../lib/clock.ts'
 
 /**
  * WALKING AN ACCOUNT THROUGH ITS SEQUENCE WHILE YOU WATCH.
@@ -82,7 +83,8 @@ export function TestClockPanel({ accountId, accountNumber, isTestAccount: marked
     return () => window.clearInterval(id)
   }, [running])
 
-  if (!isTestAccount({ accountNumber, isTestAccount: marked })) return null
+  /* On staging every account (testClock.isTestAccount); elsewhere only the marked ones. */
+  if (!isTestAccount({ accountNumber, isTestAccount: marked }, { staging: firmClockState()?.staging === true })) return null
 
   return (
     <Card>

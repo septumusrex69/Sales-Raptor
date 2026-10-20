@@ -61,6 +61,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: account, error: accountError } = await admin
     .from('debtor_accounts').select('account_number, is_test_account').eq('id', accountId)
     .maybeSingle()
+  /* THE DATABASE'S OWN WORD ON WHERE IT IS, which is what lets every account through on staging
+     (testClock.isTestAccount). Lock 1 above already refused anything that is not staging's URL. */
+  const { data: deployment } = await admin.from('deployment').select('kind').maybeSingle()
   if (accountError) {
     res.status(500).json({ error: accountError.message })
     return
@@ -70,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isTestAccount({
     accountNumber: account?.account_number as string | null,
     isTestAccount: account?.is_test_account as boolean | null,
-  })) {
+  }, { staging: deployment?.kind === 'staging' })) {
     res.status(403).json({ error: 'The test clock only moves test accounts.' })
     return
   }

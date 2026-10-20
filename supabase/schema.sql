@@ -44000,3 +44000,76 @@ end;
 $$;
 revoke all on function public.signing_accept(text, text, text) from public;
 grant execute on function public.signing_accept(text, text, text) to anon, authenticated;
+
+-- S9: on staging every account is a test account, for everybody testing (the firm, 20 Oct).
+create or replace function public.workflow_test_advance(
+  p_account_id uuid, p_days integer
+) returns integer
+language plpgsql
+security invoker
+set search_path to 'public'
+as $$
+declare
+  v_number text;
+  v_is_test boolean;
+  v_moved integer := 0;
+begin
+  if p_days is null or p_days < 1 or p_days > 400 then
+    raise exception 'A test clock moves between 1 and 400 days at a time, not %.', p_days
+      using errcode = '22023';
+  end if;
+
+  select account_number, is_test_account into v_number, v_is_test
+    from public.debtor_accounts where id = p_account_id;
+  if not found then
+    raise exception 'No such account.' using errcode = '22023';
+  end if;
+  /* THE LOCK. Not a warning, not a log line -- a refusal, in the database.
+     EITHER WAY OF SAYING IT: the flag is how the firm marks their own dummy debtors, and the
+     BF-TEST prefix is kept because anything carrying it was never a real account to begin with. */
+  /* ON STAGING, EVERY ACCOUNT (S9, 20 Oct): the firm is testing on the whole of staging's book,
+     which is disposable at their own word, and everybody testing needs this. The deployment row
+     decides it and has no write policy, so production -- where it says 'production' -- keeps the
+     flag-or-prefix rule and nothing else. */
+  if not (coalesce(v_is_test, false) or coalesce(v_number, '') like 'BF-TEST%'
+          or exists (select 1 from public.deployment where kind = 'staging')) then
+    raise exception 'The test clock only moves test accounts. % is a real account.',
+      coalesce(v_number, '(no reference)') using errcode = '42501';
+  end if;
+
+  /* The run itself, or the first pause-and-resume re-dates every step from the original start and
+     the compression is silently undone. Only RUNNING runs: a held run is paused, and pulling its
+     steps forward while it is paused fights the re-dating that happens when it is let go. */
+  update public.workflow_runs
+     set started_on = started_on - p_days
+   where account_id = p_account_id and state = 'running';
+
+  update public.workflow_run_holds h
+     set started_on = h.started_on - p_days,
+         ended_on = case when h.ended_on is null then null else h.ended_on - p_days end
+    from public.workflow_runs r
+   where h.run_id = r.id and r.account_id = p_account_id and r.state = 'running';
+
+  with moved as (
+    update public.workflow_run_steps s
+       set due_on = s.due_on - p_days
+      from public.workflow_runs r
+     where s.run_id = r.id
+       and r.account_id = p_account_id
+       and r.state = 'running'
+       and s.state in ('pending', 'held')
+    returning s.id
+  )
+  select count(*) into v_moved from moved;
+
+  return v_moved;
+end $$;
+
+comment on function public.workflow_test_advance(uuid, integer) is
+  'Move a TEST account backwards under the calendar so its next workflow step falls due today. '
+  'On staging every account may be moved (S9). Elsewhere it refuses any account that is not marked '
+  'is_test_account and whose number does not begin BF-TEST. Granted to no role but service_role. Sent steps never move: their dates are '
+  'the record of notices that reached a debtor.';
+
+revoke all on function public.workflow_test_advance(uuid, integer) from public;
+revoke all on function public.workflow_test_advance(uuid, integer) from authenticated;

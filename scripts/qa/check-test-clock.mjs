@@ -86,6 +86,9 @@ ok('...and the same account unmarked is refused',
 /* THE PREFIX STILL OPENS IT, because anything carrying it was never a debtor. */
 ok('a BF-TEST reference is still allowed', isTestAccount({ accountNumber: 'BF-TEST-028' }))
 ok('a real account is refused', !isTestAccount({ accountNumber: 'LDT-00341' }))
+ok('on staging every account is a test account (S9, 20 Oct)', isTestAccount({ accountNumber: 'LDT-00341', isTestAccount: false }, { staging: true }))
+ok('...off staging the rule is unchanged', !isTestAccount({ accountNumber: 'LDT-00341' }, { staging: false }))
+ok('...and no account at all is still no account', !isTestAccount(null, { staging: true }))
 
 /*
  * EVERY SHAPE OF "I DO NOT KNOW" IS A REAL ACCOUNT. This is the direction the unknown has to fail
@@ -115,8 +118,11 @@ ok('the database has the test-clock function', fnAt > 0)
 const fn = fnAt > 0 ? sql.slice(fnAt, sql.indexOf('$$;', fnAt)) : ''
 /* THE LOCK THAT ACTUALLY HOLDS. The two above are checks a client could one day be talked past;
    this is the ledgers' rule applied to the calendar. */
-ok('...which refuses a real account itself',
-  /not \(coalesce\(v_is_test, false\) or coalesce\(v_number, ''\) like 'BF-TEST%'\)/.test(fn))
+ok('...which refuses a real account itself -- off staging',
+  /not \(coalesce\(v_is_test, false\) or coalesce\(v_number, ''\) like 'BF-TEST%'\s+or exists \(select 1 from public\.deployment where kind = 'staging'\)\)/.test(fn))
+/* ON STAGING EVERY ACCOUNT (the firm, 20 Oct: "everybody ... need that function because we're all
+   testing still"), decided by the deployment row, which has no write policy -- never by an argument. */
+ok('...where staging is the database\'s own word, not something the caller says', !/p_staging|p_test/.test(fn))
 /* AND IT READS THE FLAG OFF THE ROW RATHER THAN BEING TOLD IT. A caller that could pass "this is a
    test account" as an argument is not a lock, it is a parameter. */
 ok('...reading the flag off the account itself',
@@ -210,8 +216,10 @@ ok('it is an action on the existing router', /run, release, start, advance,/.tes
 /* ---------------- and the screen never offers what the server would refuse ---------------- */
 
 const panel = code('src/components/collections/TestClockPanel.tsx')
-ok('the panel draws nothing on a real account',
-  /if \(!isTestAccount\(\{ accountNumber, isTestAccount: marked \}\)\) return null/.test(panel))
+ok('the panel draws nothing on a real account -- except on staging, where every account is a test one',
+  /if \(!isTestAccount\(\{ accountNumber, isTestAccount: marked \}, \{ staging: firmClockState\(\)\?\.staging === true \}\)\) return null/.test(panel))
+ok('...and the server asks the database where it is, the same way', /from\('deployment'\)\.select\('kind'\)/.test(code('api/_lib/workflow/advance.ts'))
+  && /\{ staging: deployment\?\.kind === 'staging' \}/.test(code('api/_lib/workflow/advance.ts')))
 /* AND IT IS HANDED THE FLAG, or the panel asks the right question of a value nobody passed it. */
 const mount = code('src/pages/accounts/AccountDetail.tsx')
 ok('...and the page passes it in', /isTestAccount=\{account\.isTestAccount\}/.test(mount))
