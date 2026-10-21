@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchReadyToClose } from '../../lib/readyToClose'
-import { AlertTriangle, Loader2, Search, UserCheck, X } from 'lucide-react'
+import { AlertTriangle, Loader2, Megaphone, Search, UserCheck, X } from 'lucide-react'
 import { BOOK_CHOICES, bookLabel, parseBook } from '../../lib/accountBooks'
 import { Card } from '../../components/ui/Card'
 import { inputClass } from '../../components/ui/Modal'
@@ -31,7 +31,8 @@ import { CLIENT_FLAGS, DESK_POSITIONS, clientFlag, deskPosition } from '../../li
 import { AccountFilters } from './AccountFilters'
 import { HandOutModal } from './HandOutModal'
 import type { Selection } from '../../lib/accountAllocation'
-import { canHandOutAccounts } from '../../lib/permissions'
+import { canHandOutAccounts, canRunCampaigns } from '../../lib/permissions'
+import { CampaignModal } from './CampaignModal'
 import { useColumnWidths } from '../../lib/columnWidths'
 import { ResizableTh } from '../../components/ui/ResizableTh'
 import { formatCurrency, formatDate } from '../../data/mockData'
@@ -109,6 +110,10 @@ export function AccountsList() {
   /** True once "select all N matching" is used: the selection is the filter, not a list of ids. */
   const [allMatching, setAllMatching] = useState(false)
   const [allocating, setAllocating] = useState<Selection | null>(null)
+  /* A CAMPAIGN OVER THE SAME SELECTION (S10): the ticked rows, or every account the filters match --
+     the same Selection the hand-out takes, resolved through the same applyAccountFilters. */
+  const [campaigning, setCampaigning] = useState<Selection | null>(null)
+  const navigate = useNavigate()
   /** Opened once from the URL, so closing it does not have it spring straight back. */
   const [handOutOpened, setHandOutOpened] = useState(false)
   const [done, setDone] = useState<string | null>(null)
@@ -131,6 +136,7 @@ export function AccountsList() {
   const visibleColumns = ['account', 'debtor', ...(companyId ? [] : ['client']), 'handed', 'capital',
     'fees', 'interest', 'paid', 'balance', 'rate', 'position', 'desk', 'worked']
   const canSeeOthers = canHandOutAccounts(currentUser)
+  const mayCampaign = canRunCampaigns(currentUser)
 
   /*
    * THE BOOK OPENS ON YOUR OWN DESK.
@@ -411,6 +417,8 @@ export function AccountsList() {
   const allOnPageTicked = allMatching || (pageIds.length > 0 && pageIds.every((id) => ticked.has(id)))
   const selectedCount = allMatching ? total : ticked.size
   const canAllocate = canSeeOthers
+  /* THE TICK BOXES are drawn for anybody with a bulk action: the hand-out, or a campaign (S10). */
+  const canSelect = canAllocate || mayCampaign
 
   /*
    * Unticking a row while "all matching" is on drops back to THIS PAGE minus that row, rather
@@ -502,6 +510,16 @@ export function AccountsList() {
             {' '}— the money is in and {readyCount === 1 ? 'it is' : 'they are'} still open.</span>
           <span className="font-medium text-slate-600">Review</span>
         </Link>
+      )}
+
+      {/* CAMPAIGNS (S10): where a campaign started from the bulk bar is followed and stopped. */}
+      {mayCampaign && (
+        <div className="flex justify-end -mt-1">
+          <Link to="/accounts/campaigns" data-testid="campaigns-link"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-slate-600 hover:text-slate-800">
+            <Megaphone size={14} /> Campaigns
+          </Link>
+        </div>
       )}
 
       {/*
@@ -678,6 +696,15 @@ export function AccountsList() {
               <span className="text-xs text-brand-700">Everything these filters match, not just this page.</span>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {mayCampaign && (
+                <button type="button" data-testid="bulk-campaign"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  onClick={() => setCampaigning(allMatching
+                    ? { kind: 'matching', query }
+                    : { kind: 'ids', ids: [...ticked] })}>
+                  <Megaphone size={14} /> Campaign
+                </button>
+              )}
               {canAllocate && (
                 <button type="button"
                   className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg bg-navy-950 text-white hover:bg-navy-900"
@@ -839,20 +866,20 @@ export function AccountsList() {
               scrolls sideways instead. See columnWidths.ts.
             */}
             <table className="min-w-full list-table whitespace-nowrap"
-              style={{ tableLayout: 'fixed', width: visibleColumns.reduce((t, k) => t + widths[k], canAllocate ? 40 : 0) }}>
+              style={{ tableLayout: 'fixed', width: visibleColumns.reduce((t, k) => t + widths[k], canSelect ? 40 : 0) }}>
               <colgroup>
-                {canAllocate && <col style={{ width: 40 }} />}
+                {canSelect && <col style={{ width: 40 }} />}
                 {visibleColumns.map((k) => <col key={k} style={{ width: widths[k] }} />)}
               </colgroup>
               <thead>
                 <tr className="text-left text-slate-400 border-b border-slate-100">
-                  {canAllocate && (
+                  {canSelect && (
                     <th className="pl-3 pr-1 py-1.5 w-8">
                       <input type="checkbox" className="accent-brand-600" checked={allOnPageTicked}
                         onChange={togglePage} aria-label="Select every account on this page" />
                     </th>
                   )}
-                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className={`${canAllocate ? 'px-2' : 'pl-3 pr-2'} py-1.5 font-medium`}>{sortBy('account', 'Account')}</ResizableTh>
+                  <ResizableTh label="Account" width={widths.account} onWidth={(px) => setWidth('account', px)} className={`${canSelect ? 'px-2' : 'pl-3 pr-2'} py-1.5 font-medium`}>{sortBy('account', 'Account')}</ResizableTh>
                   <ResizableTh label="Debtor" width={widths.debtor} onWidth={(px) => setWidth('debtor', px)} className="px-2 py-1.5 font-medium">{sortBy('debtor', 'Debtor')}</ResizableTh>
                   {/*
                     WHOSE BOOK THE ACCOUNT IS ON, at the firm's asking, and beside the debtor
@@ -894,7 +921,7 @@ export function AccountsList() {
                   return (
                     <tr key={a.id} className={`border-b border-slate-50 last:border-0 ${
                       allMatching || ticked.has(a.id) ? 'bg-brand-50/50' : 'hover:bg-slate-50'}`}>
-                      {canAllocate && (
+                      {canSelect && (
                         <td className="pl-3 pr-1 py-1.5">
                           <input type="checkbox" className="accent-brand-600"
                             checked={allMatching || ticked.has(a.id)}
@@ -906,7 +933,7 @@ export function AccountsList() {
                           checking list). The client's reference used to sit UNDER the account number,
                           which doubled every row's height; it now follows it after a dot, and the
                           column's width decides how much shows, with the whole of it on the title. */}
-                      <td className={`${canAllocate ? 'px-2' : 'pl-3 pr-2'} py-1.5 truncate`}
+                      <td className={`${canSelect ? 'px-2' : 'pl-3 pr-2'} py-1.5 truncate`}
                         title={a.clientReference ? `${a.accountNumber ?? '—'} · ${a.clientReference}` : undefined}>
                         <Link to={`/accounts/${a.id}`} className="font-medium text-brand-700 hover:underline">
                           {a.accountNumber ?? '—'}
@@ -1028,6 +1055,15 @@ export function AccountsList() {
           </div>
         )}
       </Card>
+
+      {campaigning && (
+        <CampaignModal
+          selection={campaigning}
+          selectedCount={selectedCount}
+          onClose={() => setCampaigning(null)}
+          onStarted={(id) => { setCampaigning(null); navigate(`/accounts/campaigns?c=${id}`) }}
+        />
+      )}
 
       {allocating && (
         <HandOutModal

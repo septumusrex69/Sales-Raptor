@@ -19,7 +19,7 @@
  *
  * Pure: no database, no clock. The account's state and the moment are passed in.
  */
-import { isWeekend, publicHolidays } from './workingDays.ts'
+import { isWeekend } from './workingDays.ts'
 /* A DISPOSITION RESOLVES TO ONE OF THESE. Type-only, so nothing of the outcome box's own machinery
    is dragged in here -- see OUTCOME_FOR_DISPOSITION for why the two vocabularies meet at all. */
 import type { CallOutcome } from './callOutcome.ts'
@@ -337,49 +337,14 @@ export const ALWAYS_AT_HAND = [
  * WHEN THE FIRM MAY RING
  * ============================================================================================== */
 
-/**
- * The firm's own calling hours. Their policy rather than a statutory limit, and the brief says so:
- * "confirm these hours with the firm before the scripts go live."
- *
- * Minutes from midnight, so a comparison is arithmetic rather than string juggling.
+/*
+ * THE FIRM'S CALLING HOURS LIVE IN contactHours.ts NOW (S10, campaigns), re-exported here so every
+ * caller of this file is unchanged. Moved because the campaign sender -- a serverless function --
+ * needs the same hours, and this file's `.ts` imports cannot survive Vercel's transpile. One set of
+ * hours for a call and for a campaign SMS, so the firm never reaches a debtor at an hour it would
+ * not ring them.
  */
-export const CALL_HOURS = {
-  weekday: { from: 8 * 60, to: 17 * 60 },
-  saturday: { from: 9 * 60, to: 13 * 60 },
-  /** Sunday and public holidays: none at all. */
-  sunday: null,
-} as const
-
-/**
- * May the firm dial at this moment?
- *
- * TAKES THE DAY AND THE MINUTE RATHER THAN A Date, so it can be checked without a clock and so the
- * caller is the one that reads the firm's own timezone -- the hours are Johannesburg's, and a
- * collector working from a laptop still set to London must not dial at seven in the morning.
- *
- * A PUBLIC HOLIDAY IS A SUNDAY HERE. The calendar is the same one the workflow's business days are
- * counted on, so a day that is not a working day for a statutory notice is not a day for a call.
- */
-export function withinCallHours(day: string, minuteOfDay: number): boolean {
-  const date = new Date(`${day}T00:00:00Z`)
-  if (Number.isNaN(date.getTime())) return false
-  if (publicHolidays(date.getUTCFullYear()).has(day)) return false
-  const weekday = date.getUTCDay()
-  if (weekday === 0) return false
-  const window = weekday === 6 ? CALL_HOURS.saturday : CALL_HOURS.weekday
-  return minuteOfDay >= window.from && minuteOfDay < window.to
-}
-
-/** Why the firm may not ring now, in the collector's own words, or null. */
-export function callHoursProblem(day: string, minuteOfDay: number): string | null {
-  if (withinCallHours(day, minuteOfDay)) return null
-  const date = new Date(`${day}T00:00:00Z`)
-  if (Number.isNaN(date.getTime())) return 'That is not a day.'
-  if (publicHolidays(date.getUTCFullYear()).has(day)) return 'The firm does not call on a public holiday.'
-  if (date.getUTCDay() === 0) return 'The firm does not call on a Sunday.'
-  if (date.getUTCDay() === 6) return 'On a Saturday the firm calls between 09:00 and 13:00.'
-  return 'The firm calls between 08:00 and 17:00 on a weekday.'
-}
+export { CALL_HOURS, callHoursProblem, withinCallHours } from './contactHours.ts'
 
 /* =================================================================================================
  * THE SCRIPTS THEMSELVES, AND WHAT A DISPOSITION WRITES

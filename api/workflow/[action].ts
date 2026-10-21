@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import advance from '../_lib/workflow/advance.js'
+import campaign from '../_lib/campaign/route.js'
 import balances from '../_lib/workflow/balances.js'
 import clock from '../_lib/workflow/clock.js'
 import release from '../_lib/workflow/release.js'
@@ -22,6 +23,9 @@ const ROUTES: Record<string, (req: VercelRequest, res: VercelResponse) => Promis
   /* `balances` is the nightly balance (S9): every account's stored computeBalance figure for the
      new day, which the accounts list sorts by. A cron, so a route here rather than a file. */
   balances,
+  /* `campaign` is a debtor campaign from the Accounts list (S10): preview, create, send, stop. A
+     route here for the same reason as every other -- api/ is at twelve files. */
+  campaign,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

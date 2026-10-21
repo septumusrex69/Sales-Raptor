@@ -43,7 +43,7 @@ export interface BulkResult {
 }
 
 /** The ids a selection covers. Resolved before the write so the note and the update agree. */
-async function resolveIds(selection: Selection): Promise<string[]> {
+export async function resolveIds(selection: Selection): Promise<string[]> {
   if (selection.kind === 'ids') return selection.ids
 
   /*

@@ -46780,3 +46780,289 @@ commit;
 -- does not use the allowance up.
 create unique index if not exists marketing_sends_one_first_approach on public.marketing_sends (lead_id)
   where first_approach and lead_id is not null and state not in ('failed', 'skipped');
+
+-- ==========================================================================================
+-- S10 / DEBTOR CAMPAIGNS: ONE SMS OR ONE EMAIL TO A SELECTION OF ACCOUNTS (21 Oct)
+-- ==========================================================================================
+--
+-- THE FIRM: "an option to run a campaign ... on something that you've selected ... send a specific
+-- SMS, or ... a specific thing to all of the ... or a selection of the debtors ... it sends it to
+-- their email addresses, or SMS".
+--
+-- TWO TABLES AND THE BROWSER WRITES NEITHER. A campaign is created, worked through and stopped by
+-- the server (api/_lib/campaign), which checks who may run one on which desks for every account --
+-- an Administrator on any, a team leader on their own team's desks -- and charges every message
+-- through the charge engine as it goes. So there is a READ policy here and no write policy at all:
+-- a signed-in person cannot insert a campaign that skips those checks, whatever they hold.
+--
+-- ONE ROW PER ACCOUNT, and its state is the record: pending until the sender claims it, then sent,
+-- skipped (with the reason in the firm's words), failed (the provider's words) or cancelled (Stop).
+-- `sending` is the claim itself, so the screen's loop and the five-minute cron never send one
+-- account the same message twice.
+
+-- THE TICK, in the template of the two roles that lead the collections floor.
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','campaign.run','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','settlement.approve','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;
+
+create table if not exists public.campaigns (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (length(btrim(name)) between 1 and 120),
+  channel text not null check (channel in ('sms', 'email')),
+  -- The library row it was chosen from, where it was; the words are copied below either way, so a
+  -- template edited after the campaign started does not change what the rest of the book is sent.
+  template_id uuid references public.message_templates (id) on delete set null,
+  subject text,
+  body text not null,
+  -- WHAT WAS SELECTED: {"kind":"ids"} or {"kind":"matching","query":{...}} -- the AccountQuery the
+  -- list showed, kept so "which accounts did this go to and why those" has an answer.
+  selection jsonb not null default '{}'::jsonb,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_by_name text,
+  -- The creator's team on the day, which is who else may see and stop it.
+  team_id uuid references public.teams (id) on delete set null,
+  status text not null default 'sending' check (status in ('sending', 'finished', 'stopped')),
+  -- AT CREATION: how many accounts were selected, how many were to be sent, how many skipped, and
+  -- the estimate the confirm step read back. The live counts are campaign_counts().
+  selected integer not null default 0,
+  to_send integer not null default 0,
+  skipped integer not null default 0,
+  fee_estimate numeric(12,2),
+  -- Why it is waiting, where it is: "the mailbox is not connected", "outside calling hours".
+  note text,
+  created_at timestamptz not null default now(),
+  stopped_at timestamptz,
+  stopped_by uuid references public.profiles (id) on delete set null,
+  finished_at timestamptz,
+  constraint campaigns_subject_on_email check ((channel = 'email') = (subject is not null))
+);
+
+create table if not exists public.campaign_messages (
+  id uuid primary key default gen_random_uuid(),
+  campaign_id uuid not null references public.campaigns (id) on delete cascade,
+  account_id uuid not null references public.debtor_accounts (id) on delete cascade,
+  state text not null default 'pending'
+    check (state in ('pending', 'sending', 'sent', 'skipped', 'failed', 'cancelled')),
+  -- The reason it was skipped, failed or cancelled, in the firm's words.
+  reason text,
+  sent_to text,
+  segments integer,
+  -- WHAT THE ENGINE CHARGED, excluding VAT, and why where it was nothing (at-ceiling, monthly-limit).
+  fee_excl_vat numeric(12,2),
+  fee_reason text,
+  -- The message on the account's own record, exactly where a single send files it.
+  sms_message_id uuid references public.sms_messages (id) on delete set null,
+  account_email_id uuid references public.account_emails (id) on delete set null,
+  claimed_at timestamptz,
+  sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  -- ONE MESSAGE PER ACCOUNT PER CAMPAIGN, whatever the selection held twice.
+  unique (campaign_id, account_id)
+);
+
+create index if not exists campaign_messages_state_idx on public.campaign_messages (campaign_id, state, created_at);
+create index if not exists campaign_messages_account_idx on public.campaign_messages (account_id);
+create index if not exists campaigns_sending_idx on public.campaigns (created_at) where status = 'sending';
+
+alter table public.campaigns enable row level security;
+alter table public.campaign_messages enable row level security;
+
+-- WHO MAY SEE A CAMPAIGN: the tick, and then an Administrator sees every one, anybody else their own
+-- and their team's. Security definer so the profile lookup is not itself filtered.
+create or replace function public.campaign_visible(p_created_by uuid, p_team uuid)
+returns boolean
+language sql stable security definer set search_path to 'public'
+as $$
+  select public.has_capability('campaign.run')
+     and (public.current_user_role() = 'Administrator'
+          or p_created_by = auth.uid()
+          or (p_team is not null and p_team = (select p.team_id from public.profiles p where p.id = auth.uid())))
+$$;
+revoke all on function public.campaign_visible(uuid, uuid) from public, anon;
+grant execute on function public.campaign_visible(uuid, uuid) to authenticated;
+
+create policy "campaigns_read" on public.campaigns for select to authenticated
+  using (public.campaign_visible(created_by, team_id));
+create policy "campaign_messages_read" on public.campaign_messages for select to authenticated
+  using (exists (select 1 from public.campaigns c where c.id = campaign_id));
+
+-- THE CLAIM: the next pending messages of one campaign, marked `sending` in the same statement so
+-- two senders (the screen's loop and the cron) never take the same row. SKIP LOCKED, not a wait.
+--
+-- A `sending` row older than ten minutes is a sender that died mid-send. It is FAILED, never put
+-- back to pending: whether the provider took the message is unknown, and sending it again is how a
+-- debtor gets two -- and is charged for two.
+create or replace function public.campaign_claim(p_campaign uuid, p_limit integer)
+returns setof public.campaign_messages
+language plpgsql security invoker set search_path to 'public'
+as $$
+begin
+  update public.campaign_messages
+     set state = 'failed', updated_at = now(),
+         reason = 'Interrupted while sending: it may or may not have gone. Check the account before sending anything again.'
+   where campaign_id = p_campaign and state = 'sending' and claimed_at < now() - interval '10 minutes';
+
+  return query
+  update public.campaign_messages m
+     set state = 'sending', claimed_at = now(), updated_at = now()
+   where m.id in (
+     select x.id from public.campaign_messages x
+      where x.campaign_id = p_campaign and x.state = 'pending'
+        and exists (select 1 from public.campaigns c where c.id = p_campaign and c.status = 'sending')
+      order by x.created_at, x.id
+      limit greatest(1, least(coalesce(p_limit, 1), 100))
+      for update skip locked)
+  returning m.*;
+end $$;
+revoke all on function public.campaign_claim(uuid, integer) from public, anon, authenticated;
+grant execute on function public.campaign_claim(uuid, integer) to service_role;
+
+-- THE LIVE COUNTS, per campaign the caller can see (security invoker: RLS decides which).
+create or replace function public.campaign_counts(p_ids uuid[])
+returns table (campaign_id uuid, pending integer, sending integer, sent integer, skipped integer,
+               failed integer, cancelled integer, fees numeric)
+language sql stable security invoker set search_path to 'public'
+as $$
+  select m.campaign_id,
+         count(*) filter (where m.state = 'pending')::int,
+         count(*) filter (where m.state = 'sending')::int,
+         count(*) filter (where m.state = 'sent')::int,
+         count(*) filter (where m.state = 'skipped')::int,
+         count(*) filter (where m.state = 'failed')::int,
+         count(*) filter (where m.state = 'cancelled')::int,
+         coalesce(sum(m.fee_excl_vat) filter (where m.state = 'sent'), 0)
+    from public.campaign_messages m
+   where m.campaign_id = any(p_ids)
+   group by m.campaign_id
+$$;
+revoke all on function public.campaign_counts(uuid[]) from public, anon;
+grant execute on function public.campaign_counts(uuid[]) to authenticated, service_role;
+
+-- S10 / CAMPAIGNS: CLEAR STAGING EMPTIES THEM WITH THE BOOK. campaign_messages points at
+-- sms_messages and account_emails, both truncated here, so Postgres demands it be in the same
+-- truncate (check-clear-staging), and a campaign with no messages left is a row about nothing.
+-- marketing_sends and marketing_campaigns are the sales newsletter's, added to the SHARED staging
+-- database by the session building it; they are named here because this mirrors the live function,
+-- and that session's schema.sql defines them.
+create or replace function public.clear_staging(p_start date, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_old date := public.raptor_today();
+  v_accounts integer;
+begin
+  perform public.staging_clock_guard();
+  if p_confirm is distinct from 'CLEAR STAGING' then
+    raise exception 'Type CLEAR STAGING to clear it.' using errcode = '22023';
+  end if;
+  if p_start is null then
+    raise exception 'Say which date the clock starts on.' using errcode = '22023';
+  end if;
+
+  select count(*) into v_accounts from public.debtor_accounts;
+
+  execute 'trunc' || 'ate table public.client_payment_applications, public.client_payment_arrangements, '
+    || 'public.client_business_receipts, public.payover_run_sends, public.payover_run_lines, public.payover_runs, '
+    || 'public.payment_allocations, public.trust_creditor_entries, public.trust_payments_out, '
+    || 'public.bank_statement_lines, public.client_charges, public.account_payments, '
+    || 'public.account_documents, public.account_trace_items, public.account_traces, '
+    || 'public.diary_entries, public.promises_to_pay, '
+    || 'public.workflow_run_holds, public.workflow_run_steps, public.workflow_runs, '
+    || 'public.sms_messages, public.signing_requests, public.account_fees, public.account_interest_accruals, '
+    || 'public.account_settlements, public.account_reminders, public.account_calls, public.account_emails, '
+    || 'public.account_queries, public.account_judgments, public.account_notes, public.account_status_events, '
+    || 'public.account_desk_history, public.account_director_companies, public.account_directors, '
+    || 'public.account_authorised_contacts, public.account_contacts, public.account_balances, '
+    || 'public.notifications, public.activities, public.tasks, public.proposals, public.business_expenses, '
+    || 'public.handover_draft_rows, public.handover_drafts, public.client_documents, public.swordfish_holding, ' || 'public.marketing_sends, public.marketing_campaigns, ' || 'public.campaign_messages, public.campaigns';
+
+  execute 'de' || 'lete from public.debtor_accounts';
+  execute 'de' || 'lete from public.handovers';
+  execute 'de' || 'lete from public.deals';
+  execute 'de' || 'lete from public.contacts';
+  execute 'de' || 'lete from public.leads';
+  execute 'de' || 'lete from public.companies';
+
+  perform set_config('raptor.trust_opening', 'on', true);
+  update public.firm_settings
+     set trust_opening_balance = null, trust_opening_date = null
+   where id = true;
+  perform set_config('raptor.trust_opening', '', true);
+
+  update public.staging_clock set business_date = p_start, set_at = now(), set_by = auth.uid() where id;
+  if not found then
+    insert into public.staging_clock (id, business_date, set_at, set_by) values (true, p_start, now(), auth.uid());
+  end if;
+
+  insert into public.finance_setting_changes (setting, old_value, new_value, reason, changed_by)
+  values ('staging_clock', to_char(v_old, 'YYYY-MM-DD'), to_char(p_start, 'YYYY-MM-DD'),
+          'Staging cleared (' || v_accounts || ' accounts) and the clock started again', auth.uid());
+
+  return jsonb_build_object('accounts', v_accounts, 'clock', p_start);
+end $$;
+
+
+-- ============================================================================================
+-- S10 / BOTH NEW CAPABILITIES IN ONE DEFINITION. The debtor campaigns (`campaign.run`) and the news
+-- campaigns (`marketing.send`) were built side by side on one staging database, and each redefined
+-- role_capabilities with only its own. This is the definition live on staging, carrying both; it is
+-- the LAST one, which is the one that counts (check-capabilities holds it to capabilities.ts).
+-- ============================================================================================
+create or replace function public.role_capabilities(p_role text)
+returns text[]
+language sql
+immutable
+set search_path to 'public'
+as $$
+  select case p_role
+    when 'Administrator' then array[
+      'finance.view','business.view','payment.record','payment.approve','payment.reverse','payment.move',
+      'book.hand_out','book.reassign','book.freeze','floor.lead','campaign.run','handover.discard',
+      'client.view','dispute.write_to_client','dispute.pool','mail.refile','settlement.approve',
+      'marketing.send','library.view','library.edit']
+    when 'Sales Manager' then array['book.hand_out','book.reassign','client.view','marketing.send','library.view']
+    when 'Sales Representative' then array['client.view','library.view']
+    when 'Liaison Manager' then array[
+      'payment.record','book.hand_out','book.reassign','book.freeze',
+      'client.view','dispute.write_to_client','settlement.approve','marketing.send','library.view']
+    when 'Liaison' then array[
+      'payment.record','book.freeze','client.view','dispute.write_to_client','settlement.approve',
+      'library.view']
+    when 'Call Centre Manager' then array[
+      'payment.record','book.hand_out','floor.lead','campaign.run','client.view','library.view']
+    when 'Pre-legal Team Leader' then array[
+      'payment.record','book.hand_out','book.freeze','floor.lead','campaign.run','client.view','library.view']
+    -- NO client.view: a pre-legal agent works debtors, not the firm's relationships.
+    when 'Pre-legal Agent' then array['library.view']
+    when 'Read Only' then array['library.view']
+    else array[]::text[]
+  end
+$$;

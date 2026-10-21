@@ -78,6 +78,7 @@ export type Capability =
   | 'book.reassign'
   | 'book.freeze'
   | 'floor.lead'
+  | 'campaign.run'
   | 'handover.discard'
   /* ---- clients and disputes ---- */
   | 'client.view'
@@ -235,6 +236,21 @@ export const CAPABILITIES: Record<Capability, CapabilityMeta> = {
       + 'What separates a team leader’s dashboard from a collector’s.',
     group: 'The book',
   },
+  /*
+   * A CAMPAIGN: ONE SMS OR EMAIL TO A WHOLE SELECTION OF DEBTORS (S10, 21 Oct). The firm decided who:
+   * an Administrator on any accounts, a team leader on their own team's desks. Every message is a fee
+   * under item 1(a) or 1(c) charged to a debtor, so this is a money action in bulk.
+   *
+   * NOT inDatabase, honestly: the campaign tables have no write policy at all and the SERVER decides
+   * (api/_lib/campaign, through mayCampaignOn) -- a browser cannot create one whatever it holds. The
+   * database's has_capability gates only who may READ the campaigns list.
+   */
+  'campaign.run': {
+    label: 'Run a campaign to debtors',
+    blurb: 'Send one SMS or email to a selection of accounts. An Administrator on any accounts, '
+      + 'anybody else only on their own team’s desks. Each message is charged to the debtor.',
+    group: 'The book',
+  },
   /* ---------------------------- clients and disputes ---------------------------- */
   'client.view': {
     label: 'Look at a client',
@@ -348,10 +364,11 @@ export const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'library.view',
   ],
   'Call Centre Manager': [
-    'payment.record', 'book.hand_out', 'floor.lead', 'client.view', 'library.view',
+    'payment.record', 'book.hand_out', 'floor.lead', 'campaign.run', 'client.view', 'library.view',
   ],
   'Pre-legal Team Leader': [
-    'payment.record', 'book.hand_out', 'book.freeze', 'floor.lead', 'client.view', 'library.view',
+    'payment.record', 'book.hand_out', 'book.freeze', 'floor.lead', 'campaign.run', 'client.view',
+    'library.view',
   ],
   /* NO client.view, and that is the firm's rule rather than an omission: a pre-legal agent works
      debtors, not the firm's relationships. */

@@ -29,6 +29,7 @@ import {
   canViewFinance, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canViewLibrary, canEditLibrary, mayPoolDisputes,
   canViewTrust, canViewBusiness, canSendMarketing,
+  canRunCampaigns,
 } from '../../src/lib/permissions.ts'
 
 let pass = 0
@@ -132,6 +133,9 @@ const EXPECTED = {
   canHandOutAccounts: ['Administrator', 'Sales Manager', 'Liaison Manager', 'Call Centre Manager', 'Pre-legal Team Leader'],
   canReassign: ['Administrator', 'Sales Manager', 'Liaison Manager'],
   canLeadCollections: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader'],
+  /* S10: CAMPAIGNS. The firm: an Administrator, or a team leader on their own team's desks. The
+     desks are the server's question (mayCampaignOn); who may run one at all is this. */
+  canRunCampaigns: ['Administrator', 'Call Centre Manager', 'Pre-legal Team Leader'],
   canRefileMail: ['Administrator'],
   canEditLibrary: ['Administrator'],
   mayPoolDisputes: ['Administrator'],
@@ -143,6 +147,7 @@ const FN = {
   canViewFinance, canViewTrust, canViewBusiness, canRecordPayment, canViewClients, canFreezeAccounts, canHandOutAccounts,
   canReassign, canLeadCollections, canRefileMail, canEditLibrary, mayPoolDisputes, canViewLibrary,
   canSendMarketing,
+  canRunCampaigns,
 }
 for (const [name, allowed] of Object.entries(EXPECTED)) {
   for (const role of ROLES) {
@@ -162,7 +167,7 @@ check('...and nothing else', [...capabilitiesOf(asUser('Read Only'))], ['library
  * left behind in one of them is a permission a grant cannot reach -- the firm's "add them more
  * functionality" working on the button and not on the rule underneath it.
  */
-check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 19)
+check('every predicate goes through can()', (perms.match(/return can\(user, '/g) ?? []).length, 20)
 /*
  * THREE PLACES IN THIS FILE STILL READ THE ROLE, AND EACH IS DELIBERATE -- so they are named here
  * rather than forbidden, and a FOURTH appearing fails this. The file's own header says why:

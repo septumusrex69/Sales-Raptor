@@ -3,6 +3,7 @@ import { adminClient, requireCaller } from '../auth.js'
 import { claimSync, releaseSync, syncConnection, type EmailConnectionRow } from '../emailSync.js'
 import { inPool } from '../../../src/lib/pool.js'
 import { drainMarketing } from '../marketing.js'
+import { sendCampaignChunk } from '../campaign/send.js'
 
 /*
  * NOTHING IS PRUNED. Mail stays until somebody deals with it.
@@ -282,6 +283,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
    * `results` still carries the per-mailbox detail for the cron's log and for an administrator
    * reading it, and it is the evidence for the known limit recorded above.
    */
+  /*
+   * AND THE CAMPAIGNS (S10), ON THE CRON ONLY. A campaign is worked by the Campaigns screen while it
+   * is open; this is what carries it on once the iPad is closed, every five minutes inside the
+   * firm's calling hours. Here rather than a cron of its own because vercel.json's crons are the
+   * deployment's and this one already runs minutes apart -- a daily run would leave a campaign
+   * started at four in the afternoon until the next morning.
+   *
+   * AFTER THE MAIL, with what is left of the function's life and never more than a minute of it, so
+   * a large campaign cannot crowd out the replies it provokes. A fault here is reported in the
+   * response and never fails the sync that already happened.
+   */
+  let campaigns: unknown = null
+  if (fromCron) {
+    const left = Math.min(60_000, 240_000 - (Date.now() - started))
+    if (left > 5_000) {
+      try {
+        campaigns = await sendCampaignChunk(admin, { budgetMs: left })
+      } catch (e) {
+        campaigns = { error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+  }
+
   const logged = results.reduce((t, r) => t + (r.logged ?? 0), 0)
   const failed = results.filter((r) => r.error).length
   const skipped = results.filter((r) => r.skipped).length
@@ -298,6 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     /* Named, not counted -- see notReached. */
     notReached,
     pressedBy,
+    campaigns,
     results,
   })
 }
