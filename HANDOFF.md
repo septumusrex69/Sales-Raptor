@@ -18,6 +18,26 @@ https://sales-raptor-git-claude-sales-raptor-review-p1pzx2-team-raptor.vercel.ap
 
 ### Start here tomorrow
 
+0000000. **S10, evening of 21 Oct: cut-over money and campaigns** (§2 under S10, "Cut-over money and
+   campaigns"). Built and merged: the clean break defaulting to 10 Dec and recorded per import run;
+   Camille's balances brought forward (Trust settings -> Balances brought forward); debtor SMS/email
+   campaigns (Accounts -> Campaign / Campaigns); News & campaigns for clients and leads via Resend.
+   **WAITING ON THE FIRM:**
+   - **The set-off gap (money model).** When a payover run is approved, `trust_creditors_on_run` moves
+     the WHOLE set-off charge to the firm even when the run is below nil -- R1 000 owed, nothing
+     collected, the firm shows R1 000 drawable from trust that is not there. Withdrawal fees already
+     do this; brought-forward balances (R400k-R1m) make it large. Proposed fix: credit the firm only
+     as far as the client's trust money covered it, the rest carried as owing (the PTC share's rule).
+     Asked the user 21 Oct; not changed until they say.
+   - **Bring the balances forward ON cut-over day**, not during the parallel run: a balance dated 10
+     Dec is taken by the first Raptor run after it.
+   - **Resend setup** for News: account, domain + DNS records, `RESEND_API_KEY`, `MARKETING_FROM`
+     (optional `MARKETING_REPLY_TO`, webhook + `RESEND_WEBHOOK_SECRET`) in Vercel.
+   - **Debtor campaigns: the 10-SMS-a-month cap is OFF** (`ENFORCE_MONTHLY_LIMITS`, firm's instruction
+     10 Sep), so every campaign SMS is charged. Contact hours are the firm's calling hours (weekdays
+     08:00-17:00, Saturday 09:00-13:00). Promises and running workflows are NOT skipped. Call
+     campaigns: proposed (own list + a "Campaign calls" section under the diary), not built until the
+     firm has agreed it with the team leaders.
 000000. **Staging has one client, at the user's request (21 Oct): "Stephan's Test Client" (STC)** --
    25% flat, mandate dated, 24% interest, ten debtors in one batch (STC0001-STC0010, RAP-125252 to
    RAP-125261, R171 256.50 capital), each with an @example.com email only, all UNASSIGNED so no
@@ -388,6 +408,36 @@ probed on staging inside a rolled-back transaction before it was written into sc
   answered the new device check with `[]`; the harness now answers it first (5d01351).
 - **e2e on a shared machine: set `RAPTOR_E2E_PORT`** to a private port when another session may be
   running browser tests; two runs died on 5199 with "connection refused".
+
+**Cut-over money and campaigns (evening, 21 Oct)**, four more worktrees merged:
+- **Clean break**: most existed (S8: `paid_over_in_swordfish`, Clean break default). Built: the default
+  cut-over is `SWORDFISH_CUTOVER = '2026-12-10'` (trustCycles.ts; it was the last closed cycle, which
+  would have given 10 Oct), the split in figures on screen, and `swordfish_import_runs` -- one row per
+  import batch with the cut-over and the split, written before the wipe, frozen after, discard stamps
+  it. Production needs it before the real import or the import stops at the start. check-clean-break.
+- **Balances brought forward** (`/trust/brought-forward`, `src/lib/broughtForward.ts`,
+  `bring_forward_client_balances`): Trust Debtors sheet, newest month column, exact name or code match
+  else a person picks; owed = `client_charges` kind `brought_forward` off_payover; a CREDIT = the same
+  kind with a NEGATIVE amount (only this kind may be negative), which recompute_payover_run already
+  adds to the payout. One per client (unique index), dated the cut-over, source file + cell, never the
+  name. client_ledger opens with it; business income leaves it out (billed in Swordfish). THE FILE IS
+  NEVER IN THE REPO. check-brought-forward (102), e2e/brought-forward.
+- **Debtor campaigns** (`campaigns`, `campaign_messages`, `campaign_claim`; `api/_lib/campaign/*` on the
+  workflow dispatcher; `CampaignModal`, `/accounts/campaigns`): `campaign.run` for Administrator (any
+  account), Call Centre Manager and Pre-legal Team Leader (own team's desks, or the floor without a
+  team), enforced on the server per account. Skip rules in `campaignSkip`. SMS via Connect Mobile into
+  sms_messages; email from the creator's own mailbox into account_emails; fee per message after the
+  provider accepts, through the charge engine. Sent by the open page and by the 5-minute sync cron.
+  check-campaigns (96), e2e/campaigns.
+- **News & campaigns** (`/news`, `src/lib/marketing.ts`, `api/_lib/marketing.ts`, unsubscribe +
+  resend-webhook actions on the email dispatcher, `marketing_*` tables, `leads.marketing_consent_at`,
+  `leads.status_changed_at`): Resend batches, POPIA s69 rules (clients opt out; leads need consent or
+  one "first approach" ever), one-click unsubscribe, preferences + history, timeline line per send.
+  `marketing.send` for Administrator, Sales Manager, Liaison Manager. check-marketing (128),
+  e2e/news-campaigns.
+- **The merge**: both campaign builds redefined `role_capabilities` with only their own new
+  capability; the LAST definition in schema.sql now carries both (it is staging's live one), and
+  check-capabilities counts 20 predicates. clear_staging's last definition empties both builds' tables.
 
 **Tests at the end of S10:** fast suite all green (18 688 checks, 304 files). Full `npm run qa`: 357 of
 361 green. `e2e/upload-a-batch` was red because its client had no commission (the new rule, item 3);
@@ -1196,6 +1246,10 @@ no toggle, the allocation and the ledger unchanged. (The payover run was already
 
 ## 5. Known gaps and things still outstanding
 
+- **S10's evening migrations too**: `swordfish_import_runs` + `discard_import_batch`; the brought-forward
+  columns/kind/index, `bring_forward_client_balances`, `client_ledger`, `business_income`,
+  `business_month`; campaigns tables + functions; marketing tables, lead columns + trigger, functions;
+  the combined `role_capabilities`; the last `clear_staging`; the last revoke loop.
 - **S10's open-list migrations too** (end of schema.sql, after the S10 list below): the login-code
   tables and three functions; the Swordfish holding table, column, functions, and the new
   `trust_position`, `protect_bank_statement_line`, `clear_staging`, and the revoke loop.
