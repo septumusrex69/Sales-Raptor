@@ -44436,3 +44436,100 @@ $$;
 
 revoke all on function public.unmatch_email(uuid, uuid, uuid, text) from public, anon;
 grant execute on function public.unmatch_email(uuid, uuid, uuid, text) to authenticated;
+
+
+-- ============================================================================================
+-- S10 / PROMPT 13 ITEMS 9 AND 10: ONE LIVE PROMISE, AND A BROKEN ARRANGEMENT GOES BACK TO SECTION 129.
+--
+-- 10. "A second PTP can't be made while one is open." Live is open OR defaulted -- the rule
+--     ptpSchedule.liveArrangement already applies, because a defaulted arrangement is inside the 48
+--     hours its notice gives and still stands on its terms. A trigger says it in a sentence; the
+--     partial unique index is the backstop a race cannot get past. A replacement cancels first.
+--
+--  9. "When a debtor misses an arrangement payment, the account leaves the arrangement workflow and
+--     starts the Section 129 workflow automatically." The missed instalment makes the arrangement
+--     DEFAULTED, and the firm's own notice of default gives 48 hours in which a payment revives it
+--     ("no further step is taken"); the morning sweep makes it BROKEN when they pass. So this acts on
+--     BROKEN, which keeps the firm's letter true: workflow_resume_account already ends the Promise to
+--     pay run (no live arrangement left) and resumes a section 129 the promise had held; what was
+--     missing was the account that never had one. It now STARTS: the active by-hand version with
+--     statutory steps (section_129_version), dated today, once per account ever -- not over another
+--     live promise, an open dispute or a closed account, the refusals the start route makes. Its day-1
+--     notice still waits for a collector to release it, as a statutory demand always has.
+-- ============================================================================================
+create or replace function public.refuse_second_live_promise()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.status in ('open', 'defaulted')
+     and (tg_op = 'INSERT' or coalesce(old.status, '') not in ('open', 'defaulted'))
+     and exists (
+       select 1 from public.promises_to_pay p
+        where p.account_id = new.account_id and p.id <> new.id and p.status in ('open', 'defaulted')
+     ) then
+    raise exception 'This account already has a live promise to pay. Record what became of it (kept, broken or cancelled) before making another.'
+      using errcode = '23505';
+  end if;
+  return new;
+end
+$$;
+
+create or replace trigger promises_one_live_per_account
+  before insert or update of status on public.promises_to_pay
+  for each row execute function public.refuse_second_live_promise();
+
+create unique index if not exists promises_to_pay_one_live
+  on public.promises_to_pay (account_id) where status in ('open', 'defaulted');
+
+revoke all on function public.refuse_second_live_promise() from public, anon;
+
+create or replace function public.section_129_version()
+returns uuid
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select v.id
+    from public.workflow_versions v
+   where v.state = 'active' and v.trigger_kind = 'by_hand'
+     and exists (select 1 from public.workflow_nodes n where n.version_id = v.id and n.statutory)
+   order by v.published_at desc nulls last, v.created_at desc
+   limit 1
+$$;
+
+revoke all on function public.section_129_version() from public, anon;
+
+create or replace function public.workflow_resume_on_promise_broken() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare v_version uuid;
+begin
+  if new.status = 'broken' and coalesce(old.status, '') <> 'broken' then
+    /* 'promise' ONLY: a broken promise says nothing about a dispute the firm has still to answer. */
+    perform public.workflow_resume_account(new.account_id, 'promise_broken', 'promise');
+
+    v_version := public.section_129_version();
+    if v_version is not null
+       and not exists (
+         select 1 from public.workflow_runs r
+           join public.workflow_versions rv on rv.id = r.version_id
+          where r.account_id = new.account_id
+            and rv.workflow_id = (select workflow_id from public.workflow_versions where id = v_version))
+       and not exists (
+         select 1 from public.promises_to_pay p
+          where p.account_id = new.account_id and p.id <> new.id and p.status in ('open', 'defaulted'))
+       and not exists (
+         select 1 from public.account_queries q
+          where q.account_id = new.account_id and q.kind = 'dispute' and q.status <> 'closed')
+       and exists (
+         select 1 from public.debtor_accounts a where a.id = new.account_id and a.ended_as is null)
+    then
+      insert into public.workflow_runs (account_id, version_id, started_on, started_by)
+      values (new.account_id, v_version, public.raptor_today(), new.resolved_by);
+    end if;
+  end if;
+  return new;
+end $$;

@@ -3448,9 +3448,16 @@ function PromisePanel({ accountId, promises, userName, userId, onChange, open, s
   return (
     <Card>
       <PanelTitle action={
-        <button onClick={() => setOpen(!open)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
-          {open ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Take one</>}
-        </button>
+        /* ONE LIVE PROMISE PER ACCOUNT (S10, prompt 13 item 10): "Take one" is not offered while one
+           is open or in its 48 hours. The database refuses a second as well
+           (promises_one_live_per_account), so this is the explanation, not the guard. */
+        outstanding.length > 0 && !open
+          ? <span className="text-[11px] text-slate-400" data-testid="one-live-promise">One is live — settle it first</span>
+          : (
+            <button onClick={() => setOpen(!open)} className="text-xs text-brand-600 hover:underline inline-flex items-center gap-1">
+              {open ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Take one</>}
+            </button>
+          )
       }>Promise to pay</PanelTitle>
 
       {successRatio !== null && (
