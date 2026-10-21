@@ -189,8 +189,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null }
   }
 
+  /*
+   * THIS BROWSER ONLY. supabase-js signs out GLOBALLY by default, which revokes every session the
+   * person has. On 21 Oct an Administrator signed in on a new device, was emailed a code, and in
+   * the half-minute before they typed it the idle timer in four forgotten tabs on their old Mac
+   * fired -- four global sign-outs, and the new device's session went with them. The code was
+   * fine; the check came back "Invalid or expired session". A tab timing out says nothing about
+   * any other device, and neither does pressing Sign out on this one.
+   */
   async function signOut() {
-    await supabase.auth.signOut()
+    await supabase.auth.signOut({ scope: 'local' })
   }
 
   function updateCurrentUserLocal(patch: Partial<User>) {

@@ -22,6 +22,8 @@ import { AuthShell, authFieldClass } from '../../pages/auth/AuthShell'
 /* Answered once per page load per person, so moving between screens does not ask again. */
 const cleared = new Set<string>()
 
+const SIGNED_OUT = 'You were signed out, so this code can no longer be checked. Sign out below, sign in again, and use the new code we send.'
+
 type Reply = { trusted?: boolean; required?: boolean; sent?: boolean; to?: string; error?: string }
 
 async function call(step: 'send' | 'check', extra: Record<string, unknown> = {}): Promise<{ ok: boolean; body: Reply }> {
@@ -32,6 +34,9 @@ async function call(step: 'send' | 'check', extra: Record<string, unknown> = {})
     body: JSON.stringify({ step, deviceId: deviceId(), ...extra }),
   })
   const body = await res.json().catch(() => ({})) as Reply
+  /* A 401 is the SIGN-IN gone, not the code: said as "Invalid or expired session", it read as the
+     code having expired while the email said ten minutes (21 Oct). Say what happened instead. */
+  if (res.status === 401) return { ok: false, body: { error: SIGNED_OUT } }
   return { ok: res.ok, body }
 }
 
