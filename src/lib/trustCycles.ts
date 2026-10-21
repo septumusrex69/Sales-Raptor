@@ -125,6 +125,19 @@ export function cutoverDefault(today: string): string {
   return settledThroughDefault(today, 0)
 }
 
+/**
+ * THE CUT-OVER THE FIRM AGREED: the end of 10 December 2026 (the go-live plan of 10 Oct, HANDOFF §3a).
+ * Swordfish pays clients on 11 Dec and 11 Jan out of what it received up to here; Raptor's first
+ * payover is 11 Feb. The Swordfish import's clean break starts on this date rather than on
+ * `cutoverDefault(today)`, because it is a DECISION with a date on it, not a rule about cycles: the
+ * cycle rule would have offered 10 October on any day of the parallel run and 10 January on the
+ * fallback's import day, and either, accepted without reading, makes a month of receipts Raptor's.
+ *
+ * If the firm moves to the fallback (end of 10 January), this one constant moves. The screen still
+ * lets a person type another date for a trial or the parallel run (10 October), and says so.
+ */
+export const SWORDFISH_CUTOVER = '2026-12-10'
+
 /** '2026-09-10' as a day count, in UTC, so no local clock can move it. */
 function dayOf(iso: string): number {
   const [y, m, d] = iso.split('-').map(Number)

@@ -45869,3 +45869,124 @@ $$;
 
 revoke all on function public.login_code_waive(uuid) from public, anon;
 grant execute on function public.login_code_waive(uuid) to authenticated;
+
+-- ============================================================================================
+-- S10 / THE SWORDFISH IMPORT'S CLEAN BREAK, RECORDED WITH ITS BATCH (go-live plan item 1).
+--
+-- The clean break itself shipped in S8: every receipt on or before the cut-over is imported with
+-- paid_over_in_swordfish, so it comes off the debtor's balance and is never split, never on a Raptor
+-- run, never counted as trust money received (the existing flag every engine function already asks).
+-- What was missing is the RECORD: a flagged receipt looks the same whichever line flagged it, so the
+-- cut-over, the choice and the receipts each way are kept here, one row per run, keyed on the same
+-- import_batch_id its clients, batches and accounts carry. Written by the import screen before the
+-- first row; completed_at at the end; discarded_at by discard_import_batch. Frozen otherwise: the
+-- trigger RAISES rather than reverting, so a change nobody may make is never a silent success.
+-- Not emptied by Clear staging or Start over: it is a record of what was done, not part of the book.
+-- ============================================================================================
+create table if not exists public.swordfish_import_runs (
+  id uuid primary key,
+  imported_by uuid references public.profiles(id) default auth.uid(),
+  started_at timestamptz not null default now(),
+  clean_break boolean not null,
+  cutover_on date not null,
+  swordfish_receipts integer not null default 0 check (swordfish_receipts >= 0),
+  swordfish_amount numeric(14,2) not null default 0,
+  raptor_receipts integer not null default 0 check (raptor_receipts >= 0),
+  raptor_amount numeric(14,2) not null default 0,
+  accounts integer not null default 0,
+  clients integer not null default 0,
+  wiped_first boolean not null default false,
+  report jsonb not null default '{}'::jsonb,
+  completed_at timestamptz,
+  discarded_at timestamptz
+);
+comment on table public.swordfish_import_runs is
+  'One row per Swordfish import run (S10), keyed on the import_batch_id its clients, batches and accounts '
+  'carry. Records the cut-over, whether it was a clean break, and the receipts each way, so the report can '
+  'be read after the screen is gone. Written before the first row; completed_at at the end; discarded_at '
+  'by discard_import_batch. The facts are frozen once written.';
+comment on column public.swordfish_import_runs.cutover_on is
+  'In a clean break, the cut-over: every receipt on or before it is Swordfish''s (paid_over_in_swordfish). '
+  'Otherwise the last day Swordfish paid clients over.';
+alter table public.swordfish_import_runs enable row level security;
+create policy swordfish_import_runs_read on public.swordfish_import_runs
+  for select to authenticated
+  using (public.current_user_role() = 'Administrator' or public.has_capability('finance.view'));
+create policy swordfish_import_runs_insert on public.swordfish_import_runs
+  for insert to authenticated
+  with check (public.current_user_role() = 'Administrator' and imported_by = auth.uid());
+create policy swordfish_import_runs_finish on public.swordfish_import_runs
+  for update to authenticated
+  using (public.current_user_role() = 'Administrator')
+  with check (public.current_user_role() = 'Administrator');
+
+create or replace function public.protect_swordfish_import_run()
+returns trigger
+language plpgsql security invoker set search_path to 'public'
+as $$
+begin
+  if (new.id, new.imported_by, new.started_at, new.clean_break, new.cutover_on,
+      new.swordfish_receipts, new.swordfish_amount, new.raptor_receipts, new.raptor_amount,
+      new.accounts, new.clients, new.wiped_first, new.report)
+     is distinct from
+     (old.id, old.imported_by, old.started_at, old.clean_break, old.cutover_on,
+      old.swordfish_receipts, old.swordfish_amount, old.raptor_receipts, old.raptor_amount,
+      old.accounts, old.clients, old.wiped_first, old.report) then
+    raise exception 'An import run''s record is what the import did; it cannot be changed afterwards.'
+      using errcode = '42501';
+  end if;
+  if old.completed_at is not null and new.completed_at is distinct from old.completed_at then
+    raise exception 'This import run was already recorded as finished.' using errcode = '42501';
+  end if;
+  if old.discarded_at is not null and new.discarded_at is distinct from old.discarded_at then
+    raise exception 'This import run was already recorded as taken back out.' using errcode = '42501';
+  end if;
+  if old.completed_at is null and new.completed_at is not null then new.completed_at := now(); end if;
+  if old.discarded_at is null and new.discarded_at is not null then new.discarded_at := now(); end if;
+  return new;
+end
+$$;
+create or replace trigger swordfish_import_runs_frozen
+  before update on public.swordfish_import_runs
+  for each row execute function public.protect_swordfish_import_run();
+
+-- S10 / TAKING A RUN BACK OUT NOW SAYS SO ON ITS RECORD. The same function, one statement added before
+-- the return; rebuilt on staging from its own live source, so the two match by construction.
+create or replace function public.discard_import_batch(p_batch uuid)
+returns jsonb
+language plpgsql security definer set search_path to 'public'
+as $$
+declare
+  v_accounts int;
+  v_batches int;
+  v_clients int;
+begin
+  if public.current_user_role() is distinct from 'Administrator' then
+    raise exception 'Only an Administrator can take an import back out.' using errcode = '42501';
+  end if;
+  if p_batch is null then
+    raise exception 'Which import? No batch id was given.' using errcode = '22023';
+  end if;
+  if exists (select 1 from public.payment_allocations a
+               join public.debtor_accounts d on d.id = a.account_id
+              where d.import_batch_id = p_batch)
+     or exists (select 1 from public.trust_creditor_entries t
+                  join public.debtor_accounts d on d.id = t.account_id
+                 where d.import_batch_id = p_batch) then
+    raise exception 'Money on this import has already been split or put in trust, so it cannot simply be taken out. Ask an administrator.'
+      using errcode = '22023';
+  end if;
+
+  delete from public.debtor_accounts where import_batch_id = p_batch;
+  get diagnostics v_accounts = row_count;
+  delete from public.handovers where import_batch_id = p_batch;
+  get diagnostics v_batches = row_count;
+  delete from public.companies where import_batch_id = p_batch;
+  get diagnostics v_clients = row_count;
+
+  -- S10: the run's own record says it was taken back out (it stays: it is what happened).
+  update public.swordfish_import_runs set discarded_at = now()
+   where id = p_batch and discarded_at is null;
+
+  return jsonb_build_object('accounts', v_accounts, 'batches', v_batches, 'clients', v_clients);
+end $$;

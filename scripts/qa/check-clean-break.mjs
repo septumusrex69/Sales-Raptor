@@ -15,12 +15,17 @@
  *   4. "Nothing left to approve" is NOT a problem in a clean break (it is an import on the cut-over
  *      day); "everything to approve" still is. The lagged mode keeps both warnings.
  *   5. The import screen offers it, by default, with the cut-over date.
+ *   6. (S10) The agreed cut-over, end of 10 Dec 2026, is the default -- a decision, not a cycle rule.
+ *      The plan carries the split as figures (receipts and Rand each way), and the run is RECORDED
+ *      with its batch (swordfish_import_runs, keyed on the batch id) before the first row is written,
+ *      finished at the end, and stamped by discard_import_batch. The record's facts are frozen.
+ *      Both choices are said on screen, one sentence each.
  *
  * Run: node --import ./scripts/qa/tsresolve.mjs scripts/qa/check-clean-break.mjs
  */
 import { readFileSync } from 'node:fs'
-import { buildImportPlan } from '../../src/lib/swordfishImport.ts'
-import { cutoverDefault, settledThroughDefault } from '../../src/lib/trustCycles.ts'
+import { buildImportPlan, importRunRecord, receiptSplitLine, runAsSplit } from '../../src/lib/swordfishImport.ts'
+import { SWORDFISH_CUTOVER, cutoverDefault, settledThroughDefault } from '../../src/lib/trustCycles.ts'
 
 let pass = 0
 const failures = []
@@ -118,8 +123,88 @@ ok('an explicit cut-over wins over the default (the parallel run: 10 Oct)',
 const tab = read('src/components/settings/DataImportTab.tsx')
 ok('the import screen asks clean break or not', /cleanBreak/.test(tab) && /setCleanBreak/.test(tab))
 ok('...clean break by default', /useState\(true\)/.test(tab.slice(tab.indexOf('const [cleanBreak'), tab.indexOf('const [cleanBreak') + 80)))
-ok('...defaulting the date to the cut-over', /cutoverDefault\(clockToday\(\)\)/.test(tab))
+ok('...defaulting the date to the agreed cut-over', /useState\(SWORDFISH_CUTOVER\)/.test(tab))
+ok('...and back to it when Clean break is picked again', /setSettledThrough\(v \? SWORDFISH_CUTOVER :/.test(tab))
 ok('...and passes it to the plan', /cleanBreak,/.test(tab.slice(tab.indexOf('buildImportPlan('))))
+
+/* ---------- 6. the agreed cut-over, the split, and the record (S10) ---------- */
+
+check('the agreed cut-over is the end of 10 December 2026', SWORDFISH_CUTOVER, '2026-12-10')
+/* IMPORTED IN OCTOBER, THE DEFAULT IS STILL 10 DEC: the cycle rule would have said 10 Oct and handed
+   Raptor two months of receipts Swordfish pays over on 11 Dec and 11 Jan. */
+const october = buildImportPlan(exportsWith(payments.slice(0, 4)),
+  { ownerId: owner, now: new Date('2026-10-21T08:00:00Z'), cleanBreak: true })
+check('a clean break with no date given draws the line at 10 Dec, whatever today is', october.receipts.cutover, '2026-12-10')
+check('...so every receipt in an October export is Swordfish\'s', october.payments.every((p) => p.paid_over_in_swordfish), true)
+check('the lagged mode on the same day is untouched (10 Sep)',
+  buildImportPlan(exportsWith(payments.slice(0, 4)), { ownerId: owner, now: new Date('2026-10-21T08:00:00Z') }).receipts.cutover,
+  '2026-09-10')
+
+check('the split, as figures', clean.receipts, {
+  cleanBreak: true, cutover: '2026-12-10',
+  swordfish: { receipts: 6, amount: 6300 }, raptor: { receipts: 1, amount: 6400 },
+})
+check('...the lagged split names its own line', lagged.receipts.cleanBreak, false)
+check('...and the note says the same figures', clean.notes.some((n) => n.includes('6 receipts up to that day (R6300.00)')
+  && n.includes('1 received after it (R6400.00)')), true)
+check('the split line, clean break', receiptSplitLine(clean.receipts),
+  "Clean break at the end of 2026-12-10: 6 receipts (R6300.00) are Swordfish's to pay over; 1 receipt (R6400.00) after it are Raptor's.")
+ok('the split line, lagged, calls it history', receiptSplitLine(lagged.receipts).startsWith('Swordfish paid over up to 2026-11-10'))
+
+/* FROZEN HISTORY: the split counts what was flagged; it never touches an amount. */
+check('nothing recalculated: the receipts are written as imported',
+  clean.payments.map((p) => p.amount), [100, 200, 400, 800, 1600, 3200, 6400])
+
+const rec = importRunRecord(clean, 'batch-1', false)
+check('the run record is keyed on the batch and carries the line and the choice',
+  [rec.id, rec.clean_break, rec.cutover_on], ['batch-1', true, '2026-12-10'])
+check('...and the receipts each way',
+  [rec.swordfish_receipts, rec.swordfish_amount, rec.raptor_receipts, rec.raptor_amount], [6, 6300, 1, 6400])
+check('...and the report as shown', rec.report.notes, clean.notes)
+check('a record read back gives the same split', runAsSplit({ ...rec, swordfish_amount: '6300.00', raptor_amount: '6400.00' }), clean.receipts)
+
+/* THE SCREEN WRITES IT, FIRST. Presence before order (indexOf is -1 when the thing is gone). */
+const runBody = tab.slice(tab.indexOf('const runImport'), tab.indexOf('TWO TABS, NOT TWO HEADINGS'))
+const recAt = runBody.indexOf(".from('swordfish_import_runs').insert(importRunRecord(plan, batch, wipe))")
+const wipeAt = runBody.indexOf('if (wipe) {')
+const firstRowAt = runBody.indexOf('.from(table).insert(chunk)')
+ok('the import screen records the run', recAt > 0)
+ok('...before the wipe and before the first row', recAt > 0 && wipeAt > recAt && firstRowAt > recAt)
+ok('...and a record that cannot be written stops the import with nothing changed',
+  /Recording this import run[\s\S]{0,200}Nothing was changed/.test(runBody))
+ok('...marks it finished at the end', /\.update\(\{ completed_at:[\s\S]{0,60}\.eq\('id', batch\)/.test(runBody))
+ok('...and says the split when it is done', /receiptSplitLine\(r\)/.test(runBody))
+ok('both choices are said, one sentence each', /data-testid="cutover-choices"/.test(tab)
+  && /<strong>Clean break<\/strong>/.test(tab) && /<strong>Swordfish has paid up to<\/strong>/.test(tab))
+ok('earlier runs are read back off the record', /from\('swordfish_import_runs'\)\s*\.select\(/.test(tab))
+
+/* THE DATABASE: the table, its freeze, and the take-back stamping it. Last definitions only. */
+const schema = read('supabase/schema.sql')
+const lastFn = (name) => {
+  const at = schema.lastIndexOf(`create or replace function public.${name}(`)
+  if (at < 0) return ''
+  const a = schema.indexOf('$$', at) + 2
+  return schema.slice(a, schema.indexOf('$$', a))
+}
+const tableAt = schema.lastIndexOf('create table if not exists public.swordfish_import_runs (')
+const tableSql = tableAt < 0 ? '' : schema.slice(tableAt, schema.indexOf(');', tableAt))
+ok('swordfish_import_runs exists in schema.sql', tableSql.length > 0)
+for (const col of ['id uuid primary key', 'clean_break boolean not null', 'cutover_on date not null',
+  'swordfish_receipts integer', 'swordfish_amount numeric', 'raptor_receipts integer', 'raptor_amount numeric',
+  'report jsonb', 'completed_at timestamptz', 'discarded_at timestamptz']) {
+  ok(`...with ${col}`, tableSql.includes(col))
+}
+ok('...every column the record writes is in the table',
+  Object.keys(rec).every((k) => new RegExp(`\\n\\s+${k} `).test(tableSql)))
+ok('...row-level security on', /alter table public\.swordfish_import_runs enable row level security/.test(schema))
+ok('...only an Administrator records a run', /swordfish_import_runs_insert[\s\S]{0,200}current_user_role\(\) = 'Administrator'/.test(schema))
+ok('...and there is no delete policy', !/policy \w+ on public\.swordfish_import_runs\s+for delete/.test(schema))
+const guard = lastFn('protect_swordfish_import_run')
+ok('the record\'s facts are frozen (and it raises, not reverts)',
+  /new\.cutover_on/.test(guard) && /new\.clean_break/.test(guard) && /new\.swordfish_amount/.test(guard)
+  && /raise exception/.test(guard))
+ok('...on a before-update trigger', /before update on public\.swordfish_import_runs[\s\S]{0,80}protect_swordfish_import_run/.test(schema))
+ok('taking a run back out stamps its record', /update public\.swordfish_import_runs set discarded_at = now\(\)\s+where id = p_batch/.test(lastFn('discard_import_batch')))
 
 if (failures.length) {
   console.error(`check-clean-break: ${failures.length} failed, ${pass} passed\n  ${failures.join('\n  ')}`)

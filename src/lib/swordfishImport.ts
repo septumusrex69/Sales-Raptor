@@ -27,7 +27,7 @@ import { kindFromIdentity, normaliseRegistrationNumber } from './debtorIdentity.
 import { codeForLegacyName, isQuarantinedLegacyName } from './actionTariff.ts'
 import { rateForCapital, type CommissionSchedule } from './commission.ts'
 import { SWORDFISH_CLIENTS, type SwordfishClientSpec } from './swordfishClients.ts'
-import { cutoverDefault, settledThroughDefault } from './trustCycles.ts'
+import { SWORDFISH_CUTOVER, settledThroughDefault } from './trustCycles.ts'
 import { readDebtorsPerClient, type ContactRow, type NoteRow, type PromiseRow } from './swordfishDebtors.ts'
 import { clockNow } from './clock.ts'
 
@@ -257,6 +257,12 @@ export interface ImportPlan {
   problems: string[]
   /** Things worth knowing that are not faults. */
   notes: string[]
+  /**
+   * WHERE THE LINE FELL, as figures rather than a sentence: what the import treats as Swordfish's and
+   * what it hands to Raptor. The note says the same thing in words; this is what the run RECORD keeps
+   * (`importRunRecord`), so the report can be read after the screen is gone.
+   */
+  receipts: ReceiptSplit
   stats: {
     capital: number
     paid: number
@@ -269,6 +275,21 @@ export interface ImportPlan {
     freeBillableActions: number
     unbilledEvents: number
   }
+}
+
+/**
+ * THE TWO SIDES OF THE CUT-OVER. `swordfish` is every receipt flagged `paid_over_in_swordfish` --
+ * on the debtor's ledger, never split, never on a Raptor run; `raptor` is everything after the line,
+ * Raptor's to approve, split and pay over. Amounts are the receipts as imported, PTCs and reversed
+ * ones included, because the count is of what was WRITTEN each way, not of what is in trust.
+ */
+export interface ReceiptSplit {
+  /** True for the go-live clean break; false for the older "Swordfish has paid up to" line. */
+  cleanBreak: boolean
+  /** The line itself: the cut-over in a clean break, the last day Swordfish paid over otherwise. */
+  cutover: string
+  swordfish: { receipts: number; amount: number }
+  raptor: { receipts: number; amount: number }
 }
 
 export interface BuildOptions {
@@ -300,6 +321,9 @@ export interface BuildOptions {
    * is the expected shape of an import taken on the cut-over day, not a warning. The money Swordfish
    * has not yet paid over is still in the trust account; it is ring-fenced by "Held for Swordfish
    * payovers" (set_swordfish_holding), not by anything on the receipts.
+   *
+   * WITH NO DATE GIVEN, the cut-over is the one the firm agreed (`SWORDFISH_CUTOVER`, 10 Dec 2026),
+   * not one worked out from today. Left off, the import keeps the older line it always drew.
    */
   cleanBreak?: boolean
   /**
@@ -343,7 +367,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
    * See settledThroughDefault for why this is a date somebody states rather than one we work out.
    */
   const settledThrough = options.settledThrough
-    ?? (options.cleanBreak ? cutoverDefault(today) : settledThroughDefault(today))
+    ?? (options.cleanBreak ? SWORDFISH_CUTOVER : settledThroughDefault(today))
 
   /*
    * WHOSE DESK. Active users by whole name; an inactive one is known but cannot work an account,
@@ -982,11 +1006,18 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
    * it is treating as history and how many it is putting in front of a person -- rather than
    * leaving it to be discovered from a queue that is the wrong length.
    */
-  const settledCount = payments.filter((p) => p.paid_over_in_swordfish).length
-  const toApprove = payments.length - settledCount
+  const sum = (rows: PaymentRow[]) => Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100
+  const swordfish = payments.filter((p) => p.paid_over_in_swordfish)
+  const raptors = payments.filter((p) => !p.paid_over_in_swordfish)
+  const receipts: ReceiptSplit = {
+    cleanBreak: !!options.cleanBreak,
+    cutover: settledThrough,
+    swordfish: { receipts: swordfish.length, amount: sum(swordfish) },
+    raptor: { receipts: raptors.length, amount: sum(raptors) },
+  }
+  const settledCount = swordfish.length
+  const toApprove = raptors.length
   if (payments.length > 0 && options.cleanBreak) {
-    const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
-    const swordfish = payments.filter((p) => p.paid_over_in_swordfish)
     /*
      * WHAT SWORDFISH HAS NOT PAID OVER YET, as far as the firm's own rule can say: a cycle is paid on
      * the 11th of the month after it closes (settledThroughDefault), so receipts after that day and up
@@ -1004,8 +1035,9 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
       && p.received_at.slice(0, 10) > paidBy)
     notes.push(
       `Clean break at the end of ${settledThrough}: ${swordfish.length} receipts up to that day `
-      + `(R${sum(swordfish).toFixed(2)}) are Swordfish's to pay over -- Raptor never splits them, and no `
-      + `payover run can claim them. ${toApprove} received after it (R${sum(payments.filter((p) => !p.paid_over_in_swordfish)).toFixed(2)}) `
+      + `(R${receipts.swordfish.amount.toFixed(2)}) are Swordfish's to pay over -- they come off the debtors' `
+      + 'balances, but Raptor never splits them, never counts them as trust money it received, and no '
+      + `payover run can claim them. ${toApprove} received after it (R${receipts.raptor.amount.toFixed(2)}) `
       + 'are Raptor\'s and need approving.',
     )
     if (stillOwed.length > 0) {
@@ -1024,12 +1056,11 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     }
     /* Nothing after the cut-over is what an import ON the cut-over day looks like: no warning. */
   } else if (payments.length > 0) {
-    const sum = (rows: PaymentRow[]) => rows.reduce((t, r) => t + r.amount, 0)
     notes.push(
-      `${settledCount} receipts received up to ${settledThrough} (R${sum(payments.filter((p) => p.paid_over_in_swordfish)).toFixed(2)}) `
+      `${settledCount} receipts received up to ${settledThrough} (R${receipts.swordfish.amount.toFixed(2)}) `
       + 'are treated as already paid over in Swordfish: they stay out of the approval queue and no '
       + `payover run can claim them. ${toApprove} received after it `
-      + `(R${sum(payments.filter((p) => !p.paid_over_in_swordfish)).toFixed(2)}) need approving in Raptor.`,
+      + `(R${receipts.raptor.amount.toFixed(2)}) need approving in Raptor.`,
     )
     /*
      * AND IT IS A WARNING WHEN NOTHING LANDS ON ONE SIDE, because both shapes are plausible and
@@ -1281,6 +1312,7 @@ export function buildImportPlan(exports: SwordfishExports, options: BuildOptions
     diaryEntries,
     problems,
     notes,
+    receipts,
     stats: {
       capital: debtorAccounts.reduce((t, a) => t + a.capital_handed_over, 0),
       paid: payments.reduce((t, p) => t + p.amount, 0),
@@ -1319,6 +1351,66 @@ export const WIPE_TABLES = [
   'debtor_accounts', 'handovers', 'notifications', 'activities', 'tasks', 'proposals',
   'deals', 'contacts', 'leads', 'companies',
 ] as const
+
+/**
+ * THE RUN, RECORDED WITH ITS BATCH (`swordfish_import_runs`, keyed on the same id every client, batch
+ * and account of the run is stamped with).
+ *
+ * The cut-over is the one number in the migration that cannot be read back out of the data
+ * afterwards: a receipt flagged `paid_over_in_swordfish` looks the same whether it was flagged by a
+ * clean break at 10 December or by a "Swordfish has paid up to" line at 10 November, and the two mean
+ * different things about who still owes a client that money. So the run keeps the date, the choice,
+ * the count and amount each way, and the report as it was shown -- written BEFORE the first row, so
+ * that even a half-import a failed discard leaves behind can be told apart from a finished one
+ * (`completed_at`, stamped at the end; `discarded_at`, stamped by discard_import_batch).
+ *
+ * Figures as the plan computed them, nothing recalculated: this describes the import, it is not a
+ * second opinion on it.
+ */
+export function importRunRecord(plan: ImportPlan, batch: string, wipedFirst: boolean) {
+  return {
+    id: batch,
+    clean_break: plan.receipts.cleanBreak,
+    cutover_on: plan.receipts.cutover,
+    swordfish_receipts: plan.receipts.swordfish.receipts,
+    swordfish_amount: plan.receipts.swordfish.amount,
+    raptor_receipts: plan.receipts.raptor.receipts,
+    raptor_amount: plan.receipts.raptor.amount,
+    accounts: plan.debtorAccounts.length,
+    clients: plan.companies.length,
+    wiped_first: wipedFirst,
+    report: { notes: plan.notes, problems: plan.problems },
+  }
+}
+
+/**
+ * THE SPLIT IN ONE SENTENCE, for the screen after the import and for a run read back later. Each mode
+ * in its own words: a clean break hands receipts to SWORDFISH to pay over; the older line calls them
+ * history Swordfish has already paid. The same figures either way.
+ */
+export function receiptSplitLine(r: ReceiptSplit): string {
+  const each = (side: { receipts: number; amount: number }) =>
+    `${side.receipts} ${side.receipts === 1 ? 'receipt' : 'receipts'} (R${side.amount.toFixed(2)})`
+  return r.cleanBreak
+    ? `Clean break at the end of ${r.cutover}: ${each(r.swordfish)} are Swordfish's to pay over; `
+      + `${each(r.raptor)} after it are Raptor's.`
+    : `Swordfish paid over up to ${r.cutover}: ${each(r.swordfish)} are history; `
+      + `${each(r.raptor)} after it need approving in Raptor.`
+}
+
+/** A `swordfish_import_runs` row back as the split it recorded. */
+export function runAsSplit(row: {
+  clean_break: boolean; cutover_on: string
+  swordfish_receipts: number; swordfish_amount: number | string
+  raptor_receipts: number; raptor_amount: number | string
+}): ReceiptSplit {
+  return {
+    cleanBreak: row.clean_break,
+    cutover: row.cutover_on,
+    swordfish: { receipts: row.swordfish_receipts, amount: Number(row.swordfish_amount) },
+    raptor: { receipts: row.raptor_receipts, amount: Number(row.raptor_amount) },
+  }
+}
 
 export function planRows(plan: ImportPlan): Record<(typeof IMPORT_TABLES)[number], object[]> {
   return {

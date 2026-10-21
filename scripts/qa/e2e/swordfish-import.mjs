@@ -18,6 +18,9 @@
  *      screen says the run was taken back out rather than leaving half a book
  *   5. Stop pressed part-way        -> the next chunk is never sent, the run is taken back out by
  *      the same id, and the screen says the person stopped it (not that something failed)
+ *   6. a clean break with the default cut-over (S10) -> 10 Dec 2026 offered; every receipt is
+ *      Swordfish's; the run is RECORDED (swordfish_import_runs) under the batch id, before the first
+ *      row, with the cut-over, the choice and the receipts each way, and marked finished at the end
  *
  * Run: node scripts/qa/e2e/swordfish-import.mjs
  */
@@ -61,6 +64,9 @@ let discards = []      // p_batch of every discard_import_batch call
 let refuseInterest = false
 let holdPayments = null // a promise the payments insert waits on, so Stop can be pressed mid-run
 let shotTaken = false
+let runsPosted = []     // swordfish_import_runs rows POSTed
+let runsPatched = []    // { url, body } of every PATCH to swordfish_import_runs
+let order = []          // tables in the order they were first POSTed to
 
 const handlers = [
   [(u) => u.includes('/auth/v1/user'), () => ({ body: { id: ADMIN.id, email: ADMIN.email } })],
@@ -68,6 +74,14 @@ const handlers = [
   [(u) => u.includes('/rpc/discard_import_batch'), (u, req) => {
     discards.push(req.postDataJSON()?.p_batch ?? null)
     return { body: { accounts: 1, batches: 1, clients: 1 } }
+  }],
+  [(u, req) => /\/rest\/v1\/swordfish_import_runs/.test(u) && req.method() !== 'GET', (u, req) => {
+    if (req.method() === 'POST') {
+      const rows = req.postDataJSON()
+      runsPosted.push(...(Array.isArray(rows) ? rows : [rows]))
+      if (!order.includes('swordfish_import_runs')) order.push('swordfish_import_runs')
+    } else runsPatched.push({ url: u, body: req.postDataJSON() })
+    return { status: 201, body: [] }
   }],
   [(u, req) => req.method() === 'POST' && /\/rest\/v1\/(companies|handovers|debtor_accounts|account_payments|account_fees|account_interest_accruals|account_contacts|promises_to_pay|account_notes|diary_entries)\b/.test(u),
     async (u, req) => {
@@ -81,6 +95,7 @@ const handlers = [
       }
       if (table === 'account_payments' && holdPayments) await holdPayments
       const rows = req.postDataJSON()
+      if (!order.includes(table)) order.push(table)
       sent[table] = [...(sent[table] ?? []), ...(Array.isArray(rows) ? rows : [rows])]
       return { status: 201, body: [] }
     }],
@@ -89,7 +104,7 @@ const handlers = [
 ]
 
 async function importWith(page, cutoff, whileRunning = null) {
-  sent = {}; discards = []
+  sent = {}; discards = []; runsPosted = []; runsPatched = []; order = []
   await page.goto(`http://127.0.0.1:${PORT}/settings?tab=Data%20Import`, { waitUntil: 'domcontentloaded' })
   await page.getByText('Client Account Summary').first().waitFor({ timeout: 20000 })
   const pick = async (label, name, text) => page.locator('label', { hasText: label }).first()
@@ -100,8 +115,14 @@ async function importWith(page, cutoff, whileRunning = null) {
   await pick('Interest per Period', 'interest.csv', INTEREST)
   /* The lagged mode, by name: since S8 the screen opens on "Clean break", and this file is about the
      line drawn at what Swordfish has PAID. */
-  await page.getByRole('radio', { name: 'Swordfish has paid up to' }).click()
-  await page.getByLabel('Swordfish has paid clients over up to and including').fill(cutoff)
+  if (cutoff === 'clean') {
+    /* THE DEFAULT, untouched: what somebody gets who reads nothing and presses Read. */
+    cleanDefault = await page.getByLabel('Cut-over date').inputValue()
+    choicesText = await page.getByTestId('cutover-choices').innerText()
+  } else {
+    await page.getByRole('radio', { name: 'Swordfish has paid up to' }).click()
+    await page.getByLabel('Swordfish has paid clients over up to and including').fill(cutoff)
+  }
   await page.getByRole('button', { name: 'Read the exports' }).click()
   const go = page.getByRole('button', { name: /^Import 1 accounts?$/ })
   await go.waitFor({ timeout: 20000 })
@@ -128,6 +149,9 @@ async function importWith(page, cutoff, whileRunning = null) {
   await page.getByText(/Imported [\d  ]+ rows\.|has been taken back out|ALSO failed|Nothing was written|Nothing was changed/).first()
     .waitFor({ timeout: 30000 })
 }
+
+let cleanDefault = null
+let choicesText = ''
 
 const server = await startServer()
 const browser = await chromium.launch()
@@ -218,6 +242,29 @@ try {
   t.check('...and the Stop button is gone once the run has ended',
     await page.getByRole('button', { name: /^Stop/ }).count(), 0)
   await t.shot(page, 'swordfish-import-stopped')
+
+  /* ---------- 6. a clean break, on the default cut-over, recorded with its batch ---------- */
+  await importWith(page, 'clean')
+  t.check('the screen opens on the agreed cut-over, 10 December 2026', cleanDefault, '2026-12-10')
+  t.ok('...and says what each choice means', /Clean break[\s\S]*never\s+splits it into trust/.test(choicesText)
+    && /Swordfish has paid up to[\s\S]*comes into Raptor to approve/.test(choicesText))
+  const cleanPay = sent.account_payments ?? []
+  t.check('every receipt up to the cut-over is written as Swordfish\'s',
+    cleanPay.filter((p) => p.paid_over_in_swordfish === true).length, 5)
+  t.check('...as imported: the amounts are not touched', cleanPay.map((p) => p.amount).join(','), '400,400,400,400,400')
+  t.check('the run is recorded once', runsPosted.length, 1)
+  const run = runsPosted[0] ?? {}
+  const cleanBatch = (sent.debtor_accounts ?? [])[0]?.import_batch_id
+  t.ok('...under the batch id its accounts carry', !!cleanBatch && run.id === cleanBatch)
+  t.check('...as a clean break at 10 Dec', `${run.clean_break} ${run.cutover_on}`, 'true 2026-12-10')
+  t.check('...with the receipts each way',
+    `${run.swordfish_receipts} ${run.swordfish_amount} ${run.raptor_receipts} ${run.raptor_amount}`, '5 2000 0 0')
+  t.check('...BEFORE the first row of the book', order[0], 'swordfish_import_runs')
+  t.ok('...and marked finished at the end',
+    runsPatched.length === 1 && runsPatched[0].url.includes(`id=eq.${cleanBatch}`) && !!runsPatched[0].body?.completed_at)
+  t.ok('the screen says the split when it is done',
+    await page.getByText(/Clean break at the end of 2026-12-10: 5 receipts \(R2000\.00\) are Swordfish's to pay over/).first().isVisible())
+  await t.shot(page, 'swordfish-import-clean-break')
 
   await context.close()
 } catch (e) {

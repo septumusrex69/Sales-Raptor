@@ -10,17 +10,18 @@ import { parseCsv, type CsvRow } from '../../lib/csv'
 import { readSingleCsvFromZip } from '../../lib/zip'
 import { readXlsx } from '../../lib/xlsx'
 import {
-  buildImportPlan, countWhatAWipeWouldDelete, planRows, tollIsUnknown, wipeTollLine,
+  buildImportPlan, countWhatAWipeWouldDelete, importRunRecord, planRows, receiptSplitLine, runAsSplit,
+  tollIsUnknown, wipeTollLine,
   IMPORT_TABLES, WIPE_TABLES, type ImportPlan, type WipeToll,
 } from '../../lib/swordfishImport'
-import { cutoverDefault, settledThroughDefault } from '../../lib/trustCycles'
+import { SWORDFISH_CUTOVER, settledThroughDefault } from '../../lib/trustCycles'
 import {
   applyEnrichment, fetchAccountRefs, planEnrichment, type EnrichPlan,
 } from '../../lib/accountEnrich'
 import { formatCurrency } from '../../data/mockData'
 import { HandoverImportCard } from './HandoverImportCard'
 import { LeadsImportCard } from './LeadsImportCard'
-import { clockToday } from '../../lib/clock.ts'
+import { clockNow, clockToday } from '../../lib/clock.ts'
 
 /**
  * Which database this app is actually pointed at.
@@ -151,11 +152,13 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
    * A CLEAN BREAK BY DEFAULT (S8). The go-live plan the firm agreed on 10 Oct: everything received up to
    * the cut-over is Swordfish's to pay over, paid or not yet paid, and Raptor splits only what comes
    * after. The other mode -- "Swordfish has paid up to" -- is the old one, kept for trial imports.
+   *
+   * THE DATE IS THE ONE THE FIRM AGREED (end of 10 December 2026), not one worked out from today: the
+   * cycle rule offered 10 October on any day of the parallel run, which is right for the parallel run
+   * and wrong for the real import, and a default somebody accepts without reading should be the real one.
    */
   const [cleanBreak, setCleanBreak] = useState(true)
-  const [settledThrough, setSettledThrough] = useState(
-    () => cutoverDefault(clockToday()),
-  )
+  const [settledThrough, setSettledThrough] = useState(SWORDFISH_CUTOVER)
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [reading, setReading] = useState(false)
   const [phase, setPhase] = useState<Phase>(null)
@@ -284,6 +287,22 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
       }
 
       if (abort.current) throw new Error(`${STOPPED} Nothing was changed.`)
+      /*
+       * THE RUN IS RECORDED BEFORE ANYTHING ELSE IS WRITTEN (swordfish_import_runs): the cut-over, the
+       * choice, and the receipts each way, under the same id every client, batch and account is
+       * stamped with. Before the wipe and before the first row, so a run that dies half-way -- even
+       * one whose take-back also fails -- still says which line it drew. A record that cannot be
+       * written stops the import here, with nothing changed: an import whose cut-over nobody can read
+       * back later is the thing this record exists to prevent.
+       */
+      const batch = crypto.randomUUID()
+      {
+        const { error: e } = await supabase.from('swordfish_import_runs').insert(importRunRecord(plan, batch, wipe))
+        if (e) {
+          throw new Error(`Recording this import run (its cut-over and receipts) failed: ${e.message}. `
+            + 'Nothing was changed.')
+        }
+      }
       if (wipe) {
         setStoppable(false)
         for (const [i, table] of WIPE_TABLES.entries()) {
@@ -302,7 +321,6 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
        * carries its id, and on ANY failure -- an insert refused, a network that dropped -- the run is taken
        * back out by `discard_import_batch`, everything else going with its account by cascade.
        */
-      const batch = crypto.randomUUID()
       const STAMPED = new Set<string>(['companies', 'handovers', 'debtor_accounts'])
       let written = 0
       try {
@@ -339,7 +357,16 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           + `(${n?.accounts ?? 0} accounts, ${n?.clients ?? 0} clients), so the book is `
           + `${wipe ? 'empty, as the wipe left it' : 'as it was before you pressed Import'}.`)
       }
-      setDone(`Imported ${totalRows.toLocaleString('en-ZA')} rows.`)
+      /* Finished: said on the record. Not fatal if it fails -- the rows are in, and a record with no
+         completed_at reads as "never finished", which is the cautious reading, not a wrong one. */
+      const { error: finishError } = await supabase.from('swordfish_import_runs')
+        .update({ completed_at: clockNow().toISOString() }).eq('id', batch)
+      const r = plan.receipts
+      setDone(`Imported ${totalRows.toLocaleString('en-ZA')} rows. `
+        + `${receiptSplitLine(r)} `
+        + (finishError
+          ? `The run is recorded, but marking it finished failed (${finishError.message}).`
+          : 'Recorded with this import, with the cut-over and these figures.'))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -470,7 +497,7 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
                     cleanBreak === v ? 'bg-navy-900 text-white border-navy-900' : 'text-slate-500 border-slate-200')}
                   onClick={() => {
                     setCleanBreak(v)
-                    setSettledThrough(v ? cutoverDefault(clockToday()) : settledThroughDefault(clockToday()))
+                    setSettledThrough(v ? SWORDFISH_CUTOVER : settledThroughDefault(clockToday()))
                     setPlan(null)
                   }}>
                   {label}
@@ -487,14 +514,26 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
               value={settledThrough}
               onChange={(e) => { setSettledThrough(e.target.value); setPlan(null) }}
             />
+            {/*
+              BOTH CHOICES SAID, ONE SENTENCE EACH, whichever is picked: the difference between them is
+              a month of receipts paid over twice or never, and it should not take a click to find out.
+            */}
+            <ul className="text-[11px] text-slate-500 mt-1.5 space-y-1" data-testid="cutover-choices">
+              <li className={clsx(cleanBreak && 'text-slate-700')}>
+                <strong>Clean break</strong> (the firm&rsquo;s go-live decision): every receipt up to and including
+                the cut-over is Swordfish&rsquo;s to pay over, so it lowers the debtor&rsquo;s balance but Raptor never
+                splits it into trust or pays it over.
+              </li>
+              <li className={clsx(!cleanBreak && 'text-slate-700')}>
+                <strong>Swordfish has paid up to</strong>: only receipts up to the last day Swordfish paid clients
+                over are history, and everything after it &mdash; including money Swordfish has received but not yet
+                paid over &mdash; comes into Raptor to approve, split and pay over.
+              </li>
+            </ul>
             <span className="block text-[11px] text-slate-400 mt-1">
               {cleanBreak
-                ? <>Every receipt up to this day is Swordfish&rsquo;s to pay over, including the cycles it has
-                  not paid yet. Raptor splits only what arrives after it. Go-live: 10 December. The parallel
-                  run: 10 October.</>
-                : <>Receipts up to this day are history: they stay out of the approval queue and no payover
-                  run can claim them. Everything after it arrives needing approval. Raptor cannot work
-                  this out &mdash; set it to the last day the old system actually remitted.</>}
+                ? <>Go-live cut-over: 10 December 2026. For the parallel run, set it to 10 October.</>
+                : <>Raptor cannot work this out &mdash; set it to the last day the old system actually remitted.</>}
             </span>
           </div>
           <label className="block">
@@ -605,6 +644,8 @@ export function DataImportTab({ forCompanyId }: { forCompanyId?: string | null }
           </div>
         </Card>
       )}
+
+      {!plan && <EarlierImports refreshKey={done} />}
 
       {plan && <PlanReview plan={plan} />}
 
@@ -923,6 +964,59 @@ function FilePicker({ label, hint, badge, file, onPick }: {
       </span>
       <span className="text-xs font-medium text-brand-600 shrink-0">{file ? 'Change' : 'Choose'}</span>
     </label>
+  )
+}
+
+/**
+ * EARLIER SWORDFISH IMPORTS, read back off `swordfish_import_runs`: when, which line was drawn, and
+ * how many receipts went each way. This is "the report read later" -- the
+ * question a month after the migration is never "how many rows" but "was that a clean break, and
+ * where was the cut-over?", because nothing on a receipt can answer it.
+ */
+interface RunRow {
+  id: string
+  started_at: string
+  clean_break: boolean
+  cutover_on: string
+  swordfish_receipts: number
+  swordfish_amount: number | string
+  raptor_receipts: number
+  raptor_amount: number | string
+  accounts: number
+  completed_at: string | null
+  discarded_at: string | null
+}
+
+function EarlierImports({ refreshKey }: { refreshKey: string | null }) {
+  const [runs, setRuns] = useState<RunRow[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void supabase.from('swordfish_import_runs')
+      .select('id, started_at, clean_break, cutover_on, swordfish_receipts, swordfish_amount, raptor_receipts, raptor_amount, accounts, completed_at, discarded_at')
+      .order('started_at', { ascending: false })
+      .limit(5)
+      .then(({ data }) => { if (!cancelled) setRuns(Array.isArray(data) ? (data as RunRow[]) : []) })
+    return () => { cancelled = true }
+  }, [refreshKey])
+  /* Absent rather than empty: a heading over nothing reads as a screen that failed to load. */
+  if (runs.length === 0) return null
+  return (
+    <Card>
+      <CardHeader title="Earlier Swordfish imports" subtitle="The line each run drew, as it was recorded." />
+      <ul className="space-y-2.5 text-sm text-slate-600" data-testid="earlier-imports">
+        {runs.map((r) => (
+          <li key={r.id} className="flex gap-2.5">
+            <Info size={15} className="text-slate-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-slate-800">{r.started_at.slice(0, 10)}</strong>
+              {' · '}{r.accounts.toLocaleString('en-ZA')} accounts
+              {' · '}{r.discarded_at ? 'taken back out' : r.completed_at ? 'finished' : 'never finished'}
+              <span className="block">{receiptSplitLine(runAsSplit(r))}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
   )
 }
 

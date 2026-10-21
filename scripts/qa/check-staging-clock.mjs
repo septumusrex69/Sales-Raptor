@@ -88,11 +88,16 @@ for (const n of names) {
  */
 check('only the named audit and real-world functions read the real clock', stillReal.sort(), [
   'clear_staging',
+  /* discard_import_batch and protect_swordfish_import_run (S10): when an import run was taken back out
+     or finished is an audit stamp about a person pressing a button, like updated_at -- not a business
+     date. The run's cut-over is the business date, and it is stored as given. */
+  'discard_import_batch',
   /* login_code_waive and trusted_device_seen (S10): a sign-in waiver's thirty minutes and a
      device's last use are about a person at a door, not a business date -- staging's clock set to
      next month must not make a waiver last a month. */
   'login_code_waive',
   'protect_approved_handover_draft', 'protect_approved_handover_draft_row',
+  'protect_swordfish_import_run',
   'raptor_clock', 'raptor_now', 'raptor_today', 'set_trust_opening_balance',
   /* signing_accept (S9): the moment the debtor accepted, a real-world stamp like signing_sign's. */
   'signing_accept', 'signing_document',
