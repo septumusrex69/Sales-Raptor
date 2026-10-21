@@ -152,6 +152,14 @@ export function canLeadCollections(user: Pick<User, 'role' | 'grants' | 'revokes
 }
 
 /**
+ * MAY THIS PERSON RUN A CAMPAIGN (S10) -- draws the Campaign button and the Campaigns page. WHICH
+ * accounts is the server's question (campaigns.ts mayCampaignOn), asked of every account.
+ */
+export function canRunCampaigns(user: Pick<User, 'role' | 'grants' | 'revokes'> | null | undefined): boolean {
+  return can(user, 'campaign.run')
+}
+
+/**
  * WHOSE DISPUTES THIS PERSON MAY LOOK AT.
  *
  * The firm, having made a new user and opened the board: "I went into the disputes pane and I saw

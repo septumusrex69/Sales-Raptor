@@ -87,6 +87,9 @@ for (const n of names) {
  * reads now() for a business date fails here -- write raptor_now() / raptor_today() instead.
  */
 check('only the named audit and real-world functions read the real clock', stillReal.sort(), [
+  /* campaign_claim (S10): a claim older than ten minutes is a sender that died mid-send -- elapsed
+     WALL time, which a staging clock jumped a week ahead must not turn into every claim at once. */
+  'campaign_claim',
   'clear_staging',
   /* discard_import_batch and protect_swordfish_import_run (S10): when an import run was taken back out
      or finished is an audit stamp about a person pressing a button, like updated_at -- not a business
