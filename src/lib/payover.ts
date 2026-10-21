@@ -1761,3 +1761,45 @@ export async function fetchProcessedMonth(from: string, to: string): Promise<Pro
     ptcCount: Number(r.ptc_count ?? 0), ptcAmount: Number(r.ptc_amount ?? 0),
   }
 }
+
+/**
+ * BALANCES BROUGHT FORWARD FROM SWORDFISH (HANDOFF §3a item 3) -- see broughtForward.ts for the
+ * reading and bring_forward_client_balances for the rules. Every row in one transaction or none;
+ * a client that already has a balance brought forward is skipped and counted, so the same file
+ * pressed twice adds nothing.
+ */
+export interface BroughtForwardResult { added: number; skipped: number; owed: number; credited: number }
+
+export async function bringForwardBalances(input: {
+  source: string
+  month: string
+  cutOver: string
+  rows: { company_id: string; amount: number; row_ref: string }[]
+}): Promise<BroughtForwardResult> {
+  const { data, error } = await supabase.rpc('bring_forward_client_balances', {
+    p_source: input.source, p_month: input.month, p_cut_over: input.cutOver, p_rows: input.rows,
+  })
+  if (error) throw new Error(error.message)
+  const r = (data ?? {}) as Record<string, unknown>
+  return {
+    added: Number(r.added ?? 0), skipped: Number(r.skipped ?? 0),
+    owed: Number(r.owed ?? 0), credited: Number(r.credited ?? 0),
+  }
+}
+
+/** The balances already brought forward, by client: what the screen marks "already" before a press. */
+export interface ExistingBroughtForward { companyId: string; amount: number; sourceFile: string | null; raisedOn: string }
+
+export async function fetchBroughtForward(): Promise<ExistingBroughtForward[]> {
+  const { data, error } = await supabase.from('client_charges')
+    .select('company_id, amount, source_file, raised_on')
+    .eq('kind', 'brought_forward')
+    .is('cancelled_at', null)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    companyId: String(r.company_id),
+    amount: Number(r.amount ?? 0),
+    sourceFile: (r.source_file as string | null) ?? null,
+    raisedOn: String(r.raised_on ?? ''),
+  }))
+}

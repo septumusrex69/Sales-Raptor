@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
+import { Link } from 'react-router-dom'
 import { Card } from '../../components/ui/Card'
 import { Modal, inputClass } from '../../components/ui/Modal'
 import { CommissionModal, type CommissionModalClient } from '../../components/companies/CommissionModal'
@@ -309,6 +310,25 @@ export function FinanceSettings() {
                     + `${rand(swordfish.paidOut)} paid out (${swordfish.lines} ${swordfish.lines === 1 ? 'line' : 'lines'}), ${rand(swordfish.left)} left. `
                     + 'Its payouts are taken off it under To sort, Statement lines.'
                   : 'The trust money at the cut-over that Swordfish still pays out. Part of the opening balance, so it is set after it.'}
+              </p>
+            </Card>
+            {/*
+              BALANCES BROUGHT FORWARD (S10, HANDOFF §3a item 3), beside the other two things set once at
+              the cut-over: what each client owed the firm, or was owed, in Swordfish, from Camille's
+              Trust Debtors workbook. Its own page, because it is a file read and a row-by-row match.
+            */}
+            <Card>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.07em] text-slate-400">
+                Balances brought forward
+              </div>
+              <div className="mt-1 flex items-baseline gap-3">
+                <Link to="/trust/brought-forward" data-testid="brought-forward-open"
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12.5px] font-medium text-slate-700 hover:bg-slate-100">
+                  Bring forward from the Trust Debtors sheet
+                </Link>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                What each client owed the firm, or was owed, at the cut-over. Owed comes off their next payover; a credit is paid with it.
               </p>
             </Card>
           </div>

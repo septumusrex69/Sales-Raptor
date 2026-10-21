@@ -75,6 +75,17 @@ export function cycleOf(day: string): { start: string; end: string } {
   return { start: iso(sy, sm, 11), end: iso(ey, em, 10) }
 }
 
+/*
+ * THE BALANCE BROUGHT FORWARD FROM SWORDFISH (S10) keeps its own line for good -- the ledger opens
+ * with it -- and says where it went. Negative is what the client owed us (taken off their payover);
+ * positive is a credit we owed them (paid with it). Once an approved payover has taken it the
+ * database names that run in `reference`.
+ */
+export function broughtForwardState(e: ClientEntry): string {
+  if (e.reference) return `${e.amount < 0 ? 'Set off against' : 'Paid with'} ${e.reference}`
+  return e.amount < 0 ? 'Comes off the next payover' : 'Paid with the next payover'
+}
+
 const label = (r: LedgerRun) =>
   `Payover ${r.invoiceNumber ?? ''} · ${short(r.periodStart)} – ${short(r.periodEnd)}`.replace('  ', ' ')
 
@@ -130,7 +141,9 @@ export function ledgerByPayover(entries: ClientEntry[], runs: LedgerRun[]): Ledg
           /* A run below nil the client paid into the BUSINESS account (record_client_business_receipt). */
           : e.kind === 'paid_direct' ? `Paid to our business account against ${e.reference ?? 'the payover'}`
           : e.description,
-        state: e.kind === 'charge_pending' ? 'Comes off the next payover' : null,
+        state: e.kind === 'charge_pending' ? 'Comes off the next payover'
+          : e.kind === 'brought_forward' ? broughtForwardState(e)
+          : null,
         reference: e.reference, runId: e.runId,
       }))
     }
@@ -143,7 +156,9 @@ export function ledgerByPayover(entries: ClientEntry[], runs: LedgerRun[]): Ledg
    * own by its day -- and a run sorts before a payment of that run on the same day, because the
    * payover has to exist before it can be paid. The running balance is then the sum to that row.
    */
-  const order = (r: LedgerRow) => (r.key.startsWith('own:') ? 1 : 0)
+  /* THE BALANCE BROUGHT FORWARD OPENS ITS DAY (S10): it is what stood before anything Raptor did. */
+  const order = (r: LedgerRow) => (!r.key.startsWith('own:') ? 0
+    : r.lines[0]?.kind === 'brought_forward' ? -1 : 1)
   rows.sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : order(a) - order(b)))
   let bal = 0
   for (const r of rows) {

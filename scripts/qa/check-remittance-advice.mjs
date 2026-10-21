@@ -279,7 +279,9 @@ ok('...and the PDF draws it as its own section',
   /title: 'Overpayments paid over to you in full — no commission'/.test(pdfSrc) && /adv\.released\.map/.test(pdfSrc))
 const runPage = readFileSync(new URL('../../src/pages/finance/RunDetail.tsx', import.meta.url), 'utf8')
 ok('the run page shows both lines too',
-  /label="Charges set off against this payover"/.test(runPage) && /label="Overpayments released to the client, no commission"/.test(runPage))
+  /* S10: the charges line names a brought-forward CREDIT for what it is when the set-off is below
+     nothing, so the label is an expression now -- either spelling of the charges words is the line. */
+  /(label="|: ')Charges set off against this payover/.test(runPage) && /label="Overpayments released to the client, no commission"/.test(runPage))
 const adviceSrc = readFileSync(new URL('../../src/lib/remittanceAdvice.ts', import.meta.url), 'utf8')
 ok('...and hands both to the advice, in the one place a run becomes an advice',
   /chargesSetOff: Number\(run\.charges_set_off \?\? 0\), excessReleased: Number\(run\.excess_released \?\? 0\)/.test(adviceSrc)
